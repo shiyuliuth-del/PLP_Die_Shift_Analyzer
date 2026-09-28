@@ -34,13 +34,14 @@ class GeometryCache:
         self.bytes=sum(q['flat'].nbytes+q['centers'].nbytes+q['radii'].nbytes for q in self.layers.values())
     @property
     def geometries(self):return {k:v['geometry'] for k,v in self.layers.items()}
-    def bind(self,case,motions,keys):
-        return BoundGeometry(self,case,motions,keys)
+    def bind(self,case,motions,keys,parameters=None):
+        return BoundGeometry(self,case,motions,keys,parameters)
 
 class BoundGeometry:
-    def __init__(self,cache,case,motions,keys):
+    def __init__(self,cache,case,motions,keys,parameters=None):
         self.cache=cache;self.case=case;self.keys=list(keys);self.owners={};self.vertex_owners={};self.workers=1;self.calibration=None
-        self.centers=np.array([[i['cx'],i['cy']] for i in case['infos']])
+        from .pivots import rotation_centers
+        self.centers=rotation_centers(case,parameters)
         for key in self.keys:
             q=cache.layers[key];mode=default_motion(case.get('roles',{}).get(key));n=len(q['centers'])
             if mode=='fixed':own=np.full(n,-1,np.int32)
@@ -110,7 +111,7 @@ def check_frame(bound,roles,p,result,states,layers,scheme,connections=None,check
     if check_interfaces:
         connections=connections or case.get('connections')
         from .contact import ContactModel
-        model=ContactModel(bound.cache.data,case,roles,connections,bound.cache)
+        model=ContactModel(bound.cache.data,case,roles,connections,bound.cache,parameters=p)
         for issue in model.current(states,p)['issues']:
             if issue['scheme']==scheme:fail(issue['kind'],[issue['point']])
     return dict(problem_percent=100 if failures else 0,failures=failures,scope='已导入几何的净距、禁布区和有名义向下连接的接口窗口；不是完整DRC')
@@ -118,10 +119,10 @@ def check_frame(bound,roles,p,result,states,layers,scheme,connections=None,check
 class PreviewEngine:
     """One engine per geometry/role/motion generation; called by one UI worker."""
     def __init__(self,cache,case,roles,motions,p,result,connections):
-        self.bound=cache.bind(case,motions,[k for k in cache.layers if roles.get(k)!='不参与'])
+        self.bound=cache.bind(case,motions,[k for k in cache.layers if roles.get(k)!='不参与'],p)
         self.roles=roles;self.p=p;self.result=result;self.connections=connections;self.frames=__import__('die_shift_studio.session_cache',fromlist=['SessionCache']).SessionCache();self.deformer=None;self.deformers={}
         from .contact import ContactModel
-        self.contact=ContactModel(cache.data,case,roles,connections,cache,motions)
+        self.contact=ContactModel(cache.data,case,roles,connections,cache,motions,p)
     def configure_deformation(self,enabled,settings):
         key=(bool(enabled and self.result is not None),settings.deformation_continuity,settings.deformation_method,settings.deformation_tolerance_um,settings.deformation_arc_angle_deg,settings.deformation_min_angle_deg)
         if getattr(self,'deformation_key',None)==key:return
@@ -160,7 +161,7 @@ class PreviewEngine:
             check['failures'] += [dict(kind=q['kind'],point=q['point']) for q in current['issues'] if q['scheme']==s]
             check['problem_percent']=100 if check['failures'] else 0
             check['scope']='当前状态：线距控制区与下一金属层其他几何网络接触，另检查净距/禁布区'
-        frame=dict(layers=layers,checks=checks,states=np.asarray(states).copy(),contact=current)
+        frame=dict(layers=layers,checks=checks,states=np.asarray(states).copy(),rotation_centers=self.bound.centers.copy(),contact=current)
         if deformation is not None:frame['deformation']=deformation
         if getattr(self,'drc_enabled',False):
             frame['drc']=deformation['violations'] if deformation is not None else self.global_drc.frame(states,settings=self.drc_settings,progress=progress)
@@ -189,7 +190,7 @@ class PreviewEngine:
             for q in f['contact']['issues']:
                 identity=(q['source_layer'],q['source_index'],q['scheme'])
                 if identity not in remaining or q['ratio']>remaining[identity]['ratio']:remaining[identity]=dict(q)
-        keys=('single_bound_x_um','single_bound_y_um','multi_bound_x_um','multi_bound_y_um','bound_angle_deg','target_nsigma','mean_x_um','mean_y_um','mean_angle_deg','rho_xy','per_die_enabled','die_bounds','annulus_um','line_space_um')
+        keys=('single_bound_x_um','single_bound_y_um','multi_bound_x_um','multi_bound_y_um','bound_angle_deg','target_nsigma','reference_nsigma','mean_x_um','mean_y_um','mean_angle_deg','rho_xy','per_die_enabled','die_bounds','rotation_center','rotation_x_um','rotation_y_um','die_pivots','annulus_um','line_space_um')
         result=self.result or {};saved=result.get('parameters',{})
         current=(all(saved.get(k)==getattr(self.p,k) for k in keys) and result.get('roles')==self.roles and result.get('connections',{}).get('layer_order')==self.connections.order)
         baseline=result.get('contact_analysis',{}) if current else self.contact.screen(self.p,settings,progress)
@@ -207,7 +208,7 @@ class PreviewEngine:
         # the source. Include those interfaces; the old probability bound is
         # not a certificate for a changed, unverified route.
         for identity,q in remaining.items():
-            if identity not in originals:originals[identity]=dict(q,probability_upper=1.,threshold=math.erfc(self.p.target_nsigma/math.sqrt(2)))
+            if identity not in originals:originals[identity]=dict(q,probability_upper=1.,threshold=self.p.failure_threshold)
         has_best=any(q.get('best_effort',0) for q in summaries)
         for identity,original in originals.items():
             q=dict(remaining.get(identity,original));v=probabilities.get(identity[:2],{})

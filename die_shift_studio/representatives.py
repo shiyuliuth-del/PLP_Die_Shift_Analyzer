@@ -6,13 +6,13 @@ from shapely.ops import nearest_points
 from .statistics import mean_and_bounds
 
 PREVIEW_SCOPE=('预演采用输入均值±单边幅度的有界组合，与目标σ独立。列出8个XYZ角点组合、各芯片不利方向、最危险芯片对与封装边界方向。'
- '平移严格不超输入幅度；孔的实际位移另含绕芯片中心转动。代表预演不枚举多芯片全部组合，也不代表连续正态分布的硬截断；统计窗口另按目标σ计算。')
+ '平移严格不超输入幅度；孔的实际位移另含绕所选旋转中心转动。代表预演不枚举多芯片全部组合，有界连续概率不能用有限代表状态替代；统计窗口另按目标σ计算。')
 
 class RepresentativeExtremes:
     def __init__(self,case,p):
         self.unbounded=False
         self.items=[];m=len(case['dies']);mu,_=mean_and_bounds(p,m);bounds=np.array([mean_and_bounds(p.for_die(i),m)[1] for i in range(m)]);k=1.;self.k=k
-        nominal=np.tile(mu,(m,1));centers=np.array([[i['cx'],i['cy']] for i in case['infos']])
+        nominal=np.tile(mu,(m,1));centers=__import__('die_shift_studio.pivots',fromlist=['rotation_centers']).rotation_centers(case,p)
         def support(c,i):
             return mu+bounds[i]*np.sign(c)
         def add(name,states,detail):

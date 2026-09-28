@@ -5,6 +5,7 @@ from .core import uncertainty_bound
 from .statistics import statistical_state
 
 def space_maps(model,p,resolution=81):
+    model.configure_parameters(p)
     case=model.case;owners={}
     for record in model.records:owners.setdefault(record['owner'],set()).add(record['key'])
     maps=[]

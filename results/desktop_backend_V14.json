@@ -4,10 +4,15 @@
   "platform": "linux",
   "deformation_routes": 2,
   "configuration_retry": true,
-  "native_drc": "0.30.8",
-  "version": "V13",
+  "native_drc": {
+    "version": "0.30.8",
+    "self_check": true,
+    "backend": "installed desktop",
+    "executable": "/usr/bin/klayout"
+  },
+  "version": "V14",
   "jobs": "/home/niubi/文档/ChatGPT/DIE_SHIFT评估/Jobs",
-  "formulas": 45,
+  "formulas": 47,
   "regions": 64,
   "space_maps": 2,
   "probability_maps": 64,

@@ -1,16 +1,21 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-if not exist results mkdir results
-call RUN.bat --smoke-test results\windows_source_smoke.json
-if errorlevel 1 exit /b 1
-.venv\Scripts\python.exe -m unittest discover -s tests -p test_v13.py -v > results\windows_v13_tests.log 2>&1
+call SELECT_PYTHON.bat
 if errorlevel 1 goto failed
-type results\windows_source_smoke.json
-echo Windows source tests passed. Details: results\windows_v13_tests.log
+if not exist results mkdir results
+"%DSA_PYTHON%" main.py --smoke-test results\windows_source_smoke.json
+if errorlevel 1 goto failed
+set "DIE_SHIFT_NATIVE_BACKEND=desktop"
+"%DSA_PYTHON%" main.py --smoke-test results\windows_desktop_smoke.json
+if errorlevel 1 goto failed
+"%DSA_PYTHON%" -m unittest discover -s tests -p test_v14.py -v > results\windows_v14_tests.log 2>&1
+if errorlevel 1 goto failed
+type results\windows_desktop_smoke.json
+echo Windows offline source tests passed.
 pause
 exit /b 0
 :failed
-type results\windows_v13_tests.log
+echo Offline validation failed. See results and startup-error.log.
 pause
 exit /b 1

@@ -32,7 +32,7 @@ class GeometrySelection:
         if stamp==self.index_stamp:return
         from .fast_preview import GeometryCache
         cache=w.geometry_cache or GeometryCache(w.data);w.geometry_cache=cache
-        bound=cache.bind(w.case,w.motions(),cache.layers) if w.case else None
+        bound=cache.bind(w.case,w.motions(),cache.layers,w.params()) if w.case else None
         self.groups=[]
         for key,q in cache.layers.items():
             owners=bound.owners[key] if bound else np.full(len(q['geometry']),-1)
@@ -48,7 +48,7 @@ class GeometrySelection:
             if not w.visible_boxes[key].isChecked() or w.roles().get(key) in ('芯片边框','封装边框'):continue
             local=shape
             if owner>=0 and w.shown_states is not None:
-                info=w.case['infos'][owner];local=inverse_geometry(shape,[info['cx'],info['cy']],w.shown_states[owner])
+                local=inverse_geometry(shape,w.rotation_centers()[owner],w.shown_states[owner])
             candidates=tree.query(local,predicate='intersects')
             for j in candidates:
                 if (key,int(ids[j])) in hidden:continue

@@ -22,54 +22,15 @@ def smooth_weight(t,continuity='C2'):
     return 1-(t*t*(3-2*t) if continuity=='C1' else t**3*(10+t*(-15+6*t)))
 
 
-def native_region(geometry,dbu):
-    return _cached_native_region(geometry.wkb,float(dbu)).dup()
-
-
-@lru_cache(maxsize=192)
-def _cached_native_region(wkb,dbu):
-    geometry=shapely.from_wkb(wkb)
-    import klayout.db as kdb
-    region=kdb.Region()
-    pending=list(shapely.get_parts(geometry))
-    while pending:
-        p=pending.pop()
-        if p.geom_type in ('MultiPolygon','GeometryCollection'):pending.extend(shapely.get_parts(p));continue
-        if p.geom_type!='Polygon':continue
-        def ring(r):
-            xy=np.rint(np.asarray(r.coords)[:-1]/dbu).astype(np.int64)
-            if len(xy)>3:
-                xy=xy[np.any(xy!=np.roll(xy,1,axis=0),axis=1)]
-                a=xy-np.roll(xy,1,axis=0);b=np.roll(xy,-1,axis=0)-xy
-                if np.max(abs(np.r_[a,b]),initial=0)<2e9:
-                    cross=a[:,0]*b[:,1]-a[:,1]*b[:,0];keep=(cross!=0)|(np.sum(a*b,axis=1)<0)
-                    if keep.sum()>=3:xy=xy[keep]
-            return [kdb.Point(int(x),int(y)) for x,y in xy]
-        q=kdb.Polygon(ring(p.exterior))
-        for hole in p.interiors:q.insert_hole(ring(hole))
-        region.insert(q)
-    region.merge();return region
-
+from .native_backend import compute as _cached_native_region, geometry as native_operation
 
 def snapped(geometry,dbu):
-    region=native_region(geometry,dbu);parts=[]
-    for p in region.each():
-        parts.append(Polygon([(v.x*dbu,v.y*dbu) for v in p.each_point_hull()],
-                    [[(v.x*dbu,v.y*dbu) for v in p.each_point_hole(i)] for i in range(p.holes())]))
-    return shapely.union_all(parts),region
-
+    result=native_operation('normalize',geometry,dbu)
+    return result,result
 
 def width_ok(geometry,width,dbu):
     from .drc import rule_region
     return rule_region(geometry,width,dbu).is_empty
-
-
-def native_geometry(region,dbu):
-    polys=[Polygon([(v.x*dbu,v.y*dbu) for v in p.each_point_hull()],
-        [[(v.x*dbu,v.y*dbu) for v in p.each_point_hole(i)] for i in range(p.holes())]) for p in region.merged().each()]
-    # Native DRC markers may contain cut lines / point-touching boundaries.
-    # Normalize those annotations, never a folded displacement candidate.
-    return shapely.union_all([g if g.is_valid else shapely.make_valid(g) for g in polys])
 
 
 def width_regions(geometry,width,dbu):
@@ -182,7 +143,7 @@ class Component:
 
 class DeformationPreview:
     def __init__(self,contact,parameters,result,settings):
-        self.model=contact;self.p=parameters;self.settings=settings;self.cache=__import__('die_shift_studio.session_cache',fromlist=['SessionCache']).SessionCache();self.components=[]
+        contact.configure_parameters(parameters);self.model=contact;self.p=parameters;self.settings=settings;self.cache=__import__('die_shift_studio.session_cache',fromlist=['SessionCache']).SessionCache();self.components=[]
         # Statistical insufficiency is an exclusion, never evidence of sufficient routing.
         ca=(result or {}).get('contact_analysis',{})
         self.blocked={(q['source_layer'],q['source_index']) for q in (result or {}).get('issues',[])}
@@ -505,11 +466,8 @@ class DeformationPreview:
             if support is None:support=shapely.union_all([Point(r['center']).buffer(inner[i]+span,quad_segs=32) for i,r in enumerate(records)])
             angle_bad=angle_regions(candidate,cfg.deformation_min_angle_deg,dbu)
             if not angle_bad.is_empty and support.covers(angle_bad):
-                from klayout import db as kdb
                 for radius in (p.line_width_um*.25,p.line_width_um*.5,p.line_width_um,2*p.line_width_um):
-                    rr=kdb.Region()
-                    for part in region.each():rr.insert(part.round_corners(round(radius/dbu),round(radius/dbu),128))
-                    q=native_geometry(rr,dbu)
+                    q=native_operation("round",candidate,dbu,radius)
                     delta=q.symmetric_difference(candidate)
                     local=[g for g in shapely.get_parts(delta) if support.covers(g)]
                     if not local:continue

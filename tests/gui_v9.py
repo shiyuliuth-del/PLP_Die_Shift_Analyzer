@@ -20,14 +20,14 @@ def wait():
     assert not errors,errors
     app.processEvents()
 def shot(name):
-    w.canvas.draw();w.grab().save(str(ROOT/'figures'/('software_V13_regression_'+name+'.png')))
+    w.canvas.draw();w.grab().save(str(ROOT/'figures'/('software_V14_regression_'+name+'.png')))
 def choose(widget,value):widget.setCurrentIndex(widget.findData(value));wait()
 def mouse(name,xy):
     e=MouseEvent(name,w.canvas,*w.ax.transData.transform(xy),button=1);w.canvas.callbacks.process(name,e)
 def click(xy):mouse('button_press_event',xy);mouse('button_release_event',xy);app.processEvents()
 def drag(a,b):mouse('button_press_event',a);mouse('motion_notify_event',b);mouse('button_release_event',b);app.processEvents()
 w.load_project(ROOT/'Jobs/示例D_芯片外扇出.dshift.json');wait();w.run_evaluation();wait()
-assert 'input_nsigma' not in w.fields and w.target_sigma.count()==13 and not w.target_sigma.isEditable()
+assert 'input_nsigma' not in w.fields and w.target_sigma.count()==14 and not w.target_sigma.isEditable()
 assert '非金属图形' not in [w.role_boxes['4/0'].itemText(i) for i in range(w.role_boxes['4/0'].count())]
 assert w.analysis_split.count()==2
 assert w.ax.get_xlabel()==w.ax.get_ylabel()==''
@@ -132,4 +132,4 @@ assert np.all(w.space_artists[0].get_array()==w.params().line_space_um)
 path=Path(temp.name)/'infinite.json';w.write_project(path);assert json.loads(path.read_text())['parameters']['target_nsigma']=='Infinity'
 w.load_project(path);wait();assert w.target_sigma.currentText()=='∞'
 w.run_evaluation();wait();w.tabs.setCurrentWidget(w.detail);app.processEvents();assert '输入单边幅度的极端预演' in w.detail.toPlainText();assert 'math:///' in w.detail.toHtml()
-metrics['status']='PASS';(ROOT/'results/regression_V12.json').write_text(json.dumps(metrics,ensure_ascii=False,indent=2)+'\n');w.close();app.processEvents();temp.cleanup();print(json.dumps(metrics,ensure_ascii=False,indent=2))
+metrics['status']='PASS';(ROOT/'results/regression_V14.json').write_text(json.dumps(metrics,ensure_ascii=False,indent=2)+'\n');w.close();app.processEvents();temp.cleanup();print(json.dumps(metrics,ensure_ascii=False,indent=2))

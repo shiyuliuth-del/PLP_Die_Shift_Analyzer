@@ -14,10 +14,10 @@ def mean_and_bounds(p,count):
 def statistical_state(p,count):
     mu,bounds=mean_and_bounds(p,count)
     if math.isinf(p.target_nsigma):mu=np.zeros(3)
-    sx,sy,st=bounds/p.target_nsigma
+    sx,sy,st=bounds/p.scale_nsigma
     cov=np.array([[sx*sx,p.rho_xy*sx*sy,0],[p.rho_xy*sx*sy,sy*sy,0],[0,0,st*st]])
     from .distribution import normalizer
-    k=0. if math.isinf(p.target_nsigma) else math.sqrt(chi2.isf(2*norm.sf(p.target_nsigma)*normalizer(p,count)[0]/count,3))
+    k=math.inf if p.target_nsigma==0 else 0. if math.isinf(p.target_nsigma) else math.sqrt(chi2.isf(2*norm.sf(p.target_nsigma)*normalizer(p,count)[0]/count,3))
     return mu,cov,k
 
 class ExtremeCatalog:

@@ -23,7 +23,7 @@ def wait_motion():
   time.sleep(.002)
  raise AssertionError('No animation started')
 def shot(name):
- w.canvas.draw();w.grab().save(str(ROOT/'figures'/('software_V13_'+name+'.png')))
+ w.canvas.draw();w.grab().save(str(ROOT/'figures'/('software_V14_'+name+'.png')))
 w.load_project(ROOT/'Jobs/示例E_连续型变与约束.dshift.json');wait();order=w.ordered_layers().copy()
 assert order[2]=='127/0' and order[5]=='128/0';assert w.run_button.text()=='方案评估'
 assert not w.deformation_toggle.isChecked()
@@ -94,4 +94,4 @@ assert any(a.get_visible() and a._world_bounds[0]>1500 for a in w.probability_ar
 pose=w.shown_states.copy();old=w.result;w.target_sigma.setCurrentText('∞');wait();np.testing.assert_allclose(w.shown_states,pose)
 assert w.result is not old and w.result['contact_analysis']['mode']=='binary'
 w.fit_plot();wait();shot('live_overlays');metrics['status']='PASS'
-(ROOT/'results/gui_legacy_regression_V12.json').write_text(json.dumps(metrics,ensure_ascii=False,indent=2)+'\n');w.close();app.processEvents();tmp.cleanup();print(json.dumps(metrics,ensure_ascii=False,indent=2))
+(ROOT/'results/gui_legacy_regression_V14.json').write_text(json.dumps(metrics,ensure_ascii=False,indent=2)+'\n');w.close();app.processEvents();tmp.cleanup();print(json.dumps(metrics,ensure_ascii=False,indent=2))

@@ -97,6 +97,9 @@ def _deposit(shape,points,weights,origin,cell):
 
 
 def probability_maps(cache,bound,roles,p,exponent=12,masks=None,settings=None,progress=lambda *_:None):
+    if settings and settings.probability_show_ranges:
+        from dataclasses import replace
+        p=replace(p,target_nsigma=0)
     if p.per_die_enabled:
         values=[];maps=[]
         for owner in range(len(bound.centers)):
@@ -129,12 +132,12 @@ def _probability_maps(cache,bound,roles,p,exponent=12,masks=None,settings=None,p
             nodes,weights=roots_legendre(cfg.quadrature_order)
             # Integrate in conditional CDF coordinates: positive weights sum to
             # one even at low order / 12 sigma, avoiding area inflation.
-            u=ndtr(-p.target_nsigma)+(nodes+1)/2*float(normal_interval(-p.target_nsigma,p.target_nsigma))
+            u=ndtr(-p.scale_nsigma)+(nodes+1)/2*float(normal_interval(-p.scale_nsigma,p.scale_nsigma))
             angles=mu[2]+sigma_angle*ndtri(u);weights=weights/2
         else:angles=np.array([mu[2]]);weights=np.array([1.])
-        limit=p.target_nsigma if math.isfinite(p.target_nsigma) else 0.
+        limit=p.scale_nsigma if math.isfinite(p.scale_nsigma) else 0.
         translation=_translation_kernel(cov,cell,limit,cfg.quadrature_order,hard_k=limit)
-        zxy,_=normalization(p.target_nsigma,p.rho_xy,cov[0,0]>0,cov[1,1]>0,False);translation/=zxy
+        zxy,_=normalization(p.scale_nsigma,p.rho_xy,cov[0,0]>0,cov[1,1]>0,False);translation/=zxy
         offsets=np.array([translation.shape[1]//2,translation.shape[0]//2])*cell
         groups=[(float(angle),float(weight)) for angle,weight in zip(angles,weights)]
     else:
@@ -189,6 +192,7 @@ def _probability_maps(cache,bound,roles,p,exponent=12,masks=None,settings=None,p
             raise ValueError(f'{key} 图形{index+1}概率卷积边缘或数值范围自检失败')
         grid[np.abs(grid)<1e-14]=0;grid=np.clip(grid,0,1).astype(np.float32)
         return dict(key=key,index=index,owner=int(owner),probability=grid,input_envelope=np.asarray(envelope.exterior.coords),
+            nominal_polygon=poly,rotation_center=c.copy(),
             extent=[origin[0]-cell/2,origin[0]+(size[0]-.5)*cell,origin[1]-cell/2,origin[1]+(size[1]-.5)*cell],
             edge_probability=edge,convolution_mass_error=abs(numerical_mass-area_integral),cell_um=cell,via_area_um2=float(poly.area),integrated_area_um2=float(grid.sum(dtype=float)*cell*cell),
             raster_area_relative_error=abs(area_integral-poly.area)/poly.area,
@@ -203,3 +207,23 @@ def _probability_maps(cache,bound,roles,p,exponent=12,masks=None,settings=None,p
                 support='输入单边幅度硬边界；正态联合分布在该盒内截断归一化',
                 definition='网格位置被过孔实体覆盖的概率；0—1；面积积分近似等于过孔面积，网格值之和不归一为1',
                 accuracy='空间栅格和角度积分为数值近似；提高精度需细化网格并增加节点/样本复算。低于采样分辨率或数值精度的尾部不伪造色值；虚线输入包络独立标示全部极端。接触判定使用同一截断分布的概率界。')
+
+
+def coverage_envelope(poly,center,p,count,level):
+    """Conservative via swept hull for |Z_j-mu_j| <= min(B_j, level*sigma_j).
+
+    Every displayed level uses the SAME distribution scale. This box-envelope
+    includes the via area and rotation, and is not an equal-density contour or
+    a claim of exact joint probability in correlated 3-D pose space.
+    """
+    from dataclasses import replace
+    if math.isinf(level):
+        # Infinity is the application's nominal binary mode, not infinite sigma.
+        return poly
+    if level==0:return input_envelope(poly,center,p,count)
+    _,bounds=mean_and_bounds(p,count)
+    scale=p.reference_nsigma if math.isinf(p.scale_nsigma) else p.scale_nsigma
+    limit=bounds*min(1.,level/scale)
+    q=replace(p,per_die_enabled=False,single_bound_x_um=limit[0],multi_bound_x_um=limit[0],
+              single_bound_y_um=limit[1],multi_bound_y_um=limit[1],bound_angle_deg=math.degrees(limit[2]))
+    return input_envelope(poly,center,q,count)

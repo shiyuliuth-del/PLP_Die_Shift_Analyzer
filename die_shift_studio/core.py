@@ -36,7 +36,9 @@ PARAMETER_DESCRIPTIONS = {
     'single_bound_x_um':'单芯片X单边幅度 / μm', 'single_bound_y_um':'单芯片Y单边幅度 / μm',
     'multi_bound_x_um':'多芯片每颗X单边幅度 / μm', 'multi_bound_y_um':'多芯片每颗Y单边幅度 / μm',
     'bound_angle_deg':'角度单边幅度 / °', 'input_nsigma':'输入幅度对应的σ倍率 / 无量纲',
-    'target_nsigma':'接口目标双侧等效σ级别；∞为二值模式 / 无量纲', 'mean_x_um':'平均X偏移 / μm',
+    'reference_nsigma':'最近有限非零尺度级别；0级沿用此值 / 无量纲',
+    'rotation_center':'旋转中心选项', 'rotation_x_um':'自定义中心相对芯片中心X / μm', 'rotation_y_um':'自定义中心相对芯片中心Y / μm',
+    'target_nsigma':'目标0～12；0为全部有界概率，∞为二值模式 / 无量纲', 'mean_x_um':'平均X偏移 / μm',
     'mean_y_um':'平均Y偏移 / μm', 'mean_angle_deg':'平均转角 / °', 'rho_xy':'X/Y相关系数 / 无量纲',
     'interdie':'跨芯片连接：unknown待确认、none无、present有',
     'fixed_via_assignment':'固定过孔归属：all所有点保守包络、nearest最近芯片假设',
@@ -66,8 +68,13 @@ class Parameters:
     bound_angle_deg: float = 1.0
     per_die_enabled: bool = False
     die_bounds: list = field(default_factory=list)  # rows: [Bx μm, By μm, Bθ degrees], DIE order
+    rotation_center: str = "center"
+    rotation_x_um: float = 0.0
+    rotation_y_um: float = 0.0
+    die_pivots: list = field(default_factory=list)  # [mode, relative X, relative Y]
     input_nsigma: float = 6.0
     target_nsigma: float = 6.0
+    reference_nsigma: float = 6.0  # last finite nonzero level, persists for all-support mode
     mean_x_um: float = 0.0
     mean_y_um: float = 0.0
     mean_angle_deg: float = 0.0
@@ -78,8 +85,9 @@ class Parameters:
     def __post_init__(self):
         # Old projects may contain an obsolete independent input multiplier.
         from copy import deepcopy
-        self.die_bounds=deepcopy(self.die_bounds)
+        self.die_bounds=deepcopy(self.die_bounds);self.die_pivots=deepcopy(self.die_pivots)
         self.input_nsigma=self.target_nsigma
+        if 0<self.target_nsigma<math.inf:self.reference_nsigma=self.target_nsigma
 
     @classmethod
     def from_dict(cls, data):
@@ -99,8 +107,17 @@ class Parameters:
         if not self.per_die_enabled:return self
         if not 0 <= owner < len(self.die_bounds):raise ValueError(f"DIE {owner+1} 缺少单独幅度参数，请检查芯片识别与幅度表")
         x,y,a=self.die_bounds[owner]
+        mode,px,py=self.die_pivots[owner] if owner<len(self.die_pivots) else (self.rotation_center,self.rotation_x_um,self.rotation_y_um)
         return replace(self,per_die_enabled=False,single_bound_x_um=x,single_bound_y_um=y,
-                       multi_bound_x_um=x,multi_bound_y_um=y,bound_angle_deg=a)
+                       multi_bound_x_um=x,multi_bound_y_um=y,bound_angle_deg=a,rotation_center=mode,rotation_x_um=px,rotation_y_um=py)
+
+    @property
+    def scale_nsigma(self):
+        return self.reference_nsigma if self.target_nsigma==0 else self.target_nsigma
+
+    @property
+    def failure_threshold(self):
+        return 0. if self.target_nsigma==0 else math.erfc(self.target_nsigma/math.sqrt(2))
 
     def validate(self):
         if not isinstance(self.per_die_enabled,bool):raise ValueError("逐芯片开关必须为布尔值")
@@ -108,9 +125,15 @@ class Parameters:
         for i,row in enumerate(self.die_bounds):
             if not isinstance(row,(list,tuple)) or len(row)!=3 or any(isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v) or v<0 for v in row) or row[2]>180:
                 raise ValueError(f"DIE {i+1} 幅度须为非负有限数，角度不超过180°")
+        from .pivots import PIVOT_CHOICES
+        allowed={v for _,v in PIVOT_CHOICES}
+        if self.rotation_center not in allowed:raise ValueError("旋转中心选项无效")
+        if not isinstance(self.die_pivots,list):raise ValueError("逐芯片旋转中心必须为表格")
+        for row in self.die_pivots:
+            if not isinstance(row,(list,tuple)) or len(row)!=3 or row[0] not in allowed or any(isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v) for v in row[1:]):raise ValueError("逐芯片旋转中心须包含有效选项和有限相对坐标")
         for f in fields(self):
             x = getattr(self, f.name)
-            if f.name in ("per_die_enabled","die_bounds"):continue
+            if f.name in ("per_die_enabled","die_bounds","die_pivots"):continue
             if f.type == "str":
                 continue
             if f.name in ('input_nsigma','target_nsigma') and x==math.inf:continue
@@ -132,8 +155,9 @@ class Parameters:
                     "multi_bound_x_um", "multi_bound_y_um", "bound_angle_deg"):
             if getattr(self,key) < 0:
                 raise ValueError(f"{key} 不得为负")
-        if not (self.input_nsigma in range(1,13) or self.input_nsigma==math.inf) or not (self.target_nsigma in range(1,13) or self.target_nsigma==math.inf):
-            raise ValueError("目标覆盖须为1～12的整数或∞")
+        if not (self.input_nsigma in range(0,13) or self.input_nsigma==math.inf) or not (self.target_nsigma in range(0,13) or self.target_nsigma==math.inf):
+            raise ValueError("目标覆盖须为0～12的整数或∞")
+        if self.reference_nsigma not in range(1,13):raise ValueError("保留的概率尺度级别须为1～12整数")
         if not 0 < self.max_route_angle_deg < 80 or abs(self.rho_xy) > 1:
             raise ValueError("布线斜角须在0～80°之间；相关系数须在[-1,1]")
         if self.interdie not in {"unknown","none","present"} or self.fixed_via_assignment not in {"all","nearest"}:
@@ -329,7 +353,7 @@ def uncertainty_bound(points,center,params,die_count,details=False,state=None):
     from .statistics import mean_and_bounds
     _,hard=mean_and_bounds(p,die_count)
     hard_limit=mean+np.linalg.norm(hard[:2])+2*np.linalg.norm(a,axis=1)*math.sin(min(math.pi,hard[2])/2)
-    q=np.minimum(mean+linear+remainder,hard_limit) if math.isfinite(p.target_nsigma) else np.zeros(len(a))
+    q=hard_limit if p.target_nsigma==0 else np.minimum(mean+linear+remainder,hard_limit) if math.isfinite(p.target_nsigma) else np.zeros(len(a))
     if details:
         return [dict(ax=float(a[j,0]),ay=float(a[j,1]),radius=float(np.linalg.norm(a[j])),
                      bx=float(b[j,0]),by=float(b[j,1]),lambda_max=float(eig[j]),
@@ -388,14 +412,15 @@ def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order
     connections=original_case['connections']
     case=connections.filter_case(original_case)
     from .contact import ContactModel
-    contact_model=contact_model or ContactModel(data,original_case,roles,connections,motions=motions)
+    contact_model=contact_model or ContactModel(data,original_case,roles,connections,motions=motions,parameters=p)
     p=replace(p,interdie='present' if contact_model.interdie_networks else 'none')
-    count=len(case['dies']); alpha=float(2*norm.sf(p.target_nsigma))
+    count=len(case['dies']); alpha=p.failure_threshold
     rows=[]; common=[]; qcorners=[]
     def compute_die(item):
         i,(die,info,pins,outputs)=item;local_notes=[];p=params.for_die(i)
         p=replace(p,residual_budget_um=0.,routing_edge_keepout_um=0.)
-        center=(info['cx'],info['cy'])
+        from .pivots import rotation_center
+        center=rotation_center(case,i,p)
         corners=np.asarray(die.exterior.coords)[:-1]
         qcorner=float(max(uncertainty_bound(corners,center,p,count)))
         boundary_gap=die.distance(case['board'].boundary)-p.min_package_clearance_um
@@ -425,6 +450,7 @@ def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order
         wratio=len(pins)/wafer_capacity if wafer_capacity>0 else math.inf
         row=dict(die=i+1,input_bounds=[p.single_bound_x_um if count==1 else p.multi_bound_x_um,p.single_bound_y_um if count==1 else p.multi_bound_y_um,p.bound_angle_deg],**info,pin_count=len(pins),output_count=len(outputs),
             all_pin_count=len(original_case['all_pins'][i]),all_output_count=len(original_case['outputs'][i]),
+            rotation_origin_um=list(map(float,center)),rotation_origin_mode=p.rotation_center,
             corner_radius_um=float(np.linalg.norm(corners-np.asarray(center),axis=1).max()),
             corner_bound_um=qcorner,package_clearance_ratio=boundary_ratio,
             package_nominal_gap_um=float(die.distance(case['board'].boundary)),
@@ -494,7 +520,7 @@ def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order
         schemes.append(dict(scheme=s,name=SCHEME_NAMES[s],status=status,gamma=float(gamma),reasons=reasons,
                             mode=mode,scope="几何与容量初筛；未做自动布线、全量DRC或电性能签核"))
     from .contact import ContactModel
-    contact_model=contact_model or ContactModel(data,original_case,roles,connections,motions=motions)
+    contact_model=contact_model or ContactModel(data,original_case,roles,connections,motions=motions,parameters=p)
     contact=contact_model.screen(p,settings=settings,progress=progress)
     if connections.ownership_notes:
         for scheme in schemes:

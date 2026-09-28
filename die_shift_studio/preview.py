@@ -28,11 +28,12 @@ def layer_owners(data,case,motions,keys=None):
         else:result[key]=case.get('ownership',{}).get(key,np.full(len(data.layers[key]),-2,dtype=int)).copy()
     return result
 
-def transformed_layers(data,case,motions,states,keys=None,owners=None):
+def transformed_layers(data,case,motions,states,keys=None,owners=None,parameters=None):
+    from .pivots import rotation_center
     keys=list(data.layers) if keys is None else list(keys)
     owners=layer_owners(data,case,motions,keys) if owners is None else owners
     output={}
     for key in keys:
-        output[key]=[points if owner<0 else rigid_transform(points,np.array([case['infos'][owner]['cx'],case['infos'][owner]['cy']]),states[owner])
+        output[key]=[points if owner<0 else rigid_transform(points,rotation_center(case,owner,parameters),states[owner])
                      for points,owner in zip(data.layers[key],owners[key])]
     return output

@@ -5,8 +5,8 @@ from shapely.strtree import STRtree
 from .selection import inverse_geometry
 
 class ViewportIndex:
-    def __init__(self,cache,case,motions):
-        self.bound=cache.bind(case,motions,cache.layers) if case else None
+    def __init__(self,cache,case,motions,parameters=None):
+        self.bound=cache.bind(case,motions,cache.layers,parameters) if case else None
         self.groups={}
         for key,q in cache.layers.items():
             owners=self.bound.owners[key] if self.bound else np.full(len(q['geometry']),-1)

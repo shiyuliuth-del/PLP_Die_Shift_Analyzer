@@ -1,0 +1,14 @@
+{
+  "status": "PASS",
+  "ctrl_wheel_zooms_only": true,
+  "plain_wheel_rotates_only": true,
+  "pivot_controls_and_save": true,
+  "absolute_marker_scale": true,
+  "range_levels": [
+    1,
+    3,
+    6
+  ],
+  "zero_retains_last_scale": true,
+  "no_errors": true
+}

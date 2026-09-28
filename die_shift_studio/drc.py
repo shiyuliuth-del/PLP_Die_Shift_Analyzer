@@ -12,48 +12,22 @@ from shapely.strtree import STRtree
 
 PARALLEL_DEGREES=5.
 
-def rule_pairs(geometry,distance,dbu,kind='width'):
-    from .deformation import native_region
-    import klayout.db as kdb
-    region=native_region(geometry,dbu)
-    method={'width':region.width_check,'space':region.space_check,'notch':region.notch_check}[kind]
-    pairs=method(max(1,math.ceil(distance/dbu-1e-9)),whole_edges=False,
-                 ignore_angle=PARALLEL_DEGREES+1e-8,metrics=kdb.Region.Projection,shielded=False)
-    kept=kdb.EdgePairs()
-    for pair in pairs.each():
-        a,b=pair.first,pair.second
-        # Adjacent violating portions meet at their common contour vertex.
-        if a.p1==b.p1 or a.p1==b.p2 or a.p2==b.p1 or a.p2==b.p2:continue
-        kept.insert(pair)
-    return kept
+from .native_backend import compute,geometry as native_operation
 
 def rule_region(geometry,distance,dbu,kind='width'):
-    from .deformation import native_geometry
-    return native_geometry(rule_pairs(geometry,distance,dbu,kind).polygons(1),dbu)
+    return native_operation(kind,geometry,dbu,distance)
 
 def rule_area(geometry,distance,dbu,kind='width'):
-    pairs=rule_pairs(geometry,distance,dbu,kind)
-    return float(pairs.polygons(1).area())*dbu*dbu
-
-def separation_pairs(a,b,distance,dbu):
-    from .deformation import native_region
-    import klayout.db as kdb
-    return native_region(a,dbu).separation_check(native_region(b,dbu),
-        max(1,math.ceil(distance/dbu-1e-9)),whole_edges=False,
-        ignore_angle=PARALLEL_DEGREES+1e-8,metrics=kdb.Region.Projection,shielded=False)
+    return compute(kind,geometry.wkb,float(dbu),float(distance))[1]
 
 def separation_area(a,b,distance,dbu):
     overlap=a.intersection(b)
-    # A point / edge touch is an electrical short even with zero area.
-    return (max(dbu*dbu,overlap.area) if not overlap.is_empty else 0.)+float(separation_pairs(a,b,distance,dbu).polygons(1).area())*dbu*dbu
+    return (max(dbu*dbu,overlap.area) if not overlap.is_empty else 0.)+compute('separation',a.wkb,float(dbu),float(distance),b.wkb)[1]
 
 def separation_region(a,b,distance,dbu):
-    """Parallel spacing plus actual overlap (a short never needs parallel edges)."""
-    from .deformation import native_geometry
     overlap=a.intersection(b)
     if not overlap.is_empty and overlap.area==0:overlap=overlap.buffer(dbu)
-    pairs=separation_pairs(a,b,distance,dbu)
-    return shapely.union_all([overlap,native_geometry(pairs.polygons(1),dbu)])
+    return shapely.union_all([overlap,native_operation('separation',a,dbu,distance,b)])
 
 class GlobalDRC:
     """Full layout DRC with bounded, per-copper immutable geometry caching.

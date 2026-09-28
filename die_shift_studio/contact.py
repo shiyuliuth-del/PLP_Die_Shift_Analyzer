@@ -21,14 +21,14 @@ class UnionFind:
         if a!=b:self.parent[b]=a
 
 class ContactModel:
-    def __init__(self,data,case,roles,connections,cache=None,motions=None):
+    def __init__(self,data,case,roles,connections,cache=None,motions=None,parameters=None):
         from .layer_roles import canonical_roles
         roles=canonical_roles(roles);self.data=data;self.case=case;self.roles=roles;self.connections=connections
         case['ownership']=connections.resolve_ownership(case)
         self.cache=cache or GeometryCache(data)
         self.motions={k:default_motion(r) for k,r in roles.items()}
         keys=[k for k in connections.order if roles.get(k) in PHYSICAL]
-        self.bound=self.cache.bind(case,self.motions,keys)
+        self.bound=self.cache.bind(case,self.motions,keys,parameters)
         self.nodes=[];self.ids={};self.planes={}
         for key in keys:
             ids=[]
@@ -69,12 +69,17 @@ class ContactModel:
         for plane,ids in self.planes.items():
             fixed=[j for j in ids if roles[self.nodes[j]['key']]=='固定RDL']
             if fixed:self.fixed_trees[plane]=(fixed,STRtree([self.nodes[j]['poly'] for j in fixed]))
+    def configure_parameters(self,p):
+        signature=(p.per_die_enabled,p.rotation_center,p.rotation_x_um,p.rotation_y_um,tuple(tuple(v) for v in p.die_pivots))
+        if getattr(self,'_pivot_signature',None)==signature:return
+        self.bound=self.cache.bind(self.case,self.motions,self.bound.keys,p);self._pivot_signature=signature
     def spacing(self,record,p):return p.line_space_um
     def moved(self,poly,owner,states):
         if owner<0:return poly
         c=self.bound.centers[owner]
         return shapely.set_coordinates(poly,rigid_transform(shapely.get_coordinates(poly),c,states[owner]))
     def current(self,states,p,replacements=None):
+        self.configure_parameters(p)
         states=np.asarray(states);issues=[];regions=[];intrusions=[];tol=max(1e-9,self.data.dbu_um*1e-6)
         records=self.records
         if not records:return dict(issues=[],regions=[],intrusions=[],problem_percent=0)
@@ -130,6 +135,7 @@ class ContactModel:
             anchors=[dict(point=list(map(float,point)),owner=-1,layer=None)],
             detail='按下层连接追溯归属；仅检查实际运动过孔与相邻固定RDL的其他网络。')
     def screen(self,p,settings=None,progress=lambda *_:None):
+        self.configure_parameters(p)
         from .settings import ViewSettings
         from .contact_probability import contact_probability
         from .resources import parallel_map
@@ -149,13 +155,13 @@ class ContactModel:
             q=dict(value,source_layer=record['key'],source_index=record['index'],die=record['owner']+1)
             probabilities.append(q)
             if value['verdict']=='概率待细化':unresolved.append(q)
-            for scheme in record['schemes']:ratios[scheme]=max(ratios[scheme],value['lower']/value['threshold'])
+            for scheme in record['schemes']:ratios[scheme]=max(ratios[scheme],(value['lower']/value['threshold'] if value['threshold'] else math.inf if value['verdict']=='窗口不足' else 0.))
             if value['verdict']!='窗口不足':continue
             witness=value['witness'];node=self.nodes[witness['node']]
             distance=record['poly'].distance(node['poly'])
             for scheme in record['schemes']:
-                row=self.issue(record,node,witness['point'],distance,p.annulus_um+p.line_space_um,p.line_space_um,scheme,'接触概率超限')
-                row.update(probability_lower=value['lower'],probability_upper=value['upper'],threshold=value['threshold'])
+                row=self.issue(record,node,witness['point'],distance,p.annulus_um+p.line_space_um,p.line_space_um,scheme,'正概率接触（0级）' if p.target_nsigma==0 else '接触概率超限')
+                row.update(probability_lower=value['lower'],probability_upper=value['upper'],threshold=value['threshold'],positive_probability_proven=value.get('positive_probability_proven',False))
                 row['detail']=f"接触概率区间 [{value['lower']:.6g}, {value['upper']:.6g}]，允许上限 {value['threshold']:.6g}；接口与全部其他网络的联合事件。"
                 issues.append(row)
         return dict(**common,issues=issues,ratios=ratios,unresolved=unresolved,probabilities=probabilities,mode='probability',
@@ -171,8 +177,8 @@ def support_face_length(poly,normal,maximum):
 def support_shape(poly,owner,centers,p,count,padding=0.):
     if owner<0:return dict(kind='poly',poly=poly,padding=padding,random=False)
     p=p.for_die(owner);mu,cov,_=statistical_state(p,count);c=centers[owner]
-    sx=(p.single_bound_x_um if count==1 else p.multi_bound_x_um)/p.input_nsigma
-    sy=(p.single_bound_y_um if count==1 else p.multi_bound_y_um)/p.input_nsigma
+    sx=(p.single_bound_x_um if count==1 else p.multi_bound_x_um)/p.scale_nsigma
+    sy=(p.single_bound_y_um if count==1 else p.multi_bound_y_um)/p.scale_nsigma
     # A positive normal variance must never be rounded to zero for infinity.
     rank=2 if sx>0 and sy>0 and abs(p.rho_xy)<1 else (1 if sx>0 or sy>0 else 0)
     if rank==2:return dict(kind='plane',random=True)
@@ -180,13 +186,13 @@ def support_shape(poly,owner,centers,p,count,padding=0.):
     if rank==1:
         axis=np.array([sx,p.rho_xy*sy]) if sx>0 and sy>0 else np.array([float(sx>0),float(sy>0)])
         axis/=np.linalg.norm(axis);normal=np.array([-axis[1],axis[0]])
-        if p.bound_angle_deg/p.input_nsigma>0:
+        if p.bound_angle_deg/p.scale_nsigma>0:
             r=float(np.linalg.norm(np.asarray(poly.exterior.coords)-c,axis=1).max())+padding;middle=float((c+mu[:2])@normal);lo,hi=middle-r,middle+r
         else:
             values=np.asarray(transformed.exterior.coords)@normal;lo,hi=float(values.min())-padding,float(values.max())+padding
-        faces=None if p.bound_angle_deg/p.input_nsigma>0 else (support_face_length(transformed,normal,False),support_face_length(transformed,normal,True))
+        faces=None if p.bound_angle_deg/p.scale_nsigma>0 else (support_face_length(transformed,normal,False),support_face_length(transformed,normal,True))
         return dict(kind='band',normal=normal,lo=lo,hi=hi,faces=faces,random=True)
-    if p.bound_angle_deg/p.input_nsigma>0:
+    if p.bound_angle_deg/p.scale_nsigma>0:
         return dict(kind='annulus',center=c+mu[:2],inner=max(0.,poly.distance(Point(c))-padding),outer=float(np.linalg.norm(np.asarray(poly.exterior.coords)-c,axis=1).max())+padding,random=True)
     return dict(kind='poly',poly=transformed,padding=padding,random=False)
 

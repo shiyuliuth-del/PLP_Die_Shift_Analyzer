@@ -9,14 +9,16 @@ seed += [(str(root/'Jobs'/(p.stem+'.dshift.json')),'seed/Jobs') for p in sorted(
 seed += collect_data_files('scipy.stats',includes=['_sobol_direction_numbers.npz'])
 # Optional GPU runtime is collected only in a build environment that has it.
 import importlib.util
-optional_data=[];optional_binaries=[];optional_hidden=[]
+optional_data=[(str(root/'die_shift_studio'/name),'die_shift_studio') for name in ('native_ops.py','klayout_worker.py')];optional_binaries=[];optional_hidden=[]
+if importlib.util.find_spec('klayout'):
+ optional_binaries+=collect_dynamic_libs('klayout');optional_hidden+=['klayout.db','klayout.dbcore','klayout.tl','klayout.tlcore']
 if importlib.util.find_spec('cupy'):
  from PyInstaller.utils.hooks import collect_all
  for package in ('cupy','cupyx'):
   data,binary,hidden=collect_all(package);optional_data+=data;optional_binaries+=binary;optional_hidden+=hidden
 # CUDA drivers remain installed on the destination machine.
-a=Analysis([str(root/'main.py')],pathex=[str(root)],binaries=collect_dynamic_libs('gdstk')+collect_dynamic_libs('klayout')+optional_binaries,datas=seed+optional_data,
- hiddenimports=['matplotlib.backends.backend_qtagg','scipy.special._ufuncs','shapely.lib','klayout.db','klayout.dbcore','klayout.tl','klayout.tlcore']+optional_hidden,
+a=Analysis([str(root/'main.py')],pathex=[str(root)],binaries=collect_dynamic_libs('gdstk')+optional_binaries,datas=seed+optional_data,
+ hiddenimports=['matplotlib.backends.backend_qtagg','scipy.special._ufuncs','shapely.lib']+optional_hidden,
  hookspath=[],runtime_hooks=[],excludes=['PyQt6','PySide6','PySide2','tkinter'],
  hooksconfig={'matplotlib':{'backends':['QtAgg','Agg']}})
 pyz=PYZ(a.pure)

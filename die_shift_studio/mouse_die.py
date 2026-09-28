@@ -19,7 +19,7 @@ class MouseDieMode:
         w=self.w
         if not w.case:return
         names=[f'DIE {i+1}' for i in range(len(w.case['dies']))]
-        value,ok=W.QInputDialog.getItem(w,'交互偏移','选择芯片；右键拖动平移，滚轮每格旋转 0.1°，ESC退出：',names,max(0,self.owner or 0),False)
+        value,ok=W.QInputDialog.getItem(w,'交互偏移','选择芯片；右键拖动平移，滚轮每格旋转 0.1°，Ctrl+滚轮缩放，ESC退出：',names,max(0,self.owner or 0),False)
         if ok:self.enter(names.index(value))
         w.canvas.setFocus()
     def enter(self,owner):
@@ -30,7 +30,7 @@ class MouseDieMode:
         states=np.zeros((len(w.case['dies']),3)) if w.shown_states is None else w.shown_states.copy()
         w.manual_states=states;w.active_preview=None;w.manual_die.setCurrentIndex(owner)
         w.extreme_table.blockSignals(True);w.extreme_table.clearSelection();w.extreme_table.blockSignals(False)
-        self.update_text();w.render_scene();w.statusBar().showMessage(f'DIE {owner+1} 交互偏移：右键平移；滚轮上/下逆时针/顺时针旋转；ESC退出')
+        self.update_text();w.render_scene();w.statusBar().showMessage(f'DIE {owner+1} 交互偏移：右键平移；滚轮上/下逆时针/顺时针旋转；Ctrl+滚轮缩放；ESC退出')
     def exit(self):
         active=self.owner is not None;self.owner=None;self.drag=None;self.w.canvas.die_move_active=False
         self.update_text();self.w.render_scene()
@@ -53,6 +53,8 @@ class MouseDieMode:
         if event.button==3 and self.owner is not None and self.drag is not None:
             self.drag=None;self.idle.start();self.flush()
     def scroll(self,event):
+        from .navigation import control_held
+        if control_held(event):return
         if self.owner is None or event.inaxes is not self.w.ax:return
         pose=self.w.manual_states.copy();pose[self.owner,2]+=math.radians(.1)*float(event.step)
         self.submit(pose)

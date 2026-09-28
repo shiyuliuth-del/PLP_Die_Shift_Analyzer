@@ -45,10 +45,10 @@
   ],
   "interfaces": 2,
   "copper_components": 2,
-  "cold_frame_ms": 46.51000699959695,
-  "repeat_frame_median_ms": 0.002078999841614859,
-  "repeat_frame_max_ms": 0.016220000361499842,
-  "toggle_roundtrip_ms": 0.013431999832391739,
+  "cold_frame_ms": 378.8317050002661,
+  "repeat_frame_median_ms": 0.027051500183006283,
+  "repeat_frame_max_ms": 0.07458499931090046,
+  "toggle_roundtrip_ms": 0.07461200038960669,
   "repeat_search_calls": 0,
   "search_calls": 2,
   "slowest_searches": [
@@ -56,13 +56,13 @@
       "indices": [
         1
       ],
-      "ms": 30.735123999875213
+      "ms": 224.96447800040187
     },
     {
       "indices": [
         0
       ],
-      "ms": 4.796427000655967
+      "ms": 49.73651199907181
     }
   ],
   "accepted": 2,

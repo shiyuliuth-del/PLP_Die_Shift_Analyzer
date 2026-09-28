@@ -58,7 +58,7 @@ def smoke(output):
         assert model.current([[65,0,0],[0,0,0]],p)['intrusions']
         from .deformation import width_ok
         from shapely.geometry import box
-        import klayout.db as kdb
+        from .native_backend import backend
         assert width_ok(box(-25,-25,25,25),20,.001) and not width_ok(box(-5,-25,5,25),20,.001)
         trace_path=root/'examples/示例G_小偏移与三段追溯.gds'
         trace_project=json.loads(trace_path.with_suffix('.json').read_text(encoding='utf-8'))
@@ -71,7 +71,7 @@ def smoke(output):
         assert te.frame(pose)['deformation']['accepted_count']==2
         record.update(deformation_routes=2,configuration_retry=True)
         te.close()
-        record.update(native_drc=kdb.__version__,status='PASS',version=result['version'],jobs=str(window.jobs_dir),formulas=len(resources),regions=len(frame['contact']['regions']),space_maps=len(window.space_artists),probability_maps=len(masses),sample_standard_deviations=window.probability_data['sample_standard_deviations'],min_occupied_probability_cells=min(int(np.count_nonzero(a)) for a in masses))
+        record.update(native_drc=backend().info,status='PASS',version=result['version'],jobs=str(window.jobs_dir),formulas=len(resources),regions=len(frame['contact']['regions']),space_maps=len(window.space_artists),probability_maps=len(masses),sample_standard_deviations=window.probability_data['sample_standard_deviations'],min_occupied_probability_cells=min(int(np.count_nonzero(a)) for a in masses))
     except Exception:record['error']=traceback.format_exc()
     finally:
         import time

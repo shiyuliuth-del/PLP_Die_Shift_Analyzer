@@ -38,7 +38,7 @@ class V8Tests(unittest.TestCase):
         np.testing.assert_array_equal(uncertainty_bound([[0,0],[500,1000]],[0,0],parsed,1),[0,0])
         support=support_shape(box(-5,-5,5,5),0,np.zeros((1,2)),parsed,1)
         self.assertEqual(support['kind'],'poly');self.assertFalse(support['random'])
-        for invalid in (0,13,-1,5.5):
+        for invalid in (13,-1,5.5):
             with self.assertRaises(ValueError):replace(p,target_nsigma=invalid).validate()
     def test_package_field_base_and_transformed_domain_follow_visibility(self):
         *_,m,p=fixture();p=replace(p,single_bound_x_um=35,single_bound_y_um=35,bound_angle_deg=1)

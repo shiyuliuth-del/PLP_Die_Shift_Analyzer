@@ -1,4 +1,4 @@
-"""Auditable V12 calculation report: bounded inputs, probabilities, geometry."""
+"""Auditable V14 calculation report: bounded inputs, probabilities, geometry."""
 from html import escape
 import math
 from .core import PARAMETER_DESCRIPTIONS,fmt,Parameters
@@ -28,27 +28,31 @@ def report_document(r,motions=None,progress=lambda *_:None):
          f"运动归属待确认{len(con.get('ownership_notes',[]))}个；跨芯片几何网络{len(r.get('interdie_networks',[]))}个",
          'A、B为相邻层图形，δ为GDS网格（μm），εA为面积容差（μm²）。同层相连先合并，再沿下层追溯D(A)芯片集合；唯一根允许随动，多根/无根待确认。全电连接分量包含两个以上DIE根即跨芯片网络，不需要手动指定。支持过孔—过孔、过孔—RDL等连接。只评估运动过孔与相邻固定RDL的真实名义接口。芯片外扇出沿连接归属，绝不按最近芯片分配。')
     step('最大输入幅度与统一统计模型',f'Bx={bounds[0]:g} μm；By={bounds[1]:g} μm；Bθ={p.bound_angle_deg:g}°；目标={fmt(p.target_nsigma)}',
-         [r'\sigma_x=\frac{B_x}{k},\quad\sigma_y=\frac{B_y}{k},\quad\sigma_\theta=\frac{B_\theta\pi}{180k}',
+         [r'\sigma_x=\frac{B_x}{\kappa},\quad\sigma_y=\frac{B_y}{\kappa},\quad\sigma_\theta=\frac{B_\theta\pi}{180\kappa}',
           r'\Sigma_{11}=\sigma_x^2,\quad\Sigma_{22}=\sigma_y^2,\quad\Sigma_{33}=\sigma_\theta^2',
           r'\Sigma_{12}=\Sigma_{21}=\rho\sigma_x\sigma_y,\quad\Sigma_{13}=\Sigma_{23}=\Sigma_{31}=\Sigma_{32}=0',
           r'\mathcal{H}=\{z:|z_j-\mu_j|\leq B_j\},\quad Z=\int_{\mathcal{H}}f_N(z;\mu,\Sigma)\,dz',
           r'f_T(z)=\frac{f_N(z;\mu,\Sigma)\mathbf{1}_{\mathcal{H}}(z)}{Z}'] if math.isfinite(p.target_nsigma) else [r'I=\mathbf{1}\{\mathrm{current\ geometry\ contacts}\}'],
          f'截断前σx={math.sqrt(cov[0,0]):.8g} μm；σy={math.sqrt(cov[1,1]):.8g} μm；σθ={math.sqrt(cov[2,2]):.8g} rad；Z={Z:.12g}' if math.isfinite(p.target_nsigma) else '∞（无穷大符号）为当前几何二值模式，空白行检查名义位置，不表示无界正态尾部',
-         'k只能选择1～12或∞。B是围绕系统均值μ的最大随机偏移幅度；μ=0时DX/DY绝不超出±B。σ是截断前母正态尺度，截断后的实际标准差通常更小。Σ是母协方差，ρ为母X/Y相关系数，角度与平移独立；fN为母正态密度，H为允许状态盒，Z为盒内母概率，fT为归一化后密度。相关X/Y联合截断，不逐轴裁剪样本。零方差按确定值积分。∞模式不估计随机概率，概率图只显示名义实体覆盖。')
+         'k可选择0～12或∞。公式中的尺度除数使用κ：非零有限k时κ=k，0时κ沿用最近有限级别（首次6）；0级α=0且不省略有界支持内尾部。B是围绕系统均值μ的最大随机偏移幅度；μ=0时DX/DY绝不超出±B。σ是截断前母正态尺度，截断后的实际标准差通常更小。Σ是母协方差，ρ为母X/Y相关系数，角度与平移独立；fN为母正态密度，H为允许状态盒，Z为盒内母概率，fT为归一化后密度。相关X/Y联合截断，不逐轴裁剪样本。零方差按确定值积分。∞模式不估计随机概率，未勾选覆盖范围时概率图只显示名义实体；勾选后显示按保留尺度计算的0级分布。')
     step('输入单边幅度的极端预演','每颗DIE的最大X/Y/转角幅度与均值',
          [r'z_j=\mu_j+\varepsilon_jB_j,\quad\varepsilon_j\in\{-1,1\}',
           r'\mu_j-B_j\leq z_j\leq\mu_j+B_j'],
          '每颗芯片均包含8种三参数端点叠加；补充各DIE不利方向、芯片对和封装边界方向，合并重复行',
          'z=(DX,DY,θ)，ε为端点符号。输入35 μm、均值0时平移端点为±35 μm；过孔实际位移包含旋转，可大于35 μm。代表列表不穷举所有多DIE笛卡尔积，连续概率判定独立于代表列表。蓝灰虚线包络包含输入盒的连续刚体位置，不是等概率线。手动输入可超出最大幅度作指定工况检查，但不属于该概率模型支持范围。')
-    step('刚体偏移与控制区域',f'最小包围a={p.annulus_um:g} μm；固定线距s={p.line_space_um:g} μm',
+    step('逐芯片旋转中心解析','共用或逐DIE旋转中心选项；GDS芯片边框；自定义相对坐标',
+         [r'C=C_{\mathrm{die}}+c_{\mathrm{relative}}',r'T_z(P)=C+R(\theta)(P-C)+D'],
+         '；'.join(f"DIE {row['die']}：{row.get('rotation_origin_mode','center')}，旋转中心{row.get('rotation_origin_um')} μm" for row in r['dies']),
+         'Cdie为名义芯片最小外接矩形中心；正中心时crelative=(0,0)，角点取该矩形的实际顶点（按图纸Y分为上下两点，再按X分左右），自定义按图纸X/Y轴输入相对Cdie的μm坐标。C始终为源图参考点，不从偏移后图形重新求取。D=(DX,DY)为用户输入平移，R为逆时针旋转矩阵；芯片自身中心、边框、扇出线路和过孔均用同一C。')
+    step('刚体偏移与控制区域' ,f'最小包围a={p.annulus_um:g} μm；固定线距s={p.line_space_um:g} μm',
          [r'x^{\prime}=C_x+D_x+(x-C_x)\cos\theta-(y-C_y)\sin\theta',
           r'y^{\prime}=C_y+D_y+(x-C_x)\sin\theta+(y-C_y)\cos\theta',
           r'V_a=T_z(V)\oplus\mathcal{B}_a,\quad V_s=T_z(V)\oplus\mathcal{B}_{a+s}',
           r'I_i(z)=\mathbf{1}\{\min_{j\in\mathcal{F}_i}\operatorname{dist}(T_z(V_i),F_j)\leq a+s\}'],
          '包围区为青绿虚线，线距控制区为紫色虚线；红圈标接触点，半透明红色填充真实侵入交集',
-         'C为连接芯片中心，x/y为原顶点，D为平移，θ以rad计算；T为刚体变换，V为真实过孔实体，⊕是Minkowski和，Br为半径r圆盘。Fi集合为相接固定RDL平面上全部其他几何网络图形，排除本网络。dist为最短距离；相切也违规，即使侵入面积为0。灰虚线接到当前运动后的孔中心。动画每帧重算控制区、接触点和交集。')
+         'C为所属DIE的实际旋转中心，x/y为原顶点，D为平移，θ以rad计算；T为刚体变换，V为真实过孔实体，⊕是Minkowski和，Br为半径r圆盘。Fi集合为相接固定RDL平面上全部其他几何网络图形，排除本网络。dist为最短距离；相切也违规，即使侵入面积为0。灰虚线接到当前运动后的孔中心。动画每帧重算控制区、接触点和交集。')
     step('默认行概率判定与预演二值判定','有限k；允许上限α；当前接口及其全部其他网络',
-         [r'\alpha=2\Phi(-k),\quad p_i=\int_{\mathcal{H}}I_i(z)f_T(z)\,dz',
+         [r'\alpha=2\Phi(-k)\ (k>0),\quad \alpha=0\ (k=0),\quad p_i=\int_{\mathcal{H}}I_i(z)f_T(z)\,dz',
           r'p_i>\alpha\ \Longrightarrow\ \mathrm{insufficient}',
           r'I_i(z_{\mathrm{preview}})=1\ \Longrightarrow\ \mathrm{insufficient}'],
          f"允许接触概率={r['target_failure']:.8g}；不足记录{len(r['issues'])}条（含各方案）；待细化接口{len(analysis.get('unresolved',[]))}个" if math.isfinite(p.target_nsigma) else f"名义位置二值接触{len(r['issues'])}条（含各方案）",
@@ -79,8 +83,8 @@ def report_document(r,motions=None,progress=lambda *_:None):
           r'Q_N=\|\mu_{xy}+b-A\|+k_M\sqrt{\lambda_{\max}(J\Sigma J^T)}+\frac{\|A\|(k_M\sigma_\theta)^2}{2}',
           r'Q_H=\|\mu_{xy}+b-A\|+\sqrt{B_x^2+B_y^2}+2\|A\|\sin\!\left(\frac{\min(\pi,B_\theta)}{2}\right)',
           r'S(P)=s+\min(Q_N,Q_H)'],
-         '整DIE及其外部随动金属显示需求；整包模式其他区域为基础线距；∞模式仅显示基础线距',
-         'P为原始位置（μm），C为所属DIE中心，R为二维旋转矩阵，A/b为原/均值旋转相对坐标，J为位移Jacobian，λmax为2×2协方差矩阵最大特征值；其计算为(v11+v22+√((v11−v22)²+4v12²))/2。M为DIE数，F为3自由度卡方CDF（代码用逆生存函数避免消减）；Z为截断归一化质量。QN为条件置信包络，QH为硬输入范围的确定性上界，Bθ此处用rad。取两者较小仍是保守上界。S不包含孔半径或包围量，不直接用来替代接触概率判定。∞没有统计补偿量。')
+         '整DIE及其外部随动金属显示需求；整包模式其他区域为基础线距；0级使用硬边界QH；∞模式仅显示基础线距',
+         'P为原始位置（μm），C为所属DIE的实际旋转中心，R为二维旋转矩阵，A/b为原/均值旋转相对坐标，J为位移Jacobian，λmax为2×2协方差矩阵最大特征值；其计算为(v11+v22+√((v11−v22)²+4v12²))/2。M为DIE数，F为3自由度卡方CDF（代码用逆生存函数避免消减）；Z为截断归一化质量。QN为条件置信包络，QH为硬输入范围的确定性上界，Bθ此处用rad。取两者较小仍是保守上界。S不包含孔半径或包围量，不直接用来替代接触概率判定。∞没有统计补偿量。')
     step('预演分析：来源图形的局部连续型变',f'连续性={cfg.deformation_continuity}；方式={cfg.deformation_method}；曲线误差={cfg.deformation_tolerance_um:g} μm；固定线宽w={p.line_width_um:g} μm、线距s={p.line_space_um:g} μm',
          [r'r_a=\frac{a}{\cos(\pi/128)}+2\delta,\quad L_i=V_i\oplus\mathcal{B}_{r_a},\quad G_0=G\cup\bigcup_i L_i',
           r'r_i=\max_{x\in\mathrm{vertices}(L_i)}\|x-c_i\|+2\delta',
@@ -91,7 +95,7 @@ def report_document(r,motions=None,progress=lambda *_:None):
           r'A(w)=\frac{1-\cos(\gamma w)+\cot(\gamma/2)\sin(\gamma w)}{2}',
           r'B(w)=\frac{\cot(\gamma/2)[1-\cos(\gamma w)]-\sin(\gamma w)}{2}',
           r'\Psi_A(P)=P+\sum_d[A(W_d)\Delta_d+B(W_d)J_{90}\Delta_d],\quad\Delta_d=T_d(P)-P'],
-         '只在真实动孔—固定RDL接口适配；当前状态排除实际接触孔；接受合法型变后重新检查并迭代释放接口。统计风险不作为具体状态的永久冻结条件。每个显示帧重新校验；通过候选与带DRC最佳候选明确区分，拓扑非法才保留源图。深色表示运动与适配部分，适配段有虚线描边。',
+         '只在真实动孔—固定RDL接口适配；当前状态排除实际接触孔；接受合法型变后重新检查并迭代释放接口。统计风险不作为具体状态的永久冻结条件。每个显示帧重新校验；只显示全部约束通过的候选，最终全层DRC未通过则恢复原图。深色表示运动与适配部分，适配段有虚线描边。',
          'P为固定RDL原位置，ci为运动孔原中心（区别于所属DIE中心Cd）；G为原固定铜区，Vi为运动过孔；先用Li补足名义所需孔盘得到G0。a为包围量，δ为源DBU，圆弧每象限32段；ra补偿内接弦和量化误差。ri从Li顶点到孔中心的最大距离加2δ求得，不再附加两倍线宽。包围是型变后输出约束，不以源孔盘不足拒绝适配。L为候选过渡宽度，以最大孔中心行程的2倍、固定线宽的2倍和5 μm三者最大值为基数，依次乘1、1.6、2.6、4.2、6.8、11，选择首个全部约束通过的最短候选；不是全局最优布线证明。wi为该孔权重，Wd把同DIE的多个孔光滑合并，Td为真实刚体变换，Dd为平移，R为旋转矩阵。贝塞尔方式混合位移，圆弧方式沿原点到刚体目标点间的圆弧行进，圆心角γ由设置的度数换成rad，正负随该DIE转角（零角取正）；A/B为弦向及垂向系数，J90将向量逆时针旋转90°。只有平移时两方式也不同。C1/C2指位移场在刚体区、固定区交界的一阶/二阶导数连续；铜内角低于设置时尝试扩大局部圆角，并重复全套校验；原GDS折角不被承诺全部变光滑，离散多边形也不声称数学上严格C2。无折叠充分界、固定连接端不动、原图与型变后最小线宽、异网及其他动孔控制区线距、包围、封装、禁布区和拓扑均校验。曲线自适应细分后按源DBU量化；宽度/线距使用近似平行（≤5°）的非相邻边对规则，实际短接不受角度过滤；长度阈值向上取整到DBU，不放宽。型变结果只作当前工况预演，不修改原GDS，也不改变前述原图统计概率。')
     step('三段追溯与全局DRC','来源铜连通区、运动/固定过孔；最小线宽线距、连续性与内角设置',
          [r'S=L_0\left(\frac{w_0}{w_{\min}}\right)^{1/4},\quad g=\max(w_0,w_{\min}),\quad L_{\max}=L_0-2g',
@@ -99,7 +103,7 @@ def report_document(r,motions=None,progress=lambda *_:None):
           r'\phi=\arccos\!\left(\frac{|e_1\cdot e_2|}{\|e_1\|\,\|e_2\|}\right),\quad\phi\leq5^{\circ}',
           r'Q=\left(\sum_{j=1}^{m}A_j,\ m,\ \operatorname{Area}(G^{\prime}\bigtriangleup G)\right)'],
          '局部孔盘调整无通过结果时，沿实际连通铜图形寻找运动段、适配段、固定段；固定端不动。独立DRC开关控制粉色违规显示，关闭开关不改变判定。',
-         'L0/w0是候选对边的共同长度/间距；S为长宽排序值，g为两端避开拐角的保留长度，Lmax为可用长度，wmin为固定最小线宽。先居中取Lmax，再尝试0.75/0.5倍及偏中心位置，最多48个组合。b为适配起点，u为指向固定端的单位向量，L为适配长度，P为源点；运动段W=1、固定段W=0，适配段使用前述C1/C2权重与贝塞尔/圆弧公式。e1/e2为两条非零边的方向；只检查近似平行、非共享顶点的边，粉色定位真实不足段；实际异网相交始终算短接。没有完全合格结果时，对合法拓扑候选按Q字典序选取：Aj为第j组违规区域面积（μm²），m为违规组数，最后一项为改动铜面积；这是有限搜索中的最佳候选，不是合格解或全局最优证明。最终再次检查所有显示候选之间的冲突。交互帧复核已有结构，停止操作后完整搜索；所有标记与图形用同一当前状态。')
+         'L0/w0是候选对边的共同长度/间距；S为长宽排序值，g为两端避开拐角的保留长度，Lmax为可用长度，wmin为固定最小线宽。先居中取Lmax，再尝试0.75/0.5倍及偏中心位置，最多48个组合。b为适配起点，u为指向固定端的单位向量，L为适配长度，P为源点；运动段W=1、固定段W=0，适配段使用前述C1/C2权重与贝塞尔/圆弧公式。e1/e2为两条非零边的方向；只检查近似平行、非共享顶点的边，粉色定位真实不足段；实际异网相交始终算短接。没有完全合格结果时，对合法拓扑候选按Q字典序选取：Aj为第j组违规区域面积（μm²），m为违规组数，最后一项为改动铜面积；这是有限搜索中的最佳候选，不是合格解或全局最优证明。Q仅用于内部搜索排序；不合格候选不会显示。最终再次检查所有候选与候选、候选与恢复原图之间的冲突，迭代回退至稳定。交互帧复核已有结构，停止操作后完整搜索；所有标记与图形用同一当前状态。')
     step('三方案比较：实图条件与待验证能力','相同真实运动过孔—固定RDL接口；实际芯片边长、层数、线宽线距；自动跨芯片网络',
          [r'C_b=L\max\!\left(0,\left\lfloor\frac{\ell_b+s}{w+s}\right\rfloor\right),\quad\eta_b=\frac{N_b}{C_b}',
           r'm_i=\operatorname{dist}(c_i,\partial F_i)-r_i-a,\quad\eta_{\mathrm{capture}}=\max_i\frac{Q(c_i)}{m_i}'],
@@ -108,16 +112,16 @@ def report_document(r,motions=None,progress=lambda *_:None):
     blocks.append(grid(['方案','状态','Γ','理由'],[[s['scheme'],s['status'],fmt(s['gamma']),'; '.join(s['reasons'])] for s in r['schemes']]))
     if p.per_die_enabled:
         step('逐芯片输入解析','GDS识别的DIE编号与独立单边幅度',
-             [r'\sigma_{x,d}=\frac{B_{x,d}}{k},\quad\sigma_{y,d}=\frac{B_{y,d}}{k},\quad\sigma_{\theta,d}=\frac{\pi B_{O,d}}{180k}'],
+             [r'\sigma_{x,d}=\frac{B_{x,d}}{\kappa},\quad\sigma_{y,d}=\frac{B_{y,d}}{\kappa},\quad\sigma_{\theta,d}=\frac{\pi B_{O,d}}{180\kappa}'],
              '每颗芯片均使用自己的幅度；前述单组数值示例为DIE 1，几何连通归属决定实际调用哪组。',
              'd为DIE编号；Bx,d和By,d是μm单边最大幅度，BO,d是度，k为目标级别。有限k采用截断联合正态，∞为名义位置二值判断。')
         blocks.append(grid(['DIE','Bx / μm','By / μm','BO / °','σx / μm','σy / μm','σθ / rad'],
-            [[i+1,*v,v[0]/p.target_nsigma,v[1]/p.target_nsigma,math.radians(v[2])/p.target_nsigma] for i,v in enumerate(p.die_bounds)]))
+            [[i+1,*v,v[0]/p.scale_nsigma,v[1]/p.scale_nsigma,math.radians(v[2])/p.scale_nsigma] for i,v in enumerate(p.die_bounds)]))
     adaptive=r.get('adaptive_preview')
     if adaptive:
         if not adaptive.get('statistics_match_saved_evaluation',True):blocks.append('<p>本表使用当前预演参数，与上次方案评估快照不同；重新点击方案评估可同步。目标σ='+h(fmt(adaptive['target_sigma']))+'；包围/固定线宽/固定线距（μm）='+h(str([adaptive['annulus_um'],adaptive['line_width_um'],adaptive['line_space_um']]))+'；逐芯片幅度（μm、μm、°）='+h(str(adaptive['die_bounds']))+'</p>')
         blocks.append('<h3>预演分析的迭代结果</h3><p>'+h(adaptive['continuous_probability'])+'</p>'+grid(['代表状态','初始不足','最终不足','释放','迭代轮数'],[[q['name'],q['initial'],q['remaining'],q['released'],len(q['iterations'])] for q in adaptive['states']]))
-    hidden={'per_die_enabled','die_bounds','input_nsigma','interdie','fixed_via_assignment','residual_budget_um','transition_length_um','max_route_angle_deg','routing_edge_keepout_um'}
+    hidden={'per_die_enabled','die_bounds','die_pivots','input_nsigma','interdie','fixed_via_assignment','residual_budget_um','transition_length_um','max_route_angle_deg','routing_edge_keepout_um'}
     appendix='<h2>附录：输入与几何明细</h2>'+grid(['参数','含义/单位','值'],[[key,PARAMETER_DESCRIPTIONS.get(key,key),fmt(value,8)] for key,value in r['parameters'].items() if key not in hidden])
     appendix+=grid(['图层','图形编号','归属问题','可达DIE'],[[q['layer'],q['index'],q['reason'],q['dies']] for q in con.get('ownership_notes',[])])
     appendix+=grid(['图层','随动设置'],list((motions or r.get('motions',{})).items()))

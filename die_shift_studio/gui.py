@@ -29,6 +29,8 @@ from matplotlib.transforms import Affine2D
 from matplotlib import patheffects
 from .plot_geometry import geometry_path
 from .settings import ViewSettings
+from .pivots import rotation_centers
+from .setting_widgets import PivotEditor,ColorButton,RangeEditor
 from .animation import Transition
 from .selection import GeometrySelection
 from .ticks import DistanceMinorLocator
@@ -139,7 +141,7 @@ class MainWindow(W.QMainWindow):
         self.data=None;self.result=None;self.case=None;self.worker=None;self.project_path=None
         from .runtime_log import LogBus,RuntimeCapture
         self.log_bus=LogBus(self,self.jobs_dir.parent/'logs'/'runtime.log');self.runtime_capture=RuntimeCapture(self.log_bus);self._tasks={};self._closing=False
-        self.per_die_values=[];self._per_die_initialized=False;self.hardware_worker=None
+        self.per_die_values=[];self.per_die_pivots=[];self.reference_nsigma=6.;self._per_die_initialized=False;self.hardware_worker=None
         from .session_cache import SessionCache
         self.session_values=SessionCache();self.session_engines={};self.retired_sessions=[]
         self.fields={};self.role_boxes={};self.stage_hints={};self.visible_boxes={};self.motion_boxes={}
@@ -178,7 +180,7 @@ class MainWindow(W.QMainWindow):
         if collapsed:
             toggle=W.QToolButton();toggle.setText('▸ '+title);toggle.setCheckable(True);box.hide()
             toggle.toggled.connect(box.setVisible);toggle.toggled.connect(lambda checked:toggle.setText(('▾ ' if checked else '▸ ')+title));parent.addWidget(toggle)
-        parent.addWidget(box)
+        parent.addWidget(box);return form
     def _build(self):
         central=W.QWidget();root=W.QVBoxLayout(central);self.setCentralWidget(central)
         root.setContentsMargins(6,4,6,4);root.setSpacing(4)
@@ -207,12 +209,13 @@ class MainWindow(W.QMainWindow):
         self.layer_drag.moved.connect(lambda:self.drag_timer.start() if not self.drag_timer.isActive() else None)
         self.layer_drag.finished.connect(self.layer_moved)
         target=W.QGroupBox('目标覆盖要求');form=W.QFormLayout(target)
-        self.target_sigma=W.QComboBox();self.target_sigma.setEditable(False);self.target_sigma.addItems([str(i) for i in range(1,13)]+['∞']);self.target_sigma.setCurrentText('6')
-        self.target_sigma.setToolTip('有限k：输入幅度为±kσ；默认行按接触概率与2Φ(−k)比较。∞或具体预演按当前几何接触判断。')
+        self.target_sigma=W.QComboBox();self.target_sigma.setEditable(False);self.target_sigma.addItems([str(i) for i in range(0,13)]+['∞']);self.target_sigma.setCurrentText('6')
+        self.target_sigma.setToolTip('有限非零k：最大幅度 B 决定截断前 σ=B/k；0保留最近尺度并检查全部有界概率。∞或具体预演按当前接触判断。')
         self.target_sigma.currentTextChanged.connect(self.coverage_changed);form.addRow('目标覆盖级别',self.target_sigma);page.addWidget(target)
-        self._group(page,'偏移单边幅度',['single_bound_x_um','single_bound_y_um','multi_bound_x_um','multi_bound_y_um','bound_angle_deg'])
+        amplitude=self._group(page,'偏移单边幅度',['single_bound_x_um','single_bound_y_um','multi_bound_x_um','multi_bound_y_um','bound_angle_deg'])
+        self.pivot_editor=PivotEditor();amplitude.addRow('旋转中心',self.pivot_editor);self.pivot_editor.valueChanged.connect(self.invalidate)
         self.per_die_toggle=W.QCheckBox('按芯片分别设置单边幅度');page.addWidget(self.per_die_toggle)
-        self.per_die_table=table(['芯片','X / μm','Y / μm','O / °']);self.per_die_table.setMaximumHeight(215);page.addWidget(self.per_die_table);self.per_die_table.hide()
+        self.per_die_table=table(['芯片','X / μm','Y / μm','O / °','旋转中心']);self.per_die_table.setMaximumHeight(215);page.addWidget(self.per_die_table);self.per_die_table.hide()
         self.per_die_toggle.toggled.connect(self.per_die_changed)
         self._group(page,'系统偏差与相关性',['mean_x_um','mean_y_um','mean_angle_deg','rho_xy'],collapsed=True);page.addStretch()
         page=self._page('工艺')
@@ -314,6 +317,9 @@ class MainWindow(W.QMainWindow):
         spin(probability,'probability_cell_um','网格 / μm（0自动）',0,1000,3)
         spin(probability,'angle_bins','实体角度分组上限',4,128)
         choice(probability,'probability_cmap','配色方案');choice(probability,'probability_interpolation','显示平滑')
+        check=W.QCheckBox('显示目标覆盖级别范围');self.setting_fields['probability_show_ranges']=check;probability.addRow(check);check.toggled.connect(self.settings_changed)
+        color=ColorButton();self.setting_fields['probability_target_color']=color;probability.addRow('当前级别虚线颜色',color);color.valueChanged.connect(self.settings_changed)
+        ranges=RangeEditor();self.setting_fields['probability_ranges']=ranges;probability.addRow(ranges);ranges.valueChanged.connect(self.settings_changed)
         spin(probability,'probability_alpha','叠加不透明度',.05,.95,2)
         spin(probability,'contact_box_budget','接触概率自适应积分预算',128,32768)
         page.addWidget(label('实体概率按所选方法计算；虚线包络表示输入幅度全部组合，并非等概率边界。默认接触判定用概率上下界；积分不足时明确标为待细化。∞仅作当前位置二值判断。'))
@@ -338,6 +344,10 @@ class MainWindow(W.QMainWindow):
         spin(deformation,'deformation_tolerance_um','曲线细分误差 / μm',.001,1,3)
         page.addWidget(label('连续性约束作用于型变位移场。孔盘调整失败后自动追溯三段式适配；未通过则恢复原图并显示琥珀叉号，型变校验列出原因。DRC检查固定RDL的≤5°非相邻边；型变另验证异网最小净距。'))
         drawing=group('接触标记');spin(drawing,'intrusion_alpha','侵入面积不透明度',.05,.85,2)
+        for prefix,title in [('contact','接触空心圆'),('unadapted','未适配叉号')]:
+            color=ColorButton();self.setting_fields[prefix+'_marker_color']=color;drawing.addRow(title+'颜色',color);color.valueChanged.connect(self.settings_changed)
+            spin(drawing,prefix+'_marker_size',title+'直径 / pt 或 μm',.1,10000,2)
+            check=W.QCheckBox(title+'使用图纸绝对大小 / μm');self.setting_fields[prefix+'_marker_absolute']=check;drawing.addRow(check);check.toggled.connect(self.settings_changed)
         page.addWidget(label('平滑只改变热图显示，不改变线距需求、连接归属和接触判定。资源由CPU/内存自动限额，多线程计算几何和概率，切换预演复用数值结果。'))
         page.addStretch();self.load_view_settings()
     def discover_hardware(self):
@@ -373,7 +383,7 @@ class MainWindow(W.QMainWindow):
         values={k:(w.currentData() if isinstance(w,W.QComboBox) else w.isChecked() if isinstance(w,W.QCheckBox) else w.value()) for k,w in self.setting_fields.items()}
         intent=self._motion_intent if self.transition.timer.isActive() else None
         self.stop_animation()
-        old_settings=self.view_settings;updated=ViewSettings.from_dict(values);deform=any(getattr(updated,k)!=getattr(self.view_settings,k) for k in ('deformation_continuity','deformation_method','deformation_tolerance_um','deformation_arc_angle_deg','deformation_min_angle_deg'));numeric=updated.numeric_key()!=self.view_settings.numeric_key();self.view_settings=updated;self.enable_settings()
+        old_settings=self.view_settings;updated=ViewSettings.from_dict(values);deform=any(getattr(updated,k)!=getattr(self.view_settings,k) for k in ('deformation_continuity','deformation_method','deformation_tolerance_um','deformation_arc_angle_deg','deformation_min_angle_deg'));numeric=(updated.numeric_key()!=self.view_settings.numeric_key() or (updated.probability_show_ranges!=old_settings.probability_show_ranges and self.target_sigma.currentText()=='∞'));self.view_settings=updated;self.enable_settings()
         live_motion=any(getattr(updated,k)!=getattr(old_settings,k) for k in ('animation_enabled','animation_duration_ms','animation_fps','animation_speed'))
         if numeric:
             self.dirty=self.result is not None
@@ -417,12 +427,14 @@ class MainWindow(W.QMainWindow):
         data={k:w.value() for k,w in self.fields.items()}
         if self.data:data.update(self.auto_values)
         data['target_nsigma']=math.inf if self.target_sigma.currentText() in ('∞','无穷大','Infinity') else float(self.target_sigma.currentText())
-        data.update(per_die_enabled=self.per_die_toggle.isChecked(),die_bounds=self.per_die_values if self._per_die_initialized else [])
+        if 0<data['target_nsigma']<math.inf:self.reference_nsigma=data['target_nsigma']
+        mode,x,y=self.pivot_editor.value()
+        data.update(reference_nsigma=self.reference_nsigma,rotation_center=mode,rotation_x_um=x,rotation_y_um=y,die_pivots=self.per_die_pivots,per_die_enabled=self.per_die_toggle.isChecked(),die_bounds=self.per_die_values if self._per_die_initialized else [])
         data.update(input_nsigma=data['target_nsigma'],fixed_via_assignment=self.fixed_assignment);return Parameters.from_dict(data)
     def per_die_changed(self,*_):
         if self.per_die_toggle.isChecked() and not self._per_die_initialized and not self.loading:
-            self.per_die_values=[];self.per_die_table.setRowCount(0);self._per_die_initialized=True
-        self.per_die_table.setVisible(self.per_die_toggle.isChecked());self.sync_per_die()
+            self.per_die_values=[];self.per_die_pivots=[];self.per_die_table.setRowCount(0);self._per_die_initialized=True
+        self.per_die_table.setVisible(self.per_die_toggle.isChecked());self.pivot_editor.setEnabled(not self.per_die_toggle.isChecked());self.sync_per_die()
         for key in ('single_bound_x_um','single_bound_y_um','multi_bound_x_um','multi_bound_y_um','bound_angle_deg'):
             self.fields[key].setEnabled(not self.per_die_toggle.isChecked())
         if not self.loading:self.invalidate()
@@ -431,6 +443,7 @@ class MainWindow(W.QMainWindow):
         prefix='single' if count==1 else 'multi'
         default=[self.fields[prefix+'_bound_x_um'].value(),self.fields[prefix+'_bound_y_um'].value(),self.fields['bound_angle_deg'].value()]
         self.per_die_values=(self.per_die_values+[default.copy() for _ in range(count)])[:count]
+        self.per_die_pivots=(self.per_die_pivots+[self.pivot_editor.value() for _ in range(count)])[:count]
         if self.per_die_table.rowCount()==count and getattr(self,'_die_table_source',None)==id(self.data):return
         self._die_table_source=id(self.data);self.per_die_table.setRowCount(count)
         for i,values in enumerate(self.per_die_values):
@@ -438,7 +451,20 @@ class MainWindow(W.QMainWindow):
             for j,value in enumerate(values):
                 spin=W.QDoubleSpinBox();spin.setRange(0,180 if j==2 else 10000);spin.setDecimals(4 if j==2 else 3);spin.setValue(value);spin.setKeyboardTracking(False)
                 spin.valueChanged.connect(lambda value,i=i,j=j:self.set_die_bound(i,j,value));self.per_die_table.setCellWidget(i,j+1,spin)
-        for j in range(4):self.per_die_table.setColumnWidth(j,88)
+            pivot=PivotEditor();pivot.setValue(self.per_die_pivots[i]);pivot.valueChanged.connect(lambda i=i,w=pivot:self.set_die_pivot(i,w.value()));self.per_die_table.setCellWidget(i,4,pivot)
+        for j in range(4):self.per_die_table.setColumnWidth(j,72)
+        self.per_die_table.setColumnWidth(4,190);self.per_die_table.resizeRowsToContents()
+    def set_die_pivot(self,i,value):
+        self.per_die_pivots[i]=value;self.per_die_table.resizeRowsToContents()
+        if not self.loading:self.invalidate()
+    def rotation_centers(self):
+        if self.current_frame is not None and "rotation_centers" in self.current_frame:return self.current_frame["rotation_centers"]
+        return rotation_centers(self.case,self.params())
+    def marker_size(self,prefix):
+        size=getattr(self.view_settings,prefix+'_marker_size')
+        if getattr(self.view_settings,prefix+'_marker_absolute'):
+            size*=self.ax.bbox.width/max(np.ptp(self.ax.get_xlim()),1e-20)*72/self.figure.dpi
+        return size**2
     def set_die_bound(self,i,j,value):
         self.per_die_values[i][j]=value
         if not self.loading:self.invalidate()
@@ -475,6 +501,8 @@ class MainWindow(W.QMainWindow):
             from .route_adaptation import boundary_tolerant
             from .distribution import normalization
             _cached_native_region.cache_clear();boundary_tolerant.cache_clear();normalization.cache_clear()
+            from . import native_backend
+            if native_backend._backend is not None:native_backend._backend.execute({'op':'clear'})
         self.retired_sessions.clear()
     def clear_preview(self):
         self.extremes=None;self.active_preview=None;self.owner_cache=None;self.page_items=[];self.preview_page=0;self.state_result=None
@@ -483,6 +511,7 @@ class MainWindow(W.QMainWindow):
         self.state_table.setRowCount(0);self.issue_table.setRowCount(0);self._issue_table_stamp=None;self.page_summary.setText('尚未评估')
     def coverage_changed(self,*_):
         if self.loading:return
+        if self.target_sigma.currentText() not in ('0','∞'):self.reference_nsigma=float(self.target_sigma.currentText())
         self.stop_animation();self.revision+=1;self.engine=None;self.connections=None
         self.probability_data=None;self.space_data=None;self.preview_ticket+=1;self.preview_pending=None
         if self.preview_worker:self.preview_worker.cancelled.set()
@@ -571,6 +600,7 @@ class MainWindow(W.QMainWindow):
             for j,width in enumerate([38,82,58,170]):self.layer_table.setColumnWidth(j,width)
             self.layer_table.horizontalHeader().setStretchLastSection(True)
             for key,w in self.fields.items():w.setValue(getattr(pars,key))
+            self.reference_nsigma=pars.reference_nsigma;self.per_die_pivots=[list(v) for v in pars.die_pivots];self.pivot_editor.setValue([pars.rotation_center,pars.rotation_x_um,pars.rotation_y_um])
             self.target_sigma.setCurrentText('∞' if math.isinf(pars.target_nsigma) else f'{pars.target_nsigma:g}')
             self.fixed_assignment=pars.fixed_via_assignment
             self.per_die_values=[list(v) for v in pars.die_bounds];self._per_die_initialized=bool(pars.die_bounds);self.per_die_table.setRowCount(0);self.per_die_toggle.blockSignals(True);self.per_die_toggle.setChecked(pars.per_die_enabled);self.per_die_toggle.blockSignals(False)
@@ -795,10 +825,11 @@ class MainWindow(W.QMainWindow):
         if not preserve or self._default_view is None:self.fit_plot()
         from .viewport import ViewportIndex,expanded_bounds,overlaps
         self.view_bounds=expanded_bounds(self.ax.get_xlim(),self.ax.get_ylim())
-        vstamp=(id(self.data),id(self.case))
+        vstamp=(id(self.data),id(self.case),self.rotation_centers().tobytes() if self.case else None)
         if vstamp!=self._viewport_stamp:
             self.geometry_cache=self.geometry_cache or GeometryCache(self.data)
-            self.viewport_index=ViewportIndex(self.geometry_cache,self.case,motions);self._viewport_stamp=vstamp
+            self.viewport_index=ViewportIndex(self.geometry_cache,self.case,motions,self.params());self._viewport_stamp=vstamp
+            if self.viewport_index.bound is not None:self.viewport_index.bound.centers=self.rotation_centers()
         states=frame['states'] if frame else None
         stamp=(id(self.data),id(frame),self.view_bounds);changed=stamp!=self._artist_frame;self.rendered_layers={}
         self.preview_applied=frame is not None;self.shown_states=frame['states'] if frame else None
@@ -874,7 +905,7 @@ class MainWindow(W.QMainWindow):
         area,circles,lines=self.issue_artists
         patches=[PathPatch(geometry_path(q['geometry'])) for q in frame['contact'].get('intrusions',[]) if self.visible_boxes[q['key']].isChecked() and self.visible_boxes[q['target_layer']].isChecked() and overlaps(q['geometry'].bounds,self.view_bounds)] if frame else []
         area.set_paths(patches);area.set_alpha(self.view_settings.intrusion_alpha);area.set_visible(self.show_issues.isChecked() and bool(patches))
-        circles.set_edgecolor(['#b88735' if q.get('adaptive_unresolved') else '#bc243e' for q in self.display_issues]);circles.set_offsets(np.asarray([q['point'] for q in self.display_issues]).reshape(-1,2));circles.set_visible(self.show_issues.isChecked() and bool(self.display_issues))
+        circles.set_sizes([self.marker_size('contact')]);circles.set_edgecolor(self.view_settings.contact_marker_color);circles.set_offsets(np.asarray([q['point'] for q in self.display_issues]).reshape(-1,2));circles.set_visible(self.show_issues.isChecked() and bool(self.display_issues))
         lines.set_segments([[self.issue_origin(q),q['point']] for q in self.display_issues]);lines.set_visible(circles.get_visible())
         if not hasattr(self,'violation_artist') or self.violation_artist.axes is None:
             self.violation_artist=PatchCollection([],facecolor='#e956b5',edgecolor='#ca398f',linewidth=.5,alpha=.48,zorder=10.2);self.ax.add_collection(self.violation_artist)
@@ -886,6 +917,7 @@ class MainWindow(W.QMainWindow):
         if not hasattr(self,'unadapted_artist') or self.unadapted_artist.axes is None:
             self.unadapted_artist=self.ax.scatter([],[],marker='x',s=65,color='#ba7628',linewidths=1.6,zorder=12,path_effects=[patheffects.withStroke(linewidth=3,foreground='white',alpha=.85)])
         points=[point for q in diagnostics if self.visible_boxes[q['layer']].isChecked() for point in q.get('points',[q['point']])]
+        self.unadapted_artist.set_sizes([self.marker_size('unadapted')]);self.unadapted_artist.set_color(self.view_settings.unadapted_marker_color)
         self.unadapted_artist.set_offsets(np.asarray(points).reshape(-1,2));self.unadapted_artist.set_visible(bool(points))
 
         self.state_result=frame['checks'][scheme] if frame else None
@@ -905,7 +937,7 @@ class MainWindow(W.QMainWindow):
                 for label_ in self.die_labels:label_.remove()
                 self.die_labels=[self.ax.text(0,0,f'DIE{i+1}',ha='center',va='center',fontsize=10,color='#3c5169',weight='medium',zorder=12,clip_on=True) for i in range(len(self.case['dies']))]
             for i,(label_,info) in enumerate(zip(self.die_labels,self.case['infos'])):
-                point=np.array([info['cx'],info['cy']]);point=point+(self.shown_states[i,:2] if self.shown_states is not None else 0);label_.set_position(point)
+                point=np.array([info['cx'],info['cy']]);point=rigid_transform(point,self.rotation_centers()[i],self.shown_states[i]) if self.shown_states is not None else point;label_.set_position(point)
         if not preserve or self._default_view is None:self.fit_plot()
         self.refresh_legend();self.update_die_label_visibility()
         if not getattr(self,'_in_animation',False):
@@ -937,11 +969,11 @@ class MainWindow(W.QMainWindow):
         if self.current_frame is not None:
             owner=int(issue['die'])-1
             if owner>=0:
-                info=self.case['infos'][owner];origin=rigid_transform(origin,np.array([info['cx'],info['cy']]),self.current_frame['states'][owner])
+                origin=rigid_transform(origin,self.rotation_centers()[owner],self.current_frame['states'][owner])
         return origin
     def refresh_legend(self):
         stamp=(tuple((k,self.visible_boxes[k].isChecked(),str(self.style_for(k))) for k in self.ordered_layers()),
-               self.current_frame is not None,bool(getattr(self,'deformation_diagnostics',[])),self.probability_toggle.isChecked(),id(self.probability_data),self.view_settings.probability_cmap,self.view_settings.probability_alpha)
+               self.current_frame is not None,bool(getattr(self,'deformation_diagnostics',[])),self.probability_toggle.isChecked(),id(self.probability_data),self.view_settings.probability_cmap,self.view_settings.probability_alpha,self.view_settings.probability_show_ranges,self.view_settings.probability_ranges,self.view_settings.probability_target_color,self.view_settings.contact_marker_color,self.view_settings.unadapted_marker_color)
         if stamp==self._legend_stamp:return
         self._legend_stamp=stamp
         if self.legend is not None:self.legend.remove()
@@ -952,17 +984,22 @@ class MainWindow(W.QMainWindow):
             name=(key+' '+sty['label']) if key in self.layer_styles else sty['label']
             entries[name]=Patch(facecolor=sty['color'] if sty['fill'] else 'none',edgecolor=sty['color'],alpha=sty['alpha'],label=name)
         handles=list(entries.values())
-        if getattr(self,'deformation_diagnostics',[]):handles.append(Line2D([],[],marker='x',ls='none',color='#ba7628',label='未适配：保留原图'))
+        if getattr(self,'deformation_diagnostics',[]):handles.append(Line2D([],[],marker='x',ls='none',color=self.view_settings.unadapted_marker_color,label='未适配：保留原图'))
         if getattr(self.data,'ignored_geometry',[]):handles.append(Line2D([],[],color='#d72b91',ls='--',lw=.7,label='忽略的无效图形'))
         if self.current_frame is not None:
             handles += [Line2D([],[],color='#3c9995',ls='--',label='最小包围区域'),Line2D([],[],color='#aa78ab',ls='--',label='线距控制区域'),Line2D([],[],color='#92979e',ls='--',label='当前孔中心→接触位置')]
         if self.probability_toggle.isChecked() and self.probability_data:
             maximum=max((float(q['probability'].max()) for q in self.probability_data['maps']),default=0)
             handles += [Line2D([],[],color='#729cb5',ls=':',lw=.7,label='输入最大幅度包络（非等概率线）'),Patch(facecolor=self.probability_colormap()(0.),alpha=self.view_settings.probability_alpha,label='实体覆盖概率：浅色较低'),Patch(facecolor=self.probability_colormap()(maximum),alpha=self.view_settings.probability_alpha,label=f'实体覆盖概率高（最大{maximum:.1%}）')]
+        if self.probability_toggle.isChecked() and self.probability_data and self.view_settings.probability_show_ranges:
+            levels=dict(self.view_settings.probability_ranges);levels[self.params().target_nsigma]=self.view_settings.probability_target_color
+            for level,color in levels.items():
+                name='全部输入范围' if level==0 else '∞ 名义位置' if math.isinf(level) else f'{level:g}σ 有界扫掠包络'
+                handles.append(Line2D([],[],color=color,ls='--',lw=1.25,label=name))
         self.legend=self.ax.legend(handles=handles,loc='upper right',fontsize=7,framealpha=1,ncol=1)
     def draw_probability(self):
         active=self.probability_toggle.isChecked() and self.probability_data is not None
-        stamp=(id(self.probability_data),bool(active),self.view_settings.probability_alpha,self.view_settings.probability_cmap,self.view_settings.probability_interpolation)
+        stamp=(id(self.probability_data),bool(active),self.view_settings.probability_alpha,self.view_settings.probability_cmap,self.view_settings.probability_interpolation,self.view_settings.probability_show_ranges,self.view_settings.probability_ranges,self.view_settings.probability_target_color,self.target_sigma.currentText())
         if stamp!=self.probability_stamp:
             for a in self.probability_artists:a.remove()
             self.probability_artists=[];self.probability_stamp=stamp
@@ -974,6 +1011,16 @@ class MainWindow(W.QMainWindow):
                     a._via_layer=q['key'];e=q['extent'];a._world_bounds=(e[0],e[2],e[1],e[3]);self.probability_artists.append(a)
                     boundary=LineCollection([q['input_envelope']],colors='#729cb5',linewidths=.65,linestyles=(0,(2,3)),alpha=.5,zorder=4.1)
                     boundary._via_layer=q['key'];xy=q['input_envelope'];boundary._world_bounds=(*xy.min(axis=0),*xy.max(axis=0));self.ax.add_collection(boundary);self.probability_artists.append(boundary)
+                    if self.view_settings.probability_show_ranges:
+                        from .probability_overlay import coverage_envelope
+                        p=self.params().for_die(q['owner']);levels=dict(self.view_settings.probability_ranges)
+                        levels[p.target_nsigma]=self.view_settings.probability_target_color
+                        for level,color in levels.items():
+                            key=('range',q['nominal_polygon'].wkb,tuple(q['rotation_center']),str(asdict(p)),level)
+                            hull=self.session_values.get_or_compute(key,lambda:coverage_envelope(q['nominal_polygon'],q['rotation_center'],p,len(self.case['dies']),level))
+                            xy=np.asarray(hull.exterior.coords)
+                            line=LineCollection([xy],colors=color,linewidths=1.25,linestyles=(0,(5,2)),alpha=.9,zorder=4.3,path_effects=[patheffects.withStroke(linewidth=2.2,foreground='white',alpha=.7)])
+                            line._via_layer=q['key'];line._coverage_level=level;line._world_bounds=(*xy.min(axis=0),*xy.max(axis=0));self.ax.add_collection(line);self.probability_artists.append(line)
         from .viewport import overlaps
         for a in self.probability_artists:
             a.set_visible(active and self.visible_boxes[a._via_layer].isChecked() and overlaps(a._world_bounds,self.view_bounds))
@@ -1030,7 +1077,7 @@ class MainWindow(W.QMainWindow):
                 resolution=min(31,cfg.space_resolution) if getattr(self,'_in_animation',False) else cfg.space_resolution
                 key=(id(self.space_data),None if self.shown_states is None else self.shown_states.tobytes(),tuple(sorted(visible)),resolution)
                 if getattr(self,'_package_field_key',None)!=key:
-                    centers=np.array([[i['cx'],i['cy']] for i in self.case['infos']])
+                    centers=self.rotation_centers()
                     prepared=getattr(self,'_prepared_package',None)
                     cache_key=('package',getattr(self.engine,'signature',id(self.space_data)),key[1],key[2],resolution)
                     self._package_field=prepared[1] if prepared is not None and prepared[0]==key else self.session_values.get_or_compute(cache_key,lambda:package_map(self.space_data,self.case['board'],centers,self.shown_states,visible,resolution));self._package_field_key=key
@@ -1043,7 +1090,7 @@ class MainWindow(W.QMainWindow):
                 artist.set_visible(active and artist._has_domain and any(k in visible for k in artist._source_layers));continue
             transform=Affine2D()
             if self.shown_states is not None:
-                info=self.case['infos'][artist._owner];center=(info['cx'],info['cy']);state=self.shown_states[artist._owner]
+                center=self.rotation_centers()[artist._owner];state=self.shown_states[artist._owner]
                 transform.rotate_around(*center,state[2]).translate(*state[:2])
             trans=transform+self.ax.transData;artist.set_transform(trans);artist.set_clip_path(artist._space_domain,trans)
             artist.set_visible(active and any(self.visible_boxes[k].isChecked() for k in artist._source_layers))
@@ -1103,7 +1150,7 @@ class MainWindow(W.QMainWindow):
             actual.signature=signature
             actual.configure_deformation(deform,settings);actual.configure_drc(drc,settings)
             distribution=None;field=None
-            if heat:distribution=session_values.get_or_compute(('probability',signature,settings.numeric_key()),lambda:probability_maps(actual_cache,actual.bound,roles,params,masks=actual.contact.interface_masks,settings=settings,progress=progress))
+            if heat:distribution=session_values.get_or_compute(('probability',signature,settings.numeric_key(),bool(settings.probability_show_ranges and math.isinf(params.target_nsigma))),lambda:probability_maps(actual_cache,actual.bound,roles,params,masks=actual.contact.interface_masks,settings=settings,progress=progress))
             if space:field=session_values.get_or_compute(('space',signature,settings.space_resolution),lambda:space_maps(actual.contact,params,resolution=settings.space_resolution))
             prepared=None
             if space and field is not None and settings.space_scope=='package':
@@ -1340,7 +1387,7 @@ class MainWindow(W.QMainWindow):
         if mode=='fixed':owner=-1
         elif mode and mode.startswith('die:'):owner=int(mode.split(':')[1])
         if owner>=0 and self.shown_states is not None and self.preview_applied:
-            info=self.case['infos'][owner];point=rigid_transform(point,np.array([info['cx'],info['cy']]),self.shown_states[owner])
+            point=rigid_transform(point,self.rotation_centers()[owner],self.shown_states[owner])
         return point
     def locate_die(self,row,column):
         if not self.case:return

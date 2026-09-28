@@ -1,8 +1,7 @@
-"""Check native DRC before opening the UI, not halfway through a worker."""
+"""Offline preflight; desktop KLayout can supply the native DRC engine."""
 import importlib
 import sys
-
-MODULES=('numpy','scipy','matplotlib','shapely','gdstk','PyQt5.QtCore','psutil','PIL','klayout.db')
+MODULES=('numpy','scipy','matplotlib','shapely','gdstk','PyQt5.QtCore','psutil','PIL')
 
 def verify():
     failures=[]
@@ -10,11 +9,9 @@ def verify():
         try:importlib.import_module(name)
         except (ImportError,OSError) as exc:failures.append(f'{name}: {exc}')
     if failures:
-        raise RuntimeError('运行依赖不完整。请通过 RUN.bat 启动（自动建立并修复本地环境）。\n'
-            f'当前解释器：{sys.executable}\n'+'\n'.join(failures)+'\n'
-            f'手动修复："{sys.executable}" -m pip install -r requirements.txt')
-    import klayout.db as kdb
-    region=kdb.Region(kdb.Box(0,0,100,10))
-    assert not region.width_check(20).is_empty(),'KLayout native DRC self-check failed'
+        raise RuntimeError('当前 Python 环境缺少应用依赖。不会联网或自动安装；请使用已有完整环境，或已打包的 EXE。\n'
+            f'当前解释器：{sys.executable}\n'+'\n'.join(failures))
+    from .native_backend import backend
+    return backend().info
 
-if __name__=='__main__':verify()
+if __name__=='__main__':print(verify())

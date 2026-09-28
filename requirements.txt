@@ -7,4 +7,5 @@ PyQt5>=5.15,<6
 psutil>=5.9,<8
 Pillow>=9,<13
 
-klayout==0.30.8
+# Optional: use the installed KLayout desktop backend when the module is absent.
+# klayout==0.30.8

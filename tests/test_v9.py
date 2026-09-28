@@ -27,7 +27,7 @@ class V9Tests(unittest.TestCase):
     def test_only_target_controls_parent_sigma(self):
         p=Parameters(target_nsigma=3,input_nsigma=12)
         _,cov,_=statistical_state(p,1);self.assertAlmostEqual(cov[0,0],(25/3)**2)
-        for bad in (0,5.5,13):
+        for bad in (-1,5.5,13):
             with self.assertRaises(ValueError):replace(p,target_nsigma=bad).validate()
     def test_probability_bounds_contain_analytic_truncated_event(self):
         *_,m,p=fixture()

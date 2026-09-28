@@ -15,7 +15,7 @@ def wait(timeout=120,allow_errors=False):
  assert not busy(),'worker timeout'
  if not allow_errors:assert not errors,errors
  app.processEvents()
-def shot(name):w.canvas.draw();w.grab().save(str(ROOT/'figures'/('software_V13_'+name+'.png')))
+def shot(name):w.canvas.draw();w.grab().save(str(ROOT/'figures'/('software_V14_'+name+'.png')))
 assert not w.runtime_toggle.isChecked() and w.runtime_view.isHidden()
 w.runtime_toggle.setChecked(True);assert not w.runtime_view.isHidden()
 print('V11 standard-output capture sentinel');sys.stderr.write('V11 standard-error capture sentinel\n');app.processEvents()

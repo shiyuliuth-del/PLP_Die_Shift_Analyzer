@@ -22,7 +22,7 @@ class RevisionTests(unittest.TestCase):
         for target in (1,3,6,12):
             p=replace(self.params,target_nsigma=target);p.validate();mu,cov,k=statistical_state(p,256)
             self.assertTrue(math.isfinite(k));self.assertGreater(k,0)
-        for value in (0,-1,.1,5.5,12.001):
+        for value in (-1,.1,5.5,12.001):
             with self.assertRaises(ValueError):replace(self.params,target_nsigma=value).validate()
         _,c6,k6=statistical_state(replace(self.params,target_nsigma=6),2)
         _,c12,k12=statistical_state(replace(self.params,target_nsigma=12),2)

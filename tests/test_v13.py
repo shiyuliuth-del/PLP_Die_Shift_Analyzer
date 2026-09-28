@@ -24,9 +24,11 @@ class V13Tests(unittest.TestCase):
         def missing(name):
             if name=='klayout.db':raise ModuleNotFoundError("No module named 'klayout'")
             return original(name)
-        with patch('importlib.import_module',side_effect=missing):
-            with self.assertRaisesRegex(RuntimeError,'RUN.bat') as error:verify()
-        self.assertIn('pip install -r requirements.txt',str(error.exception))
+        from die_shift_studio import native_backend
+        native_backend.close()
+        with patch('importlib.import_module',side_effect=missing),patch.object(native_backend,'executable_candidates',return_value=[]):
+            with self.assertRaisesRegex(RuntimeError,'DIE_SHIFT_KLAYOUT') as error:verify()
+        self.assertNotIn('pip install',str(error.exception))
         verify()
 
     def test_failed_deformation_init_can_retry_with_probability_enabled(self):

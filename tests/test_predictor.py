@@ -56,7 +56,7 @@ class ModelTests(unittest.TestCase):
         q=uncertainty_bound([[1000,0]],[0,0],p,1)[0]
         self.assertAlmostEqual(q,math.sqrt(2)*1000)
     def test_bad_parameters(self):
-        for change in [dict(panel_layers=0,wafer_layers=0),dict(line_width_um=0),dict(rho_xy=1.1),dict(target_nsigma=0),dict(wafer_layers=1.5),dict(mean_x_um=float('nan'))]:
+        for change in [dict(panel_layers=0,wafer_layers=0),dict(line_width_um=0),dict(rho_xy=1.1),dict(target_nsigma=-1),dict(wafer_layers=1.5),dict(mean_x_um=float('nan'))]:
             with self.assertRaises(ValueError):replace(Parameters(),**change).validate()
     def test_manual_die_validation(self):
         data,roles,p=self.example('示例A_小芯片大孔盘')

@@ -22,7 +22,7 @@ def mouse(name,pixel,button=None,step=0):
 def wheel(widget,delta=-120):
     event=QtGui.QWheelEvent(QtCore.QPointF(10,10),QtCore.QPointF(widget.mapToGlobal(QtCore.QPoint(10,10))),QtCore.QPoint(),QtCore.QPoint(0,delta),Qt.NoButton,Qt.NoModifier,Qt.NoScrollPhase,False)
     app.sendEvent(widget,event);app.processEvents()
-def shot(name):w.canvas.draw();w.grab().save(str(ROOT/'figures'/('software_V13_'+name+'.png')))
+def shot(name):w.canvas.draw();w.grab().save(str(ROOT/'figures'/('software_V14_'+name+'.png')))
 w.load_project(ROOT/'Jobs/示例G_小偏移与三段追溯.dshift.json');wait()
 assert not w.drc_toggle.isChecked()
 assert w.drc_toggle.parentWidget().layout().itemAt(0).widget() is w.drc_toggle
@@ -101,5 +101,5 @@ assert w.current_frame['deformation']['unresolved_count']>0 and not w.current_fr
 assert w.unadapted_artist.get_visible()
 assert w.violation_artist.get_visible() and w.violation_artist.get_paths();w.set_view([400,780],1200,700);wait();shot('global_drc')
 w.drc_toggle.setChecked(False);assert not w.violation_artist.get_visible();w.drc_toggle.setChecked(True);wait();assert w.violation_artist.get_visible()
-metrics['status']='PASS';(ROOT/'results/gui_V13_legacy.json').write_text(json.dumps(metrics,ensure_ascii=False,indent=2)+'\n')
+metrics['status']='PASS';(ROOT/'results/gui_V14_legacy.json').write_text(json.dumps(metrics,ensure_ascii=False,indent=2)+'\n')
 w.close();app.processEvents();tmp.cleanup();print(json.dumps(metrics,ensure_ascii=False,indent=2))

@@ -7,14 +7,14 @@ import shapely
 from die_shift_studio.core import read_gds,build_case,Parameters
 from die_shift_studio.fast_preview import GeometryCache,PreviewEngine
 from die_shift_studio.settings import ViewSettings
-from die_shift_studio.drc import rule_pairs
+from die_shift_studio.drc import rule_region
 from die_shift_studio.deformation import angle_regions
 from die_shift_studio.resources import resource_profile
 
 def timed(fn):
     start=time.perf_counter();value=fn();return value,1000*(time.perf_counter()-start)
 
-def run(path,q,z,figure=False):
+def run(path,q,z,figure=False,version="V13"):
     data=read_gds(path);case=build_case(data,q['roles'],layer_order=q['layer_order']);cache=GeometryCache(data);p=Parameters.from_dict(q['parameters']);cfg=ViewSettings()
     e=PreviewEngine(cache,case,q['roles'],{},p,{},case['connections']);e.configure_deformation(True,cfg);e.configure_drc(True,cfg)
     calls=[];original=e.deformer.search;lock=threading.Lock()
@@ -37,8 +37,8 @@ def run(path,q,z,figure=False):
         ids,geoms,tree=final[key.split('/')[0]]
         for v in values:
             g=v['geometry'];assert v['verified'] and g.is_valid
-            assert rule_pairs(g,p.line_width_um,data.dbu_um).is_empty()
-            assert rule_pairs(g,p.line_space_um,data.dbu_um,'notch').is_empty()
+            assert rule_region(g,p.line_width_um,data.dbu_um).is_empty
+            assert rule_region(g,p.line_space_um,data.dbu_um,'notch').is_empty
             assert angle_regions(g,cfg.deformation_min_angle_deg,data.dbu_um).is_empty
             for j in tree.query(g,predicate='dwithin',distance=p.line_space_um):
                 if e.contact.nodes[ids[j]]['net']!=v['net']:assert g.distance(geoms[j])+data.dbu_um*.01>=p.line_space_um
@@ -49,11 +49,11 @@ def run(path,q,z,figure=False):
         repeat_search_calls=0,search_calls=n,slowest_searches=sorted(calls,key=lambda q:q['ms'],reverse=True)[:5],accepted=d['accepted_count'],
         unadapted=d['unresolved_count'],rejected_displayed=d['best_effort_count'],visible_drc_groups=len(frame['drc']),interface_outcomes=d['interfaces'],audit=audit,
         iteration_history=d['iterations'],joint_rounds=d['joint_rounds'],rollback_rounds=d['rollback_rounds'])
-    (ROOT/'results'/('audit_GD55_V13.json' if figure else 'audit_G_V13.json')).write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
-    if figure:draw(e,frame,case,p)
+    (ROOT/'results'/(('audit_GD55_' if figure else 'audit_G_')+version+'.json')).write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
+    if figure:draw(e,frame,case,p,version)
     e.close();return result
 
-def draw(e,f,case,p):
+def draw(e,f,case,p,version='V13'):
     import matplotlib
     matplotlib.use('Agg')
     from matplotlib import pyplot as plt,font_manager
@@ -78,7 +78,7 @@ def draw(e,f,case,p):
             if points:ax.scatter(*np.asarray(points).T,marker='x',s=22,c='#b8752e',linewidths=.9,zorder=5)
         ax.set(xlim=(bounds[0]-100,bounds[2]+100),ylim=(bounds[1]-100,bounds[3]+100),xlabel='X / μm',ylabel='Y / μm',title='b  最终预演：未通过线路保留原图' if after else 'a  原始固定 RDL 与运动过孔');ax.set_aspect('equal')
     fig.legend(handles=[Patch(color='#dce6ef',label='原图 / 固定段'),Patch(color='#8badc7',label='已验证型变'),Patch(color='#467d89',label='运动过孔'),Patch(color='#b8752e',label='未适配位置')],loc='lower center',bbox_to_anchor=(.5,-.04),ncol=4,frameon=False)
-    for ext in ('png','svg'):fig.savefig(ROOT/'figures'/('V13_GD55_final.'+ext),dpi=300,bbox_inches='tight')
+    for ext in ('png','svg'):fig.savefig(ROOT/'figures'/(version+'_GD55_final.'+ext),dpi=300,bbox_inches='tight')
     plt.close(fig)
 
 def main():

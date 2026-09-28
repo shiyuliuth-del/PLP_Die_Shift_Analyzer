@@ -1,5 +1,5 @@
 """Regression contracts for traced owners, real interfaces, Space Map and GDS repair."""
-import hashlib, math, unittest
+import hashlib, math, os, unittest
 from dataclasses import replace
 from pathlib import Path
 import gdstk
@@ -16,6 +16,9 @@ from die_shift_studio.probability_overlay import probability_maps
 from die_shift_studio.geometry_errors import sanitize_data
 from die_shift_studio.project import normalize_project
 
+USER_GDS = next((p for p in [Path(os.environ.get('DIE_SHIFT_TEST_GDS', '')),
+                           Path.home()/'桌面/GD55_9-21.gds',
+                           Path.home()/'下载/GD55_9-21.gds'] if p.is_file()), None)
 
 def traced_fixture():
     arrays=lambda *rects:[np.asarray(box(*r).exterior.coords)[:-1] for r in rects]
@@ -101,9 +104,9 @@ class Revision060Tests(unittest.TestCase):
         new=normalize_project(old);self.assertEqual(new['layer_order'],old['layer_order'])
         self.assertEqual(list(new['roles'].values()),['运动RDL','运动过孔','固定RDL','固定过孔'])
         self.assertEqual(normalize_project(new),new)
-    @unittest.skipUnless(Path('/home/niubi/下载/GD55_9-21.gds').exists(),'External user GDS is not bundled')
+    @unittest.skipUnless(USER_GDS is not None,'External user GDS is not bundled; set DIE_SHIFT_TEST_GDS')
     def test_user_gds_522_vertex_shape_restored_against_klayout_area(self):
-        path=Path('/home/niubi/下载/GD55_9-21.gds');before=hashlib.sha256(path.read_bytes()).hexdigest();d=read_gds(path)
+        path=USER_GDS;before=hashlib.sha256(path.read_bytes()).hexdigest();d=read_gds(path)
         self.assertEqual(before,hashlib.sha256(path.read_bytes()).hexdigest());self.assertEqual(len(d.ignored_geometry),0)
         repaired=next(q for q in d.repaired_geometry if q['layer']=='5/0')
         self.assertEqual(repaired['index'],45);self.assertEqual(repaired['holes'],4)

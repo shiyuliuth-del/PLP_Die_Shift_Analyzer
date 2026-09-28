@@ -8,7 +8,8 @@ from .core import _margin
 
 def check_state(data,case,roles,p,result,states,layers,scheme):
     failures=[];tol=max(1e-9,data.dbu_um*1e-6)
-    centers=[np.array([q['cx'],q['cy']]) for q in case['infos']]
+    from .pivots import rotation_centers
+    centers=rotation_centers(case,p)
     moved=[Polygon(rigid_transform(np.asarray(d.exterior.coords),c,z)) for d,c,z in zip(case['dies'],centers,states)]
     def fail(kind,point):failures.append(dict(kind=kind,point=list(map(float,point))))
     for i,die in enumerate(moved):
@@ -29,7 +30,7 @@ def check_state(data,case,roles,p,result,states,layers,scheme):
     from .contact import ContactModel
     from .stack import Connections
     connections=case.get('connections') or Connections(data,roles)
-    for issue in ContactModel(data,case,roles,connections).current(states,p)['issues']:
+    for issue in ContactModel(data,case,roles,connections,parameters=p).current(states,p)['issues']:
         if issue['scheme']==scheme:fail(issue['kind'],issue['point'])
     return dict(problem_percent=100 if failures else 0,failures=failures,
                 scope='实际动孔—固定RDL接口的其他网络接触，以及机械净距、禁布区')

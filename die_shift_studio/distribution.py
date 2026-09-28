@@ -35,13 +35,13 @@ def normalization(k,rho,has_x=True,has_y=True,has_angle=True):
 
 def normalizer(p,count):
     _,bounds=mean_and_bounds(p,count)
-    return normalization(p.target_nsigma,p.rho_xy,*(bool(b) for b in bounds))
+    return normalization(p.scale_nsigma,p.rho_xy,*(bool(b) for b in bounds))
 
 
 def bounded_poses(p,count,settings):
     mu,b=mean_and_bounds(p,count);n=2**settings.sample_exponent
     if math.isinf(p.target_nsigma):return np.tile(np.zeros(3),(n,1))
-    sig=b/p.target_nsigma;rho=p.rho_xy
+    sig=b/p.scale_nsigma;rho=p.rho_xy
     root=np.array([[sig[0],0,0],[rho*sig[1],sig[1]*math.sqrt(max(0,1-rho*rho)),0],[0,0,sig[2]]])
     sobol=qmc.Sobol(3,scramble=True,seed=settings.random_seed) if settings.probability_method=='sobol' else None
     rng=np.random.default_rng(settings.random_seed);chunks=[];total=0

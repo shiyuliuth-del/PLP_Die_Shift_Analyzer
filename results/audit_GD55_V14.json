@@ -27,42 +27,42 @@
   ],
   "interfaces": 158,
   "copper_components": 118,
-  "cold_frame_ms": 87011.91615600055,
-  "repeat_frame_median_ms": 0.00611099994785036,
-  "repeat_frame_max_ms": 0.05460299962578574,
-  "toggle_roundtrip_ms": 0.041231000068364665,
+  "cold_frame_ms": 114391.26234500145,
+  "repeat_frame_median_ms": 0.0059539997891988605,
+  "repeat_frame_max_ms": 0.035228000342613086,
+  "toggle_roundtrip_ms": 0.03234799987694714,
   "repeat_search_calls": 0,
   "search_calls": 172,
   "slowest_searches": [
     {
       "indices": [
+        8
+      ],
+      "ms": 5849.998215000596
+    },
+    {
+      "indices": [
         4
       ],
-      "ms": 3764.2079190000004
+      "ms": 5635.190666000199
+    },
+    {
+      "indices": [
+        6
+      ],
+      "ms": 5454.13613600067
     },
     {
       "indices": [
         10
       ],
-      "ms": 3362.488839999969
+      "ms": 5349.104566999813
     },
     {
       "indices": [
         5
       ],
-      "ms": 3315.9356770001978
-    },
-    {
-      "indices": [
-        6
-      ],
-      "ms": 3070.7499459995233
-    },
-    {
-      "indices": [
-        6
-      ],
-      "ms": 3030.731058999663
+      "ms": 5158.732380999936
     }
   ],
   "accepted": 46,

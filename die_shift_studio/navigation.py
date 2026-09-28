@@ -3,6 +3,14 @@ import math
 import numpy as np
 from matplotlib.backend_bases import MouseButton
 
+def control_held(event):
+    native=getattr(event,'guiEvent',None)
+    if native is not None and hasattr(native,'modifiers'):
+        from .qt_compat import Qt
+        return bool(native.modifiers() & getattr(Qt,'KeyboardModifier',Qt).ControlModifier)
+    modifiers=getattr(event,'modifiers',()) or ()
+    return bool({'ctrl','control'}.intersection(modifiers)) or any(v in ('ctrl','control') for v in str(event.key or '').lower().split('+'))
+
 class Navigation:
     def __init__(self,canvas,ax):
         self.canvas=canvas;self.ax=ax;self.drag=None
@@ -16,7 +24,7 @@ class Navigation:
         toolbar=getattr(self.canvas,'toolbar',None)
         if toolbar:toolbar.push_current()
     def scroll(self,e):
-        if getattr(self.canvas,'die_move_active',False):return
+        if getattr(self.canvas,'die_move_active',False) and not control_held(e):return
         if self.drag or e.inaxes is not self.ax or e.xdata is None or e.ydata is None:return
         step=float(e.step)
         if not math.isfinite(step) or not step:return
