@@ -1,0 +1,163 @@
+{
+  "status": "PASS",
+  "source_sha256": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+  "parameters": {
+    "panel_layers": 2,
+    "wafer_layers": 1,
+    "line_width_um": 20,
+    "line_space_um": 20,
+    "wafer_line_width_um": 3.0,
+    "wafer_line_space_um": 3.0,
+    "via_diameter_um": 20.0,
+    "annulus_um": 15,
+    "residual_budget_um": 5.0,
+    "transition_length_um": 200.0,
+    "max_route_angle_deg": 30.0,
+    "routing_edge_keepout_um": 40.0,
+    "min_die_gap_um": 20.0,
+    "min_package_clearance_um": 20.0,
+    "single_bound_x_um": 25.0,
+    "single_bound_y_um": 25.0,
+    "multi_bound_x_um": 25,
+    "multi_bound_y_um": 25,
+    "bound_angle_deg": 1,
+    "per_die_enabled": false,
+    "die_bounds": [],
+    "rotation_center": "center",
+    "rotation_x_um": 0.0,
+    "rotation_y_um": 0.0,
+    "die_pivots": [],
+    "input_nsigma": 6.0,
+    "target_nsigma": 6.0,
+    "reference_nsigma": 6.0,
+    "mean_x_um": 0.0,
+    "mean_y_um": 0.0,
+    "mean_angle_deg": 0.0,
+    "rho_xy": 0.0,
+    "interdie": "unknown",
+    "fixed_via_assignment": "all"
+  },
+  "source_layer": "5/0",
+  "source_index": 93,
+  "via_indices": [
+    115,
+    116
+  ],
+  "states": [
+    {
+      "signs": [
+        -1,
+        -1,
+        -1
+      ],
+      "verified": false,
+      "reason": [
+        "其他运动孔控制区侵入"
+      ],
+      "span_um": 227.33011759856444,
+      "seconds": 0.2586312089988496
+    },
+    {
+      "signs": [
+        -1,
+        -1,
+        1
+      ],
+      "verified": false,
+      "reason": [
+        "其他运动孔控制区侵入",
+        "异网最小净距不足",
+        "异网线距不足"
+      ],
+      "span_um": 271.41276544766316,
+      "seconds": 0.2549272979995294
+    },
+    {
+      "signs": [
+        -1,
+        1,
+        -1
+      ],
+      "verified": false,
+      "reason": [
+        "其他运动孔控制区侵入",
+        "异网最小净距不足",
+        "异网线距不足"
+      ],
+      "span_um": 353.3659727458736,
+      "seconds": 0.22742231099982746
+    },
+    {
+      "signs": [
+        -1,
+        1,
+        1
+      ],
+      "verified": true,
+      "reason": [],
+      "span_um": 40.0,
+      "seconds": 0.014791451998462435
+    },
+    {
+      "signs": [
+        1,
+        -1,
+        -1
+      ],
+      "verified": false,
+      "reason": [
+        "其他运动孔控制区侵入",
+        "异网最小净距不足",
+        "异网线距不足"
+      ],
+      "span_um": 40.0,
+      "seconds": 0.34042213399879984
+    },
+    {
+      "signs": [
+        1,
+        -1,
+        1
+      ],
+      "verified": false,
+      "reason": [
+        "其他运动孔控制区侵入",
+        "异网最小净距不足",
+        "异网线距不足"
+      ],
+      "span_um": 353.63137640839074,
+      "seconds": 0.47599530200022855
+    },
+    {
+      "signs": [
+        1,
+        1,
+        -1
+      ],
+      "verified": false,
+      "reason": [
+        "其他运动孔控制区侵入",
+        "异网最小净距不足",
+        "异网线距不足"
+      ],
+      "span_um": 273.33822921409586,
+      "seconds": 0.7143275950002135
+    },
+    {
+      "signs": [
+        1,
+        1,
+        1
+      ],
+      "verified": false,
+      "reason": [
+        "其他运动孔控制区侵入",
+        "异网最小净距不足",
+        "异网线距不足"
+      ],
+      "span_um": 229.6975211233904,
+      "seconds": 0.898434193997673
+    }
+  ],
+  "interpretation": "Each valid local result independently checked against original neighbours; whole-layout benchmark performs final simultaneous acceptance."
+}

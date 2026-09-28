@@ -14,8 +14,8 @@ from die_shift_studio.resources import resource_profile
 def timed(fn):
     start=time.perf_counter();value=fn();return value,1000*(time.perf_counter()-start)
 
-def run(path,q,z,figure=False,version="V13"):
-    data=read_gds(path);case=build_case(data,q['roles'],layer_order=q['layer_order']);cache=GeometryCache(data);p=Parameters.from_dict(q['parameters']);cfg=ViewSettings()
+def run(path,q,z,figure=False,version="V13",settings=None):
+    data=read_gds(path);case=build_case(data,q['roles'],layer_order=q['layer_order']);cache=GeometryCache(data);p=Parameters.from_dict(q['parameters']);cfg=settings or ViewSettings()
     e=PreviewEngine(cache,case,q['roles'],{},p,{},case['connections']);e.configure_deformation(True,cfg);e.configure_drc(True,cfg)
     calls=[];original=e.deformer.search;lock=threading.Lock()
     def search(c,*args,**kwargs):
@@ -46,9 +46,12 @@ def run(path,q,z,figure=False,version="V13"):
     assert len(d['interfaces'])==sum(len(c.records) for c in e.deformer.components)
     result=dict(sha256=data.sha256,parameters=q['parameters'],states=z.tolist(),interfaces=len(e.contact.records),copper_components=len(e.deformer.components),
         cold_frame_ms=cold,repeat_frame_median_ms=statistics.median(repeated),repeat_frame_max_ms=max(repeated),toggle_roundtrip_ms=toggle,
-        repeat_search_calls=0,search_calls=n,slowest_searches=sorted(calls,key=lambda q:q['ms'],reverse=True)[:5],accepted=d['accepted_count'],
+        repeat_search_calls=0,search_calls=n,search_calls_scope="Parent process only; spawned worker searches are not included",slowest_searches=sorted(calls,key=lambda q:q['ms'],reverse=True)[:5],accepted=d['accepted_count'],
         unadapted=d['unresolved_count'],rejected_displayed=d['best_effort_count'],visible_drc_groups=len(frame['drc']),interface_outcomes=d['interfaces'],audit=audit,
-        iteration_history=d['iterations'],joint_rounds=d['joint_rounds'],rollback_rounds=d['rollback_rounds'])
+        iteration_history=d['iterations'],joint_rounds=d['joint_rounds'],rollback_rounds=d['rollback_rounds'],
+        execution=d.get('execution','serial'),workers=d.get('workers',1),
+        three_part_count=sum(v.get('mode')=='three_part' for values in d['replacements'].values() for v in values),
+        accepted_indices=[list(v['indices']) for values in d['replacements'].values() for v in values])
     (ROOT/'results'/(('audit_GD55_' if figure else 'audit_G_')+version+'.json')).write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
     if figure:draw(e,frame,case,p,version)
     e.close();return result

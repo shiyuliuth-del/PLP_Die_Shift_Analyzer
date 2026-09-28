@@ -62,7 +62,8 @@ class RevisionTests(unittest.TestCase):
         self.assertEqual(result['schemes'][0]['engineering_gamma'],baseline['schemes'][0]['engineering_gamma'])
         self.assertFalse(any(q['kind']=='动态补偿窗口' for q in result['issues']))
         self.assertTrue(all(q['source_net']!=q['foreign_net'] for q in result['issues']))
-        self.assertEqual(result['schemes'][0]['status'],'窗口不足') # this fixture also has actual foreign-net risk
+        self.assertEqual(result['schemes'][0]['contact_status'],'存在接触超限') # contact evidence is separate from geometric screening
+        self.assertTrue(result['contact_analysis']['issues'])
     def state(self,p,states,scheme=1):
         r=evaluate(self.data,self.roles,p)
         modes={k:default_motion(v) for k,v in self.roles.items()}

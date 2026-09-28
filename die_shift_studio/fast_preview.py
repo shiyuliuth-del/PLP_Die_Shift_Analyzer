@@ -124,8 +124,9 @@ class PreviewEngine:
         from .contact import ContactModel
         self.contact=ContactModel(cache.data,case,roles,connections,cache,motions,p)
     def configure_deformation(self,enabled,settings):
-        key=(bool(enabled and self.result is not None),settings.deformation_continuity,settings.deformation_method,settings.deformation_tolerance_um,settings.deformation_arc_angle_deg,settings.deformation_min_angle_deg)
+        key=(bool(enabled and self.result is not None),*settings.deformation_key())
         if getattr(self,'deformation_key',None)==key:return
+        if self.deformer is not None:self.deformer.release_workers()
         # Commit state only after successful initialization: retry remains possible.
         from .deformation import DeformationPreview
         deformer=self.deformers.get(key)
@@ -143,7 +144,7 @@ class PreviewEngine:
         return (getattr(self,'deformation_key',None),getattr(self,'drc_key',None))
     def close(self):
         self.frames.close()
-        for d in self.deformers.values():d.cache.close()
+        for d in self.deformers.values():d.close()
         self.deformers.clear()
     def frame(self,states,progress=lambda *_:None,quick=False):
         progress(0,'生成当前几何状态')

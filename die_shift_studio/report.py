@@ -1,4 +1,4 @@
-"""Auditable V14 calculation report: bounded inputs, probabilities, geometry."""
+"""Auditable V15 calculation report: bounded inputs, probabilities, geometry."""
 from html import escape
 import math
 from .core import PARAMETER_DESCRIPTIONS,fmt,Parameters
@@ -96,20 +96,41 @@ def report_document(r,motions=None,progress=lambda *_:None):
           r'B(w)=\frac{\cot(\gamma/2)[1-\cos(\gamma w)]-\sin(\gamma w)}{2}',
           r'\Psi_A(P)=P+\sum_d[A(W_d)\Delta_d+B(W_d)J_{90}\Delta_d],\quad\Delta_d=T_d(P)-P'],
          '只在真实动孔—固定RDL接口适配；当前状态排除实际接触孔；接受合法型变后重新检查并迭代释放接口。统计风险不作为具体状态的永久冻结条件。每个显示帧重新校验；只显示全部约束通过的候选，最终全层DRC未通过则恢复原图。深色表示运动与适配部分，适配段有虚线描边。',
-         'P为固定RDL原位置，ci为运动孔原中心（区别于所属DIE中心Cd）；G为原固定铜区，Vi为运动过孔；先用Li补足名义所需孔盘得到G0。a为包围量，δ为源DBU，圆弧每象限32段；ra补偿内接弦和量化误差。ri从Li顶点到孔中心的最大距离加2δ求得，不再附加两倍线宽。包围是型变后输出约束，不以源孔盘不足拒绝适配。L为候选过渡宽度，以最大孔中心行程的2倍、固定线宽的2倍和5 μm三者最大值为基数，依次乘1、1.6、2.6、4.2、6.8、11，选择首个全部约束通过的最短候选；不是全局最优布线证明。wi为该孔权重，Wd把同DIE的多个孔光滑合并，Td为真实刚体变换，Dd为平移，R为旋转矩阵。贝塞尔方式混合位移，圆弧方式沿原点到刚体目标点间的圆弧行进，圆心角γ由设置的度数换成rad，正负随该DIE转角（零角取正）；A/B为弦向及垂向系数，J90将向量逆时针旋转90°。只有平移时两方式也不同。C1/C2指位移场在刚体区、固定区交界的一阶/二阶导数连续；铜内角低于设置时尝试扩大局部圆角，并重复全套校验；原GDS折角不被承诺全部变光滑，离散多边形也不声称数学上严格C2。无折叠充分界、固定连接端不动、原图与型变后最小线宽、异网及其他动孔控制区线距、包围、封装、禁布区和拓扑均校验。曲线自适应细分后按源DBU量化；宽度/线距使用近似平行（≤5°）的非相邻边对规则，实际短接不受角度过滤；长度阈值向上取整到DBU，不放宽。型变结果只作当前工况预演，不修改原GDS，也不改变前述原图统计概率。')
+         'P为固定RDL原位置，ci为运动孔原中心（区别于所属DIE中心Cd）；G为原固定铜区，Vi为运动过孔；先用Li补足名义所需孔盘得到G0。a为包围量，δ为源DBU，圆弧每象限32段；ra补偿内接弦和量化误差。ri从Li顶点到孔中心的最大距离加2δ求得，不再附加两倍线宽。包围是型变后输出约束，不以源孔盘不足拒绝适配。L为候选过渡宽度，以最大孔中心行程的2倍、固定线宽的2倍和5 μm三者最大值为基数，按设置的递增倍率g生成L=L0g^j，j=0至搜索级数减1，选择首个全部约束通过的最短候选；不是全局最优布线证明。wi为该孔权重，Wd把同DIE的多个孔光滑合并，Td为真实刚体变换，Dd为平移，R为旋转矩阵。贝塞尔方式混合位移，圆弧方式沿原点到刚体目标点间的圆弧行进，圆心角γ由设置的度数换成rad，正负随该DIE转角（零角取正）；A/B为弦向及垂向系数，J90将向量逆时针旋转90°。只有平移时两方式也不同。C1/C2指位移场在刚体区、固定区交界的一阶/二阶导数连续；铜内角低于设置时尝试扩大局部圆角，并重复全套校验；原GDS折角不被承诺全部变光滑，离散多边形也不声称数学上严格C2。无折叠充分界、固定连接端不动、原图与型变后最小线宽、异网及其他动孔控制区线距、包围、封装、禁布区和拓扑均校验。曲线自适应细分后按源DBU量化；宽度/线距使用近似平行（≤5°）的非相邻边对规则，实际短接不受角度过滤；长度阈值向上取整到DBU，不放宽。型变结果只作当前工况预演，不修改原GDS，也不改变前述原图统计概率。')
     step('三段追溯与全局DRC','来源铜连通区、运动/固定过孔；最小线宽线距、连续性与内角设置',
-         [r'S=L_0\left(\frac{w_0}{w_{\min}}\right)^{1/4},\quad g=\max(w_0,w_{\min}),\quad L_{\max}=L_0-2g',
+         [r'S=L_0\left(\frac{w_0}{w_{\min}}\right)^{1/4},\quad g=\beta_g\max(w_0,w_{\min}),\quad L_{\max}=L_0-2g',
           r't(P)=\min\!\left(1,\max\!\left(0,\frac{(P-b)\cdot u}{L}\right)\right)',
           r'\phi=\arccos\!\left(\frac{|e_1\cdot e_2|}{\|e_1\|\,\|e_2\|}\right),\quad\phi\leq5^{\circ}',
           r'Q=\left(\sum_{j=1}^{m}A_j,\ m,\ \operatorname{Area}(G^{\prime}\bigtriangleup G)\right)'],
          '局部孔盘调整无通过结果时，沿实际连通铜图形寻找运动段、适配段、固定段；固定端不动。独立DRC开关控制粉色违规显示，关闭开关不改变判定。',
-         'L0/w0是候选对边的共同长度/间距；S为长宽排序值，g为两端避开拐角的保留长度，Lmax为可用长度，wmin为固定最小线宽。先居中取Lmax，再尝试0.75/0.5倍及偏中心位置，最多48个组合。b为适配起点，u为指向固定端的单位向量，L为适配长度，P为源点；运动段W=1、固定段W=0，适配段使用前述C1/C2权重与贝塞尔/圆弧公式。e1/e2为两条非零边的方向；只检查近似平行、非共享顶点的边，粉色定位真实不足段；实际异网相交始终算短接。没有完全合格结果时，对合法拓扑候选按Q字典序选取：Aj为第j组违规区域面积（μm²），m为违规组数，最后一项为改动铜面积；这是有限搜索中的最佳候选，不是合格解或全局最优证明。Q仅用于内部搜索排序；不合格候选不会显示。最终再次检查所有候选与候选、候选与恢复原图之间的冲突，迭代回退至稳定。交互帧复核已有结构，停止操作后完整搜索；所有标记与图形用同一当前状态。')
-    step('三方案比较：实图条件与待验证能力','相同真实运动过孔—固定RDL接口；实际芯片边长、层数、线宽线距；自动跨芯片网络',
-         [r'C_b=L\max\!\left(0,\left\lfloor\frac{\ell_b+s}{w+s}\right\rfloor\right),\quad\eta_b=\frac{N_b}{C_b}',
-          r'm_i=\operatorname{dist}(c_i,\partial F_i)-r_i-a,\quad\eta_{\mathrm{capture}}=\max_i\frac{Q(c_i)}{m_i}'],
+         'L0/w0是候选对边的共同长度/间距；S为长宽排序值，βg为设置的拐角端部预留倍数，g为两端避开拐角的保留长度，Lmax为可用长度，wmin为固定最小线宽。先居中取Lmax，再尝试0.75/0.5倍及偏中心位置，候选预算由设置控制；同时增加完整投影截面法处理弯曲、宽孔盘及分支，截面前为运动段、后为固定段。设置允许关闭这类通用截面。b为适配起点，u为指向固定端的单位向量，L为适配长度，P为源点；运动段W=1、固定段W=0，适配段使用前述C1/C2权重与贝塞尔/圆弧公式。e1/e2为两条非零边的方向；只检查近似平行、非共享顶点的边，粉色定位真实不足段；实际异网相交始终算短接。没有完全合格结果时，对合法拓扑候选按Q字典序选取：Aj为第j组违规区域面积（μm²），m为违规组数，最后一项为改动铜面积；这是有限搜索中的最佳候选，不是合格解或全局最优证明。Q仅用于内部搜索排序；不合格候选不会显示。最终再次检查所有候选与候选、候选与恢复原图之间的冲突，迭代回退至稳定。交互帧复核已有结构，停止操作后完整搜索；所有标记与图形用同一当前状态。')
+    step('三方案空间判据：一个需求／空间比值', '硬输入最大幅度、实际旋转中心、几何网络、实际RDL平面、线宽线距及固定端',
+         [r'Q_i=\sqrt{(|\mu_x|+B_x)^2+(|\mu_y|+B_y)^2}+2R_i\sin\!\left(\frac{\min(\pi,|\mu_\theta|+B_\theta)}{2}\right)',
+          r'n_b=\left\lceil\frac{N_b}{L}\right\rceil,\quad W_b=n_bw+(n_b-1)s+2Q\quad(N_b>0)',
+          r'M_i=\min\!\left\{d(V_i,F_{\ne i})-a-s,\ d(V_i,\partial P)-a,\ d(V_i,K)-a-s,\ \min_{j\ne i}\frac{d(V_i,V_j)-2a-s}{2}\right\}',
+          r'U_1=\max_b\frac{W_{\mathrm{chip},b}}{\ell_{\mathrm{chip},b}},\quad U_2=\max_i\frac{Q_i}{M_i}',
+          r'U_3=\max\!\left(\max_b\frac{W_{\mathrm{fanout},b}}{\ell_{\mathrm{fanout},b}},\ \max_b\frac{W_{\mathrm{moving},b}}{\ell_{\mathrm{chip},b}}\right)',
+          r'U\leq1\Rightarrow\mathrm{screening\ candidate},\quad s^*=\operatorname{arg\,min}_{s\in\mathcal{S}_{\mathrm{eligible}}}U_s'],
          r['recommendation']['name']+'；'+r['recommendation']['reason'],
-         'Cb为芯片边b的轨道容量上界；L为对应RDL层数，ℓb为边长，w/s为对应线宽/线距，Nb为按最近边分配的实际接口数量。ci为接口中心，Fi为本网络接收图形，ri为孔相对自身中心最大顶点距离，mi为几何捕获裕量（中心不在Fi内取距离0）；分母≤0表示无捕获裕量。方案1比较轨道容量，方案2比较实际捕获裕量且自动排除跨DIE刚体冲突，方案3比较捕获/容量两条适配路径并要求运动RDL。运动层分类不证明晶圆段预制。已删除人工补偿长度、斜角、残差及边端预留；动态重布线可行性仍需真实路由确认。机械净距另检查。Γ汇总必要条件和已确认概率超限比，不把未定概率当通过；所有推荐均为初筛。')
-    blocks.append(grid(['方案','状态','Γ','理由'],[[s['scheme'],s['status'],fmt(s['gamma']),'; '.join(s['reasons'])] for s in r['schemes']]))
+         'Q为硬输入盒下保守位移（μm），Ri是相关过孔实体顶点到其DIE实际旋转中心最大距离；各运动接口取最大Q作为束边界补偿。μ为均值，Bx/By为单边μm，Bθ为rad。此初筛始终比较完整输入幅度，独立于概率阈值。Nb为最近切边分配的不同几何网络数；L为GDS实际物理RDL层数（不重复计算datatype，并不超过参数层数）；n为单层最多轨道数，w/s为对应工艺规则。每束只加2Q，同DIE线路不被当成独立随机移动；Nb=0时W=0。方案1切边是DIE矩形，方案3切边为与DIE同方向且覆盖DIE及全部实际接口的矩形；运动层原始逃逸带宽使用Q=0及运动规则。方案2的Vi是沿网络连接追溯到该DIE的固定过孔；F≠i为同接收平面的其他网络固定RDL，P为封装，K为禁布区，j只取相同平面其他网络固定过孔。距离为实体最短距离，无对应障碍的项为∞；共享净间距均分给两端，Mi≤0则U2=∞。固定端空间可用于扩大孔盘，不只取现有孔盘半径。原始铜是否能按该模型路由、全层随动是否碰撞以及预制制造阶段仍须详细验证。机械净距/跨DIE刚体冲突/归属作为独立门槛。各方案U最小优先，仅同分按2→1→3；原接口概率不合并成U、不声明制造放行。')
+    blocks.append(grid(['方案','状态','U','原接口概率','理由'],[[s['scheme'],s['status'],fmt(s['gamma']),s.get('contact_status',''),'; '.join(s['reasons'])] for s in r['schemes']]))
+    metrics=r.get('screening',{})
+    blocks.append(grid(['DIE','U1','U2','U3','固定层数','运动层数'],[[q['die'],fmt(q['u1']),fmt(q['u2']),fmt(q['u3']),metrics.get('fixed_layers'),metrics.get('moving_layers')] for q in metrics.get('rows',[])]))
+    for q in metrics.get('rows',[]):
+        blocks.append('<h3>DIE '+str(q['die'])+'：各项计算展开</h3>'+grid(['切边模型','边','网络N','每层n','层L','w / μm','s / μm','Q / μm','需求W / μm','空间ℓ / μm','W/ℓ'],
+            [[name,side,tr['counts'][i],tr['tracks_per_layer'][i],tr['layers'],tr['width_um'],tr['space_um'],fmt(tr['travel_um']),fmt(tr['demand_um'][i]),fmt(tr['lengths_um'][i]),fmt(tr['demand_um'][i]/tr['lengths_um'][i])] for name,tr in [('芯片边',q['route']),('扇出边',q['fanout']),('运动层',q['pre_escape'])] for i,side in enumerate(('左','右','下','上'))]))
+        blocks.append(grid(['固定过孔层/编号','位移Q / μm','异网裕量','封装裕量','禁布裕量','孔对半裕量','最小M / μm','Q/M'],[[v['layer']+' #'+str(v['index']+1),fmt(v['need_um']),*[fmt(v.get('margin_terms',{}).get(k)) for k in ('foreign_margin_um','package_margin_um','keepout_margin_um','pair_half_margin_um')],fmt(v['free_um']),fmt(v['ratio'])] for v in q['captures']]))
+    safe=r.get('safe_ranges',{})
+    step('连续无异常接触范围：较大体积安全内盒',f'硬输入幅度；原始固定RDL；搜索端点精度={cfg.safe_box_precision:g}倍单边幅度；连续验证预算={cfg.safe_box_budget}盒；起点数={cfg.safe_box_starts}',
+         [r'\mathcal{B}_d=[l_x,h_x]\times[l_y,h_y]\times[l_\theta,h_\theta]\subseteq[\mu-B,\mu+B],\quad\mu\in\mathcal{B}_d',
+          r'v(\mathcal{B}_d)=\prod_{j:B_j>0}\frac{h_j-l_j}{2B_j}',
+          r'd(T_m(V_i),F_{\ne i})>a+s+\sqrt{e_x^2+e_y^2}+2R_i\sin\!\left(\frac{\min(\pi,e_\theta)}{2}\right)\Rightarrow\mathrm{safe}',
+          r'\varepsilon_{arc}=2R_i\sin^2\!\left(\frac{\Delta\theta}{4n}\right),\quad E=\operatorname{conv}\!\{R(\theta_t)(V_i-C)+C+D_{xy}^{corner}\}\oplus\mathcal{B}_{\varepsilon_{arc}+\epsilon}',
+          r'd(E,F_{\ne i})>a+s\Rightarrow\mathrm{safe\ for\ every\ pose}'],
+         '逐DIE输出X/Y/O最小最大值；只有整盒证明安全才显示数值。均值接触或归属不完整时不输出伪安全范围。',
+         'l/h为候选各轴端点；v为占原输入盒的体积分数，零幅度轴从乘积移除（全零为1）。采用对称缩放起点和多个端点扩张顺序，分别调整六个正负端点；保留体积较大的已证安全盒，未证明全局最大。m/e为候选状态盒中点/半宽；先用Hausdorff界证明，再构造整孔旋转弧及平移矩形的外包络。θt为n等分角度节点，Δθ为该盒角度全宽，conv为凸包，εarc为弦高上界，ε为DBU数值保护，圆盘采用外接离散补偿；凹角/孔洞可被填平但不会低估占据区域。若包络还不能证明，继续分裂贡献最大的状态维；实际接触见证或耗尽预算均拒绝候选。安全结论不依靠极端点或随机采样；所有DIE可组合，因为被检查固定RDL保持原始状态。范围包含输入均值，默认均值0；无概率阈值豁免，∞同样搜索硬幅度。范围仅证明真实运动孔控制区对相邻固定RDL异网无接触，不包括预演型变、全层DRC或芯片机械碰撞。')
+    blocks.append(grid(['DIE','X最小 / μm','X最大 / μm','Y最小 / μm','Y最大 / μm','O最小 / °','O最大 / °','体积分数','状态'],
+        [[q['die'],*([fmt(q['minimum_display'][0],6),fmt(q['maximum_display'][0],6),fmt(q['minimum_display'][1],6),fmt(q['maximum_display'][1],6),fmt(q['minimum_display'][2],8),fmt(q['maximum_display'][2],8)] if q.get('certified') else ['—']*6),fmt(q.get('volume_fraction'),6) if q.get('certified') else '—',q['status']] for q in safe.get('rows',[])]))
     if p.per_die_enabled:
         step('逐芯片输入解析','GDS识别的DIE编号与独立单边幅度',
              [r'\sigma_{x,d}=\frac{B_{x,d}}{\kappa},\quad\sigma_{y,d}=\frac{B_{y,d}}{\kappa},\quad\sigma_{\theta,d}=\frac{\pi B_{O,d}}{180\kappa}'],

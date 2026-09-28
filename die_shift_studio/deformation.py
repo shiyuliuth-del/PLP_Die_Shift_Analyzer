@@ -82,8 +82,11 @@ class Field:
             bound+=rotation
             for r,inner in zip(self.records,self.inner):
                 if r['owner']!=owner:continue
-                radius=np.linalg.norm(np.array(r['center'])-self.centers[owner])+inner+self.span
-                bound+=factor*gradient/self.span*(np.linalg.norm(z[:2])+rate*radius)
+                point=np.asarray(r['center'])
+                delta=rigid_transform(point[None,:],self.centers[owner],z)[0]-point
+                # Affine rigid displacement: retain translation/rotation
+                # cancellation at the pad; only the support radius needs a bound.
+                bound+=factor*gradient/self.span*(np.linalg.norm(delta)+rate*(inner+self.span))
         return bound
     def __call__(self,xy):
         xy=np.asarray(xy);weights=self.weights(xy);out=xy.copy()
@@ -124,11 +127,21 @@ def warp_polygon(poly,field,tolerance,step,prepared=None):
             out[extra]=(a[bad]+b[bad])/2;xy=np.vstack((out,xy[-1]))
         raise ValueError('曲线误差未收敛')
     parts=[]
-    for p in shapely.get_parts(poly):
+    pending=[poly]
+    while pending:
+        p=pending.pop()
+        if p.is_empty:continue
+        if p.geom_type in ('MultiPolygon','GeometryCollection'):
+            pending.extend(reversed(list(p.geoms)));continue
+        # A clipping plane may touch a remote branch in a zero-area line/point.
+        # It is not copper area and must not crash adaptation-band rendering.
+        if p.geom_type!='Polygon':
+            if p.area==0:continue
+            raise ValueError('型变区域含非面几何')
         q=Polygon(ring(p.exterior),[ring(r) for r in p.interiors])
         if not q.is_valid or q.is_empty or len(q.interiors)!=len(p.interiors):raise ValueError('型变折叠或拓扑改变')
         parts.append(q)
-    return shapely.union_all(parts)
+    return shapely.union_all(parts) if parts else Polygon()
 
 
 @dataclass
@@ -175,6 +188,62 @@ class DeformationPreview:
         checks=parallel_map(baseline_check,[(c.poly.wkb,self.p.line_width_um,self.model.data.dbu_um,self.p.line_space_um) for c in self.components],process=process)
         for c,reason in zip(self.components,checks):
             self.component_base[c.key,c.indices]='源铜图形并非单一连通区' if c.poly.geom_type!='Polygon' else reason
+        self.executor=None;self.execution_used='serial';self.worker_count=1;self.frame_generation=0
+
+    def release_workers(self):
+        if self.executor is not None:
+            self.executor.shutdown(wait=True,cancel_futures=True);self.executor=None
+
+    def close(self):
+        self.release_workers();self.cache.close()
+
+    def prepare_pose(self,states):
+        moved=[self.model.moved(r['poly'],r['owner'],states) for r in self.model.records]
+        self._via_required={(r['key'],r['index']):v.buffer(self.p.annulus_um/math.cos(math.pi/128),quad_segs=32) for r,v in zip(self.model.records,moved)}
+        self._via_controls=[v.buffer(self.p.annulus_um+self.p.line_space_um,quad_segs=32) for v in moved]
+        self._moved_via_trees={}
+        for plane in self.model.fixed_trees:
+            ids=[i for i,r in enumerate(self.model.records) if any(k.split('/')[0]==plane for k in r['target_layers'])]
+            self._moved_via_trees[plane]=(ids,STRtree([moved[i] for i in ids]))
+        return moved
+
+    def proposals(self,fn,tasks,states,replacements,iteration,quick,progress):
+        if not tasks:return []
+        from .resources import resource_profile,parallel_map
+        cfg=self.settings;profile=resource_profile();mode=cfg.deformation_execution
+        if mode=='auto':mode='process' if len(tasks)>=12 and not quick else 'serial'
+        maximum=profile['process_workers'] if mode=='process' else profile['workers']
+        if mode=='process':
+            coordinates=sum(int(shapely.get_num_coordinates(v['geometry']).sum()) for v in self.model.cache.layers.values())
+            estimate=max(768*1024**2,coordinates*128+self.model.data.count*2048+256*1024**2)
+            maximum=min(maximum,max(1,int(profile['available_memory_mb']*1024**2*.35)//estimate))
+        workers=min(maximum,cfg.deformation_workers or maximum,len(tasks))
+        if workers<2 or mode=='serial':
+            profile['workers']=1;self.execution_used='serial';self.worker_count=1
+            return parallel_map(fn,tasks,profile,progress=progress)
+        self.execution_used=mode;self.worker_count=workers
+        if mode=='thread':
+            profile['workers']=workers
+            return parallel_map(fn,tasks,profile,progress=progress)
+        from concurrent.futures import ProcessPoolExecutor,as_completed
+        import multiprocessing,logging
+        from .adaptation_workers import initialize,search_job
+        try:
+            if self.executor is None:
+                self.executor=ProcessPoolExecutor(max_workers=workers,mp_context=multiprocessing.get_context('spawn'),
+                    initializer=initialize,initargs=(self.model,self.p,cfg))
+            stamp=(self.frame_generation,iteration)
+            futures={self.executor.submit(search_job,((c.key,c.indices),signature,states,replacements,stamp,quick)):i
+                     for i,(c,active,anchors,signature,context) in enumerate(tasks)}
+            results=[None]*len(tasks)
+            for completed,future in enumerate(as_completed(futures),1):
+                results[futures[future]]=future.result();progress(completed,len(tasks))
+            return results
+        except Exception:
+            logging.getLogger(__name__).exception('并行型变搜索失败；改为本进程重算，仍执行全部约束检查')
+            self.release_workers();self.execution_used='serial fallback';self.worker_count=1
+            profile['workers']=1
+            return parallel_map(fn,tasks,profile,progress=progress)
     def _replacements(self,accepted):
         out={}
         for a in accepted.values():
@@ -204,16 +273,10 @@ class DeformationPreview:
         if key in self.cache:self.cache.move_to_end(key);return self.cache[key]
         hit=lambda q:{(v['source_layer'],v['source_index']) for v in q['issues']}
         initial=hit(current);blocked=initial.copy();accepted={};provisional={};diagnostics={};history=[];previous_active={};attempted={};attempted_full=set()
-        moved_vias=[self.model.moved(r['poly'],r['owner'],states) for r in self.model.records]
-        self._via_required={(r['key'],r['index']):v.buffer(self.p.annulus_um/math.cos(math.pi/128),quad_segs=32) for r,v in zip(self.model.records,moved_vias)}
-        self._via_controls=[v.buffer(self.p.annulus_um+self.p.line_space_um,quad_segs=32) for v in moved_vias]
-        self._moved_via_trees={}
-        for plane in self.model.fixed_trees:
-            ids=[i for i,r in enumerate(self.model.records) if any(k.split('/')[0]==plane for k in r['target_layers'])]
-            self._moved_via_trees[plane]=(ids,STRtree([moved_vias[i] for i in ids]))
+        moved_vias=self.prepare_pose(states);self.frame_generation+=1
         # Accepted replacements are monotone in eligible interfaces. No speculative
         # unchecked topology is drawn; best-effort candidates are explicitly flagged.
-        limit=len(self.model.records)+len(self.components)+1
+        limit=self.settings.deformation_iterations
         for iteration in range(limit):
             changed=False;before=blocked.copy();previous_accepted=accepted.copy();previous_signatures=previous_active.copy()
             snapshot=self._snapshot(self._replacements(accepted));tasks=[]
@@ -237,14 +300,8 @@ class DeformationPreview:
                 c,active,anchors,signature,context=task
                 try:return self.search(c,active,anchors,states,moved_vias,snapshot,progress,quick),''
                 except (ValueError,RuntimeError) as exc:return None,str(exc)
-            from .resources import parallel_map,resource_profile
-            profile=resource_profile()
-            # Fine-grained Python/GEOS/KLayout search suffers severe GIL/native
-            # contention in a thread pool (GD55 profiling). Keep this phase
-            # serial; bulk probability, transforms and baseline DRC retain their
-            # separately measured thread/process policies.
-            profile['workers']=1
-            results=parallel_map(proposal,tasks,profile,progress=lambda n,total:progress(round(85*n/max(1,total)),f'型变迭代 {iteration+1} · 搜索 {n}/{total}'))
+            results=self.proposals(proposal,tasks,states,self._replacements(accepted),iteration,quick,
+                lambda n,total:progress(round(85*n/max(1,total)),f'型变迭代 {iteration+1}/{limit} · 搜索 {n}/{total} · {self.execution_used} {self.worker_count}'))
             latest_snapshot=snapshot
             for task,(candidate_result,reason) in zip(tasks,results):
                 c,active,anchors,signature,context=task;ck=(c.key,c.indices)
@@ -305,7 +362,7 @@ class DeformationPreview:
         # Try the best pending candidates together, pruning failures against the
         # restored source until a verified fixed point remains. Never draw trials.
         joint=dict(accepted);joint.update(provisional);joint_rounds=0
-        while joint:
+        while joint and joint_rounds<self.settings.deformation_joint_rounds:
             snapshot=self._snapshot(self._replacements(joint));remove=[]
             for ck,a in joint.items():
                 if ck in accepted:continue
@@ -314,8 +371,12 @@ class DeformationPreview:
             if not remove:break
             for ck in remove:joint.pop(ck)
             joint_rounds+=1
+        # Exhausting a configurable pruning budget is not an acceptance proof.
+        joint_snapshot=self._snapshot(self._replacements(joint))
         for ck,a in joint.items():
             if ck in accepted:continue
+            c=a['component']
+            if self.candidate_violations(c,a['geometry'],c.records,c.anchors,states,moved_vias,joint_snapshot):continue
             a['field'].verified=True;a['field'].candidate_violations=[];a['field'].failure_reasons=[];a.pop('display',None)
             if a['field'].mode=='three_part' and not hasattr(a['field'],'adapted_band'):
                 a['field'].adapted_band=warp_polygon(a['field'].band,a['field'],max(self.model.data.dbu_um,self.settings.deformation_tolerance_um),max(1,self.p.line_width_um/2)).intersection(a['geometry'])
@@ -368,20 +429,22 @@ class DeformationPreview:
         for q in current['intrusions']:violations.append(dict(layer=q['target_layer'],geometry=q['geometry'],kind='控制区接触其他网络'))
         out=dict(replacements=replacements,diagnostics=list(diagnostics.values()),violations=violations,iterations=history,
                  initial_blocked_count=len(initial),released_count=len(initial-blocked),blocked_count=len(blocked),
-                 unresolved_count=len(diagnostics),accepted_count=len(accepted),best_effort_count=0,rejected_candidates=len(provisional),joint_rounds=joint_rounds,rollback_rounds=rollback_rounds,interfaces=interfaces,search_quality='interactive' if quick else 'complete_family',states=states.copy())
+                 unresolved_count=len(diagnostics),accepted_count=len(accepted),best_effort_count=0,rejected_candidates=len(provisional),joint_rounds=joint_rounds,rollback_rounds=rollback_rounds,interfaces=interfaces,search_quality='interactive' if quick else 'complete_family',states=states.copy(),
+                 execution=self.execution_used,workers=self.worker_count,iteration_limit=limit,iteration_limit_reached=len(history)>=limit and bool(changed))
         self.cache[key]=out
-        progress(100,f'型变收敛：释放 {out["released_count"]} 个窗口，剩余 {len(blocked)} 个')
+        progress(100,('型变达到搜索预算：' if out['iteration_limit_reached'] else '型变搜索完成：')+f'释放 {out["released_count"]} 个窗口，剩余 {len(blocked)} 个')
         return out
-    def candidate_violations(self,c,candidate,records,anchors,states,moved_vias,snapshot):
+    def candidate_violations(self,c,candidate,records,anchors,states,moved_vias,snapshot,cheap=False):
         from .drc import rule_area,separation_area
         p=self.p;dbu=self.model.data.dbu_um;bad=[]
         def add(kind,g):
             if not g.is_empty:bad.append(dict(kind=kind,geometry=g,area_um2=g.area))
         def measure(kind,area):
             if area>0:bad.append(dict(kind=kind,area_um2=area))
-        measure('线宽不足',rule_area(candidate,p.line_width_um,dbu))
-        measure('内部线距不足',rule_area(candidate,p.line_space_um,dbu,'notch'))
-        add('最小内角不足',angle_regions(candidate,self.settings.deformation_min_angle_deg,dbu))
+        if not cheap:
+            measure('线宽不足',rule_area(candidate,p.line_width_um,dbu))
+            measure('内部线距不足',rule_area(candidate,p.line_space_um,dbu,'notch'))
+            add('最小内角不足',angle_regions(candidate,self.settings.deformation_min_angle_deg,dbu))
         add('超出封装',candidate.difference(self.model.case['board']))
         for r in records:
             via=self.model.moved(r['poly'],r['owner'],states)
@@ -397,7 +460,7 @@ class DeformationPreview:
             nearby=[geoms[j] for j in tree.query(candidate,predicate='dwithin',distance=p.line_space_um) if self.model.nodes[ids[j]]['net']!=c.net]
             if nearby:
                 foreign=shapely.union_all(nearby)
-                measure('异网线距不足',separation_area(candidate,foreign,p.line_space_um,dbu))
+                if not cheap:measure('异网线距不足',separation_area(candidate,foreign,p.line_space_um,dbu))
                 if candidate.distance(foreign)+dbu*.01<p.line_space_um:
                     add('异网最小净距不足',candidate.intersection(foreign.buffer(p.line_space_um,quad_segs=32)))
         if hasattr(self,'_moved_via_trees'):
@@ -427,7 +490,7 @@ class DeformationPreview:
         travel=max(np.linalg.norm(rigid_transform(np.array([r['center']]),self.model.bound.centers[r['owner']],states[r['owner']])[0]-r['center']) for r in records)
         scale=max(p.line_width_um*2,travel*2,5.);last='未找到满足约束的过渡';best=None
         contour=self.contours.setdefault((c.key,c.indices),{});preferred=self.preferred_span.get((c.key,c.indices),0.)
-        spans=sorted(set([scale*f for f in (1.,1.6,2.6,4.2,6.8,11.)]+([preferred] if preferred else [])))
+        spans=sorted(set([scale*cfg.deformation_growth**i for i in range(cfg.deformation_local_steps)]+([preferred] if preferred else [])))
         field_key=(c.key,c.indices,tuple((r['key'],r['index']) for r in records))
         def fields():
             if quick and field_key in self.last_fields:
@@ -443,6 +506,7 @@ class DeformationPreview:
                 field=Field(records,self.model.bound.centers,states,inner,span,cfg);field.mode='local'
                 if any(records[i]['owner']!=records[j]['owner'] and np.linalg.norm(np.array(records[i]['center'])-records[j]['center'])<inner[i]+inner[j]+2*span for i in range(len(records)) for j in range(i)):continue
                 yield field,span
+            if not cfg.deformation_route_enabled:return
             from .route_adaptation import routed_fields
             foreign=[]
             if snapshot is not None:
@@ -450,7 +514,7 @@ class DeformationPreview:
                 foreign=[geoms[j] for j in tree.query(source.buffer(travel+p.line_space_um)) if self.model.nodes[ids[j]]['net']!=c.net]
             from itertools import islice
             options=routed_fields(source,records,anchors,self.model.bound.centers,states,cfg,p.line_width_um,dbu,foreign,self.route_templates)
-            yield from islice(options,2 if quick else 48)
+            yield from islice(options,min(2,cfg.deformation_route_candidates) if quick else cfg.deformation_route_candidates)
         for attempt,(field,span) in enumerate(fields()):
             progress(20,f'型变搜索 · {c.key} · '+('三段追溯' if field.mode=='three_part' else '孔盘调整')+f' {attempt+1}')
             if field.jacobian_bound()>=.98:last='无法证明位移场无折叠';continue
@@ -474,7 +538,10 @@ class DeformationPreview:
                     q=candidate.symmetric_difference(shapely.union_all(local))
                     if q.is_valid and q.geom_type=='Polygon' and len(q.interiors)==len(c.poly.interiors) and angle_regions(q,cfg.deformation_min_angle_deg,dbu).is_empty:
                         candidate,region=snapped(q,dbu);break
-            bad=self.candidate_violations(c,candidate,records,anchors,states,moved_vias,snapshot)
+            # GEOS rejects impossible envelope/anchor/clearance candidates before
+            # native edge extraction. Only promising shapes pay the full DRC cost.
+            bad=self.candidate_violations(c,candidate,records,anchors,states,moved_vias,snapshot,cheap=True)
+            if not bad:bad=self.candidate_violations(c,candidate,records,anchors,states,moved_vias,snapshot)
             field.verified=not bad;field.failure_reasons=sorted({v['kind'] for v in bad});field.candidate_violations=bad
             score=(sum(v['area_um2'] for v in bad),len(bad),candidate.symmetric_difference(c.poly).area)
             if best is None or score<best[0]:best=(score,candidate,field,span)
@@ -485,6 +552,8 @@ class DeformationPreview:
             last='；'.join(field.failure_reasons)
         if best is not None:
             _,candidate,field,span=best;self.last_fields[field_key]=field
+            bad=self.candidate_violations(c,candidate,records,anchors,states,moved_vias,snapshot)
+            field.verified=not bad;field.failure_reasons=sorted({v['kind'] for v in bad});field.candidate_violations=bad
             if field.mode=='three_part':field.adapted_band=warp_polygon(field.band,field,tol,max(1,p.line_width_um/2)).intersection(candidate)
             return candidate,field,span
         raise ValueError(last+'（有限搜索未解，保留源图形）')

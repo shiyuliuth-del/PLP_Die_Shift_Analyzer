@@ -11,6 +11,8 @@ set "DIE_SHIFT_NATIVE_BACKEND=desktop"
 if errorlevel 1 goto failed
 "%DSA_PYTHON%" -m unittest discover -s tests -p test_v14.py -v > results\windows_v14_tests.log 2>&1
 if errorlevel 1 goto failed
+"%DSA_PYTHON%" -m unittest discover -s tests -p test_v15.py -v > results\windows_v15_tests.log 2>&1
+if errorlevel 1 goto failed
 type results\windows_desktop_smoke.json
 echo Windows offline source tests passed.
 pause

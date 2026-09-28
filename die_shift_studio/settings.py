@@ -43,6 +43,21 @@ class ViewSettings:
     deformation_method:str="bezier"
     deformation_tolerance_um:float=.05
     deformation_arc_angle_deg:float=30.
+    deformation_iterations:int=6
+    deformation_local_steps:int=6
+    deformation_growth:float=1.6
+    deformation_route_enabled:bool=True
+    deformation_route_candidates:int=32
+    deformation_general_bands:bool=True
+    deformation_min_length:float=3.
+    deformation_corner_guard:float=.5
+    deformation_joint_rounds:int=6
+    deformation_execution:str='auto'
+    deformation_workers:int=0
+    safe_box_precision:float=.01
+    safe_box_budget:int=512
+    safe_box_starts:int=3
+    safe_box_passes:int=2
 
     @classmethod
     def from_dict(cls,values=None):
@@ -52,7 +67,8 @@ class ViewSettings:
                  'space_interpolation':('nearest','bilinear','bicubic'),
                  'probability_interpolation':('nearest','bilinear','bicubic'),
                  'probability_cmap':('blue','YlGnBu','BuPu','viridis','cividis'),
-                 'space_scope':('moving','package'),'deformation_continuity':('C1','C2'),'deformation_method':('bezier','arc')}
+                 'space_scope':('moving','package'),'deformation_continuity':('C1','C2'),'deformation_method':('bezier','arc'),
+                 'deformation_execution':('auto','serial','thread','process')}
         for key,allowed in choices.items():
             if getattr(q,key) not in allowed:raise ValueError('无效设置：'+key)
         limits={'contact_marker_size':(.1,10000),'unadapted_marker_size':(.1,10000),'deformation_min_angle_deg':(1,179),'deformation_arc_angle_deg':(1,120),'deformation_tolerance_um':(.001,1.),'sample_exponent':(8,18),'random_seed':(0,2147483647),'quadrature_order':(5,81),
@@ -60,11 +76,16 @@ class ViewSettings:
                 'footprint_samples':(1,8),'space_resolution':(31,401),
                 'animation_fps':(10,120),'animation_speed':(1,5),'camera_speed':(1,5),'contact_box_budget':(128,32768),'animation_duration_ms':(80,3000),'animation_steps':(2,60),'probability_alpha':(.05,.95),'space_alpha':(.05,.95),'intrusion_alpha':(.05,.85)}
         integers={'animation_fps','animation_speed','camera_speed','contact_box_budget','sample_exponent','random_seed','quadrature_order','angle_bins','footprint_samples','space_resolution','animation_duration_ms','animation_steps'}
+        limits.update(deformation_iterations=(1,64),deformation_local_steps=(1,12),deformation_growth=(1.1,3.),
+                      deformation_route_candidates=(1,256),deformation_min_length=(1,20),deformation_corner_guard=(0,3),
+                      deformation_joint_rounds=(0,32),deformation_workers=(0,16),safe_box_precision=(.0001,.1),
+                      safe_box_budget=(32,32768),safe_box_starts=(1,6),safe_box_passes=(1,8))
+        integers.update(('safe_box_budget','safe_box_starts','safe_box_passes','deformation_iterations','deformation_local_steps','deformation_route_candidates','deformation_joint_rounds','deformation_workers'))
         for key,(lo,hi) in limits.items():
             v=getattr(q,key)
             if not isinstance(v,(int,float)) or not math.isfinite(v) or not lo<=v<=hi or (key in integers and int(v)!=v):
                 raise ValueError(f'设置 {key} 超出范围 {lo}—{hi}')
-        for key in ('animation_enabled','probability_show_ranges','contact_marker_absolute','unadapted_marker_absolute'):
+        for key in ('animation_enabled','probability_show_ranges','contact_marker_absolute','unadapted_marker_absolute','deformation_route_enabled','deformation_general_bands'):
             if not isinstance(getattr(q,key),bool):raise ValueError(key+'必须为布尔值')
         import re
         color=lambda v:isinstance(v,str) and re.fullmatch(r'#[0-9a-fA-F]{6}',v)
@@ -78,4 +99,7 @@ class ViewSettings:
 
     def numeric_key(self):
         return tuple(getattr(self,k) for k in ('acceleration','probability_method','sample_exponent','random_seed',
-            'quadrature_order','probability_cell_um','angle_bins','space_resolution','contact_box_budget'))
+            'quadrature_order','probability_cell_um','angle_bins','space_resolution','contact_box_budget','safe_box_precision','safe_box_budget','safe_box_starts','safe_box_passes'))
+
+    def deformation_key(self):
+        return tuple(getattr(self,f.name) for f in fields(self) if f.name.startswith('deformation_'))

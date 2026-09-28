@@ -28,6 +28,7 @@ from matplotlib.lines import Line2D
 from matplotlib.transforms import Affine2D
 from matplotlib import patheffects
 from .plot_geometry import geometry_path
+from .safe_range_plot import draw_safe_ranges
 from .settings import ViewSettings
 from .pivots import rotation_centers
 from .setting_widgets import PivotEditor,ColorButton,RangeEditor
@@ -262,7 +263,7 @@ class MainWindow(W.QMainWindow):
         self.issue_scheme.currentIndexChanged.connect(self.issue_filter_changed);self.show_issues.toggled.connect(lambda _:self.plot_layout(preserve=True))
         self.extreme_split=W.QSplitter(HORIZONTAL);self.extreme_split.addWidget(extreme_page);self.extreme_split.addWidget(issue_page);self.extreme_split.setSizes([520,500])
         self.preview_tabs.addTab(self.extreme_split,'极端情况')
-        self.die_table=table(['芯片','长 / μm','宽 / μm','接口过孔','边界接口','角点包络 / μm','运动通道占用比','固定接口比值','方案3接口比值'])
+        self.die_table=table(['芯片','长 / μm','宽 / μm','接口过孔','边界接口','角点包络 / μm','方案1 U','方案2 U','方案3 U'])
         self.die_table.cellDoubleClicked.connect(self.locate_die)
         info=W.QSplitter(HORIZONTAL)
         for caption,widget in [('图层随动设置',self.motion_table),('当前芯片状态',self.state_table),('逐芯片结果',self.die_table)]:
@@ -277,11 +278,17 @@ class MainWindow(W.QMainWindow):
         self.scheme_figure=Figure(figsize=(9,5),layout='constrained');self.scheme_canvas=FigureCanvasQTAgg(self.scheme_figure);self.scheme_canvas.setMinimumHeight(160)
         page=W.QWidget();v=W.QVBoxLayout(page);self.verdict=label('导入GDS后设置图层用途，再进行评估。');self.verdict.setObjectName('Notice');v.addWidget(self.verdict)
         self.analysis_page=page;upper=W.QWidget();uv=W.QVBoxLayout(upper);uv.setContentsMargins(0,0,0,0);uv.addWidget(self.scheme_canvas,1)
-        self.scheme_table=table(['方案','状态','Γ','选择理由']);self.scheme_table.setMaximumHeight(160);uv.addWidget(self.scheme_table)
+        self.scheme_table=table(['方案','状态','U','选择理由']);self.scheme_table.setMaximumHeight(160);uv.addWidget(self.scheme_table)
         self.analysis_split=W.QSplitter(VERTICAL);self.analysis_split.addWidget(upper);v.addWidget(self.analysis_split,1);self.tabs.addTab(page,'结果分析')
+        safe_page=W.QWidget();sv=W.QVBoxLayout(safe_page);sv.setContentsMargins(0,0,0,0)
+        self.safe_range_caption=label('连续安全内范围：运行方案评估后显示。');sv.addWidget(self.safe_range_caption)
+        self.safe_range_figure=Figure(figsize=(10,3.6));self.safe_range_canvas=FigureCanvasQTAgg(self.safe_range_figure)
+        self.safe_range_canvas.setMinimumHeight(240);self.safe_range_plot_data=draw_safe_ranges(self.safe_range_figure,{})
+        self.safe_range_scroll=W.QScrollArea();self.safe_range_scroll.setWidgetResizable(True);self.safe_range_scroll.setWidget(self.safe_range_canvas)
+        self.safe_range_scroll.setMinimumHeight(150);sv.addWidget(self.safe_range_scroll,1);self.analysis_split.addWidget(safe_page)
         chart_page=W.QWidget();cv=W.QVBoxLayout(chart_page);self.chart_status=label('选择极端情况后显示可见运动过孔的位移统计。');cv.addWidget(self.chart_status)
         self.distribution_figure=Figure(figsize=(9,6),layout='constrained');self.distribution_canvas=FigureCanvasQTAgg(self.distribution_figure);self.distribution_canvas.setMinimumHeight(200);cv.addWidget(self.distribution_canvas,1)
-        self.analysis_split.addWidget(chart_page);self.analysis_split.setSizes([430,350]);self.histogram_data=None
+        self.analysis_split.addWidget(chart_page);self.analysis_split.setSizes([330,400,0]);self.histogram_data=None;self._histogram_revealed=False
         self.detail=W.QTextBrowser();self.tabs.addTab(self.detail,'报告');self.tabs.currentChanged.connect(self.tab_changed)
         self.runtime_view=W.QPlainTextEdit();self.runtime_view.setReadOnly(True);self.runtime_view.setMaximumBlockCount(10000);self.runtime_view.setToolTip('界面保留最近10000行；完整日志：'+str(self.log_bus.path));self.runtime_view.setMaximumHeight(170);self.runtime_view.hide();root.addWidget(self.runtime_view)
         self.runtime_toggle.toggled.connect(self.runtime_view.setVisible);self.log_bus.message.connect(self.runtime_view.appendPlainText)
@@ -342,7 +349,26 @@ class MainWindow(W.QMainWindow):
         spin(deformation,'deformation_min_angle_deg','最小铜图形内角 / °',1,179,1)
         self.setting_fields['deformation_min_angle_deg'].setToolTip('铜图形内部最小凸角；圆弧以DBU折线离散，角度检验容差0.2°。无法达标时恢复原图，显示未适配原因。')
         spin(deformation,'deformation_tolerance_um','曲线细分误差 / μm',.001,1,3)
+        spin(deformation,'deformation_iterations','最大窗口迭代轮数',1,64)
+        spin(deformation,'deformation_joint_rounds','邻线联合修复轮数',0,32)
+        spin(deformation,'deformation_local_steps','孔盘搜索级数',1,12)
+        spin(deformation,'deformation_growth','搜索跨度递增倍率',1.1,3.,2)
+        for key,title in [('deformation_route_enabled','启用三段追溯'),('deformation_general_bands','允许弯曲及分支适配段')]:
+            check=W.QCheckBox(title);self.setting_fields[key]=check;deformation.addRow(check);check.toggled.connect(self.settings_changed)
+        spin(deformation,'deformation_route_candidates','三段候选预算 / 条线路',1,256)
+        spin(deformation,'deformation_min_length','最短适配长度 / 线宽',1,20,1)
+        spin(deformation,'deformation_corner_guard','拐角端部预留 / 线宽',0,3,2)
+        choices['deformation_execution']=[('自动（按硬件与图纸）','auto'),('单线程','serial'),('多线程','thread'),('多进程','process')]
+        choice(deformation,'deformation_execution','搜索并行模式')
+        spin(deformation,'deformation_workers','并行数量上限（0自动）',0,16)
+        self.setting_fields['deformation_iterations'].setToolTip('达到预算仍未完成者显示未适配；减少搜索不会放宽最终DRC。')
         page.addWidget(label('连续性约束作用于型变位移场。孔盘调整失败后自动追溯三段式适配；未通过则恢复原图并显示琥珀叉号，型变校验列出原因。DRC检查固定RDL的≤5°非相邻边；型变另验证异网最小净距。'))
+        safe=group('连续无异常接触范围')
+        spin(safe,'safe_box_precision','端点搜索精度 / 输入单边幅度',.0001,.1,4)
+        spin(safe,'safe_box_budget','每候选连续验证盒预算',32,32768)
+        spin(safe,'safe_box_starts','端点扩张起点数',1,6)
+        spin(safe,'safe_box_passes','体积交换轮数',1,8)
+        self.setting_fields['safe_box_precision'].setToolTip('返回包含输入均值的安全内盒；多个端点顺序比较体积。未定候选拒绝，精度不代表全局最优误差。')
         drawing=group('接触标记');spin(drawing,'intrusion_alpha','侵入面积不透明度',.05,.85,2)
         for prefix,title in [('contact','接触空心圆'),('unadapted','未适配叉号')]:
             color=ColorButton();self.setting_fields[prefix+'_marker_color']=color;drawing.addRow(title+'颜色',color);color.valueChanged.connect(self.settings_changed)
@@ -375,6 +401,9 @@ class MainWindow(W.QMainWindow):
     def enable_settings(self):
         if not self.setting_fields:return
         self.setting_fields['deformation_arc_angle_deg'].setEnabled(self.setting_fields['deformation_method'].currentData()=='arc')
+        for key in ('deformation_general_bands','deformation_route_candidates','deformation_min_length','deformation_corner_guard'):
+            self.setting_fields[key].setEnabled(self.setting_fields['deformation_route_enabled'].isChecked())
+        self.setting_fields['deformation_workers'].setEnabled(self.setting_fields['deformation_execution'].currentData()!='serial')
         deterministic=self.setting_fields['probability_method'].currentData()=='quadrature'
         for key in ('sample_exponent','random_seed','angle_bins'):self.setting_fields[key].setEnabled(not deterministic)
         for key in ('quadrature_order',):self.setting_fields[key].setEnabled(deterministic)
@@ -383,7 +412,7 @@ class MainWindow(W.QMainWindow):
         values={k:(w.currentData() if isinstance(w,W.QComboBox) else w.isChecked() if isinstance(w,W.QCheckBox) else w.value()) for k,w in self.setting_fields.items()}
         intent=self._motion_intent if self.transition.timer.isActive() else None
         self.stop_animation()
-        old_settings=self.view_settings;updated=ViewSettings.from_dict(values);deform=any(getattr(updated,k)!=getattr(self.view_settings,k) for k in ('deformation_continuity','deformation_method','deformation_tolerance_um','deformation_arc_angle_deg','deformation_min_angle_deg'));numeric=(updated.numeric_key()!=self.view_settings.numeric_key() or (updated.probability_show_ranges!=old_settings.probability_show_ranges and self.target_sigma.currentText()=='∞'));self.view_settings=updated;self.enable_settings()
+        old_settings=self.view_settings;updated=ViewSettings.from_dict(values);deform=updated.deformation_key()!=old_settings.deformation_key();numeric=(updated.numeric_key()!=self.view_settings.numeric_key() or (updated.probability_show_ranges!=old_settings.probability_show_ranges and self.target_sigma.currentText()=='∞'));self.view_settings=updated;self.enable_settings()
         live_motion=any(getattr(updated,k)!=getattr(old_settings,k) for k in ('animation_enabled','animation_duration_ms','animation_fps','animation_speed'))
         if numeric:
             self.dirty=self.result is not None
@@ -535,6 +564,7 @@ class MainWindow(W.QMainWindow):
     def drop_result(self):
         self.result=None;self.clear_preview();self.manual_states=None;self.dirty=False;self.probability_data=None;self.space_data=None
         self.verdict.setText('正在评估…');self.scheme_table.setRowCount(0);self.die_table.setRowCount(0)
+        self.safe_range_plot_data=draw_safe_ranges(self.safe_range_figure,{});self.safe_range_canvas.setMinimumHeight(240);self.safe_range_canvas.draw_idle()
         self.scheme_figure.clear();self.scheme_canvas.draw_idle();self.detail.clear();self.plot_layout(preserve=True);self.update_histograms()
     def error(self,text):
         self.log_bus.emit(text,'ERROR');W.QMessageBox.warning(self,'操作未完成',str(text))
@@ -1238,6 +1268,8 @@ class MainWindow(W.QMainWindow):
         if self.tabs.currentWidget() is self.analysis_page:self.render_histograms()
     def render_histograms(self):
         if not self.histogram_data or not self.histogram_dirty:return
+        if not self._histogram_revealed and (self.active_preview is not None or self.manual_states is not None):
+            self.analysis_split.setSizes([320,320,220]);self._histogram_revealed=True
         self.histogram_dirty=False;q=self.histogram_data
         mag_edges=q['magnitude_edges'];mag_counts=q['magnitude_counts'];dir_edges=q['direction_edges'];dir_counts=q['direction_counts']
         self.distribution_figure.clear();axes=self.distribution_figure.subplots(1,2)
@@ -1261,7 +1293,7 @@ class MainWindow(W.QMainWindow):
             progress(1,'构建图层连接与几何索引');actual_cache=cache or GeometryCache(data);connections=Connections(data,roles,order,actual_cache.geometries);case=build_case(data,roles,connections=connections)
             from .session_cache import fingerprint
             key=('assessment',fingerprint((data.sha256,data.top_name,roles,order,asdict(p),settings.numeric_key())))
-            r=values.get_or_compute(key,lambda:evaluate(data,roles,p,progress=progress,layer_order=order,connections=connections,motions=motions,settings=settings));r=dict(r,motions=motions,view_settings=asdict(settings))
+            r=values.get_or_compute(key,lambda:evaluate(data,roles,p,progress=progress,layer_order=order,connections=connections,motions=motions,settings=settings,safe_range_cache=values));r=dict(r,motions=motions,view_settings=asdict(settings))
             catalog=RepresentativeExtremes(case,p);r['preview_count']=catalog.total
             return r,case,actual_cache,connections,catalog
         def accepted(value):
@@ -1283,15 +1315,23 @@ class MainWindow(W.QMainWindow):
         self.scheme_table.setRowCount(3)
         for i,s in enumerate(r['schemes']):
             for j,v in enumerate([f"{s['scheme']} {s['name']}",s['status'],fmt(s['gamma']),'; '.join(s['reasons'])]):self.scheme_table.setItem(i,j,W.QTableWidgetItem(str(v)))
-        self.scheme_table.setColumnWidth(0,230);self.scheme_table.setColumnWidth(1,120);self.scheme_table.setColumnWidth(2,65);self.scheme_table.horizontalHeader().setStretchLastSection(True);self.scheme_table.resizeRowsToContents()
+        self.scheme_table.setColumnWidth(0,230);self.scheme_table.setColumnWidth(1,120);self.scheme_table.setColumnWidth(2,65);self.scheme_table.horizontalHeader().setStretchLastSection(True);self.scheme_table.resizeRowsToContents();self.scheme_table.setFixedHeight(min(280,self.scheme_table.horizontalHeader().height()+sum(self.scheme_table.rowHeight(i) for i in range(3))+8))
         self.scheme_figure.clear();ax=self.scheme_figure.add_subplot(111);values=[s['gamma'] for s in r['schemes']];finite=[x for x in values if math.isfinite(x)]
         cap=max(1.4,min(8,max(finite or [1])*1.2));display=[min(x,cap) for x in values];ax.barh([0,1,2],display,color=['#a8c5de','#accfbd','#d6bedf'],height=.48)
         ax.axvline(1,color='#708395',ls='--',lw=1);ax.set_yticks([0,1,2],['方案1','方案2','方案3']);ax.invert_yaxis();ax.set_xlim(0,cap*1.15)
         for i,s in enumerate(r['schemes']):ax.text(display[i]+cap*.02,i,fmt(s['gamma']),va='center',color='#42536b')
-        ax.set(xlabel='保守需求 / 能力 Γ（≤1仅为初筛通过）',title='三方案比较');ax.spines[['top','right']].set_visible(False);self.scheme_canvas.draw_idle()
+        ax.set(xlabel='空间需求 / 可用空间 U（≤1为初筛候选）',title='三方案比较');ax.spines[['top','right']].set_visible(False);self.scheme_canvas.draw_idle()
+        ranges=r.get('safe_ranges',{});safe_rows=ranges.get('rows',[])
+        self.safe_range_caption.setText('原始固定RDL：各轴范围可任意组合；包含输入均值，未声明全局最大。')
+        self.safe_range_caption.setToolTip(ranges.get('scope','')+'；'+ranges.get('optimality',''))
+        self.safe_range_canvas.setMinimumHeight(max(240,105+len(safe_rows)*89))
+        self.safe_range_plot_data=draw_safe_ranges(self.safe_range_figure,ranges);self.safe_range_canvas.draw_idle()
+        self.safe_range_canvas.setToolTip('同一横轴以各DIE各轴的输入单边幅度归一化；0表示输入均值。右侧为实际安全端点，X/Y单位μm、O单位°；灰线是输入全范围。\n'+ranges.get('guarantee',''))
+        if not preserve:
+            self.analysis_split.setSizes([330,max(330,105+len(safe_rows)*89),0]);self._histogram_revealed=False
         self.die_table.setRowCount(len(r['dies']))
         for i,d in enumerate(r['dies']):
-            vals=[d['die'],d['width'],d['height'],d['pin_count'],d['output_count'],d['corner_bound_um'],d['traffic']['ratio'],d['fixed_via_ratio'],d['output_capture_ratio']]
+            vals=[d['die'],d['width'],d['height'],d['pin_count'],d['output_count'],d['corner_bound_um'],d['screening']['u1'],d['screening']['u2'],d['screening']['u3']]
             for j,value in enumerate(vals):self.die_table.setItem(i,j,W.QTableWidgetItem(fmt(value)))
         self.die_table.resizeColumnsToContents();self.detail.clear()
         if preserve:

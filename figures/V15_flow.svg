@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="684pt" height="280.512pt" viewBox="0 0 684 280.512" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-09-28T14:42:47.367635</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.6.3, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 280.512 
+L 684 280.512 
+L 684 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 160.092 83.308032 
+L 523.908 83.308032 
+Q 530.604 83.308032 530.604 76.921344 
+L 530.604 31.15008 
+Q 530.604 24.763392 523.908 24.763392 
+L 160.092 24.763392 
+Q 153.396 24.763392 153.396 31.15008 
+L 153.396 76.921344 
+Q 153.396 83.308032 160.092 83.308032 
+z
+" clip-path="url(#p1331d28487)" style="fill: #f0f5f8; stroke: #c2d0da; stroke-width: 0.8; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 340.01261 84.06106 
+Q 215.054909 97.944202 91.097285 111.716232 
+" clip-path="url(#p1331d28487)" style="fill: none; stroke: #9baebb; stroke-width: 0.9; stroke-linecap: round"/>
+    <path d="M 95.713309 113.416916 
+L 91.097285 111.716232 
+L 95.227446 109.043824 
+L 95.713309 113.416916 
+z
+" clip-path="url(#p1331d28487)" style="fill: #9baebb; stroke: #9baebb; stroke-width: 0.9; stroke-linecap: round"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 20.592 200.397312 
+L 155.628 200.397312 
+Q 162.324 200.397312 162.324 194.010624 
+L 162.324 119.499264 
+Q 162.324 113.112576 155.628 113.112576 
+L 20.592 113.112576 
+Q 13.896 113.112576 13.896 119.499264 
+L 13.896 194.010624 
+Q 13.896 200.397312 20.592 200.397312 
+z
+" clip-path="url(#p1331d28487)" style="fill: #dceaf2; stroke: #c2d0da; stroke-width: 0.8; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 340.096945 84.460919 
+Q 298.754714 97.944285 258.369122 111.115653 
+" clip-path="url(#p1331d28487)" style="fill: none; stroke: #9baebb; stroke-width: 0.9; stroke-linecap: round"/>
+    <path d="M 263.234414 111.842934 
+L 258.369122 111.115653 
+L 261.870121 107.659788 
+L 263.234414 111.842934 
+z
+" clip-path="url(#p1331d28487)" style="fill: #9baebb; stroke: #9baebb; stroke-width: 0.9; stroke-linecap: round"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 187.992 200.397312 
+L 323.028 200.397312 
+Q 329.724 200.397312 329.724 194.010624 
+L 329.724 119.499264 
+Q 329.724 113.112576 323.028 113.112576 
+L 187.992 113.112576 
+Q 181.296 113.112576 181.296 119.499264 
+L 181.296 194.010624 
+Q 181.296 200.397312 187.992 200.397312 
+z
+" clip-path="url(#p1331d28487)" style="fill: #e1eee6; stroke: #c2d0da; stroke-width: 0.8; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 343.888921 84.498795 
+Q 382.455346 97.944312 420.071627 111.058578 
+" clip-path="url(#p1331d28487)" style="fill: none; stroke: #9baebb; stroke-width: 0.9; stroke-linecap: round"/>
+    <path d="M 416.641122 107.532726 
+L 420.071627 111.058578 
+L 415.192642 111.687471 
+L 416.641122 107.532726 
+z
+" clip-path="url(#p1331d28487)" style="fill: #9baebb; stroke: #9baebb; stroke-width: 0.9; stroke-linecap: round"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 355.392 200.397312 
+L 490.428 200.397312 
+Q 497.124 200.397312 497.124 194.010624 
+L 497.124 119.499264 
+Q 497.124 113.112576 490.428 113.112576 
+L 355.392 113.112576 
+Q 348.696 113.112576 348.696 119.499264 
+L 348.696 194.010624 
+Q 348.696 200.397312 355.392 200.397312 
+z
+" clip-path="url(#p1331d28487)" style="fill: #eee3ef; stroke: #c2d0da; stroke-width: 0.8; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 343.989178 84.066225 
+Q 466.15545 97.944243 587.321923 111.708684 
+" clip-path="url(#p1331d28487)" style="fill: none; stroke: #9baebb; stroke-width: 0.9; stroke-linecap: round"/>
+    <path d="M 583.198363 109.0261 
+L 587.321923 111.708684 
+L 582.70172 113.397982 
+L 583.198363 109.0261 
+z
+" clip-path="url(#p1331d28487)" style="fill: #9baebb; stroke: #9baebb; stroke-width: 0.9; stroke-linecap: round"/>
+   </g>
+   <g id="patch_10">
+    <path d="M 522.792 200.397312 
+L 657.828 200.397312 
+Q 664.524 200.397312 664.524 194.010624 
+L 664.524 119.499264 
+Q 664.524 113.112576 657.828 113.112576 
+L 522.792 113.112576 
+Q 516.096 113.112576 516.096 119.499264 
+L 516.096 194.010624 
+Q 516.096 200.397312 522.792 200.397312 
+z
+" clip-path="url(#p1331d28487)" style="fill: #f4eadb; stroke: #c2d0da; stroke-width: 0.8; stroke-linejoin: miter"/>
+   </g>
+   <g id="text_1">
+    <text style="fill: #344e62; font: 700 12px 'Noto Sans CJK JP'; text-anchor: middle" x="342" y="46.527132" transform="rotate(-0 342 46.527132)">真实GDS + 工艺 + 每DIE输入边界</text>
+   </g>
+   <g id="text_2">
+    <text style="fill: #344e62; font: 10px 'Noto Sans CJK JP'; text-anchor: middle" x="342" y="65.375027" transform="rotate(-0 342 65.375027)">几何修复 → 按层连通 → 旋转中心与接口归属</text>
+   </g>
+   <g id="text_3">
+    <text style="fill: #344e62; font: 700 12px 'Noto Sans CJK JP'; text-anchor: middle" x="88.11" y="142.923543" transform="rotate(-0 88.11 142.923543)">空间初筛 U</text>
+   </g>
+   <g id="text_4">
+    <text style="fill: #344e62; font: 10px 'Noto Sans CJK JP'" transform="translate(53.909219 165.28859)">带宽 / 可用边长</text>
+    <text style="fill: #344e62; font: 10px 'Noto Sans CJK JP'" transform="translate(48.909219 180.712184)">位移 / 捕获净空间</text>
+   </g>
+   <g id="text_5">
+    <text style="fill: #344e62; font: 9.5px 'Noto Sans CJK JP'; text-anchor: middle" x="88.11" y="221.717808" transform="rotate(-0 88.11 221.717808)">U≤1候选；最小U优先</text>
+   </g>
+   <g id="text_6">
+    <text style="fill: #344e62; font: 700 12px 'Noto Sans CJK JP'; text-anchor: middle" x="255.51" y="142.923543" transform="rotate(-0 255.51 142.923543)">原图接触概率</text>
+   </g>
+   <g id="text_7">
+    <text style="fill: #344e62; font: 10px 'Noto Sans CJK JP'" transform="translate(203.269375 165.268278)">截断正态 → 概率上下界</text>
+    <text style="fill: #344e62; font: 10px 'Noto Sans CJK JP'" transform="translate(210.51 180.691872)">与目标允许概率比较</text>
+   </g>
+   <g id="text_8">
+    <text style="fill: #344e62; font: 9.5px 'Noto Sans CJK JP'; text-anchor: middle" x="255.51" y="221.717808" transform="rotate(-0 255.51 221.717808)">超限 / 通过 / 待细化</text>
+   </g>
+   <g id="text_9">
+    <text style="fill: #344e62; font: 700 12px 'Noto Sans CJK JP'; text-anchor: middle" x="422.91" y="142.923543" transform="rotate(-0 422.91 142.923543)">连续安全内盒</text>
+   </g>
+   <g id="text_10">
+    <text style="fill: #344e62; font: 10px 'Noto Sans CJK JP'" transform="translate(379.76 165.268278)">独立扩张X/Y/O端点</text>
+    <text style="fill: #344e62; font: 10px 'Noto Sans CJK JP'" transform="translate(377.91 180.691872)">整盒几何外包络验证</text>
+   </g>
+   <g id="text_11">
+    <text style="fill: #344e62; font: 9.5px 'Noto Sans CJK JP'; text-anchor: middle" x="422.91" y="221.717808" transform="rotate(-0 422.91 221.717808)">任意组合无接触的内范围</text>
+   </g>
+   <g id="text_12">
+    <text style="fill: #344e62; font: 700 12px 'Noto Sans CJK JP'; text-anchor: middle" x="590.31" y="142.923543" transform="rotate(-0 590.31 142.923543)">指定状态型变</text>
+   </g>
+   <g id="text_13">
+    <text style="fill: #344e62; font: 10px 'Noto Sans CJK JP'" transform="translate(535.82875 165.268278)">孔盘 → 三段截面 → 迭代</text>
+    <text style="fill: #344e62; font: 10px 'Noto Sans CJK JP'" transform="translate(540.505312 180.691872)">全层DRC与固定端复核</text>
+   </g>
+   <g id="text_14">
+    <text style="fill: #344e62; font: 9.5px 'Noto Sans CJK JP'; text-anchor: middle" x="590.31" y="221.717808" transform="rotate(-0 590.31 221.717808)">合格显示；不合格恢复原图</text>
+   </g>
+   <g id="text_15">
+    <text style="fill: #647b8b; font: 10px 'Noto Sans CJK JP'; text-anchor: middle" x="342" y="253.087488" transform="rotate(-0 342 253.087488)">初筛不等于制造放行  ·  概率结果不等于安全范围  ·  连续内盒不声明全局最大</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p1331d28487">
+   <rect x="7.2" y="7.2" width="669.6" height="266.112"/>
+  </clipPath>
+ </defs>
+</svg>

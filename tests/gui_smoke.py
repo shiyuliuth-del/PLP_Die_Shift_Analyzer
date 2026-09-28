@@ -69,7 +69,13 @@ with tempfile.TemporaryDirectory() as tmp:
     other=window.jobs_dir/'另一工程.json';atomic_save(other,json.loads(saved.read_text()));app.processEvents();window.refresh_jobs()
     assert window.job_combo.count()==3
     assert not hasattr(window,'interdie') and 'transition_length_um' not in window.fields
-    window.run_evaluation();wait_idle();assert window.result['recommendation']['scheme'] is None and window.result['schemes'][2]['status']=='窗口不足'
+    window.run_evaluation();wait_idle()
+    assert window.result['issues'] and window.result['schemes'][2]['contact_status']=='存在接触超限'
+    candidates=[s for s in window.result['schemes'] if s['status']=='初筛候选']
+    if candidates:
+        chosen=window.result['schemes'][window.result['recommendation']['scheme']-1]
+        assert chosen['gamma']<=min(s['gamma'] for s in candidates)+1e-9
+    else:assert window.result['recommendation']['scheme'] is None
     assert 1<window.extreme_table.rowCount()<=16 and window.extremes.total<=15
     assert all(window.extreme_table.item(0,j) is None for j in range(window.extreme_table.columnCount()))
     assert not window.detail.toPlainText() # report is lazy

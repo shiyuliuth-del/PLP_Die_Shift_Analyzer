@@ -23,7 +23,7 @@ class RouteField(Field):
         super().__init__(records,centers,states,np.full(len(records),width),length,settings)
         self.moving=moving;self.band=band;self.start=np.asarray(start);self.direction=np.asarray(direction)
         self.length=length;self.width=width;self.mode='three_part'
-        self.support=moving.union(band);self.moving_test=boundary_tolerant(moving.wkb);self.band_test=boundary_tolerant(band.wkb)
+        self.support=moving.union(band);shapely.prepare(self.support);self.moving_test=boundary_tolerant(moving.wkb);self.band_test=boundary_tolerant(band.wkb)
     def weights(self,xy):
         t=(xy-self.start)@self.direction/self.length
         inside=shapely.intersects_xy(self.band_test,xy[:,0],xy[:,1])
@@ -42,11 +42,12 @@ class RouteField(Field):
         return xy+a[:,None]*delta+b[:,None]*np.column_stack((-delta[:,1],delta[:,0]))
     def jacobian_bound(self):
         owner=self.records[0]['owner'];z=self.states[owner];coords=shapely.get_coordinates(self.band)
-        radius=np.linalg.norm(coords-self.centers[owner],axis=1).max()
+        from .preview import rigid_transform
+        travel=np.linalg.norm(rigid_transform(coords,self.centers[owner],z)-coords,axis=1).max()
         rotation=2*abs(math.sin(z[2]/2));gradient=1.5 if self.settings.deformation_continuity=='C1' else 1.875
         gamma=math.radians(self.settings.deformation_arc_angle_deg)
         factor=1 if self.settings.deformation_method=='bezier' else gamma/(2*math.sin(gamma/2))
-        return rotation+gradient*factor*(np.linalg.norm(z[:2])+rotation*radius)/self.length
+        return rotation+gradient*factor*travel/self.length
 
 
 class CombinedRouteField:
@@ -63,6 +64,69 @@ class CombinedRouteField:
         return out
 
 
+class SlabField(RouteField):
+    """Smooth whole-section transition, including bent/branched conductors.
+
+    Every point before/after the two cutting planes is rigid/fixed. Thus all
+    seams, including multiple arms crossing a section, share endpoint jets.
+    """
+    def weights(self,xy):
+        t=(xy-self.start)@self.direction/self.length
+        return np.repeat(smooth_weight(t,self.settings.deformation_continuity)[:,None],len(self.records),axis=1)
+
+
+def section_candidates(source,records,anchors,minimum_width,dbu,settings):
+    """Cut whole sections rather than requiring one pair of long straight edges.
+
+    This family permits curved edges, broad landing islands, holes and branches;
+    terminal coverage and later full DRC remain mandatory. It does not invent a
+    connection across an empty source region.
+    """
+    if not anchors or len({r['owner'] for r in records})!=1:return
+    moving_points=shapely.get_coordinates([r['poly'] for r in records])
+    fixed_points=shapely.get_coordinates(anchors)
+    all_points=shapely.get_coordinates(source);origin=moving_points.mean(axis=0)
+    directions=[fixed_points.mean(axis=0)-origin]
+    for anchor in anchors:directions.append(np.asarray(anchor.centroid.coords[0])-origin)
+    for poly in shapely.get_parts(source):
+        for ring in [poly.exterior,*poly.interiors]:
+            edges=np.diff(np.asarray(ring.coords),axis=0)
+            directions.extend(edges[np.linalg.norm(edges,axis=1)>=minimum_width])
+    seen=set();ranked=[]
+    for v in directions:
+        norm=np.linalg.norm(v)
+        if norm<dbu:continue
+        u=v/norm
+        if u@(fixed_points.mean(axis=0)-origin)<0:u=-u
+        # Keep observed orientations (not a rounded replacement direction).
+        key=round(math.atan2(u[1],u[0])*180/math.pi,1)
+        if key in seen:continue
+        seen.add(key)
+        low=float(((moving_points-origin)@u).max());high=float(((fixed_points-origin)@u).min())
+        guard=settings.deformation_corner_guard*minimum_width
+        lo=low+guard;hi=high-guard;length=hi-lo
+        if length<settings.deformation_min_length*minimum_width:continue
+        n=np.array([-u[1],u[0]]);side=(all_points-origin)@n
+        n0,n1=float(side.min()-minimum_width),float(side.max()+minimum_width)
+        extent=max(np.linalg.norm(all_points-origin,axis=1).max(),minimum_width)*3
+        def rectangle(a,b):
+            return Polygon([origin+u*a+n*n0,origin+u*b+n*n0,origin+u*b+n*n1,origin+u*a+n*n1])
+        for fraction,position in [(1.,.5),(.75,.5),(.5,.5),(.5,.25),(.5,.75)]:
+            size=length*fraction;start=lo+(length-size)*position;end=start+size
+            moving=source.intersection(rectangle(-extent,start));band=source.intersection(rectangle(start,end))
+            fixed=source.intersection(rectangle(end,extent))
+            if band.is_empty or moving.is_empty or fixed.is_empty:continue
+            if not all(moving.covers(r['poly']) for r in records) or not all(fixed.covers(g) for g in anchors):continue
+            if any(moving.intersects(g) or band.intersects(g) for g in anchors):continue
+            # Reject unattached bands or missing geometric necks. Source topology
+            # is then independently checked after warp + DBU conversion.
+            if not moving.intersects(band) or not fixed.intersects(band):continue
+            width=band.area/size
+            ranked.append((size, width, (moving,band,origin+u*start,u,size,width)))
+    ranked.sort(key=lambda q:(q[0],q[1]),reverse=True)
+    for _,_,candidate in ranked:yield candidate
+
+
 def routed_fields(source,records,anchors,centers,states,settings,width,dbu,foreign,templates=None):
     """Bounded combinations of nonoverlapping cuts for shared multi-DIE nets."""
     from itertools import islice
@@ -73,24 +137,35 @@ def routed_fields(source,records,anchors,centers,states,settings,width,dbu,forei
         key=(source.wkb,owner,tuple(g.wkb for g in stops))
         raw=templates.get(key) if templates is not None else None
         if raw is None:
-            raw=list(islice(straight_candidates(source,mine,stops,width,dbu,foreign),48))
+            count=settings.deformation_route_candidates
+            # Reserve capacity for general sections; straight-only enumeration
+            # must not exhaust the budget before curved/branched shapes are tried.
+            raw=[('straight',q) for q in islice(straight_candidates(source,mine,stops,width,dbu,foreign,settings),max(1,count//2) if settings.deformation_general_bands else count)]
+            if settings.deformation_general_bands:
+                raw.extend(('section',q) for q in islice(section_candidates(source,mine,stops,width,dbu,settings),count-len(raw)))
             if templates is not None:
                 templates[key]=raw
-        candidates=[RouteField(mine,centers,states,settings,*q) for q in raw]
+        candidates=[(SlabField if kind=='section' else RouteField)(mine,centers,states,settings,*q) for kind,q in raw]
         if not candidates:return
         next_beams=[]
         for old in beams:
             for candidate in candidates:
-                if any(candidate.support.intersection(f.support).area>dbu*dbu for f in old):continue
+                def overlaps(other):
+                    k=('support_overlap',candidate.support,other.support)
+                    if templates is not None and k in templates:return templates[k]
+                    value=candidate.support.intersects(other.support) and candidate.support.intersection(other.support).area>dbu*dbu
+                    if templates is not None:templates[k]=value
+                    return value
+                if any(overlaps(f) for f in old):continue
                 next_beams.append(old+[candidate])
-        beams=next_beams[:48]
+        beams=next_beams[:settings.deformation_route_candidates]
         if not beams:return
     for beam in beams:
         f=beam[0] if len(beam)==1 else CombinedRouteField(beam)
         yield f,f.span
 
 
-def straight_candidates(source,records,anchors,minimum_width,dbu,foreign=()):
+def straight_candidates(source,records,anchors,minimum_width,dbu,foreign=(),settings=None):
     """Yield (moving copper, adaptation copper, start, axis, length, width).
 
     Separating the source graph is stronger than matching a centreline near a
@@ -123,8 +198,8 @@ def straight_candidates(source,records,anchors,minimum_width,dbu,foreign=()):
     tested=set()
     for _,_,base,u,full,width in ranked:
         # Longest centred interval first, with guard length at both corners.
-        guard=max(width,minimum_width);available=full-2*guard
-        if available<minimum_width*2:continue
+        guard=max(width,minimum_width)*(settings.deformation_corner_guard if settings else 1.);available=full-2*guard
+        if available<minimum_width*(settings.deformation_min_length if settings else 2):continue
         for fraction in (1.,.75,.5):
             length=available*fraction
             for center_fraction in ((.5,) if fraction==1 else (.5,.35,.65)):

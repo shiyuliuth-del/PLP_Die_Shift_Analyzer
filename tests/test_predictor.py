@@ -25,7 +25,12 @@ class ModelTests(unittest.TestCase):
         for name,expected in [('示例A_小芯片大孔盘',None),('示例B_大芯片局部重构',1),('示例C_多芯片晶圆接口',None)]:
             data,roles,p=self.example(name)
             r=evaluate(data,roles,p)
-            self.assertEqual(r['recommendation']['scheme'],expected)
+            candidates=[s for s in r['schemes'] if s['status']=='初筛候选']
+            if candidates:
+                chosen=r['schemes'][r['recommendation']['scheme']-1]
+                self.assertLessEqual(chosen['gamma'],min(s['gamma'] for s in candidates)+1e-9)
+                self.assertIn('contact_status',chosen)
+            else:self.assertIsNone(r['recommendation']['scheme'])
             self.assertTrue(r['recommendation']['provisional'])
             json.dumps(clean_json(r),allow_nan=False)
     def test_no_wafer_layers_no_scheme3(self):

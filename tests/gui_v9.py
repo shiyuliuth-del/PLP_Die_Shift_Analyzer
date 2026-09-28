@@ -29,7 +29,9 @@ def drag(a,b):mouse('button_press_event',a);mouse('motion_notify_event',b);mouse
 w.load_project(ROOT/'Jobs/示例D_芯片外扇出.dshift.json');wait();w.run_evaluation();wait()
 assert 'input_nsigma' not in w.fields and w.target_sigma.count()==14 and not w.target_sigma.isEditable()
 assert '非金属图形' not in [w.role_boxes['4/0'].itemText(i) for i in range(w.role_boxes['4/0'].count())]
-assert w.analysis_split.count()==2
+assert w.analysis_split.count()==3  # Schemes, combined safe ranges, preview statistics.
+assert w.analysis_split.widget(1).isAncestorOf(w.safe_range_canvas)
+assert w.analysis_split.widget(2).isAncestorOf(w.distribution_canvas)
 assert w.ax.get_xlabel()==w.ax.get_ylabel()==''
 assert w.ax.get_position().width>.92
 # Every local corner is in the input box (degrees converted at display only).
