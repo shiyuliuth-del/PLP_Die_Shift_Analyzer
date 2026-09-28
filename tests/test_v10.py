@@ -50,7 +50,7 @@ class V10Tests(unittest.TestCase):
                     self.assertGreater(out['accepted_count'],0,(method,continuity,out['diagnostics']))
                     for layer,values in out['replacements'].items():
                         for value in values:
-                            if not value.get('verified',True):continue  # V12 exposes explicitly marked best-effort candidates.
+                            self.assertTrue(value['verified'])
                             g=value['geometry'];co=next(c for c in dp.components if c.key==layer and c.indices==value['indices'])
                             self.assertTrue(g.is_valid and g.geom_type=='Polygon');self.assertTrue(width_ok(g,p.line_width_um,d.dbu_um))
                             self.assertGreater(g.symmetric_difference(co.poly).area,.1);self.assertGreater(value['dark'].area,10)
@@ -66,7 +66,7 @@ class V10Tests(unittest.TestCase):
         self.assertTrue(any('原图形线宽不足' in d['reason'] for d in out['diagnostics']))
         for key,values in out['replacements'].items():
             for v in values:
-                if not v.get('verified',True):continue
+                self.assertTrue(v['verified'])
                 c=next(c for c in dp.components if c.key==key and c.indices==v['indices'])
                 self.assertTrue(all((r['key'],r['index']) not in dp.blocked for r in c.records))
         # An inconclusive probability interval is not promoted to a safe interface.

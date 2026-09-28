@@ -119,28 +119,36 @@ class PreviewEngine:
     """One engine per geometry/role/motion generation; called by one UI worker."""
     def __init__(self,cache,case,roles,motions,p,result,connections):
         self.bound=cache.bind(case,motions,[k for k in cache.layers if roles.get(k)!='不参与'])
-        self.roles=roles;self.p=p;self.result=result;self.connections=connections;self.frames=OrderedDict();self.deformer=None
+        self.roles=roles;self.p=p;self.result=result;self.connections=connections;self.frames=__import__('die_shift_studio.session_cache',fromlist=['SessionCache']).SessionCache();self.deformer=None;self.deformers={}
         from .contact import ContactModel
         self.contact=ContactModel(cache.data,case,roles,connections,cache,motions)
-        # Estimate all arrays plus diagnostic objects. Keep at most 3 frames.
-        budget=min(128*1024**2,int(cache.profile['available_memory_mb']*1024**2*.1))
-        self.capacity=max(1,min(3,budget//max(1,cache.bytes*3)))
     def configure_deformation(self,enabled,settings):
-        key=(bool(enabled),settings.deformation_continuity,settings.deformation_method,settings.deformation_tolerance_um,settings.deformation_arc_angle_deg,settings.deformation_min_angle_deg,id(self.result))
+        key=(bool(enabled and self.result is not None),settings.deformation_continuity,settings.deformation_method,settings.deformation_tolerance_um,settings.deformation_arc_angle_deg,settings.deformation_min_angle_deg)
         if getattr(self,'deformation_key',None)==key:return
-        self.deformation_key=key;self.frames.clear()
+        # Commit state only after successful initialization: retry remains possible.
         from .deformation import DeformationPreview
-        self.deformer=DeformationPreview(self.contact,self.p,self.result,settings) if enabled and self.result is not None else None
+        deformer=self.deformers.get(key)
+        if key[0] and deformer is None:
+            deformer=DeformationPreview(self.contact,self.p,self.result,settings)
+            self.deformers[key]=deformer
+        self.deformer=deformer;self.deformation_key=key
     def configure_drc(self,enabled,settings):
-        key=(enabled,settings.deformation_min_angle_deg)
-        if getattr(self,'drc_key',None)!=key:self.frames.clear();self.drc_key=key
-        self.drc_enabled=enabled;self.drc_settings=settings
+        key=(bool(enabled),settings.deformation_min_angle_deg)
         if enabled and not hasattr(self,'global_drc'):
             from .drc import GlobalDRC
             self.global_drc=GlobalDRC(self.contact,self.p)
+        self.drc_key=key;self.drc_enabled=enabled;self.drc_settings=settings
+    def cache_key(self):
+        return (getattr(self,'deformation_key',None),getattr(self,'drc_key',None))
+    def close(self):
+        self.frames.close()
+        for d in self.deformers.values():d.cache.close()
+        self.deformers.clear()
     def frame(self,states,progress=lambda *_:None,quick=False):
         progress(0,'生成当前几何状态')
-        key=(np.asarray(states,float).tobytes(),bool(quick))
+        key=(self.cache_key(),np.asarray(states,float).tobytes(),bool(quick))
+        complete=(self.cache_key(),np.asarray(states,float).tobytes(),False)
+        if quick and complete in self.frames:return self.frames[complete]
         if key in self.frames:self.frames.move_to_end(key);return self.frames[key]
         layers=self.bound.calibrate(states) if self.bound.calibration is None else self.bound.transform(states)
         current=self.contact.current(states,self.p)
@@ -157,7 +165,6 @@ class PreviewEngine:
         if getattr(self,'drc_enabled',False):
             frame['drc']=deformation['violations'] if deformation is not None else self.global_drc.frame(states,settings=self.drc_settings,progress=progress)
         self.frames[key]=frame
-        while len(self.frames)>self.capacity:self.frames.popitem(last=False)
         return frame
 
     def global_frame(self,nominal,settings,progress=lambda *_:None):
@@ -168,7 +175,9 @@ class PreviewEngine:
         adaptation may never introduce a previously absent contact. A previously
         failing lower bound cannot be reused after changing the geometry.
         """
-        if getattr(self,'_global_deformation_key',None)==self.deformation_key:return self._global_deformation_frame
+        if self.deformer is None:return nominal
+        global_key=('global',self.cache_key(),settings.numeric_key())
+        if global_key in self.frames:return self.frames[global_key]
         from .representatives import RepresentativeExtremes
         catalogue=RepresentativeExtremes(self.bound.case,self.p)
         poses=[q['states'] for q in catalogue];summaries=[];remaining={};released=set()
@@ -209,6 +218,6 @@ class PreviewEngine:
             if identity not in remaining:released.add(identity[:2])
         out=dict(nominal);out['contact']=dict(nominal['contact'],issues=issues)
         out['global_deformation']=dict(statistics_match_saved_evaluation=current,target_sigma=self.p.target_nsigma,annulus_um=self.p.annulus_um,line_width_um=self.p.line_width_um,line_space_um=self.p.line_space_um,die_bounds=[[(self.p.for_die(i).single_bound_x_um if len(self.bound.centers)==1 else self.p.for_die(i).multi_bound_x_um),(self.p.for_die(i).single_bound_y_um if len(self.bound.centers)==1 else self.p.for_die(i).multi_bound_y_um),self.p.for_die(i).bound_angle_deg] for i in range(len(self.bound.centers))],states=summaries,best_effort_states=sum(bool(q.get('best_effort')) for q in summaries),representative_released=len(released),continuous_probability='待细化；带DRC候选不复用原概率上界；有限代表状态不构成连续概率证书',scope='代表状态最终布局，不是连续概率穷举')
-        self._global_deformation_key=self.deformation_key;self._global_deformation_frame=out
+        self.frames[global_key]=out
         progress(100,'全局代表状态型变完成；已标明连续概率未决项')
         return out

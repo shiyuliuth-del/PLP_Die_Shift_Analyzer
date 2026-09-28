@@ -15,7 +15,7 @@ def wait(timeout=120,allow_errors=False):
  assert not busy(),'worker timeout'
  if not allow_errors:assert not errors,errors
  app.processEvents()
-def shot(name):w.canvas.draw();w.grab().save(str(ROOT/'figures'/('software_V12_'+name+'.png')))
+def shot(name):w.canvas.draw();w.grab().save(str(ROOT/'figures'/('software_V13_'+name+'.png')))
 assert not w.runtime_toggle.isChecked() and w.runtime_view.isHidden()
 w.runtime_toggle.setChecked(True);assert not w.runtime_view.isHidden()
 print('V11 standard-output capture sentinel');sys.stderr.write('V11 standard-error capture sentinel\n');app.processEvents()
@@ -75,5 +75,5 @@ w.setting_fields['deformation_min_angle_deg'].setValue(90);wait();w.select_previ
 assert w.current_frame['nominal_global'] and w.current_frame['global_deformation']['states']
 assert all(q.get('adaptive_unresolved') for q in w.current_frame['contact']['issues'])
 w.tabs.setCurrentWidget(w.detail);app.processEvents();assert '逐芯片输入解析' in w.detail.toPlainText();assert '预演分析的迭代结果' in w.detail.toPlainText()
-metrics['status']='PASS';(ROOT/'results/gui_legacy_V12.json').write_text(json.dumps(metrics,ensure_ascii=False,indent=2)+'\n')
+metrics['status']='PASS';(ROOT/'results/gui_legacy_V13.json').write_text(json.dumps(metrics,ensure_ascii=False,indent=2)+'\n')
 w.close();app.processEvents();tmp.cleanup();print(json.dumps(metrics,ensure_ascii=False,indent=2))

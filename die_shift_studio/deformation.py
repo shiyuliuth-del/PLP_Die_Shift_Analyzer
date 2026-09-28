@@ -3,8 +3,7 @@
 A compact C1/C2 displacement field preserves rigid landing regions and is the
 identity outside its support. Candidate contours are adaptively subdivided,
 snapped to the source DBU, and validated using KLayout width checks and actual
-parallel native edge checks. Invalid topology keeps the source; a valid best-effort
-candidate may be displayed with explicit DRC violations.
+parallel native edge checks. Any failed constraint keeps the source. Only verified candidates are displayed.
 """
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -183,7 +182,7 @@ class Component:
 
 class DeformationPreview:
     def __init__(self,contact,parameters,result,settings):
-        self.model=contact;self.p=parameters;self.settings=settings;self.cache=OrderedDict();self.components=[]
+        self.model=contact;self.p=parameters;self.settings=settings;self.cache=__import__('die_shift_studio.session_cache',fromlist=['SessionCache']).SessionCache();self.components=[]
         # Statistical insufficiency is an exclusion, never evidence of sufficient routing.
         ca=(result or {}).get('contact_analysis',{})
         self.blocked={(q['source_layer'],q['source_index']) for q in (result or {}).get('issues',[])}
@@ -208,7 +207,7 @@ class DeformationPreview:
             self.components.append(Component(key,indices,net,poly,records,anchors))
         self.originals={k:contact.cache.layers[k]['geometry'] for k in {c.key for c in self.components}}
         self.trees={k:STRtree(v) for k,v in self.originals.items()}
-        self.component_base={};self.contours={};self.preferred_span={};self.route_templates={};self.last_fields={}
+        self.component_base={};self.contours={};self.preferred_span={};self.route_templates={};self.last_fields={};self.sources={}
         from .resources import parallel_map,resource_profile
         vertices=sum(shapely.get_num_coordinates(c.poly) for c in self.components)
         process=len(self.components)>=8 and vertices>=200000 and resource_profile()['process_workers']>1
@@ -245,6 +244,8 @@ class DeformationPreview:
         hit=lambda q:{(v['source_layer'],v['source_index']) for v in q['issues']}
         initial=hit(current);blocked=initial.copy();accepted={};provisional={};diagnostics={};history=[];previous_active={};attempted={};attempted_full=set()
         moved_vias=[self.model.moved(r['poly'],r['owner'],states) for r in self.model.records]
+        self._via_required={(r['key'],r['index']):v.buffer(self.p.annulus_um/math.cos(math.pi/128),quad_segs=32) for r,v in zip(self.model.records,moved_vias)}
+        self._via_controls=[v.buffer(self.p.annulus_um+self.p.line_space_um,quad_segs=32) for v in moved_vias]
         self._moved_via_trees={}
         for plane in self.model.fixed_trees:
             ids=[i for i,r in enumerate(self.model.records) if any(k.split('/')[0]==plane for k in r['target_layers'])]
@@ -262,7 +263,7 @@ class DeformationPreview:
                 return tuple(sorted((ids[j],hash(geoms[j])) for j in near if self.model.nodes[ids[j]]['net']!=c.net))
             for c in self.components:
                 ck=(c.key,c.indices)
-                active=[r for r in c.records if (r['key'],r['index']) not in blocked and np.any(states[r['owner']])]
+                active=[r for r in c.records if np.any(states[r['owner']])]
                 signature=tuple((r['key'],r['index']) for r in active)
                 if not active or previous_active.get(ck)==signature:continue
                 context=context_for(c,active,snapshot);stamp=(signature,context)
@@ -277,9 +278,11 @@ class DeformationPreview:
                 except (ValueError,RuntimeError) as exc:return None,str(exc)
             from .resources import parallel_map,resource_profile
             profile=resource_profile()
-            # Large independent proposals share immutable snapshots. Applying
-            # them remains serial and rechecks neighbours changed by prior picks.
-            if len(tasks)<12:profile['workers']=1
+            # Fine-grained Python/GEOS/KLayout search suffers severe GIL/native
+            # contention in a thread pool (GD55 profiling). Keep this phase
+            # serial; bulk probability, transforms and baseline DRC retain their
+            # separately measured thread/process policies.
+            profile['workers']=1
             results=parallel_map(proposal,tasks,profile,progress=lambda n,total:progress(round(85*n/max(1,total)),f'型变迭代 {iteration+1} · 搜索 {n}/{total}'))
             latest_snapshot=snapshot
             for task,(candidate_result,reason) in zip(tasks,results):
@@ -288,7 +291,14 @@ class DeformationPreview:
                     if latest_snapshot is None:latest_snapshot=self._snapshot(self._replacements(accepted))
                     latest=latest_snapshot
                     if context_for(c,active,latest)!=context:
-                        try:candidate_result=self.search(c,active,anchors,states,moved_vias,latest,progress,quick)
+                        try:
+                            candidate,field,span=candidate_result
+                            bad=self.candidate_violations(c,candidate,c.records,c.anchors,states,moved_vias,latest)
+                            if bad:candidate_result=self.search(c,active,anchors,states,moved_vias,latest,progress,quick)
+                            else:
+                                field.verified=True;field.failure_reasons=[];field.candidate_violations=[]
+                                if field.mode=='three_part' and not hasattr(field,'adapted_band'):
+                                    field.adapted_band=warp_polygon(field.band,field,max(self.model.data.dbu_um,self.settings.deformation_tolerance_um),max(1,self.p.line_width_um/2)).intersection(candidate)
                         except (ValueError,RuntimeError) as exc:reason=str(exc)
                     if not reason:
                         candidate,field,span=candidate_result
@@ -313,10 +323,9 @@ class DeformationPreview:
                     history.append(dict(iteration=iteration+1,newly_sufficient=0,remaining=len(blocked),accepted=len(accepted),rollback='新增接触，整轮回退'));break
                 blocked=new_hit;current=updated
             newly=before-blocked;history.append(dict(iteration=iteration+1,newly_sufficient=len(newly),remaining=len(blocked),accepted=len(accepted)))
-            if not changed or not newly:break
-        # Window-blocked interfaces may still have a useful best-effort shape.
-        # They never enter the verified set or release another candidate during
-        # convergence. Display their actual DRC rather than silently omitting them.
+            if not changed:break
+        # Every moving interface gets a search outcome, including blocked ones.
+        # Unverified candidates remain internal and are never drawn.
         for c in self.components:
             ck=(c.key,c.indices)
             if ck in accepted or ck in provisional or ck in attempted_full:continue
@@ -331,21 +340,65 @@ class DeformationPreview:
                     diagnostics[ck]=dict(layer=c.key,indices=c.indices,reason='最优候选仍有DRC问题：'+'；'.join(field.failure_reasons),point=list(c.poly.representative_point().coords[0]))
             except (ValueError,RuntimeError) as exc:
                 diagnostics.setdefault(ck,dict(layer=c.key,indices=c.indices,reason=str(exc),point=list(c.poly.representative_point().coords[0])))
-        displayed=provisional.copy()
-        displayed.update(accepted);replacements=self._replacements(displayed)
-        if accepted:
-            final_snapshot=self._snapshot(replacements)
-            for ck,a in list(accepted.items()):
-                bad=self.candidate_violations(a['component'],a['geometry'],a['field'].records,a['component'].anchors,states,moved_vias,final_snapshot)
-                if bad:
-                    a['field'].verified=False;a['field'].candidate_violations=bad;a['field'].failure_reasons=sorted({v['kind'] for v in bad})
-                    a.pop('display',None);provisional[ck]=accepted.pop(ck)
-                    diagnostics[ck]=dict(layer=a['component'].key,indices=a['component'].indices,reason='最终候选之间存在DRC问题：'+'；'.join(a['field'].failure_reasons),point=list(a['geometry'].representative_point().coords[0]))
-            replacements=self._replacements(displayed)
-        current=self.model.current(states,self.p,replacements);blocked=hit(current)
+        # A neighbour may need to move at the same time to free the corridor.
+        # Try the best pending candidates together, pruning failures against the
+        # restored source until a verified fixed point remains. Never draw trials.
+        joint=dict(accepted);joint.update(provisional);joint_rounds=0
+        while joint:
+            snapshot=self._snapshot(self._replacements(joint));remove=[]
+            for ck,a in joint.items():
+                if ck in accepted:continue
+                c=a['component']
+                if self.candidate_violations(c,a['geometry'],c.records,c.anchors,states,moved_vias,snapshot):remove.append(ck)
+            if not remove:break
+            for ck in remove:joint.pop(ck)
+            joint_rounds+=1
+        for ck,a in joint.items():
+            if ck in accepted:continue
+            a['field'].verified=True;a['field'].candidate_violations=[];a['field'].failure_reasons=[];a.pop('display',None)
+            if a['field'].mode=='three_part' and not hasattr(a['field'],'adapted_band'):
+                a['field'].adapted_band=warp_polygon(a['field'].band,a['field'],max(self.model.data.dbu_um,self.settings.deformation_tolerance_um),max(1,self.p.line_width_um/2)).intersection(a['geometry'])
+            accepted[ck]=a;diagnostics.pop(ck,None)
+        # Roll back unsafe copper, then recheck neighbours against the ACTUAL
+        # restored source. Removing one replacement can invalidate another.
+        # This finite fixed point only removes candidates; it must terminate.
         from .drc import GlobalDRC
         if not hasattr(self,'drc'):self.drc=GlobalDRC(self.model,self.p)
-        violations=self.drc.frame(states,replacements,self.settings,progress)
+        rollback_rounds=0;final_drc=None
+        while accepted:
+            replacements=self._replacements(accepted);final_snapshot=self._snapshot(replacements);rejected=[]
+            for ck,a in accepted.items():
+                c=a['component']
+                bad=self.candidate_violations(c,a['geometry'],c.records,c.anchors,states,moved_vias,final_snapshot)
+                if bad:
+                    rejected.append(ck)
+                    diagnostics[ck]=dict(layer=c.key,indices=c.indices,reason='最终布局复核不通过，恢复原图：'+'；'.join(sorted({v['kind'] for v in bad})),point=list(c.poly.representative_point().coords[0]))
+            # Merged same-net copper can expose a notch absent from an isolated
+            # candidate. The final plane-level DRC is also an acceptance gate.
+            final_drc=self.drc.frame(states,replacements,self.settings,progress)
+            for ck,a in accepted.items():
+                c=a['component']
+                bad=[v['kind'] for v in final_drc if c.net in v.get('nets',(v.get('net'),)) and v['geometry'].intersects(a['geometry'])]
+                if bad and ck not in rejected:
+                    rejected.append(ck)
+                    diagnostics[ck]=dict(layer=c.key,indices=c.indices,reason='最终固定RDL全层DRC未通过，恢复原图：'+'；'.join(sorted(set(bad))),point=list(c.poly.representative_point().coords[0]))
+            if not rejected:break
+            for ck in rejected:accepted.pop(ck)
+            final_drc=None
+            rollback_rounds+=1
+        displayed=accepted;replacements=self._replacements(accepted)
+        interfaces=[]
+        for c in self.components:
+            ck=(c.key,c.indices)
+            active=[r for r in c.records if np.any(states[r['owner']])]
+            if active and ck not in accepted:
+                diag=diagnostics.setdefault(ck,dict(layer=c.key,indices=c.indices,reason='有限候选搜索未找到满足约束的型变，恢复原图',point=list(c.poly.representative_point().coords[0])))
+                if '恢复原图' not in diag['reason']:diag['reason']+='；恢复原图'
+                diag['points']=[list(self.model.moved(r['poly'],r['owner'],states).centroid.coords[0]) for r in active]
+            for r in c.records:
+                interfaces.append(dict(layer=c.key,indices=c.indices,via_layer=r['key'],via_index=r['index'],owner=r['owner'],status='已适配' if ck in accepted else ('无需移动' if not np.any(states[r['owner']]) else '未适配，恢复原图'),reason=diagnostics.get(ck,{}).get('reason','')))
+        current=self.model.current(states,self.p,replacements);blocked=hit(current)
+        violations=list(final_drc) if final_drc is not None else self.drc.frame(states,replacements,self.settings,progress)
         # Package / keepout and current control intrusions supplement metal DRC.
         for a in displayed.values():
             for violation in getattr(a['field'],'candidate_violations',[]):
@@ -354,9 +407,8 @@ class DeformationPreview:
         for q in current['intrusions']:violations.append(dict(layer=q['target_layer'],geometry=q['geometry'],kind='控制区接触其他网络'))
         out=dict(replacements=replacements,diagnostics=list(diagnostics.values()),violations=violations,iterations=history,
                  initial_blocked_count=len(initial),released_count=len(initial-blocked),blocked_count=len(blocked),
-                 unresolved_count=len(diagnostics),accepted_count=len(accepted),best_effort_count=len(provisional),search_quality='interactive' if quick else 'complete_family',states=states.copy())
+                 unresolved_count=len(diagnostics),accepted_count=len(accepted),best_effort_count=0,rejected_candidates=len(provisional),joint_rounds=joint_rounds,rollback_rounds=rollback_rounds,interfaces=interfaces,search_quality='interactive' if quick else 'complete_family',states=states.copy())
         self.cache[key]=out
-        while len(self.cache)>4:self.cache.popitem(last=False)
         progress(100,f'型变收敛：释放 {out["released_count"]} 个窗口，剩余 {len(blocked)} 个')
         return out
     def candidate_violations(self,c,candidate,records,anchors,states,moved_vias,snapshot):
@@ -372,7 +424,9 @@ class DeformationPreview:
         add('超出封装',candidate.difference(self.model.case['board']))
         for r in records:
             via=self.model.moved(r['poly'],r['owner'],states)
-            missing=via.buffer(p.annulus_um/math.cos(math.pi/128),quad_segs=32).difference(candidate)
+            landing=self._via_required.get((r['key'],r['index'])) if hasattr(self,'_via_required') else None
+            if landing is None:landing=via.buffer(p.annulus_um/math.cos(math.pi/128),quad_segs=32)
+            missing=landing.difference(candidate)
             if not candidate.covers(via) or candidate.boundary.distance(via)+dbu*.01<p.annulus_um:add('孔盘包围不足',missing if not missing.is_empty else via.boundary.buffer(dbu))
         for g in anchors:add('固定端覆盖不足',g.difference(candidate))
         for plane in {k.split('/')[0] for r in records for k in r['target_layers']}:
@@ -380,12 +434,16 @@ class DeformationPreview:
                 ids,tree=self.model.fixed_trees[plane];geoms=tree.geometries
             else:ids,geoms,tree=snapshot[plane]
             nearby=[geoms[j] for j in tree.query(candidate,predicate='dwithin',distance=p.line_space_um) if self.model.nodes[ids[j]]['net']!=c.net]
-            if nearby:measure('异网线距不足',separation_area(candidate,shapely.GeometryCollection(nearby),p.line_space_um,dbu))
+            if nearby:
+                foreign=shapely.union_all(nearby)
+                measure('异网线距不足',separation_area(candidate,foreign,p.line_space_um,dbu))
+                if candidate.distance(foreign)+dbu*.01<p.line_space_um:
+                    add('异网最小净距不足',candidate.intersection(foreign.buffer(p.line_space_um,quad_segs=32)))
         if hasattr(self,'_moved_via_trees'):
             ids,tree=self._moved_via_trees[c.key.split('/')[0]]
-            others=[moved_vias[ids[j]] for j in tree.query(candidate,predicate='dwithin',distance=p.annulus_um+p.line_space_um+dbu) if self.model.records[ids[j]]['net']!=c.net]
-        else:others=[g for r,g in zip(self.model.records,moved_vias) if r['net']!=c.net and any(k.split('/')[0]==c.key.split('/')[0] for k in r['target_layers'])]
-        for g in others:add('其他运动孔控制区侵入',candidate.intersection(g.buffer(p.annulus_um+p.line_space_um,quad_segs=32)))
+            others=[self._via_controls[ids[j]] for j in tree.query(candidate,predicate='dwithin',distance=p.annulus_um+p.line_space_um+dbu) if self.model.records[ids[j]]['net']!=c.net]
+        else:others=[g.buffer(p.annulus_um+p.line_space_um,quad_segs=32) for r,g in zip(self.model.records,moved_vias) if r['net']!=c.net and any(k.split('/')[0]==c.key.split('/')[0] for k in r['target_layers'])]
+        for g in others:add('其他运动孔控制区侵入',candidate.intersection(g))
         for k,v in self.model.cache.layers.items():
             if self.model.roles.get(k)=='禁布区':
                 for g in v['geometry']:add('禁布区侵入',candidate.intersection(g))
@@ -396,10 +454,15 @@ class DeformationPreview:
         # Enclosure is an OUTPUT constraint, not a reason to reject the source.
         # Grow only the nominal landing where necessary before moving it. Keep
         # a DBU-sized guard against inscribed buffer chords and snapping.
-        landing=[r['poly'].buffer(p.annulus_um/math.cos(math.pi/128)+2*dbu,quad_segs=32) for r in records]
-        source=shapely.union_all([c.poly,*landing])
-        if source.geom_type!='Polygon' or not source.is_valid or len(source.interiors)!=len(c.poly.interiors):raise ValueError('孔盘生长改变连通拓扑，未生成不合法候选')
-        inner=[max(np.linalg.norm(shapely.get_coordinates(g)-r['center'],axis=1))+2*dbu for r,g in zip(records,landing)]
+        source_key=(c.key,c.indices,tuple((r['key'],r['index']) for r in records))
+        prepared=self.sources.get(source_key)
+        if prepared is None:
+            landing=[r['poly'].buffer(p.annulus_um/math.cos(math.pi/128)+2*dbu,quad_segs=32) for r in records]
+            source=shapely.union_all([c.poly,*landing])
+            if source.geom_type!='Polygon' or not source.is_valid or len(source.interiors)!=len(c.poly.interiors):raise ValueError('孔盘生长改变连通拓扑，未生成不合法候选')
+            inner=[max(np.linalg.norm(shapely.get_coordinates(g)-r['center'],axis=1))+2*dbu for r,g in zip(records,landing)]
+            self.sources[source_key]=(source,inner)
+        else:source,inner=prepared
         travel=max(np.linalg.norm(rigid_transform(np.array([r['center']]),self.model.bound.centers[r['owner']],states[r['owner']])[0]-r['center']) for r in records)
         scale=max(p.line_width_um*2,travel*2,5.);last='未找到满足约束的过渡';best=None
         contour=self.contours.setdefault((c.key,c.indices),{});preferred=self.preferred_span.get((c.key,c.indices),0.)

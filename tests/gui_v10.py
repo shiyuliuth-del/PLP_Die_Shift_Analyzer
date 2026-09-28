@@ -23,7 +23,7 @@ def wait_motion():
   time.sleep(.002)
  raise AssertionError('No animation started')
 def shot(name):
- w.canvas.draw();w.grab().save(str(ROOT/'figures'/('software_V12_'+name+'.png')))
+ w.canvas.draw();w.grab().save(str(ROOT/'figures'/('software_V13_'+name+'.png')))
 w.load_project(ROOT/'Jobs/示例E_连续型变与约束.dshift.json');wait();order=w.ordered_layers().copy()
 assert order[2]=='127/0' and order[5]=='128/0';assert w.run_button.text()=='方案评估'
 assert not w.deformation_toggle.isChecked()

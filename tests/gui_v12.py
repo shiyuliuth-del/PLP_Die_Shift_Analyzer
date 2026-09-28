@@ -22,7 +22,7 @@ def mouse(name,pixel,button=None,step=0):
 def wheel(widget,delta=-120):
     event=QtGui.QWheelEvent(QtCore.QPointF(10,10),QtCore.QPointF(widget.mapToGlobal(QtCore.QPoint(10,10))),QtCore.QPoint(),QtCore.QPoint(0,delta),Qt.NoButton,Qt.NoModifier,Qt.NoScrollPhase,False)
     app.sendEvent(widget,event);app.processEvents()
-def shot(name):w.canvas.draw();w.grab().save(str(ROOT/'figures'/('software_V12_'+name+'.png')))
+def shot(name):w.canvas.draw();w.grab().save(str(ROOT/'figures'/('software_V13_'+name+'.png')))
 w.load_project(ROOT/'Jobs/示例G_小偏移与三段追溯.dshift.json');wait()
 assert not w.drc_toggle.isChecked()
 assert w.drc_toggle.parentWidget().layout().itemAt(0).widget() is w.drc_toggle
@@ -31,10 +31,10 @@ w.deformation_toggle.setChecked(True);wait()
 w.drc_toggle.setChecked(True);wait();assert w.result is None and 'drc' in w.current_frame
 w.deformation_toggle.setChecked(False);wait()
 assert w.violation_artist.get_visible()
-w.fields['wafer_line_width_um'].setValue(30);wait();assert any(v['kind']=='线宽不足' and v['layer']=='3/0' for v in w.current_frame['drc'])
+w.fields['line_width_um'].setValue(50);wait();assert any(v['kind']=='线宽不足' and v['layer']=='5/0' for v in w.current_frame['drc'])
 w.visible_boxes['3/0'].setChecked(False);app.processEvents();assert all(k!='3/0' or not a.get_visible() for k,a in w.layer_artists.items())
 w.visible_boxes['3/0'].setChecked(True);w.drc_toggle.setChecked(False);assert not w.violation_artist.get_visible()
-w.fields['wafer_line_width_um'].setValue(20);wait();w.run_evaluation();wait()
+w.fields['line_width_um'].setValue(20);wait();w.run_evaluation();wait()
 w.manual_states=np.array([[1.,1,0],[0,35,0]]);w.request_preview();wait();w.deformation_toggle.setChecked(True);wait()
 assert w.current_frame['deformation']['accepted_count']==2
 values=w.current_frame['deformation']['replacements']['5/0'];assert any(v['mode']=='three_part' for v in values)
@@ -97,8 +97,9 @@ mouse('button_release_event',end,MouseButton.RIGHT);assert not w.mouse_die.idle.
 w.manual_states=target;w.request_preview();wait()
 # Best-effort geometry and pink marker toggle correspond to the actual final layout.
 w.setting_fields['animation_enabled'].setChecked(False);w.setting_fields['deformation_min_angle_deg'].setValue(179);wait()
-assert w.current_frame['deformation']['best_effort_count']>0
+assert w.current_frame['deformation']['unresolved_count']>0 and not w.current_frame['deformation']['replacements']
+assert w.unadapted_artist.get_visible()
 assert w.violation_artist.get_visible() and w.violation_artist.get_paths();w.set_view([400,780],1200,700);wait();shot('global_drc')
 w.drc_toggle.setChecked(False);assert not w.violation_artist.get_visible();w.drc_toggle.setChecked(True);wait();assert w.violation_artist.get_visible()
-metrics['status']='PASS';(ROOT/'results/gui_V12.json').write_text(json.dumps(metrics,ensure_ascii=False,indent=2)+'\n')
+metrics['status']='PASS';(ROOT/'results/gui_V13_legacy.json').write_text(json.dumps(metrics,ensure_ascii=False,indent=2)+'\n')
 w.close();app.processEvents();tmp.cleanup();print(json.dumps(metrics,ensure_ascii=False,indent=2))

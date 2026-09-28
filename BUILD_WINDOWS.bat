@@ -7,6 +7,8 @@ if errorlevel 1 goto failed
 if errorlevel 1 goto failed
 .venv-build\Scripts\python.exe -m pip install -r requirements.txt "pyinstaller>=6.10,<7"
 if errorlevel 1 goto failed
+.venv-build\Scripts\python.exe -m die_shift_studio.dependencies
+if errorlevel 1 goto failed
 .venv-build\Scripts\python.exe -m PyInstaller --clean --noconfirm Die_Shift_Analyze.spec
 if errorlevel 1 goto failed
 start /wait "" dist\Die_Shift_Analyze.exe --smoke-test dist\windows_smoke.json

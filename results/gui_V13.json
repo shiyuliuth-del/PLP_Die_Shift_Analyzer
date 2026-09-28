@@ -1,0 +1,9 @@
+{
+  "status": "PASS",
+  "probability_calls_with_parameter_roundtrip": 2,
+  "space_calls_with_parameter_roundtrip": 2,
+  "animation_replay_ms": 192.5580329998411,
+  "animation_recomputed_deformation_calls": 0,
+  "manual_evaluation_clears_cache": true,
+  "close_removes_cache": true
+}

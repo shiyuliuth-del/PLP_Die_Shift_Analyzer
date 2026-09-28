@@ -83,27 +83,27 @@ class V12Tests(unittest.TestCase):
             triangle=Polygon([(0,0),(1000,0),(1000,1000*math.tan(math.radians(angle)))])
             self.assertTrue(rule_region(triangle,100,.001).is_empty)
     def test_global_drc_independent_of_assessment_and_deformation_and_reuses_rigid_rules(self):
-        d,q,c,cache,p,m=fixture();p=replace(p,wafer_line_width_um=30)
+        d,q,c,cache,p,m=fixture();p=replace(p,line_width_um=50)
         e=PreviewEngine(cache,c,q['roles'],{},p,None,c['connections']);e.configure_drc(True,ViewSettings())
         a=e.frame(np.zeros((2,3)));self.assertNotIn('deformation',a)
-        errors=[v for v in a['drc'] if v['kind']=='线宽不足' and v['layer']=='3/0'];self.assertTrue(errors)
+        errors=[v for v in a['drc'] if v['kind']=='线宽不足' and v['layer']=='5/0'];self.assertTrue(errors)
         misses=e.global_drc.misses;z=np.array([[11.,13,0],[11,13,0]])
         b=e.frame(z);self.assertEqual(e.global_drc.misses,misses);self.assertGreater(e.global_drc.hits,0)
-        newer=[v for v in b['drc'] if v['kind']=='线宽不足' and v['layer']=='3/0']
-        for first,last in zip(errors,newer):np.testing.assert_allclose(np.array(last['geometry'].centroid.coords)-first['geometry'].centroid.coords,[[11,13]],atol=1e-8)
+        newer=[v for v in b['drc'] if v['kind']=='线宽不足' and v['layer']=='5/0']
+        for first,last in zip(errors,newer):np.testing.assert_allclose(np.array(last['geometry'].centroid.coords)-first['geometry'].centroid.coords,[[0,0]],atol=1e-8)
         # Unknown ownership freezes geometry but must not switch its process rule.
         m.bound.owners['3/0'][:]=-2
         unknown=GlobalDRC(m,p).frame(z,settings=ViewSettings())
-        self.assertTrue(any(v['kind']=='线宽不足' and v['layer']=='3/0' for v in unknown))
+        self.assertTrue(any(v['kind']=='线宽不足' and v['layer']=='5/0' for v in unknown))
     def test_holes_and_multipolygons_survive_motion_for_global_drc(self):
         *_,m=fixture();g=box(-10,-10,10,10).difference(box(-5,-5,5,5)).union(box(20,0,30,10))
         moved=m.moved(g,0,np.array([[3.,7,.1],[0,0,0]]));self.assertAlmostEqual(moved.area,g.area)
         self.assertEqual(sum(len(q.interiors) for q in moved.geoms),1)
-    def test_unverified_best_shape_is_flagged_and_all_final_markers_use_that_shape(self):
+    def test_unverified_best_shape_is_restored_and_all_final_markers_use_source(self):
         d,q,c,cache,p,m=fixture();cfg=ViewSettings(deformation_min_angle_deg=179)
         dp=DeformationPreview(m,p,{},cfg);z=np.array([[1.,1,0],[0,35,0]]);f=dp.frame(z,m.current(z,p))
-        self.assertGreater(f['best_effort_count'],0);self.assertTrue(f['diagnostics']);self.assertTrue(f['violations'])
-        self.assertTrue(any(not v['verified'] for vs in f['replacements'].values() for v in vs))
+        self.assertEqual(f['best_effort_count'],0);self.assertGreater(f['unresolved_count'],0);self.assertTrue(f['diagnostics']);self.assertTrue(f['violations'])
+        self.assertFalse(f['replacements']);self.assertEqual(len(f['interfaces']),2)
         for vs in f['replacements'].values():
             for v in vs:self.assertTrue(v['geometry'].is_valid)
         actual=m.current(z,p,f['replacements']);self.assertEqual(f['blocked_count'],len({(v['source_layer'],v['source_index']) for v in actual['issues']}))

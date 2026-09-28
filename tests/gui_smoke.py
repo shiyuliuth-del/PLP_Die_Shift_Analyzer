@@ -40,7 +40,8 @@ with tempfile.TemporaryDirectory() as tmp:
     assert [window.controls.tabText(i) for i in range(window.controls.count())]==['偏移','工艺','设置']
     assert any('方案1' in w.text() and w.text().count('\n')==2 for w in window.findChildren(W.QLabel))
     assert [window.tabs.tabText(i) for i in range(window.tabs.count())]==['结果图形','结果分析','报告']
-    assert [window.preview_tabs.tabText(i) for i in range(window.preview_tabs.count())]==['极端情况','信息','型变校验']
+    assert [window.preview_tabs.tabText(i) for i in range(2)]==['极端情况','信息']
+    assert window.preview_tabs.tabText(2).startswith('型变校验')
     assert not hasattr(window,'preview_status') and window.layer_table.verticalHeader().isHidden()
     assert window.gds_label.text().endswith('示例C_多芯片晶圆接口.gds')
     # Drag starts in the count cell, not a row-number header. Preview reorders before release.
@@ -113,7 +114,7 @@ with tempfile.TemporaryDirectory() as tmp:
     window.canvas.draw();x,y=window.ax.transData.transform(expected);rgba=np.asarray(window.canvas.buffer_rgba());h,w=rgba.shape[:2]
     crop=rgba[max(0,h-int(y)-15):min(h,h-int(y)+16),max(0,int(x)-15):min(w,int(x)+16),:3]
     assert np.count_nonzero((crop[:,:,0]>150)&(crop[:,:,1]<130)&(crop[:,:,2]<140))>3
-    window.grab().save(str(ROOT/'figures/software_V12_window.png'))
+    window.grab().save(str(ROOT/'figures/software_V13_window.png'))
     # Manual state, probability overlay, control zones and layer order.
     snapshot=window.result
     window.manual_fields['dx'].setValue(120);window.manual_fields['dy'].setValue(10);window.manual_fields['angle'].setValue(1)
@@ -128,7 +129,7 @@ with tempfile.TemporaryDirectory() as tmp:
     center=np.mean([issue['origin'],issue['point']],axis=0)
     window.ax.set_xlim(center[0]-250,center[0]+250);window.ax.set_ylim(center[1]-210,center[1]+210)
     window.preview_tabs.setCurrentIndex(0);app.processEvents();window.canvas.draw()
-    window.grab().save(str(ROOT/'figures/software_V12_contact_detail.png'))
+    window.grab().save(str(ROOT/'figures/software_V13_contact_detail.png'))
     window.figure.savefig(ROOT/'figures/V12_contact_detail.png',dpi=240,bbox_inches='tight')
     assert window.current_frame['contact']['intrusions']
     assert any(a.get_alpha()==window.view_settings.intrusion_alpha for a in window.issue_artists)
@@ -153,7 +154,7 @@ with tempfile.TemporaryDirectory() as tmp:
         assert abs(np.ptp(window.ax.get_xlim())/np.ptp(window.ax.get_ylim())/ratio-1)<1e-6
         assert window.ax.get_position().width>.88 # axes fill the allocated window width
     window.resize(1540,1000);app.processEvents();window.fit_plot();window.canvas.draw()
-    window.grab().save(str(ROOT/'figures/software_V12_space_map.png'))
+    window.grab().save(str(ROOT/'figures/software_V13_space_map.png'))
     window.figure.savefig(ROOT/'figures/V12_space_map.png',dpi=220)
     # Per-layer appearance and numerical settings persist without discarding analysis.
     from die_shift_studio.layer_controls import LayerStyleDialog
@@ -184,12 +185,12 @@ with tempfile.TemporaryDirectory() as tmp:
     assert len(window.invalid_artists)==1
     window.visible_boxes['90/0'].setChecked(False);assert len(window.invalid_artists)==0
     window.visible_boxes['90/0'].setChecked(True);assert len(window.invalid_artists)==1
-    window.plot_layout();window.preview_tabs.setCurrentIndex(0);app.processEvents();window.grab().save(str(ROOT/'figures/software_V12_preview.png'))
-    window.tabs.setCurrentWidget(window.analysis_page);app.processEvents();window.grab().save(str(ROOT/'figures/software_V12_histograms.png'))
+    window.plot_layout();window.preview_tabs.setCurrentIndex(0);app.processEvents();window.grab().save(str(ROOT/'figures/software_V13_preview.png'))
+    window.tabs.setCurrentWidget(window.analysis_page);app.processEvents();window.grab().save(str(ROOT/'figures/software_V13_histograms.png'))
     window.tabs.setCurrentWidget(window.detail);app.processEvents();assert not errors,errors;assert '输入' in window.detail.toPlainText() and '相邻' in window.detail.toPlainText()
     html,resources=report_document(window.result,window.evaluation_motions)
     for uri,png in resources.items():assert window.detail.document().resource(QtGui.QTextDocument.ImageResource,QtCore.QUrl(uri))==QtGui.QImage.fromData(png,'PNG')
-    window.grab().save(str(ROOT/'figures/software_V12_report.png'))
+    window.grab().save(str(ROOT/'figures/software_V13_report.png'))
     window.target_sigma.setCurrentText('5.5');wait_idle();assert window.result['parameters']['target_nsigma']==6 and window.detail.toPlainText()
     assert not any(b.text()=='检查GDS图层与边框' for b in window.findChildren(W.QPushButton))
     assert not hasattr(window,'log_label') and 'via_diameter_um' not in window.fields

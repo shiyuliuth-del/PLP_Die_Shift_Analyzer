@@ -60,8 +60,23 @@ def smoke(output):
         from shapely.geometry import box
         import klayout.db as kdb
         assert width_ok(box(-25,-25,25,25),20,.001) and not width_ok(box(-5,-25,5,25),20,.001)
+        trace_path=root/'examples/示例G_小偏移与三段追溯.gds'
+        trace_project=json.loads(trace_path.with_suffix('.json').read_text(encoding='utf-8'))
+        td=read_gds(trace_path);tc=build_case(td,trace_project['roles'],layer_order=trace_project['layer_order']);tp=Parameters.from_dict(trace_project['parameters'])
+        te=PreviewEngine(GeometryCache(td),tc,trace_project['roles'],{},tp,{},tc['connections'])
+        te.configure_deformation(True,ViewSettings());te.configure_drc(True,ViewSettings())
+        pose=np.array([[1.,1,0],[0,35,0]]);tf=te.frame(pose)
+        assert tf['deformation']['accepted_count']==2 and not tf['drc']
+        te.configure_deformation(False,ViewSettings());te.frame(pose);te.configure_deformation(True,ViewSettings())
+        assert te.frame(pose)['deformation']['accepted_count']==2
+        record.update(deformation_routes=2,configuration_retry=True)
+        te.close()
         record.update(native_drc=kdb.__version__,status='PASS',version=result['version'],jobs=str(window.jobs_dir),formulas=len(resources),regions=len(frame['contact']['regions']),space_maps=len(window.space_artists),probability_maps=len(masses),sample_standard_deviations=window.probability_data['sample_standard_deviations'],min_occupied_probability_cells=min(int(np.count_nonzero(a)) for a in masses))
     except Exception:record['error']=traceback.format_exc()
     finally:
-        Path(output).write_text(json.dumps(record,ensure_ascii=False,indent=2),encoding='utf-8');window.close();app.processEvents()
+        import time
+        window.close();deadline=time.monotonic()+30
+        while window._tasks and time.monotonic()<deadline:app.processEvents();time.sleep(.005)
+        if window._tasks:record.update(status='FAIL',shutdown_error='Background workers did not stop within 30 seconds')
+        app.processEvents();Path(output).write_text(json.dumps(record,ensure_ascii=False,indent=2),encoding='utf-8')
     return 0 if record['status']=='PASS' else 1

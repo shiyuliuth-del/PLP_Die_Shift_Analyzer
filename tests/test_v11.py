@@ -74,7 +74,7 @@ class V11Tests(unittest.TestCase):
         d,q,c,cache,p,m=fixture();states=np.array([[80.,0,0],[80,0,0]])
         dp=DeformationPreview(m,p,{},ViewSettings());f=dp.frame(states,m.current(states,p))
         self.assertEqual(f['initial_blocked_count'],1);self.assertEqual(f['released_count'],1);self.assertEqual(f['blocked_count'],0)
-        self.assertEqual(f['accepted_count'],2);self.assertEqual(len(f['iterations']),2);self.assertFalse(f['violations'])
+        self.assertEqual(f['accepted_count'],2);self.assertGreaterEqual(len(f['iterations']),2);self.assertEqual(f['iterations'][-1]['remaining'],0);self.assertFalse(f['violations'])
         self.assertFalse(m.current(states,p,f['replacements'])['issues'])
         values=f['replacements']['5/0'];self.assertGreaterEqual(values[0]['geometry'].distance(values[1]['geometry']),p.line_space_um)
         for value in values:self.assertTrue(width_ok(value['geometry'],p.line_width_um,d.dbu_um))

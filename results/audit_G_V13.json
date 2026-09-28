@@ -1,0 +1,128 @@
+{
+  "sha256": "a1cdff4eb5759ffc291143ffe2a81d7e19efdc11ed85076d337990568b54b5ad",
+  "parameters": {
+    "panel_layers": 2,
+    "wafer_layers": 1,
+    "line_width_um": 20,
+    "line_space_um": 20,
+    "wafer_line_width_um": 20,
+    "wafer_line_space_um": 20,
+    "via_diameter_um": 20.0,
+    "annulus_um": 12,
+    "residual_budget_um": 5.0,
+    "transition_length_um": 200.0,
+    "max_route_angle_deg": 30.0,
+    "routing_edge_keepout_um": 40.0,
+    "min_die_gap_um": 20.0,
+    "min_package_clearance_um": 20.0,
+    "single_bound_x_um": 25.0,
+    "single_bound_y_um": 25.0,
+    "multi_bound_x_um": 35,
+    "multi_bound_y_um": 35,
+    "bound_angle_deg": 1,
+    "per_die_enabled": false,
+    "die_bounds": [],
+    "input_nsigma": 6.0,
+    "target_nsigma": 6.0,
+    "mean_x_um": 0.0,
+    "mean_y_um": 0.0,
+    "mean_angle_deg": 0.0,
+    "rho_xy": 0.0,
+    "interdie": "unknown",
+    "fixed_via_assignment": "all"
+  },
+  "states": [
+    [
+      1.0,
+      1.0,
+      0.0
+    ],
+    [
+      0.0,
+      35.0,
+      0.0
+    ]
+  ],
+  "interfaces": 2,
+  "copper_components": 2,
+  "cold_frame_ms": 46.51000699959695,
+  "repeat_frame_median_ms": 0.002078999841614859,
+  "repeat_frame_max_ms": 0.016220000361499842,
+  "toggle_roundtrip_ms": 0.013431999832391739,
+  "repeat_search_calls": 0,
+  "search_calls": 2,
+  "slowest_searches": [
+    {
+      "indices": [
+        1
+      ],
+      "ms": 30.735123999875213
+    },
+    {
+      "indices": [
+        0
+      ],
+      "ms": 4.796427000655967
+    }
+  ],
+  "accepted": 2,
+  "unadapted": 0,
+  "rejected_displayed": 0,
+  "visible_drc_groups": 0,
+  "interface_outcomes": [
+    {
+      "layer": "5/0",
+      "indices": [
+        0
+      ],
+      "via_layer": "4/0",
+      "via_index": 0,
+      "owner": 0,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        1
+      ],
+      "via_layer": "4/0",
+      "via_index": 1,
+      "owner": 1,
+      "status": "已适配",
+      "reason": ""
+    }
+  ],
+  "audit": [
+    {
+      "layer": "5/0",
+      "indices": [
+        0
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        1
+      ],
+      "verified": true
+    }
+  ],
+  "iteration_history": [
+    {
+      "iteration": 1,
+      "newly_sufficient": 0,
+      "remaining": 0,
+      "accepted": 2
+    },
+    {
+      "iteration": 2,
+      "newly_sufficient": 0,
+      "remaining": 0,
+      "accepted": 2
+    }
+  ],
+  "joint_rounds": 0,
+  "rollback_rounds": 0
+}

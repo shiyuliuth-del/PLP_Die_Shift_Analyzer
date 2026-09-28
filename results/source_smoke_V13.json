@@ -1,0 +1,20 @@
+{
+  "status": "PASS",
+  "frozen": false,
+  "platform": "linux",
+  "deformation_routes": 2,
+  "configuration_retry": true,
+  "native_drc": "0.30.8",
+  "version": "V13",
+  "jobs": "/home/niubi/文档/ChatGPT/DIE_SHIFT评估/Jobs",
+  "formulas": 45,
+  "regions": 64,
+  "space_maps": 2,
+  "probability_maps": 64,
+  "sample_standard_deviations": [
+    5.831912557895235,
+    5.832563352793422,
+    0.0029086200226714027
+  ],
+  "min_occupied_probability_cells": 17263
+}

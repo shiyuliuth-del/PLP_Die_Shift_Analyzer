@@ -8,6 +8,8 @@ if __name__=='__main__':
     try:
         from die_shift_studio.frozen_support import prepare_runtime,smoke
         prepare_runtime()
+        from die_shift_studio.dependencies import verify
+        verify()
         parser=argparse.ArgumentParser(description='Die Shift Analyze')
         parser.add_argument('--project');parser.add_argument('--smoke-test',help=argparse.SUPPRESS)
         args=parser.parse_args()

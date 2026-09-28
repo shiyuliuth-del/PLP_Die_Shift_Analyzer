@@ -11,9 +11,15 @@
       "newly_sufficient": 0,
       "remaining": 0,
       "accepted": 2
+    },
+    {
+      "iteration": 3,
+      "newly_sufficient": 0,
+      "remaining": 0,
+      "accepted": 2
     }
   ],
-  "first_validated_stream_frame_ms": 289.8841440000979,
-  "streamed_frames": 3,
+  "first_validated_stream_frame_ms": 790.6758019998961,
+  "streamed_frames": 1,
   "status": "PASS"
 }

@@ -20,7 +20,7 @@ def wait():
     assert not errors,errors
     app.processEvents()
 def shot(name):
-    w.canvas.draw();w.grab().save(str(ROOT/'figures'/('software_V12_regression_'+name+'.png')))
+    w.canvas.draw();w.grab().save(str(ROOT/'figures'/('software_V13_regression_'+name+'.png')))
 def choose(widget,value):widget.setCurrentIndex(widget.findData(value));wait()
 def mouse(name,xy):
     e=MouseEvent(name,w.canvas,*w.ax.transData.transform(xy),button=1);w.canvas.callbacks.process(name,e)

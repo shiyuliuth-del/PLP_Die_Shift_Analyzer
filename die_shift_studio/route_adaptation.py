@@ -75,7 +75,6 @@ def routed_fields(source,records,anchors,centers,states,settings,width,dbu,forei
         if raw is None:
             raw=list(islice(straight_candidates(source,mine,stops,width,dbu,foreign),48))
             if templates is not None:
-                if len(templates)>=64:templates.pop(next(iter(templates)),None)
                 templates[key]=raw
         candidates=[RouteField(mine,centers,states,settings,*q) for q in raw]
         if not candidates:return

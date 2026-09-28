@@ -1,9 +1,9 @@
-# Die Shift Analyze V12
+# Die Shift Analyze V13
 
-GDS芯片偏移分析，长度单位为μm。本版修复小偏移与包围量的误拦截，增加三段连通追溯、独立DRC和鼠标偏移；支持逐芯片幅度、完整实体概率、运行日志、最新覆盖级别重算与迭代型变；按输入单边幅度生成极端组合，支持图形逐层点选/方向框选、实际红色侵入面积、可配置的整孔概率与整包 **Space Map**、插值运动及图形缓存。运动归属沿下层金属追溯，修复含重复边界、孔洞的GDS轮廓。
+GDS 芯片偏移分析，长度单位为 μm。V13 修复 Windows 依赖缺失及初始化失败后的概率叠加异常，增加会话缓存；型变不满足约束时恢复原图，并逐接口说明未适配原因。DRC 检查最终显示的固定 RDL。
 
 - [研究报告](DIE_SHIFT评估报告.md)
-- [本版图文操作、公式与实图验证](docs/V12_操作与验证说明.md)
+- [本版图文操作、公式与实图验证](docs/V13_操作与验证说明.md)
 
 ## 启动
 
@@ -12,7 +12,7 @@ python3 -m pip install -r requirements.txt
 python3 main.py
 ```
 
-Linux也可运行`bash run.sh`。Windows源码入口为`RUN.bat`；双击`BUILD_WINDOWS.bat`在Windows构建`dist/Die_Shift_Analyze.exe`并自动自检，构建后直接双击EXE。本次仅交付源码压缩包，不构建Linux冻结程序。Linux源码已验证；尚未执行Windows实机测试。
+Linux也可运行`bash run.sh`。Windows安装64位Python 3.12或3.13后双击`RUN.bat`，首次自动建立`.venv`并安装依赖，以后固定使用该环境；缺失模块会自动修复。`TEST_WINDOWS.bat`运行源码自检并输出JSON/日志。双击`BUILD_WINDOWS.bat`在Windows构建`dist/Die_Shift_Analyze.exe`并自动自检，构建后直接双击EXE。本次仅交付源码压缩包，不构建Linux冻结程序。Linux源码已验证；尚未执行Windows实机测试。
 
 ## 操作
 
@@ -31,11 +31,13 @@ Linux也可运行`bash run.sh`。Windows源码入口为`RUN.bat`；双击`BUILD_
 
 默认有限k按每接口接触概率p与2Φ(−k)比较；程序用概率上下界确认，无法决定者显示“概率待细化”，不把零采样命中当作通过。概率云显示整孔覆盖率，另用淡色虚线包络标示最大幅度内的可达极端。跨芯片网络沿几何连通自动判断。
 
-程序只读GDS；修复保留孔洞，不能恢复者用玫红细虚线标记并忽略。Γ为保守工程初筛，0%/100%是单个确定状态的违规标志；新增“预演分析”按来源固定RDL进行局部C1/C2连续型变，设置中选择贝塞尔或圆弧路径。通过当前帧校验的候选与带DRC的最佳候选明确区分，拓扑非法或无候选时保留源图并列出原因。该预演不回写GDS，也不替代工厂完整DRC或量产良率证明。
+程序只读GDS；修复保留孔洞，不能恢复者用玫红细虚线标记并忽略。Γ为保守工程初筛，0%/100%是单个确定状态的违规标志；新增“预演分析”按来源固定RDL进行局部C1/C2连续型变，设置中选择贝塞尔或圆弧路径。只有通过最终布局校验的候选才显示；未通过则恢复原图，琥珀色叉号与“型变校验”表逐项说明原因。粉色DRC显示实际保留或型变后的图形问题。该预演不回写GDS，也不替代工厂完整DRC或量产良率证明。
 
 8. “按芯片分别设置单边幅度”开启独立输入；右上“运行信息”显示时间戳输出和错误，完整日志写入 `logs/runtime.log`。预演分析会重复检查并适配新释放的窗口，粉色表示最终可见布局的规则违反。设置中可调最小铜内角，硬件检测通过后可选CUDA卷积加速；CPU始终可用。
 
 具体预演使用最终布局二值判定；默认全局状态逐个迭代所有代表状态，并明确标出型变后连续概率未决项。有限代表状态不能证明连续6σ良率；复杂全图验证也不保证30 FPS。原GDS只读。
+
+预演、概率、Space Map、具体状态及动画中间帧使用会话缓存。相同条件再次显示不重新求解；改变条件使用独立缓存，切回原条件可复用。点击“方案评估”、更换GDS或关闭软件清理旧结果缓存。绘制和可见性仍按当前窗口实时更新。
 
 ## 验证与版本
 
@@ -46,8 +48,9 @@ QT_QPA_PLATFORM=offscreen python3 tests/gui_v9.py
 QT_QPA_PLATFORM=offscreen python3 tests/gui_v10.py
 QT_QPA_PLATFORM=offscreen python3 tests/gui_v11.py
 QT_QPA_PLATFORM=offscreen python3 tests/gui_v12.py
+QT_QPA_PLATFORM=offscreen python3 tests/gui_v13.py
 python3 -m die_shift_studio --project examples/示例C_多芯片晶圆接口.json --json results/复算.json
 python3 tools/package_release.py
 ```
 
-本地Git首个提交保留v0.4.0基线`fef0933`，本版标签`V12`；本版源码快照发布到用户授权的私有GitHub仓库，历史大型分析数据不上传。发布ZIP包含文件哈希与独立解压后的验证记录。附件图纸本身不打入通用包。
+本地Git首个提交保留v0.4.0基线`fef0933`，本版标签`V13`；本版源码快照发布到用户授权的私有GitHub仓库，历史大型分析数据不上传。发布ZIP包含文件哈希与独立解压后的验证记录。附件图纸本身不打入通用包。
