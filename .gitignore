@@ -21,3 +21,12 @@ rad.json
 *.flf
 #Test results file
 TestResults.xml
+# Die Shift Analyze runtime and build outputs
+__pycache__/
+*.py[cod]
+.venv*/
+build/
+dist/
+logs/
+startup-error.log
+results/*.log

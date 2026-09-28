@@ -1,0 +1,40 @@
+{
+  "probability": [
+    {
+      "k": 1,
+      "cell_um": 1.09375,
+      "integrated_area": 100.00000014902879,
+      "edge": 4.719620489362176e-18,
+      "mass_error": 2.842170943040401e-14
+    },
+    {
+      "k": 6,
+      "cell_um": 1.09375,
+      "integrated_area": 99.99999964757254,
+      "edge": 1.8224511469612764e-17,
+      "mass_error": 0.0
+    },
+    {
+      "k": 12,
+      "cell_um": 1.09375,
+      "integrated_area": 100.00000023612547,
+      "edge": 2.6188216864586313e-17,
+      "mass_error": 2.842170943040401e-14
+    }
+  ],
+  "iterations": [
+    {
+      "iteration": 1,
+      "newly_sufficient": 1,
+      "remaining": 0,
+      "accepted": 1
+    },
+    {
+      "iteration": 2,
+      "newly_sufficient": 0,
+      "remaining": 0,
+      "accepted": 2
+    }
+  ],
+  "released": 1
+}

@@ -1,0 +1,130 @@
+"""The same parallel-edge rules serve global display and candidate acceptance.
+
+KLayout supplies shielded edge pairs, not a raster approximation. Reported edge portions retain common contour vertices for adjacent pairs.
+Their shared endpoints are excluded before producing a marker. A 5 degree
+angle limit is independent of the minimum allowed copper corner angle.
+"""
+from collections import OrderedDict
+import math
+import numpy as np
+import shapely
+from shapely.strtree import STRtree
+
+PARALLEL_DEGREES=5.
+
+def rule_pairs(geometry,distance,dbu,kind='width'):
+    from .deformation import native_region
+    import klayout.db as kdb
+    region=native_region(geometry,dbu)
+    method={'width':region.width_check,'space':region.space_check,'notch':region.notch_check}[kind]
+    pairs=method(max(1,math.ceil(distance/dbu-1e-9)),whole_edges=False,
+                 ignore_angle=PARALLEL_DEGREES+1e-8,metrics=kdb.Region.Projection)
+    kept=kdb.EdgePairs()
+    for pair in pairs.each():
+        a,b=pair.first,pair.second
+        # Adjacent violating portions meet at their common contour vertex.
+        if a.p1==b.p1 or a.p1==b.p2 or a.p2==b.p1 or a.p2==b.p2:continue
+        kept.insert(pair)
+    return kept
+
+def rule_region(geometry,distance,dbu,kind='width'):
+    from .deformation import native_geometry
+    return native_geometry(rule_pairs(geometry,distance,dbu,kind).polygons(1),dbu)
+
+def rule_area(geometry,distance,dbu,kind='width'):
+    pairs=rule_pairs(geometry,distance,dbu,kind)
+    return float(pairs.polygons(1).area())*dbu*dbu
+
+def separation_pairs(a,b,distance,dbu):
+    from .deformation import native_region
+    import klayout.db as kdb
+    return native_region(a,dbu).separation_check(native_region(b,dbu),
+        max(1,math.ceil(distance/dbu-1e-9)),whole_edges=False,
+        ignore_angle=PARALLEL_DEGREES+1e-8,metrics=kdb.Region.Projection)
+
+def separation_area(a,b,distance,dbu):
+    overlap=a.intersection(b)
+    # A point / edge touch is an electrical short even with zero area.
+    return (max(dbu*dbu,overlap.area) if not overlap.is_empty else 0.)+float(separation_pairs(a,b,distance,dbu).polygons(1).area())*dbu*dbu
+
+def separation_region(a,b,distance,dbu):
+    """Parallel spacing plus actual overlap (a short never needs parallel edges)."""
+    from .deformation import native_geometry
+    overlap=a.intersection(b)
+    if not overlap.is_empty and overlap.area==0:overlap=overlap.buffer(dbu)
+    pairs=separation_pairs(a,b,distance,dbu)
+    return shapely.union_all([overlap,native_geometry(pairs.polygons(1),dbu)])
+
+class GlobalDRC:
+    """Full layout DRC with bounded, per-copper immutable geometry caching.
+
+    Static layers and same-owner rigid layers are checked once in local space;
+    only cross-owner spacing and deformed copper require new edge checks.
+    """
+    def __init__(self,model,parameters):
+        self.model=model;self.p=parameters;self.cache=OrderedDict();self.hits=0;self.misses=0
+        self.capacity=256
+    def cached(self,geometry,width,space,angle):
+        key=(geometry.wkb,width,space,angle)
+        if key in self.cache:self.hits+=1;self.cache.move_to_end(key);return self.cache[key]
+        from .deformation import angle_regions
+        self.misses+=1;dbu=self.model.data.dbu_um
+        out=[('线宽不足',rule_region(geometry,width,dbu)),('线距不足',rule_region(geometry,space,dbu,'space'))]
+        if angle:out.append(('最小内角不足',angle_regions(geometry,angle,dbu)))
+        out=[(k,g) for k,g in out if not g.is_empty]
+        self.cache[key]=out
+        while len(self.cache)>self.capacity:self.cache.popitem(last=False)
+        return out
+    def frame(self,states,replacements=None,settings=None,progress=lambda *_:None):
+        m=self.model;p=self.p;dbu=m.data.dbu_um;replacements=replacements or {};groups={};items=[]
+        # Datatypes on the same physical plane are checked together. Border and
+        # ignored layers never enter this metal-only map.
+        for key,role in m.roles.items():
+            if role not in ('运动RDL','固定RDL','运动过孔','固定过孔'):continue
+            groups.setdefault(key.split('/')[0],[]).append(key)
+        for n,(plane,keys) in enumerate(groups.items()):
+            progress(round(90*n/max(1,len(groups))),f'全局 DRC · 金属层 {plane}')
+            owner_groups={};world=[]
+            for key in keys:
+                hidden={i for q in replacements.get(key,[]) for i in q['indices']}
+                for i,poly in enumerate(m.cache.layers[key]['geometry']):
+                    if i in hidden:continue
+                    owner=int(m.bound.owners[key][i]);net=m.nodes[m.ids[key,i]]['net']
+                    owner_groups.setdefault((owner,m.roles[key].startswith('运动')),[]).append((key,poly,net))
+                for q in replacements.get(key,[]):owner_groups.setdefault((-1,False),[]).append((key,q['geometry'],q['net']))
+            for (owner,moving_rules),rows in owner_groups.items():
+                moving=owner>=0;width=p.wafer_line_width_um if moving_rules else p.line_width_um
+                space=p.wafer_line_space_um if moving_rules else p.line_space_um
+                # Use connected original copper; hole-boundary adjacency retained.
+                copper=shapely.union_all([v[1] for v in rows]);key=rows[0][0]
+                angle=settings.deformation_min_angle_deg if settings and any('RDL' in m.roles[v[0]] for v in rows) else 0
+                for kind,g in self.cached(copper,width,space,angle):
+                    moved=m.moved(g,owner,states) if moving else g
+                    items.append(dict(layer=key,layers=tuple({v[0] for v in rows}),geometry=moved,kind=kind))
+                for layer,g,net in rows:world.append((layer,m.moved(g,owner,states) if moving else g,net,owner,space))
+            if world:
+                tree=STRtree([r[1] for r in world])
+                for i,(key,g,net,owner,space) in enumerate(world):
+                    for j in tree.query(g,predicate='dwithin',distance=max(p.line_space_um,p.wafer_line_space_um)):
+                        if j<=i:continue
+                        other=world[j]
+                        # Same-owner gaps were checked in the merged local plane.
+                        # Still find overlapping distinct geometric networks.
+                        if owner==other[3]:
+                            bad=g.intersection(other[1]) if net!=other[2] else None
+                            if bad is not None and not bad.is_empty and bad.area==0:bad=bad.buffer(dbu)
+                        else:bad=separation_region(g,other[1],max(space,other[4]),dbu) if net!=other[2] else None
+                        if bad is not None and not bad.is_empty:
+                            items.append(dict(layer=key,layers=(key,other[0]),geometry=bad,kind='异网短接 / 线距不足'))
+        # Enclosure uses actual adjacent metal only, with no test at unconnected vias.
+        for r in m.records:
+            targets=[]
+            for key,i in m.connections.fixed_interfaces(r['key'],r['index']):
+                replacement=next((q['geometry'] for q in replacements.get(key,[]) if i in q['indices']),None)
+                targets.append(m.cache.layers[key]['geometry'][i] if replacement is None else replacement)
+            if not targets:continue
+            via=m.moved(r['poly'],r['owner'],states)
+            missing=via.buffer(p.annulus_um/math.cos(math.pi/128),quad_segs=32).difference(shapely.union_all(targets))
+            if missing.area>dbu*dbu:items.append(dict(layer=r['key'],geometry=missing,kind='孔盘包围不足'))
+        progress(100,f'全局 DRC 完成 · {len(items)} 组标记')
+        return items

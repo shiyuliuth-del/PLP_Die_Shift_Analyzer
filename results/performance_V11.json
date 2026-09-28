@@ -1,0 +1,42 @@
+{
+  "version": "V11",
+  "hardware": {
+    "cpu": 8,
+    "total_memory_mb": 15709,
+    "available_memory_mb": 9306,
+    "workers": 6,
+    "process_workers": 4,
+    "policy": "预留2逻辑CPU与65%可用内存；原生几何/FFT使用线程；大型独立原图DRC使用spawn进程；小任务串行"
+  },
+  "affinity": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "deformation_sequence": {
+    "total_ms": 211.50394435971975,
+    "first_nonzero_frame_ms": 16.25001709908247,
+    "median_ms": 6.629937095567584,
+    "frames": 25,
+    "accepted": 1
+  },
+  "GD55": {
+    "sha256": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+    "load_ms": 155.16928513534367,
+    "evaluation_ms": 2836.8322900496423,
+    "frame_ms": 1531.856695888564,
+    "probability_ms": 417.1128491871059,
+    "interfaces": 158,
+    "accepted": 51,
+    "remaining": 35,
+    "released": 6,
+    "grid_count": 158,
+    "max_area_error": 1.7993460055265587e-09,
+    "max_edge_probability": 2.807082412879408e-16
+  }
+}

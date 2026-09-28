@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="764.39952pt" height="173.99952pt" viewBox="0 0 764.39952 173.99952" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-09-28T08:31:55.150745</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.6.3, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 173.99952 
+L 764.39952 173.99952 
+L 764.39952 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="text_1">
+    <g id="patch_2">
+     <path d="M 62.209316 90.085746 
+L 136.690566 90.085746 
+Q 144.690566 90.085746 144.690566 82.085746 
+L 144.690566 59.99387 
+Q 144.690566 51.99387 136.690566 51.99387 
+L 62.209316 51.99387 
+Q 54.209316 51.99387 54.209316 59.99387 
+L 54.209316 82.085746 
+Q 54.209316 90.085746 62.209316 90.085746 
+z
+" style="fill: #edf3ef; stroke: #ccd6dd; stroke-width: 0.7; stroke-linejoin: miter"/>
+    </g>
+    <text style="font: 10px 'Noto Sans CJK JP', 'DejaVu Sans'" transform="translate(64.449941 67.953245)">沿实际网络追溯</text>
+    <text style="font: 10px 'Noto Sans CJK JP', 'DejaVu Sans'" transform="translate(62.209316 79.79512)">运动孔 → 固定孔</text>
+   </g>
+   <g id="patch_3">
+    <path d="M 186.953242 71.039808 
+Q 192.828116 71.039808 197.584956 71.039808 
+" style="fill: none; stroke: #7e93a3; stroke-linecap: round"/>
+    <path d="M 193.584956 69.039808 
+L 197.584956 71.039808 
+L 193.584956 73.039808 
+" style="fill: none; stroke: #7e93a3; stroke-linecap: round"/>
+   </g>
+   <g id="text_2">
+    <g id="patch_4">
+     <path d="M 246.949821 90.085746 
+L 326.949821 90.085746 
+Q 334.949821 90.085746 334.949821 82.085746 
+L 334.949821 59.99387 
+Q 334.949821 51.99387 326.949821 51.99387 
+L 246.949821 51.99387 
+Q 238.949821 51.99387 238.949821 59.99387 
+L 238.949821 82.085746 
+Q 238.949821 90.085746 246.949821 90.085746 
+z
+" style="fill: #eef3f8; stroke: #ccd6dd; stroke-width: 0.7; stroke-linejoin: miter"/>
+    </g>
+    <text style="font: 10px 'Noto Sans CJK JP', 'DejaVu Sans'" transform="translate(246.949821 67.953245)">优先局部孔盘调整</text>
+    <text style="font: 10px 'Noto Sans CJK JP', 'DejaVu Sans'" transform="translate(251.949821 79.79512)">输出满足包围量</text>
+   </g>
+   <g id="patch_5">
+    <path d="M 374.453122 71.039808 
+Q 380.327996 71.039808 385.084836 71.039808 
+" style="fill: none; stroke: #7e93a3; stroke-linecap: round"/>
+    <path d="M 381.084836 69.039808 
+L 385.084836 71.039808 
+L 381.084836 73.039808 
+" style="fill: none; stroke: #7e93a3; stroke-linecap: round"/>
+   </g>
+   <g id="text_3">
+    <g id="patch_6">
+     <path d="M 439.449701 90.085746 
+L 509.449701 90.085746 
+Q 517.449701 90.085746 517.449701 82.085746 
+L 517.449701 59.99387 
+Q 517.449701 51.99387 509.449701 51.99387 
+L 439.449701 51.99387 
+Q 431.449701 51.99387 431.449701 59.99387 
+L 431.449701 82.085746 
+Q 431.449701 90.085746 439.449701 90.085746 
+z
+" style="fill: #e8f0f6; stroke: #ccd6dd; stroke-width: 0.7; stroke-linejoin: miter"/>
+    </g>
+    <text style="font: 10px 'Noto Sans CJK JP', 'DejaVu Sans'" transform="translate(439.449701 67.953245)">选择长直适配段</text>
+    <text style="font: 10px 'Noto Sans CJK JP', 'DejaVu Sans'" transform="translate(439.449701 79.79512)">固定端保持不动</text>
+   </g>
+   <g id="patch_7">
+    <path d="M 561.953002 71.039808 
+Q 567.827876 71.039808 572.584716 71.039808 
+" style="fill: none; stroke: #7e93a3; stroke-linecap: round"/>
+    <path d="M 568.584716 69.039808 
+L 572.584716 71.039808 
+L 568.584716 73.039808 
+" style="fill: none; stroke: #7e93a3; stroke-linecap: round"/>
+   </g>
+   <g id="text_4">
+    <g id="patch_8">
+     <path d="M 623.548018 90.11012 
+L 700.351143 90.11012 
+Q 708.351143 90.11012 708.351143 82.11012 
+L 708.351143 59.969495 
+Q 708.351143 51.969495 700.351143 51.969495 
+L 623.548018 51.969495 
+Q 615.548018 51.969495 615.548018 59.969495 
+L 615.548018 82.11012 
+Q 615.548018 90.11012 623.548018 90.11012 
+z
+" style="fill: #f5edf2; stroke: #ccd6dd; stroke-width: 0.7; stroke-linejoin: miter"/>
+    </g>
+    <text style="font: 10px 'Noto Sans CJK JP', 'DejaVu Sans'" transform="translate(631.949581 67.92887)">完整几何校验</text>
+    <text style="font: 10px 'Noto Sans CJK JP', 'DejaVu Sans'" transform="translate(623.548018 79.819495)">线宽 / 线距 / 内角</text>
+   </g>
+   <g id="text_5">
+    <text style="fill: #556b7d; font: 9px 'Noto Sans CJK JP', 'DejaVu Sans'; text-anchor: middle" x="382.19976" y="156.569137" transform="rotate(-0 382.19976 156.569137)">通过 → 释放窗口并继续迭代     |     有 DRC → 显示最佳候选与粉色违规区域     |     拓扑不合法 → 保留源图形</text>
+   </g>
+  </g>
+ </g>
+</svg>

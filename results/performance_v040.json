@@ -1,0 +1,129 @@
+{
+  "version": "0.4.0",
+  "python": "3.12.3",
+  "platform": "Linux-7.0.0-31-generic-x86_64-with-glibc2.39",
+  "resources": {
+    "cpu": 8,
+    "available_memory_mb": 7863,
+    "workers": 4,
+    "policy": "最多4个工作线程、约半数CPU；按可用内存限流；界面线程不参与计算"
+  },
+  "source_sha256": "e4d02acd7e787b6bbe0f19dd7200bbd3435872f0121b3655655c76d081df7535",
+  "copies": 48,
+  "polygons": 18436,
+  "vertices": 657424,
+  "description": "Same-input reference vs cache; scheme 1 state check; all interfaces eligible in both kernels; no nominal contact extraction, GUI rasterization or routing in timing; sequential groups, shared-host variability.",
+  "equivalent": true,
+  "calibration": {
+    "workers": 1,
+    "samples_ms": {
+      "1": [
+        19.21974099241197,
+        20.52402193658054
+      ],
+      "4": [
+        26.364757912233472,
+        44.74380798637867
+      ]
+    },
+    "reason": "Use threads only with at least 10% measured reduction"
+  },
+  "timings": {
+    "reference_ownership": {
+      "samples_ms": [
+        325.2521869726479
+      ],
+      "median_ms": 325.2521869726479
+    },
+    "cache_build": {
+      "samples_ms": [
+        93.90498208813369
+      ],
+      "median_ms": 93.90498208813369
+    },
+    "cache_bind": {
+      "samples_ms": [
+        26.640977011993527
+      ],
+      "median_ms": 26.640977011993527
+    },
+    "reference_transform": {
+      "samples_ms": [
+        105.1322731655091,
+        106.91718384623528,
+        105.84476497024298,
+        113.15822112374008,
+        104.94343005120754,
+        104.37657707370818,
+        104.20090006664395
+      ],
+      "median_ms": 105.1322731655091
+    },
+    "cached_transform_serial": {
+      "samples_ms": [
+        24.35521990992129,
+        21.190325031057,
+        18.72266107238829,
+        18.97148904390633,
+        18.57719593681395,
+        18.571326974779367,
+        18.61384022049606
+      ],
+      "median_ms": 18.72266107238829
+    },
+    "cached_transform_threads": {
+      "samples_ms": [
+        24.24981608055532,
+        28.23273907415569,
+        20.01301199197769,
+        18.229816108942032,
+        19.277609884738922,
+        25.717792101204395,
+        19.665946951135993
+      ],
+      "median_ms": 20.01301199197769
+    },
+    "calibration": {
+      "samples_ms": [
+        112.45423695072532
+      ],
+      "median_ms": 112.45423695072532
+    },
+    "cached_transform_auto": {
+      "samples_ms": [
+        18.659583991393447,
+        19.318305887281895,
+        21.350673865526915,
+        18.602171912789345,
+        18.499900121241808,
+        18.627244979143143,
+        19.106033025309443
+      ],
+      "median_ms": 18.659583991393447
+    },
+    "reference_state_check": {
+      "samples_ms": [
+        178.3116920851171,
+        177.6971509680152,
+        177.1869428921491,
+        178.11001697555184,
+        181.5270008519292,
+        180.44767389073968,
+        181.8636090029031
+      ],
+      "median_ms": 178.3116920851171
+    },
+    "cached_state_check": {
+      "samples_ms": [
+        1.390277873724699,
+        1.3956010807305574,
+        14.700560132041574,
+        1.473468029871583,
+        1.0323070455342531,
+        1.2715698685497046,
+        1.1851650197058916
+      ],
+      "median_ms": 1.390277873724699
+    }
+  }
+}

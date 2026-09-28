@@ -1,0 +1,13 @@
+{
+  "accepted": 2,
+  "best_effort": 0,
+  "violations": 0,
+  "modes": [
+    "local",
+    "three_part"
+  ],
+  "spans_um": [
+    40.0,
+    780.0
+  ]
+}

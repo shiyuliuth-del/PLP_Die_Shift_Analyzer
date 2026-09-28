@@ -1,0 +1,49 @@
+{
+  "version": "V12",
+  "hardware": {
+    "cpu": 8,
+    "total_memory_mb": 15708,
+    "available_memory_mb": 10878,
+    "workers": 6,
+    "process_workers": 4,
+    "policy": "预留2逻辑CPU与65%可用内存；原生几何/FFT使用线程；大型独立原图DRC使用spawn进程；小任务串行"
+  },
+  "note": "Wall time; DRC on. Warm quick frames revalidate the prior topology; idle refinement searches the full finite family. No 30 FPS claim.",
+  "example_G": {
+    "sha256": "a1cdff4eb5759ffc291143ffe2a81d7e19efdc11ed85076d337990568b54b5ad",
+    "load_ms": 11.224803999994037,
+    "interfaces": 2,
+    "full_frame_ms": 138.64608099993347,
+    "accepted": 2,
+    "best_effort": 0,
+    "blocked": 0,
+    "warm_quick_samples_ms": [
+      71.59938999984661,
+      68.80674600006387,
+      76.73495299991373,
+      77.33076599993183,
+      84.70536199979506,
+      94.69460800005436,
+      82.79746999983217,
+      86.81004300001405
+    ],
+    "warm_quick_median_ms": 80.064117999882,
+    "warm_quick_max_ms": 94.69460800005436
+  },
+  "GD55": {
+    "sha256": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+    "load_ms": 731.5149240000665,
+    "interfaces": 158,
+    "full_frame_ms": 46240.90080999986,
+    "accepted": 52,
+    "best_effort": 38,
+    "blocked": 21,
+    "warm_quick_samples_ms": [
+      4055.2433500001825,
+      6412.146317999941,
+      5807.453459000044
+    ],
+    "warm_quick_median_ms": 5807.453459000044,
+    "warm_quick_max_ms": 6412.146317999941
+  }
+}

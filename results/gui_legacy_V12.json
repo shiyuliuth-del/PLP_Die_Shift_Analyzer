@@ -1,0 +1,19 @@
+{
+  "iteration_history": [
+    {
+      "iteration": 1,
+      "newly_sufficient": 1,
+      "remaining": 0,
+      "accepted": 1
+    },
+    {
+      "iteration": 2,
+      "newly_sufficient": 0,
+      "remaining": 0,
+      "accepted": 2
+    }
+  ],
+  "first_validated_stream_frame_ms": 289.8841440000979,
+  "streamed_frames": 3,
+  "status": "PASS"
+}
