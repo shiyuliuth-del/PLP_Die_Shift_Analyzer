@@ -210,10 +210,10 @@ class MainWindow(W.QMainWindow):
         self.drag_timer.timeout.connect(lambda:self.plot_layout(preserve=True))
         self.layer_drag.moved.connect(lambda:self.drag_timer.start() if not self.drag_timer.isActive() else None)
         self.layer_drag.finished.connect(self.layer_moved)
-        target=W.QGroupBox('目标覆盖要求');form=W.QFormLayout(target)
+        target=W.QGroupBox('良率要求');form=W.QFormLayout(target)
         self.target_sigma=W.QComboBox();self.target_sigma.setEditable(False);self.target_sigma.addItems([str(i) for i in range(0,13)]+['∞']);self.target_sigma.setCurrentText('6')
         self.target_sigma.setToolTip('有限非零k：最大幅度 B 决定截断前 σ=B/k；0保留最近尺度并检查全部有界概率。∞或具体预演按当前接触判断。')
-        self.target_sigma.currentTextChanged.connect(self.coverage_changed);form.addRow('目标覆盖级别',self.target_sigma);page.addWidget(target)
+        self.target_sigma.currentTextChanged.connect(self.coverage_changed);form.addRow('良率级别',self.target_sigma);page.addWidget(target)
         amplitude=self._group(page,'偏移单边幅度',['single_bound_x_um','single_bound_y_um','multi_bound_x_um','multi_bound_y_um','bound_angle_deg'])
         self.pivot_editor=PivotEditor();amplitude.addRow('旋转中心',self.pivot_editor);self.pivot_editor.valueChanged.connect(self.invalidate)
         self.per_die_toggle=W.QCheckBox('按芯片分别设置单边幅度');page.addWidget(self.per_die_toggle)
@@ -306,7 +306,7 @@ class MainWindow(W.QMainWindow):
         choices={'probability_method':[('Sobol准蒙特卡洛','sobol'),('蒙特卡洛','monte_carlo'),('确定性积分（无随机，全网格）','quadrature')],
                  'space_cmap':[('浅色 · 青绿紫','pastel'),('黄绿蓝','YlGnBu'),('蓝紫','BuPu'),('Viridis','viridis'),('Cividis','cividis')],
                  'space_interpolation':[('无平滑','nearest'),('双线性','bilinear'),('双三次','bicubic')]}
-        choices['probability_cmap']=[('浅色 · 蓝青','blue')]+choices['space_cmap'][1:]
+        choices['probability_cmap']=[('清晰 · 蓝青','blue'),('青绿','teal'),('暖橙','amber'),('玫紫','rose')]+choices['space_cmap'][1:]+[('等感知 · 紫橙','plasma'),('深紫 · 暖白','magma'),('多色 · 高对比','turbo')]
         choices['probability_interpolation']=choices['space_interpolation']
         choices['space_scope']=[('运动内容范围','moving'),('整个封装范围','package')]
         def choice(form,key,title):
@@ -324,10 +324,12 @@ class MainWindow(W.QMainWindow):
         spin(probability,'probability_cell_um','网格 / μm（0自动）',0,1000,3)
         spin(probability,'angle_bins','实体角度分组上限',4,128)
         choice(probability,'probability_cmap','配色方案');choice(probability,'probability_interpolation','显示平滑')
-        check=W.QCheckBox('显示目标覆盖级别范围');self.setting_fields['probability_show_ranges']=check;probability.addRow(check);check.toggled.connect(self.settings_changed)
+        check=W.QCheckBox('显示良率级别范围');self.setting_fields['probability_show_ranges']=check;probability.addRow(check);check.toggled.connect(self.settings_changed)
         color=ColorButton();self.setting_fields['probability_target_color']=color;probability.addRow('当前级别虚线颜色',color);color.valueChanged.connect(self.settings_changed)
         ranges=RangeEditor();self.setting_fields['probability_ranges']=ranges;probability.addRow(ranges);ranges.valueChanged.connect(self.settings_changed)
         spin(probability,'probability_alpha','叠加不透明度',.05,.95,2)
+        spin(probability,'probability_gamma','低概率增强 γ（越小越明显）',.1,1.,2)
+        self.setting_fields['probability_gamma'].setToolTip('只调整颜色和透明度，不改变概率数值、边界或良率判定。0概率保持透明。')
         spin(probability,'contact_box_budget','接触概率自适应积分预算',128,32768)
         page.addWidget(label('实体概率按所选方法计算；虚线包络表示输入幅度全部组合，并非等概率边界。默认接触判定用概率上下界；积分不足时明确标为待细化。∞仅作当前位置二值判断。'))
         space=group('Space Map')
@@ -337,6 +339,8 @@ class MainWindow(W.QMainWindow):
         spin(space,'space_alpha','叠加不透明度',.05,.95,2)
         animation=group('视图与预演运动')
         enabled=W.QCheckBox('启用渐变插值运动');self.setting_fields['animation_enabled']=enabled;animation.addRow(enabled);enabled.toggled.connect(self.settings_changed)
+        choices['animation_strategy']=[('算完连续播放','prepared'),('边算边显示','stream')]
+        choice(animation,'animation_strategy','型变动画播放方式')
         spin(animation,'animation_duration_ms','时长上限 / ms',80,3000)
         spin(animation,'animation_speed','预演速度级别',1,5)
         spin(animation,'animation_fps','FPS（自动计算插值数）',10,120)
@@ -375,6 +379,9 @@ class MainWindow(W.QMainWindow):
         spin(yield_group,'yield_box_budget','全输入良率积分预算 / DIE',64,65536)
         spin(yield_group,'yield_tolerance','良率区间宽度目标（概率）',.000001,.1,6)
         self.setting_fields['safe_box_precision'].setToolTip('返回包含输入均值的安全内盒；多个端点顺序比较体积。未定候选拒绝，精度不代表全局最优误差。')
+        drc_group=group('DRC检查')
+        spin(drc_group,'drc_tolerance_um','线宽/线距容差 ± / μm',-10000,10000,3)
+        self.setting_fields['drc_tolerance_um'].setToolTip('有效最小值 = 工艺值 − 容差。正值放宽，负值收紧；默认0。只影响DRC与型变验收，不改变包围量或概率。')
         drawing=group('接触标记');spin(drawing,'intrusion_alpha','侵入面积不透明度',.05,.85,2)
         for prefix,title in [('contact','接触空心圆'),('unadapted','未适配叉号')]:
             color=ColorButton();self.setting_fields[prefix+'_marker_color']=color;drawing.addRow(title+'颜色',color);color.valueChanged.connect(self.settings_changed)
@@ -421,8 +428,12 @@ class MainWindow(W.QMainWindow):
         values={k:(w.currentData() if isinstance(w,W.QComboBox) else w.isChecked() if isinstance(w,W.QCheckBox) else w.value()) for k,w in self.setting_fields.items()}
         intent=self._motion_intent if self.transition.timer.isActive() else None
         self.stop_animation()
-        old_settings=self.view_settings;updated=ViewSettings.from_dict(values);deform=updated.deformation_key()!=old_settings.deformation_key();numeric=(updated.numeric_key()!=self.view_settings.numeric_key() or (updated.probability_show_ranges!=old_settings.probability_show_ranges and self.target_sigma.currentText()=='∞'));self.view_settings=updated;self.enable_settings()
-        live_motion=any(getattr(updated,k)!=getattr(old_settings,k) for k in ('animation_enabled','animation_duration_ms','animation_fps','animation_speed'))
+        old_settings=self.view_settings;updated=ViewSettings.from_dict(values)
+        from .drc_rules import effective_rules
+        try:effective_rules(self.params(),updated)
+        except ValueError as exc:self.load_view_settings();self.error(str(exc));return
+        deform=updated.deformation_key()!=old_settings.deformation_key();numeric=(updated.numeric_key()!=self.view_settings.numeric_key() or (updated.probability_show_ranges!=old_settings.probability_show_ranges and self.target_sigma.currentText()=='∞'));self.view_settings=updated;self.enable_settings();self.refresh_extreme_colors()
+        live_motion=any(getattr(updated,k)!=getattr(old_settings,k) for k in ('animation_enabled','animation_duration_ms','animation_fps','animation_speed','animation_strategy'))
         if numeric:
             self.dirty=self.result is not None
             self.revision+=1;self.probability_data=None;self.space_data=None
@@ -521,7 +532,7 @@ class MainWindow(W.QMainWindow):
                 n,t=next(reversed(self._tasks.values()));self.progress.setValue(n);self.progress.setFormat(f'{n}% · '+t[:36])
         worker.finished.connect(finish)
     def reset_session_cache(self):
-        self.stop_animation()
+        self.stop_animation();self._prepared_motion=None;self._prepared_package=None
         if self.preview_worker:self.preview_worker.cancelled.set()
         if self.motion_worker:self.motion_worker.cancelled.set()
         self.retired_sessions.append((self.session_values,self.session_engines))
@@ -553,7 +564,7 @@ class MainWindow(W.QMainWindow):
         self.probability_data=None;self.space_data=None;self.preview_ticket+=1;self.preview_pending=None
         if self.preview_worker:self.preview_worker.cancelled.set()
         self._coverage_pending=True;self.coverage_timer.start()
-        self.statusBar().showMessage('覆盖级别已改变，正在更新概率、Space Map和窗口判定…')
+        self.statusBar().showMessage('良率级别已改变，正在更新概率、Space Map和窗口判定…')
     def refresh_coverage(self):
         if not self._coverage_pending or not self.data:return
         if self.worker is not None:self.coverage_timer.start();return
@@ -756,6 +767,8 @@ class MainWindow(W.QMainWindow):
         duration,steps=motion_timing(self.view_settings,distance,float(max(start_size)),True)
         self.transition.start(duration,steps,update,complete)
     def show_frame_status(self,frame):
+        if frame and frame.get('drc_rules') and self.result is not None:
+            self.result['preview_drc_rules']=frame['drc_rules'];self.report_dirty=True
         message=('预演已更新' if frame is not None else '名义位置')+f' · 当前所选方案 {len(self.filtered_issues)} 处接触或风险'
         if frame is not None:
             from .statistics import mean_and_bounds
@@ -774,6 +787,7 @@ class MainWindow(W.QMainWindow):
             if self._animation_cleanup:
                 cleanup=self._animation_cleanup;self._animation_cleanup=None;cleanup()
             self._interpolated_states=None;self.current_frame=frame;self.plot_layout(preserve=True);self.update_histograms()
+            if frame is not None:self.update_state_table(frame['states'])
             self.show_frame_status(frame)
         if not self.view_settings.animation_enabled or self.engine is None or self.case is None or (self.deformation_toggle.isChecked() and frame is not None):
             complete();return
@@ -793,10 +807,33 @@ class MainWindow(W.QMainWindow):
             else:self.show_motion_frame(self.engine.frame(states))
         self.statusBar().showMessage('插值运动中；控制区与接触标记随当前帧实时更新。')
         self.transition.start(duration,steps,update,complete)
+    def play_prepared_motion(self,frame,motion):
+        self.stop_animation();self._motion_intent=('frame',frame)
+        replay=motion['frames'];fractions=np.array([q[0] for q in replay]);last=[-1]
+        def update(t):
+            i=int(np.searchsorted(fractions,t,side='right'))-1
+            if i>=0 and i!=last[0]:last[0]=i;self.show_motion_frame(replay[i][1])
+        def complete():
+            self._motion_intent=None;self._interpolated_states=None;self.current_frame=frame
+            self.plot_layout(preserve=True);self.update_histograms();self.show_frame_status(frame)
+            if frame is not None:self.update_state_table(frame['states'])
+        if not self.view_settings.animation_enabled:complete();return
+        self.statusBar().showMessage(('播放缓存型变动画' if motion['cached'] else '播放已校验型变动画')+f" · {len(replay)} 个中间帧")
+        self.transition.start(motion['duration'],motion['steps'],update,complete)
+
     def show_motion_frame(self,frame):
         self._interpolated_states=frame['states'];self.current_frame=frame;self._in_animation=True
-        try:self.plot_layout(preserve=True)
+        try:self.plot_layout(preserve=True);self.update_state_table(frame['states'])
         finally:self._in_animation=False
+    def update_state_table(self,states):
+        if self.state_table.rowCount()!=len(states):self.state_table.setRowCount(len(states))
+        kind='手动输入' if self.manual_states is not None else '代表极端' if self.active_preview is not None else '名义位置'
+        for i,z in enumerate(states):
+            for j,value in enumerate([i+1,fmt(z[0],6),fmt(z[1],6),fmt(math.degrees(z[2]),6),kind]):
+                text=str(value);item=self.state_table.item(i,j)
+                if item is None:self.state_table.setItem(i,j,W.QTableWidgetItem(text))
+                elif item.text()!=text:item.setText(text)
+
     def launch_motion_frame(self):
         if self.motion_worker is not None or self.motion_pending is None:return
         generation,revision,engine,states=self.motion_pending;self.motion_pending=None
@@ -1029,7 +1066,7 @@ class MainWindow(W.QMainWindow):
         zoom=min(np.ptp(self.ax.get_xlim())/np.ptp(self._default_view[0]),np.ptp(self.ax.get_ylim())/np.ptp(self._default_view[1]))
         visible=zoom>=.995 and any(self.visible_boxes[k].isChecked() for k,r in self.roles().items() if r=='芯片边框')
         for label_ in self.die_labels:label_.set_visible(visible)
-        if self.legend is not None:self.legend.set_visible(np.allclose(self.ax.get_xlim(),self._default_view[0],rtol=0,atol=1e-5) and np.allclose(self.ax.get_ylim(),self._default_view[1],rtol=0,atol=1e-5))
+        if self.legend is not None:self.legend.set_visible(visible)
     def issue_origin(self,issue):
         origin=np.asarray(issue['origin'],float)
         if self.current_frame is not None:
@@ -1039,7 +1076,7 @@ class MainWindow(W.QMainWindow):
         return origin
     def refresh_legend(self):
         stamp=(tuple((k,self.visible_boxes[k].isChecked(),str(self.style_for(k))) for k in self.ordered_layers()),
-               self.current_frame is not None,bool(getattr(self,'deformation_diagnostics',[])),self.probability_toggle.isChecked(),id(self.probability_data),self.view_settings.probability_cmap,self.view_settings.probability_alpha,self.view_settings.probability_show_ranges,self.view_settings.probability_ranges,self.view_settings.probability_target_color,self.view_settings.contact_marker_color,self.view_settings.unadapted_marker_color)
+               self.current_frame is not None,bool(getattr(self,'deformation_diagnostics',[])),self.probability_toggle.isChecked(),id(self.probability_data),self.view_settings.probability_cmap,self.view_settings.probability_alpha,self.view_settings.probability_gamma,self.view_settings.probability_show_ranges,self.view_settings.probability_ranges,self.view_settings.probability_target_color,self.view_settings.contact_marker_color,self.view_settings.unadapted_marker_color)
         if stamp==self._legend_stamp:return
         self._legend_stamp=stamp
         if self.legend is not None:self.legend.remove()
@@ -1056,7 +1093,10 @@ class MainWindow(W.QMainWindow):
             handles += [Line2D([],[],color='#3c9995',ls='--',label='最小包围区域'),Line2D([],[],color='#aa78ab',ls='--',label='线距控制区域'),Line2D([],[],color='#92979e',ls='--',label='当前孔中心→接触位置')]
         if self.probability_toggle.isChecked() and self.probability_data:
             maximum=max((float(q['probability'].max()) for q in self.probability_data['maps']),default=0)
-            handles += [Patch(facecolor=self.probability_colormap()(.08),alpha=self.view_settings.probability_alpha,label='实体覆盖概率：浅色透明为低概率'),Patch(facecolor=self.probability_colormap()(maximum),alpha=self.view_settings.probability_alpha,label=f'实体覆盖概率高（最大{maximum:.1%}）')]
+            norm=matplotlib.colors.PowerNorm(self.view_settings.probability_gamma,0,1)
+            for value,title in ((.001,'覆盖概率0.1%（低概率已增强）'),(maximum,f'覆盖概率最大{maximum:.1%}')):
+                rgba=list(self.probability_colormap()(norm(value)));rgba[3]*=self.view_settings.probability_alpha
+                handles.append(Patch(facecolor=rgba,label=title))
         if self.probability_toggle.isChecked() and self.probability_data and self.view_settings.probability_show_ranges:
             levels=dict(self.view_settings.probability_ranges);levels[self.params().target_nsigma]=self.view_settings.probability_target_color
             for level,color in levels.items():
@@ -1065,7 +1105,7 @@ class MainWindow(W.QMainWindow):
         self.legend=self.ax.legend(handles=handles,loc='upper right',fontsize=7,framealpha=1,ncol=1)
     def draw_probability(self):
         active=self.probability_toggle.isChecked() and self.probability_data is not None
-        stamp=(id(self.probability_data),bool(active),self.view_settings.probability_alpha,self.view_settings.probability_cmap,self.view_settings.probability_interpolation,self.view_settings.probability_show_ranges,self.view_settings.probability_ranges,self.view_settings.probability_target_color,self.target_sigma.currentText())
+        stamp=(id(self.probability_data),bool(active),self.view_settings.probability_alpha,self.view_settings.probability_cmap,self.view_settings.probability_gamma,self.view_settings.probability_interpolation,self.view_settings.probability_show_ranges,self.view_settings.probability_ranges,self.view_settings.probability_target_color,self.target_sigma.currentText())
         if stamp!=self.probability_stamp:
             for a in self.probability_artists:a.remove()
             self.probability_artists=[];self.probability_stamp=stamp
@@ -1073,7 +1113,7 @@ class MainWindow(W.QMainWindow):
                 cmap=self.probability_colormap()
                 for q in self.probability_data['maps']:
                     values=np.ma.masked_where(q['probability']==0,q['probability'])
-                    a=self.ax.imshow(values,extent=q['extent'],origin='lower',cmap=cmap,norm=Normalize(0,1),interpolation=self.view_settings.probability_interpolation,alpha=self.view_settings.probability_alpha,zorder=4)
+                    a=self.ax.imshow(values,extent=q['extent'],origin='lower',cmap=cmap,norm=matplotlib.colors.PowerNorm(self.view_settings.probability_gamma,0,1),interpolation=self.view_settings.probability_interpolation,alpha=self.view_settings.probability_alpha,zorder=4)
                     a._via_layer=q['key'];e=q['extent'];a._world_bounds=(e[0],e[2],e[1],e[3]);self.probability_artists.append(a)
                     if self.view_settings.probability_show_ranges:
                         from .probability_overlay import coverage_envelope
@@ -1092,7 +1132,8 @@ class MainWindow(W.QMainWindow):
     def probability_colormap(self):
         name=self.view_settings.probability_cmap
         if getattr(self,'_probability_cmap_name',None)!=name:
-            base=LinearSegmentedColormap.from_list('via_probability',['#ecf5f8','#abd1df','#287e98']) if name=='blue' else matplotlib.colormaps[name]
+            palettes={'blue':['#afd2e5','#559cbb','#19557a'],'teal':['#b1d7c9','#55a997','#185f59'],'amber':['#f3d49d','#dea34b','#934513'],'rose':['#dcb4cf','#b979ad','#713874']}
+            base=LinearSegmentedColormap.from_list('via_probability' if name=='blue' else name,palettes[name]) if name in palettes else matplotlib.colormaps[name]
             x=np.linspace(0,1,4096);colors=base(x);colors[:,3]=np.sqrt(x)
             from matplotlib.colors import ListedColormap
             self._probability_cmap=ListedColormap(colors,name=base.name);self._probability_cmap.set_bad((0,0,0,0));self._probability_cmap_name=name
@@ -1235,30 +1276,6 @@ class MainWindow(W.QMainWindow):
                 key=(id(field),states.tobytes() if show_frame else None,visible,settings.space_resolution)
                 prepared=(key,session_values.get_or_compute(('package',signature,states.tobytes(),visible,settings.space_resolution),lambda:package_map(field,case['board'],actual.bound.centers,states,visible,settings.space_resolution)))
             motion=None
-            if show_frame and deform and result is not None and settings.animation_enabled and not direct and not np.array_equal(start_states,states):
-                import time
-                from .animation import motion_timing
-                travel=float(np.max(np.linalg.norm(states[:,:2]-start_states[:,:2],axis=1)+actual.bound.owner_radii*np.abs(states[:,2]-start_states[:,2])))
-                duration,steps=motion_timing(settings,travel,view_span)
-                motion_key=('animation',signature,actual.cache_key(),start_states.tobytes(),states.tobytes(),duration,steps)
-                replay=session_values.get(motion_key)
-                started=time.perf_counter();frames=0
-                if replay is not None:
-                    for elapsed,intermediate in replay:
-                        worker.cancelled.wait(max(0,elapsed-(time.perf_counter()-started)))
-                        progress(round(90*elapsed/max(.001,duration/1000)),'重用已校验动画缓存')
-                        worker.publish((actual,intermediate,distribution,con,actual_cache,field));frames+=1
-                else:
-                    replay=[];fraction=min(.2,1/max(2,steps))
-                    while fraction<1:
-                        t=fraction*fraction*(3-2*fraction)
-                        intermediate=actual.frame(start_states*(1-t)+states*t,progress,quick=True)
-                        elapsed=min(duration/1000,time.perf_counter()-started)
-                        replay.append((elapsed,intermediate));progress(round(90*fraction),'型变插值：已校验当前帧')
-                        worker.publish((actual,intermediate,distribution,con,actual_cache,field));frames+=1
-                        fraction=max(fraction+1/max(2,steps),(time.perf_counter()-started)*1000/duration)
-                    session_values[motion_key]=replay
-                motion=dict(streamed=True,count=frames,cached=motion_key in session_values)
             frame=actual.frame(states,progress,quick=direct and not settle) if show_frame or drc or (deform and result is not None) else None
             if frame is not None and not show_frame:
                 frame=dict(frame,nominal_global=True)
@@ -1266,6 +1283,10 @@ class MainWindow(W.QMainWindow):
                     frame=actual.global_frame(frame,settings,progress)
                 elif math.isfinite(params.target_nsigma):
                     frame['contact']=dict(frame['contact'],issues=(result or {}).get('issues',[]),intrusions=[])
+            if deform and result is not None and settings.animation_enabled and not direct and not np.array_equal(start_states,states):
+                from .prepared_motion import prepare_motion
+                publish=(lambda intermediate:worker.publish((actual,intermediate,distribution,con,actual_cache,field))) if settings.animation_strategy=='stream' else None
+                motion=prepare_motion(actual,start_states,states,settings,view_span,session_values,progress,publish,worker.cancelled)
             if direct:motion=dict(direct=True,settled=settle)
             return actual,frame,distribution,con,actual_cache,field,prepared,motion
         worker=Worker(work,self);worker.interactive_refinement=bool(direct and settle);self.preview_worker=worker;self.watch_worker(worker,'预演计算')
@@ -1286,11 +1307,10 @@ class MainWindow(W.QMainWindow):
                 self.result['adaptive_preview']=frame['global_deformation'];self.report_dirty=True
             if self._prepared_motion and (self._prepared_motion.get('streamed') or self._prepared_motion.get('direct')):
                 self.current_frame=frame;self.plot_layout(preserve=True);self.update_histograms();self.show_frame_status(frame);self.log_bus.emit('交互帧已更新' if self._prepared_motion.get('direct') else '型变流式帧完成：'+str(self._prepared_motion['count']))
+            elif self._prepared_motion and self._prepared_motion.get('prepared'):
+                self.play_prepared_motion(frame,self._prepared_motion)
             else:self.present_frame(frame)
-            if self.current_frame is not None:
-                self.state_table.setRowCount(len(states))
-                for i,z in enumerate(states):
-                    for j,x in enumerate([i+1,fmt(z[0],6),fmt(z[1],6),fmt(math.degrees(z[2]),6),'手动输入' if self.manual_states is not None else '代表极端']):self.state_table.setItem(i,j,W.QTableWidgetItem(str(x)))
+            if self.current_frame is not None and not self.transition.timer.isActive():self.update_state_table(self.current_frame['states'])
         def rejected(message):
             if ticket!=self.preview_ticket:return
             self.statusBar().showMessage('预演未应用：'+message.split('Traceback')[0]);self.error(message)
@@ -1357,7 +1377,7 @@ class MainWindow(W.QMainWindow):
                 validator=PreviewEngine(actual_cache,case,roles,motions,p,r,connections)
                 try:return evaluate_states(validator,catalog,settings,progress)
                 finally:validator.close()
-            try:r['extreme_validation']=values.get_or_compute(('extreme-validation',key,settings.deformation_min_angle_deg),check_extremes)
+            try:r['extreme_validation']=values.get_or_compute(('extreme-validation',key,settings.deformation_min_angle_deg,settings.drc_tolerance_um),check_extremes)
             except InterruptedError:raise
             except Exception:
                 message=traceback.format_exc();self.log_bus.emit('极端状态完整校验未完成，未校验行不会标绿：'+message,'ERROR')
@@ -1457,6 +1477,7 @@ class MainWindow(W.QMainWindow):
     def refresh_extreme_colors(self,frame=None):
         from .extreme_validation import frame_status
         baseline=(self.result or {}).get('extreme_validation',[])
+        if (self.result or {}).get('view_settings',{}).get('drc_tolerance_um',0)!=self.view_settings.drc_tolerance_um:baseline=[]
         for row,(index,item) in enumerate(self.page_items,1):
             status=baseline[index] if index<len(baseline) and not self.dirty else {}
             if frame is not None and not frame.get('nominal_global') and np.array_equal(frame['states'],item['states']):

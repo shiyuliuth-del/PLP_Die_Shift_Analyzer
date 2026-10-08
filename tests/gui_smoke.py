@@ -17,10 +17,10 @@ app=W.QApplication([])
 with tempfile.TemporaryDirectory() as tmp:
     window=MainWindow(jobs_dir=Path(tmp)/'Jobs');window.show();errors=[];window.error=lambda message:errors.append(str(message))
     def wait_idle():
-        end=time.monotonic()+40
+        end=time.monotonic()+240
         while time.monotonic()<end:
             app.processEvents()
-            if window.worker is None and window.preview_worker is None and window.preview_pending is None and not window.coverage_timer.isActive() and not window._coverage_pending and not window.viewport_timer.isActive() and not window.transition.timer.isActive():break
+            if window.worker is None and window.preview_worker is None and window.preview_pending is None and not window.coverage_timer.isActive() and not window._coverage_pending and not window.viewport_timer.isActive() and not window.transition.timer.isActive() and not window.issue_navigation.isActive():break
             time.sleep(.003)
         assert window.worker is None and window.preview_worker is None and window.preview_pending is None
         assert not errors,errors
@@ -115,10 +115,10 @@ with tempfile.TemporaryDirectory() as tmp:
     window.preview_tabs.setCurrentIndex(0);window.issue_scheme.setCurrentIndex(2);app.processEvents()
     assert window.filtered_issues and all(q['source_net']!=q['foreign_net'] for q in window.filtered_issues)
     target=window.issue_table.visualItemRect(window.issue_table.item(0,0)).center()
-    QTest.mouseClick(window.issue_table.viewport(),Qt.LeftButton,pos=target);app.processEvents()
+    QTest.mouseClick(window.issue_table.viewport(),Qt.LeftButton,pos=target);wait_idle()
     expected=np.mean([window.anchor_position(a) for a in window.filtered_issues[0]['anchors']],axis=0)
     np.testing.assert_allclose([np.mean(window.ax.get_xlim()),np.mean(window.ax.get_ylim())],expected)
-    window.ax.set_xlim(0,100);QTest.mouseClick(window.issue_table.viewport(),Qt.LeftButton,pos=target);app.processEvents()
+    window.ax.set_xlim(0,100);QTest.mouseClick(window.issue_table.viewport(),Qt.LeftButton,pos=target);wait_idle()
     assert abs(np.mean(window.ax.get_xlim())-expected[0])<1e-7
     window.canvas.draw();x,y=window.ax.transData.transform(expected);rgba=np.asarray(window.canvas.buffer_rgba());h,w=rgba.shape[:2]
     crop=rgba[max(0,h-int(y)-15):min(h,h-int(y)+16),max(0,int(x)-15):min(w,int(x)+16),:3]

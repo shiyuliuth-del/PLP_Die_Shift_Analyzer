@@ -49,7 +49,7 @@ for target in ('1','2','12'):
  assert all(q['edge_probability']<1e-10 for q in w.probability_data['maps'])
  assert w.space_data['target_sigma']==int(target)
 # Streaming publishes a validated state before the final state, with bounded queue.
-w.setting_fields['animation_enabled'].setChecked(True);wait();frames=[];plot=w.plot_layout
+w.setting_fields['animation_strategy'].setCurrentIndex(w.setting_fields['animation_strategy'].findData('stream'));w.setting_fields['animation_enabled'].setChecked(True);wait();frames=[];plot=w.plot_layout
 start=time.perf_counter()
 def record(*a,**kw):
  plot(*a,**kw)

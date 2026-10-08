@@ -135,7 +135,7 @@ class PreviewEngine:
             self.deformers[key]=deformer
         self.deformer=deformer;self.deformation_key=key
     def configure_drc(self,enabled,settings):
-        key=(bool(enabled),settings.deformation_min_angle_deg)
+        key=(bool(enabled),settings.deformation_min_angle_deg,settings.drc_tolerance_um)
         if enabled and not hasattr(self,'global_drc'):
             from .drc import GlobalDRC
             self.global_drc=GlobalDRC(self.contact,self.p)
@@ -166,6 +166,11 @@ class PreviewEngine:
         if deformation is not None:frame['deformation']=deformation
         if getattr(self,'drc_enabled',False):
             frame['drc']=deformation['violations'] if deformation is not None else self.global_drc.frame(states,settings=self.drc_settings,progress=progress)
+        if deformation is not None or getattr(self,'drc_enabled',False):
+            from .drc_rules import effective_rules
+            cfg=self.deformer.settings if self.deformer is not None else self.drc_settings
+            width,space=effective_rules(self.p,cfg)
+            frame['drc_rules']=dict(tolerance_um=cfg.drc_tolerance_um,nominal_width_um=self.p.line_width_um,nominal_space_um=self.p.line_space_um,effective_width_um=width,effective_space_um=space,annulus_um=self.p.annulus_um)
         self.frames[key]=frame
         return frame
 
@@ -219,7 +224,7 @@ class PreviewEngine:
             issues.append(q)
             if identity not in remaining:released.add(identity[:2])
         out=dict(nominal);out['contact']=dict(nominal['contact'],issues=issues)
-        out['global_deformation']=dict(statistics_match_saved_evaluation=current,target_sigma=self.p.target_nsigma,annulus_um=self.p.annulus_um,line_width_um=self.p.line_width_um,line_space_um=self.p.line_space_um,die_bounds=[[(self.p.for_die(i).single_bound_x_um if len(self.bound.centers)==1 else self.p.for_die(i).multi_bound_x_um),(self.p.for_die(i).single_bound_y_um if len(self.bound.centers)==1 else self.p.for_die(i).multi_bound_y_um),self.p.for_die(i).bound_angle_deg] for i in range(len(self.bound.centers))],states=summaries,best_effort_states=sum(bool(q.get('best_effort')) for q in summaries),representative_released=len(released),continuous_probability='待细化；带DRC候选不复用原概率上界；有限代表状态不构成连续概率证书',scope='代表状态最终布局，不是连续概率穷举')
+        out['global_deformation']=dict(drc_tolerance_um=settings.drc_tolerance_um,statistics_match_saved_evaluation=current,target_sigma=self.p.target_nsigma,annulus_um=self.p.annulus_um,line_width_um=self.p.line_width_um,line_space_um=self.p.line_space_um,die_bounds=[[(self.p.for_die(i).single_bound_x_um if len(self.bound.centers)==1 else self.p.for_die(i).multi_bound_x_um),(self.p.for_die(i).single_bound_y_um if len(self.bound.centers)==1 else self.p.for_die(i).multi_bound_y_um),self.p.for_die(i).bound_angle_deg] for i in range(len(self.bound.centers))],states=summaries,best_effort_states=sum(bool(q.get('best_effort')) for q in summaries),representative_released=len(released),continuous_probability='待细化；带DRC候选不复用原概率上界；有限代表状态不构成连续概率证书',scope='代表状态最终布局，不是连续概率穷举')
         self.frames[global_key]=out
         progress(100,'全局代表状态型变完成；已标明连续概率未决项')
         return out

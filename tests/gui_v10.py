@@ -63,7 +63,7 @@ def inspect_motion(*args,**kwargs):
  if getattr(w,'_in_animation',False) and w.current_frame and 'deformation' in w.current_frame:
   f=w.current_frame;np.testing.assert_array_equal(f['states'],f['deformation']['states']);live.append(f['states'].copy())
 w.plot_layout=inspect_motion;w.extreme_table.setCurrentCell(8,0);wait();w.plot_layout=plot
-assert len(live)>=1 and w._prepared_motion and w._prepared_motion['streamed']
+assert len(live)>=2 and w._prepared_motion and w._prepared_motion['prepared']
 metrics['validated_deformation_display_frames']=len(live);metrics['prepared_deformation_frames']=w._prepared_motion['count']
 w.setting_fields['animation_enabled'].setChecked(False);w.deformation_toggle.setChecked(False);wait()
 # Keyboard up/down navigates the insufficiency list, including retained binary pose.

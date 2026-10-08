@@ -49,12 +49,12 @@ PARAMETER_DESCRIPTIONS = {
 class Parameters:
     panel_layers: int = 2
     wafer_layers: int = 1
-    line_width_um: float = 5.0
-    line_space_um: float = 5.0
-    wafer_line_width_um: float = 3.0
-    wafer_line_space_um: float = 3.0
+    line_width_um: float = 15.0
+    line_space_um: float = 15.0
+    wafer_line_width_um: float = 15.0
+    wafer_line_space_um: float = 15.0
     via_diameter_um: float = 20.0
-    annulus_um: float = 10.0
+    annulus_um: float = 15.0
     residual_budget_um: float = 5.0
     transition_length_um: float = 200.0
     max_route_angle_deg: float = 30.0
@@ -379,7 +379,10 @@ def spacing_violation(polys,space):
 
 
 def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order=None,connections=None,contact_model=None,motions=None,settings=None,safe_range_cache=None):
-    params.validate(); p=replace(params,residual_budget_um=0.,routing_edge_keepout_um=0.);roles=canonical_roles(roles,motions);original_case=build_case(data,roles,geometry,layer_order,connections)
+    params.validate(); p=replace(params,residual_budget_um=0.,routing_edge_keepout_um=0.)
+    from .drc_rules import effective_rules
+    effective_rules(p,settings)
+    roles=canonical_roles(roles,motions);original_case=build_case(data,roles,geometry,layer_order,connections)
     from .stack import Connections
     progress(3,'识别相邻物理层的名义重叠连接')
     connections=original_case['connections']

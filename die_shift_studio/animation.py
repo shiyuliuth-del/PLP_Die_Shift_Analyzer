@@ -22,8 +22,9 @@ class Transition(QtCore.QObject):
         self.stop();self.started=time.perf_counter();self.duration=duration_ms/1000;self.steps=steps;self.update=update;self.complete=complete;self.last=-1
         self.timer.start(max(8,round(duration_ms/steps)));self.tick()
     def stop(self):
-        self.timer.stop();self.complete=None
+        self.timer.stop();self.complete=None;self.update=None
     def tick(self):
+        if not self.timer.isActive() or self.update is None:return
         now=time.perf_counter();t=min(1.,(now-self.started)/self.duration);index=int(t*self.steps)
         # Reserve measured rendering time for the exact endpoint. Otherwise a
         # costly penultimate frame followed by final drawing adds two frames

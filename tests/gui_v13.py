@@ -34,7 +34,7 @@ with patch('die_shift_studio.probability_overlay.probability_maps',wraps=probabi
     assert prob.call_count==2 and space.call_count==2
     assert len(w.probability_artists)>0 and w.space_artists
 w.setting_fields['animation_enabled'].setChecked(True);wait();pose(a)
-w.manual_states=b.copy();w.request_preview();wait();assert w._prepared_motion['streamed']
+w.manual_states=b.copy();w.request_preview();wait();assert w._prepared_motion['prepared']
 pose(a);deformer=w.engine.deformer
 with patch.object(deformer,'frame',side_effect=AssertionError('animation recomputed geometry')):
     start=time.perf_counter();w.manual_states=b.copy();w.request_preview();wait();replay_ms=(time.perf_counter()-start)*1000

@@ -1,0 +1,11 @@
+{
+  "status": "PASS",
+  "cold_frames": 6,
+  "cached_frames": 7,
+  "stream_frames": 7,
+  "cache_recomputed_geometry": 0,
+  "legend_label_sync": true,
+  "signed_tolerance_roundtrip": true,
+  "visible_tail_alpha": 0.2985516523703882,
+  "palettes_reuse_probabilities": true
+}

@@ -69,25 +69,28 @@ class Field:
     def weights(self,xy):
         distances=np.linalg.norm(xy[:,None,:]-np.array([r['center'] for r in self.records])[None,:,:],axis=2)
         return smooth_weight((distances-self.inner)/self.span,self.settings.deformation_continuity)
+    def active_edges(self,a,b):
+        active=np.zeros(len(a),bool);v=b-a;den=np.maximum(np.sum(v*v,axis=1),1e-30)
+        for r,radius in zip(self.records,self.inner+self.span):
+            center=np.asarray(r['center']);t=np.clip(np.sum((center-a)*v,axis=1)/den,0,1)
+            active|=np.sum((a+t[:,None]*v-center)**2,axis=1)<=radius*radius
+        return active
     def jacobian_bound(self):
         # ||D(T-I)|| < 1 is a global sufficient injectivity condition. It
         # prevents folds between sampled edges, not merely at drawn vertices.
         gradient=1.5 if self.settings.deformation_continuity=='C1' else 1.875
-        bound=0.
-        for owner in {r['owner'] for r in self.records}:
-            z=self.states[owner];rotation=2*abs(math.sin(z[2]/2))
-            gamma=math.radians(self.settings.deformation_arc_angle_deg)
-            factor=1. if self.settings.deformation_method=='bezier' else gamma/(2*math.sin(gamma/2))
-            rate=rotation
-            bound+=rotation
-            for r,inner in zip(self.records,self.inner):
-                if r['owner']!=owner:continue
-                point=np.asarray(r['center'])
-                delta=rigid_transform(point[None,:],self.centers[owner],z)[0]-point
-                # Affine rigid displacement: retain translation/rotation
-                # cancellation at the pad; only the support radius needs a bound.
-                bound+=factor*gradient/self.span*(np.linalg.norm(delta)+rate*(inner+self.span))
-        return bound
+        points=np.array([r['center'] for r in self.records]);radii=self.inner+self.span
+        owners=np.array([r['owner'] for r in self.records]);rates=2*np.abs(np.sin(self.states[:,2]/2))
+        gamma=math.radians(self.settings.deformation_arc_angle_deg)
+        factor=1. if self.settings.deformation_method=='bezier' else gamma/(2*math.sin(gamma/2))
+        travel=np.array([np.linalg.norm(rigid_transform(point[None,:],self.centers[owner],self.states[owner])[0]-point) for point,owner in zip(points,owners)])
+        coefficients=factor*gradient/self.span*(travel+rates[owners]*radii)
+        distances=np.linalg.norm(points[:,None,:]-points[None,:,:],axis=2)
+        overlap=distances<=radii[:,None]+radii[None,:]
+        # At any location all active supports intersect each other, so the
+        # active set is contained in every active disk's neighbour set. Taking
+        # the maximum neighbour sum is a valid bound without adding remote pads.
+        return max((coefficients[mask].sum()+rates[np.unique(owners[mask])].sum() for mask in overlap),default=0.)
     def __call__(self,xy):
         xy=np.asarray(xy);weights=self.weights(xy);out=xy.copy()
         for owner in sorted({r['owner'] for r in self.records}):
@@ -112,10 +115,14 @@ def warp_polygon(poly,field,tolerance,step,prepared=None):
     """Quarter/midpoint refinement controls contour chord error; never repairs folds."""
     def ring(r):
         # Bounded pre-segmentation also prevents missing compact support on a long edge.
-        key=r.wkb
+        original=np.asarray(r.coords);a,b=original[:-1],original[1:]
+        active=field.active_edges(a,b) if hasattr(field,'active_edges') else np.ones(len(a),bool)
+        key=(r.wkb,float(step),active.tobytes())
         if prepared is not None and key in prepared:xy=prepared[key]
         else:
-            xy=np.asarray(shapely.segmentize(shapely.LineString(r.coords),step).coords)
+            counts=np.where(active,np.maximum(1,np.ceil(np.linalg.norm(b-a,axis=1)/step)).astype(int),1)
+            ids=np.repeat(np.arange(len(a)),counts);offset=np.arange(len(ids))-np.repeat(np.r_[0,counts.cumsum()[:-1]],counts)
+            xy=np.vstack((a[ids]+(b-a)[ids]*(offset/counts[ids])[:,None],original[-1]))
             if prepared is not None:prepared[key]=xy
         for _ in range(10):
             a,b=xy[:-1],xy[1:];fa,fb=field(a),field(b);bad=np.zeros(len(a),bool)
@@ -179,13 +186,15 @@ class DeformationPreview:
                         if contact.roles[target]=='固定过孔':anchors.append(contact.cache.layers[target]['geometry'][j])
             records=list({(r['key'],r['index']):r for r in records}.values())
             self.components.append(Component(key,indices,net,poly,records,anchors))
+        from .drc_rules import effective_rules
+        self.rule_width,self.rule_space=effective_rules(self.p,self.settings)
         self.originals={k:contact.cache.layers[k]['geometry'] for k in {c.key for c in self.components}}
         self.trees={k:STRtree(v) for k,v in self.originals.items()}
-        self.component_base={};self.contours={};self.preferred_span={};self.route_templates={};self.last_fields={};self.sources={}
+        self.component_base={};self.contours={};self.preferred_span={};self.route_templates={};self.last_fields={};self.sources={};self.intrinsic_cache=OrderedDict()
         from .resources import parallel_map,resource_profile
         vertices=sum(shapely.get_num_coordinates(c.poly) for c in self.components)
         process=len(self.components)>=8 and vertices>=200000 and resource_profile()['process_workers']>1
-        checks=parallel_map(baseline_check,[(c.poly.wkb,self.p.line_width_um,self.model.data.dbu_um,self.p.line_space_um) for c in self.components],process=process)
+        checks=parallel_map(baseline_check,[(c.poly.wkb,self.rule_width,self.model.data.dbu_um,self.rule_space) for c in self.components],process=process)
         for c,reason in zip(self.components,checks):
             self.component_base[c.key,c.indices]='源铜图形并非单一连通区' if c.poly.geom_type!='Polygon' else reason
         self.executor=None;self.execution_used='serial';self.worker_count=1;self.frame_generation=0
@@ -199,6 +208,7 @@ class DeformationPreview:
 
     def prepare_pose(self,states):
         moved=[self.model.moved(r['poly'],r['owner'],states) for r in self.model.records]
+        self._posed_vias={(r['key'],r['index']):v for r,v in zip(self.model.records,moved)}
         self._via_required={(r['key'],r['index']):v.buffer(self.p.annulus_um/math.cos(math.pi/128),quad_segs=32) for r,v in zip(self.model.records,moved)}
         self._via_controls=[v.buffer(self.p.annulus_um+self.p.line_space_um,quad_segs=32) for v in moved]
         self._moved_via_trees={}
@@ -211,7 +221,7 @@ class DeformationPreview:
         if not tasks:return []
         from .resources import resource_profile,parallel_map
         cfg=self.settings;profile=resource_profile();mode=cfg.deformation_execution
-        if mode=='auto':mode='process' if len(tasks)>=12 and not quick else 'serial'
+        if mode=='auto':mode='process' if len(tasks)>=12 and (not quick or self.executor is not None) else 'serial'
         maximum=profile['process_workers'] if mode=='process' else profile['workers']
         if mode=='process':
             coordinates=sum(int(shapely.get_num_coordinates(v['geometry']).sum()) for v in self.model.cache.layers.values())
@@ -228,6 +238,7 @@ class DeformationPreview:
         from concurrent.futures import ProcessPoolExecutor,as_completed
         import multiprocessing,logging
         from .adaptation_workers import initialize,search_job
+        futures={}
         try:
             if self.executor is None:
                 self.executor=ProcessPoolExecutor(max_workers=workers,mp_context=multiprocessing.get_context('spawn'),
@@ -239,6 +250,11 @@ class DeformationPreview:
             for completed,future in enumerate(as_completed(futures),1):
                 results[futures[future]]=future.result();progress(completed,len(tasks))
             return results
+        except InterruptedError:
+            # Changing the selected pose cancels this request. It must not be
+            # mistaken for a process failure and launch a redundant serial solve.
+            for future in futures:future.cancel()
+            raise
         except Exception:
             logging.getLogger(__name__).exception('并行型变搜索失败；改为本进程重算，仍执行全部约束检查')
             self.release_workers();self.execution_used='serial fallback';self.worker_count=1
@@ -326,6 +342,7 @@ class DeformationPreview:
                             if self.component_base[ck]:reason=self.component_base[ck]+'；'+reason
                 if reason:
                     diagnostics[ck]=dict(layer=c.key,indices=c.indices,reason=reason,point=list(c.poly.representative_point().coords[0]));continue
+                self.last_fields[(c.key,c.indices,signature)]=field;self.preferred_span[ck]=span
                 accepted[ck]=dict(component=c,geometry=candidate,field=field,span=span)
                 previous_active[ck]=signature;diagnostics.pop(ck,None);provisional.pop(ck,None);changed=True;latest_snapshot=None
             if changed:
@@ -434,7 +451,7 @@ class DeformationPreview:
         self.cache[key]=out
         progress(100,('型变达到搜索预算：' if out['iteration_limit_reached'] else '型变搜索完成：')+f'释放 {out["released_count"]} 个窗口，剩余 {len(blocked)} 个')
         return out
-    def candidate_violations(self,c,candidate,records,anchors,states,moved_vias,snapshot,cheap=False):
+    def candidate_violations(self,c,candidate,records,anchors,states,moved_vias,snapshot,cheap=False,intrinsic_only=False):
         from .drc import rule_area,separation_area
         p=self.p;dbu=self.model.data.dbu_um;bad=[]
         def add(kind,g):
@@ -442,12 +459,21 @@ class DeformationPreview:
         def measure(kind,area):
             if area>0:bad.append(dict(kind=kind,area_um2=area))
         if not cheap:
-            measure('线宽不足',rule_area(candidate,p.line_width_um,dbu))
-            measure('内部线距不足',rule_area(candidate,p.line_space_um,dbu,'notch'))
-            add('最小内角不足',angle_regions(candidate,self.settings.deformation_min_angle_deg,dbu))
+            from hashlib import sha256
+            intrinsic_key=sha256(candidate.wkb).digest()
+            if intrinsic_key in self.intrinsic_cache:
+                bad.extend(self.intrinsic_cache[intrinsic_key]);self.intrinsic_cache.move_to_end(intrinsic_key)
+            else:
+                measure('线宽不足',rule_area(candidate,self.rule_width,dbu))
+                measure('内部线距不足',rule_area(candidate,self.rule_space,dbu,'notch'))
+                add('最小内角不足',angle_regions(candidate,self.settings.deformation_min_angle_deg,dbu))
+                self.intrinsic_cache[intrinsic_key]=tuple(bad)
+                while len(self.intrinsic_cache)>512:self.intrinsic_cache.popitem(last=False)
+        if intrinsic_only:return bad
         add('超出封装',candidate.difference(self.model.case['board']))
         for r in records:
-            via=self.model.moved(r['poly'],r['owner'],states)
+            via=self._posed_vias.get((r['key'],r['index'])) if hasattr(self,'_posed_vias') else None
+            if via is None:via=self.model.moved(r['poly'],r['owner'],states)
             landing=self._via_required.get((r['key'],r['index'])) if hasattr(self,'_via_required') else None
             if landing is None:landing=via.buffer(p.annulus_um/math.cos(math.pi/128),quad_segs=32)
             missing=landing.difference(candidate)
@@ -457,12 +483,12 @@ class DeformationPreview:
             if snapshot is None:
                 ids,tree=self.model.fixed_trees[plane];geoms=tree.geometries
             else:ids,geoms,tree=snapshot[plane]
-            nearby=[geoms[j] for j in tree.query(candidate,predicate='dwithin',distance=p.line_space_um) if self.model.nodes[ids[j]]['net']!=c.net]
+            nearby=[geoms[j] for j in tree.query(candidate,predicate='dwithin',distance=self.rule_space) if self.model.nodes[ids[j]]['net']!=c.net]
             if nearby:
                 foreign=shapely.union_all(nearby)
-                if not cheap:measure('异网线距不足',separation_area(candidate,foreign,p.line_space_um,dbu))
-                if candidate.distance(foreign)+dbu*.01<p.line_space_um:
-                    add('异网最小净距不足',candidate.intersection(foreign.buffer(p.line_space_um,quad_segs=32)))
+                if not cheap:measure('异网线距不足',separation_area(candidate,foreign,self.rule_space,dbu))
+                if candidate.distance(foreign)+dbu*.01<self.rule_space:
+                    add('异网最小净距不足',candidate.intersection(foreign.buffer(self.rule_space,quad_segs=32)))
         if hasattr(self,'_moved_via_trees'):
             ids,tree=self._moved_via_trees[c.key.split('/')[0]]
             others=[self._via_controls[ids[j]] for j in tree.query(candidate,predicate='dwithin',distance=p.annulus_um+p.line_space_um+dbu) if self.model.records[ids[j]]['net']!=c.net]
@@ -485,15 +511,16 @@ class DeformationPreview:
             source=shapely.union_all([c.poly,*landing])
             if source.geom_type!='Polygon' or not source.is_valid or len(source.interiors)!=len(c.poly.interiors):raise ValueError('孔盘生长改变连通拓扑，未生成不合法候选')
             inner=[max(np.linalg.norm(shapely.get_coordinates(g)-r['center'],axis=1))+2*dbu for r,g in zip(records,landing)]
-            self.sources[source_key]=(source,inner)
-        else:source,inner=prepared
+            routing_records=[dict(r,poly=g) for r,g in zip(records,landing)]
+            self.sources[source_key]=(source,inner,routing_records)
+        else:source,inner,routing_records=prepared
         travel=max(np.linalg.norm(rigid_transform(np.array([r['center']]),self.model.bound.centers[r['owner']],states[r['owner']])[0]-r['center']) for r in records)
         scale=max(p.line_width_um*2,travel*2,5.);last='未找到满足约束的过渡';best=None
         contour=self.contours.setdefault((c.key,c.indices),{});preferred=self.preferred_span.get((c.key,c.indices),0.)
         spans=sorted(set([scale*cfg.deformation_growth**i for i in range(cfg.deformation_local_steps)]+([preferred] if preferred else [])))
         field_key=(c.key,c.indices,tuple((r['key'],r['index']) for r in records))
         def fields():
-            if quick and field_key in self.last_fields:
+            if field_key in self.last_fields:
                 import copy
                 def at_pose(original):
                     q=copy.copy(original)
@@ -501,11 +528,26 @@ class DeformationPreview:
                     else:q.states=states
                     return q
                 field=at_pose(self.last_fields[field_key]);yield field,field.span
-                return
+                if quick:return
             for span in spans:
                 field=Field(records,self.model.bound.centers,states,inner,span,cfg);field.mode='local'
                 if any(records[i]['owner']!=records[j]['owner'] and np.linalg.norm(np.array(records[i]['center'])-records[j]['center'])<inner[i]+inner[j]+2*span for i in range(len(records)) for j in range(i)):continue
                 yield field,span
+            # A pad close to a fixed terminal may have plenty of transverse
+            # room but no room for a circular support disk. A directional
+            # C1/C2 plateau can use the actual terminal gap without moving the
+            # fixed end. The grown landing, not merely the bare via, is rigid.
+            if len({r['owner'] for r in records})==1 and anchors:
+                from dataclasses import replace
+                from itertools import islice
+                from .route_adaptation import section_candidates,SlabField
+                local_key=('pad_sections',source_key)
+                if local_key not in self.route_templates:
+                    local_cfg=replace(cfg,deformation_min_length=.5,deformation_corner_guard=.05)
+                    self.route_templates[local_key]=list(islice(section_candidates(source,routing_records,anchors,p.line_width_um,dbu,local_cfg),6))
+                for option in self.route_templates[local_key]:
+                    field=SlabField(records,self.model.bound.centers,states,cfg,*option);field.mode='directional_pad'
+                    yield field,field.span
             if not cfg.deformation_route_enabled:return
             from .route_adaptation import routed_fields
             foreign=[]
@@ -513,11 +555,15 @@ class DeformationPreview:
                 ids,geoms,tree=snapshot[c.key.split('/')[0]]
                 foreign=[geoms[j] for j in tree.query(source.buffer(travel+p.line_space_um)) if self.model.nodes[ids[j]]['net']!=c.net]
             from itertools import islice
-            options=routed_fields(source,records,anchors,self.model.bound.centers,states,cfg,p.line_width_um,dbu,foreign,self.route_templates)
+            options=routed_fields(source,routing_records,anchors,self.model.bound.centers,states,cfg,p.line_width_um,dbu,foreign,self.route_templates)
             yield from islice(options,min(2,cfg.deformation_route_candidates) if quick else cfg.deformation_route_candidates)
         for attempt,(field,span) in enumerate(fields()):
             progress(20,f'型变搜索 · {c.key} · '+('三段追溯' if field.mode=='three_part' else '孔盘调整')+f' {attempt+1}')
-            if field.jacobian_bound()>=.98:last='无法证明位移场无折叠';continue
+            if field.jacobian_bound()>=.98 and not (hasattr(field,'injectivity_certificate') and field.injectivity_certificate(source)):
+                if hasattr(field,'injectivity_certificate'):
+                    field.gentle_profile=True
+                    if not field.injectivity_certificate(source):last='无法证明位移场无折叠';continue
+                else:last='无法证明位移场无折叠';continue
             if anchors:
                 pts=shapely.get_coordinates(anchors)
                 if np.max(np.linalg.norm(field(pts)-pts,axis=1),initial=0)>dbu*.01:last='过渡范围到达固定连接端';continue
@@ -541,7 +587,7 @@ class DeformationPreview:
             # GEOS rejects impossible envelope/anchor/clearance candidates before
             # native edge extraction. Only promising shapes pay the full DRC cost.
             bad=self.candidate_violations(c,candidate,records,anchors,states,moved_vias,snapshot,cheap=True)
-            if not bad:bad=self.candidate_violations(c,candidate,records,anchors,states,moved_vias,snapshot)
+            if not bad:bad=self.candidate_violations(c,candidate,records,anchors,states,moved_vias,snapshot,intrinsic_only=True)
             field.verified=not bad;field.failure_reasons=sorted({v['kind'] for v in bad});field.candidate_violations=bad
             score=(sum(v['area_um2'] for v in bad),len(bad),candidate.symmetric_difference(c.poly).area)
             if best is None or score<best[0]:best=(score,candidate,field,span)

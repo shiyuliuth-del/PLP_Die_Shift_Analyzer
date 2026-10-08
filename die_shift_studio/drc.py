@@ -20,11 +20,23 @@ def rule_region(geometry,distance,dbu,kind='width'):
 def rule_area(geometry,distance,dbu,kind='width'):
     return compute(kind,geometry.wkb,float(dbu),float(distance))[1]
 
+def local_foreign(a,b,distance,dbu):
+    """Remote edges cannot contribute to an inter-net distance violation.
+
+    Clip beyond the rule distance plus two DBU; introduced clipping edges are
+    then outside the search threshold. Actual overlap is retained exactly.
+    """
+    if shapely.get_num_coordinates(b)<512:return b
+    x0,y0,x1,y1=a.bounds;pad=distance+max(2*dbu,1e-7)
+    return b.intersection(shapely.box(x0-pad,y0-pad,x1+pad,y1+pad))
+
 def separation_area(a,b,distance,dbu):
+    b=local_foreign(a,b,distance,dbu)
     overlap=a.intersection(b)
     return (max(dbu*dbu,overlap.area) if not overlap.is_empty else 0.)+compute('separation',a.wkb,float(dbu),float(distance),b.wkb)[1]
 
 def separation_region(a,b,distance,dbu):
+    b=local_foreign(a,b,distance,dbu)
     overlap=a.intersection(b)
     if not overlap.is_empty and overlap.area==0:overlap=overlap.buffer(dbu)
     return shapely.union_all([overlap,native_operation('separation',a,dbu,distance,b)])
@@ -50,7 +62,9 @@ class GlobalDRC:
         while len(self.cache)>self.capacity:self.cache.popitem(last=False)
         return out
     def frame(self,states,replacements=None,settings=None,progress=lambda *_:None):
+        from .drc_rules import effective_rules
         m=self.model;p=self.p;dbu=m.data.dbu_um;replacements=replacements or {};groups={};items=[]
+        width,space=effective_rules(p,settings)
         # Check the reconstructed fixed RDL, including unchanged source copper.
         # Do not union different nets: union would erase shorted boundaries.
         for key,role in m.roles.items():
@@ -67,16 +81,16 @@ class GlobalDRC:
             for net,rows in nets.items():
                 copper=shapely.union_all([v[1] for v in rows]);layers=tuple(sorted({v[0] for v in rows}));key=layers[0]
                 angle=settings.deformation_min_angle_deg if settings else 0
-                for kind,g in self.cached(copper,p.line_width_um,p.line_space_um,angle):
+                for kind,g in self.cached(copper,width,space,angle):
                     items.append(dict(layer=key,layers=layers,geometry=g,kind=kind,net=net))
                 world.append((key,copper,net,layers))
             if world:
                 tree=STRtree([r[1] for r in world])
                 for i,(key,g,net,layers) in enumerate(world):
-                    for j in tree.query(g,predicate='dwithin',distance=p.line_space_um):
+                    for j in tree.query(g,predicate='dwithin',distance=space):
                         if j<=i:continue
                         other=world[j]
-                        bad=separation_region(g,other[1],p.line_space_um,dbu)
+                        bad=separation_region(g,other[1],space,dbu)
                         if not bad.is_empty:
                             items.append(dict(layer=key,layers=tuple(set(layers+other[3])),geometry=bad,kind='异网短接 / 线距不足',nets=(net,other[2])))
         # Enclosure uses actual adjacent metal only, with no test at unconnected vias.

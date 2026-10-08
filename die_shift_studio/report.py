@@ -1,4 +1,4 @@
-"""Auditable V16 calculation report: bounded inputs, probabilities, geometry."""
+"""Auditable V17 calculation report: bounded inputs, probabilities, geometry."""
 from html import escape
 import math
 from .core import PARAMETER_DESCRIPTIONS,fmt,Parameters
@@ -56,7 +56,7 @@ def report_document(r,motions=None,progress=lambda *_:None):
           r'p_i>\alpha\ \Longrightarrow\ \mathrm{insufficient}',
           r'I_i(z_{\mathrm{preview}})=1\ \Longrightarrow\ \mathrm{insufficient}'],
          f"允许接触概率={r['target_failure']:.8g}；不足记录{len(r['issues'])}条（含各方案）；待细化接口{len(analysis.get('unresolved',[]))}个" if math.isfinite(p.target_nsigma) else f"名义位置二值接触{len(r['issues'])}条（含各方案）",
-         'Φ为标准正态CDF，α为每个接口允许的联合接触概率，不是各网络对概率之和，也不是已验证整包失效率。6σ的α约1.973×10⁻⁹。有限k空白行仅列已证明pi&gt;α的不足；具体极端/手动预演和∞一律按当前几何0/100%判断。目标覆盖级别变化时自动后台更新统计结果并保留预演；其他工艺输入保留上次评估，预演使用当前参数。')
+         'Φ为标准正态CDF，α为每个接口允许的联合接触概率，不是各网络对概率之和，也不是已验证整包失效率。6σ的α约1.973×10⁻⁹。有限k空白行仅列已证明pi&gt;α的不足；具体极端/手动预演和∞一律按当前几何0/100%判断。良率级别变化时自动后台更新统计结果并保留预演；其他工艺输入保留上次评估，预演使用当前参数。')
     step('接触概率上下界：避免稀有事件漏判','独立标准正态u，线性变换z=μ+Lu，LLᵀ=Σ；自适应状态盒',
          [r'm_b=\prod_d[\Phi(h_{bd})-\Phi(l_{bd})]',
           r'\Delta_b=\sqrt{e_x^2+e_y^2}+2r_V\sin\!\left(\frac{\min(\pi,e_\theta)}{2}\right)',
@@ -69,12 +69,20 @@ def report_document(r,motions=None,progress=lambda *_:None):
         blocks.append('<h3>接口概率结果</h3>'+grid(['层/图形','DIE','下界','上界','允许上限','判定','积分盒数'],[[f"{q['source_layer']} #{q['source_index']+1}",q['die'],f"{q['lower']:.7g}",f"{q['upper']:.7g}",f"{q['threshold']:.7g}",q['verdict'],q['boxes']] for q in probabilities]))
     from .settings import ViewSettings
     cfg=ViewSettings.from_dict(r.get('view_settings'))
+    from .drc_rules import effective_rules
+    rule_width,rule_space=effective_rules(p,cfg)
+    step('DRC正负容差',f'固定线宽w={p.line_width_um:g} μm；线距s={p.line_space_um:g} μm；统一容差τ={cfg.drc_tolerance_um:g} μm',
+         [r'w_{DRC}=w-\tau,\qquad s_{DRC}=s-\tau,\qquad w_{DRC}>0,\ s_{DRC}>0'],
+         f'实际DRC及型变验收门槛：线宽{rule_width:g} μm，线距{rule_space:g} μm',
+         'τ是用户设置的带符号容差；正值放宽、负值收紧，默认0。线宽和线距共用该值，检查阈值按源DBU向上取整。包围量、接触概率、Space Map和三方案初筛仍使用工艺原值；异网短接始终报错，不由容差豁免。')
+    if r.get('preview_drc_rules'):
+        q=r['preview_drc_rules'];blocks.append('<h3>当前预演的DRC输入快照（可与上次评估不同）</h3>'+grid(['工艺线宽 / μm','工艺线距 / μm','容差 / μm','有效线宽 / μm','有效线距 / μm','包围量 / μm'],[[q[k] for k in ('nominal_width_um','nominal_space_um','tolerance_um','effective_width_um','effective_space_um','annulus_um')]]))
     step('过孔实体覆盖概率',f'方法={cfg.probability_method}；样本数=2^{cfg.sample_exponent}；积分阶数={cfg.quadrature_order}；网格={cfg.probability_cell_um:g} μm（0自动）',
          [r'p_V(q)=\int_{\mathcal{H}}\mathbf{1}\{q\in T_z(V)\}f_T(z)\,dz',
           r'\widehat p_{V,G}=\frac{1}{N}\sum_{n=1}^{N}\frac{|G\cap T_{z_n}(V)|}{|G|},\quad\int p_V(q)\,dq=|V|',
           r'\widehat p_{V,G}\simeq\sum_j\omega_j(H*K_j)_G',
           r'\omega_j=\frac{w_j}{2},\quad\theta_j=\mu_\theta+\sigma_\theta\Phi^{-1}\!\left(\Phi(-k)+\frac{h_j+1}{2}[\Phi(k)-\Phi(-k)]\right)'],
-         '半透明热图表示整孔覆盖概率；透明度随概率增大，默认不描输入外包络；跟随原层显隐',
+         f'半透明热图表示整孔覆盖概率；显示色阶采用p的γ次方，γ={cfg.probability_gamma:g}；低概率增强不改变概率网格或边界',
          'q为空间位置，G为网格，|·|为面积，N为样本数。Monte Carlo/Sobol采用同一相关母分布并联合拒绝超界状态；Sobol拒绝后仅为准随机近似，不沿用原平衡保证。确定性方法用[-1,1] Gauss–Legendre节点hj/权重wj，通过截断正态逆CDF映射得到θj；ω为角度积分权重（和为1），H为相关平移落入每格的条件概率，Kj为该朝向完整孔实体面积掩模，*为卷积。全部平移格覆盖硬输入范围并按Zxy归一化。面积积分应接近孔面积，格值之和不归一为1；角度/栅格/FFT有有限数值精度，可加密复算。低概率尾部可能没有采样命中或低于FFT有效精度，不伪造颜色补齐。极端包络外不可达，包络内也并非处处有可见概率。多个孔透明叠色不是联合覆盖率。')
     step('Space Map：所需线距',f'固定线距s={p.line_space_um:g} μm；连接归属；母协方差；芯片和扇出域',
          [r'A=P-C,\quad b=R(\mu_\theta)A,\quad J_{11}=J_{22}=1,\quad J_{12}=J_{21}=0',
@@ -95,8 +103,13 @@ def report_document(r,motions=None,progress=lambda *_:None):
           r'A(w)=\frac{1-\cos(\gamma w)+\cot(\gamma/2)\sin(\gamma w)}{2}',
           r'B(w)=\frac{\cot(\gamma/2)[1-\cos(\gamma w)]-\sin(\gamma w)}{2}',
           r'\Psi_A(P)=P+\sum_d[A(W_d)\Delta_d+B(W_d)J_{90}\Delta_d],\quad\Delta_d=T_d(P)-P'],
-         '只在真实动孔—固定RDL接口适配；当前状态排除实际接触孔；接受合法型变后重新检查并迭代释放接口。统计风险不作为具体状态的永久冻结条件。每个显示帧重新校验；只显示全部约束通过的候选，最终全层DRC未通过则恢复原图。深色表示运动与适配部分，适配段有虚线描边。',
-         'P为固定RDL原位置，ci为运动孔原中心（区别于所属DIE中心Cd）；G为原固定铜区，Vi为运动过孔；先用Li补足名义所需孔盘得到G0。a为包围量，δ为源DBU，圆弧每象限32段；ra补偿内接弦和量化误差。ri从Li顶点到孔中心的最大距离加2δ求得，不再附加两倍线宽。包围是型变后输出约束，不以源孔盘不足拒绝适配。L为候选过渡宽度，以最大孔中心行程的2倍、固定线宽的2倍和5 μm三者最大值为基数，按设置的递增倍率g生成L=L0g^j，j=0至搜索级数减1，选择首个全部约束通过的最短候选；不是全局最优布线证明。wi为该孔权重，Wd把同DIE的多个孔光滑合并，Td为真实刚体变换，Dd为平移，R为旋转矩阵。贝塞尔方式混合位移，圆弧方式沿原点到刚体目标点间的圆弧行进，圆心角γ由设置的度数换成rad，正负随该DIE转角（零角取正）；A/B为弦向及垂向系数，J90将向量逆时针旋转90°。只有平移时两方式也不同。C1/C2指位移场在刚体区、固定区交界的一阶/二阶导数连续；铜内角低于设置时尝试扩大局部圆角，并重复全套校验；原GDS折角不被承诺全部变光滑，离散多边形也不声称数学上严格C2。无折叠充分界、固定连接端不动、原图与型变后最小线宽、异网及其他动孔控制区线距、包围、封装、禁布区和拓扑均校验。曲线自适应细分后按源DBU量化；宽度/线距使用近似平行（≤5°）的非相邻边对规则，实际短接不受角度过滤；长度阈值向上取整到DBU，不放宽。型变结果只作当前工况预演，不修改原GDS，也不改变前述原图统计概率。')
+         '只在真实动孔—固定RDL接口适配；每个有位移的接口都尝试，接受合法型变后重新检查并迭代释放接口。统计风险不作为具体状态的永久冻结条件。每个显示帧重新校验；只显示全部约束通过的候选，最终全层DRC未通过则恢复原图。深色表示运动与适配部分，适配段有虚线描边。',
+         'P为固定RDL原位置，ci为运动孔原中心（区别于所属DIE中心Cd）；G为原固定铜区，Vi为运动过孔；先用Li补足名义所需孔盘得到G0。a为包围量，δ为源DBU，圆弧每象限32段；ra补偿内接弦和量化误差。ri从Li顶点到孔中心的最大距离加2δ求得，不再附加两倍线宽。包围是型变后输出约束，不以源孔盘不足拒绝适配。L为候选过渡宽度，以最大孔中心行程的2倍、固定线宽的2倍和5 μm三者最大值为基数，按设置的递增倍率g生成L=L0g^j，j=0至搜索级数减1，选择首个全部约束通过的最短候选；不是全局最优布线证明。wi为该孔权重，Wd把同DIE的多个孔光滑合并，Td为真实刚体变换，Dd为平移，R为旋转矩阵。贝塞尔方式混合位移，圆弧方式沿原点到刚体目标点间的圆弧行进，圆心角γ由设置的度数换成rad，正负随该DIE转角（零角取正）；A/B为弦向及垂向系数，J90将向量逆时针旋转90°。只有平移时两方式也不同。C1/C2指位移场在刚体区、固定区交界的一阶/二阶导数连续；铜内角低于设置时尝试扩大局部圆角，并重复全套校验；原GDS折角不被承诺全部变光滑，离散多边形也不声称数学上严格C2。无折叠充分界、固定连接端不动、按带符号容差得到的型变后最小线宽和固定铜异网线距、按工艺原值计算的其他动孔控制区、包围、封装、禁布区和拓扑均校验。曲线自适应细分后按源DBU量化；宽度/线距使用近似平行（≤5°）的非相邻边对规则，实际短接不受角度过滤；有效长度阈值向上取整到DBU；不在用户容差之外额外放宽。型变结果只作当前工况预演，不修改原GDS，也不改变前述原图统计概率。')
+    step('方向性孔盘、无折叠证明与逐帧动画','实际铜区域、补足包围量后的运动孔盘、固定过孔、用户连续性与插值设置',
+         [r't=\min(1,\max(0,(P-b)\cdot u/L)),\quad\Psi(P)=P+w(t)[T(P)-P]',
+          r'J_{11}>0,\quad J_{22}>0,\quad\det J>0'],
+         '短宽孔盘增加方向性过渡；径向场按相交支撑区计算充分界。所有接受结果继续检查完整固定RDL，失败恢复原图。',
+         'b为过渡起点，u为指向固定端的单位向量，L为过渡长度；J为局部坐标中Ψ的雅可比矩阵，Jij=∂Ψi/∂Pj；运动端为补足包围量后的整个孔盘，不只包含裸孔。方向性局部候选从实际两端间隙生成，不要求圆形支撑区绕开固定端。贝塞尔权重的全截面场在覆盖整个源铜的局部坐标矩形上，对两个主对角元及行列式建立解析正下界（严格大于0.02），满足P矩阵充分条件才放行；否则仍拒绝。必要时尝试峰值斜率1.25的分段C2积分权重，避免把较大的横向剪切误判为折叠。此证明只排除映射折叠，不替代线宽线距验收。细分仅作用于型变影响边，固定或刚体边保持原顶点；候选本征DRC按几何指纹复用，异网检查仅截取规则距离外加保护边距的相关区域。动画先构造并校验每个中间状态，计算时间与播放时间分开；算完连续播放和边算边显示均支持，相同条件复用完整动画缓存。只显示已完成检查的帧；未通过的型变线路恢复原图并标记。不在两张铜图之间插值生成未检查形状。')
     step('三段追溯与全局DRC','来源铜连通区、运动/固定过孔；最小线宽线距、连续性与内角设置',
          [r'S=L_0\left(\frac{w_0}{w_{\min}}\right)^{1/4},\quad g=\beta_g\max(w_0,w_{\min}),\quad L_{\max}=L_0-2g',
           r't(P)=\min\!\left(1,\max\!\left(0,\frac{(P-b)\cdot u}{L}\right)\right)',

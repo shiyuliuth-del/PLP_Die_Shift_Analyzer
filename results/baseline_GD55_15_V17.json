@@ -1,0 +1,2649 @@
+{
+  "sha256": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+  "parameters": {
+    "line_width_um": 15,
+    "line_space_um": 15,
+    "annulus_um": 15,
+    "multi_bound_x_um": 25,
+    "multi_bound_y_um": 25,
+    "bound_angle_deg": 1
+  },
+  "states": [
+    [
+      -25.0,
+      25.0,
+      0.017453292519943295
+    ],
+    [
+      -25.0,
+      25.0,
+      0.017453292519943295
+    ],
+    [
+      -25.0,
+      25.0,
+      0.017453292519943295
+    ]
+  ],
+  "interfaces": 158,
+  "copper_components": 118,
+  "cold_frame_ms": 126523.15330599959,
+  "repeat_frame_median_ms": 0.023366999812424183,
+  "repeat_frame_max_ms": 0.10468500113347545,
+  "toggle_roundtrip_ms": 0.07210699914139695,
+  "repeat_search_calls": 0,
+  "search_calls": 23,
+  "search_calls_scope": "Parent process only; spawned worker searches are not included",
+  "slowest_searches": [
+    {
+      "indices": [
+        8
+      ],
+      "ms": 4828.292484002304
+    },
+    {
+      "indices": [
+        10
+      ],
+      "ms": 4442.742728999292
+    },
+    {
+      "indices": [
+        3
+      ],
+      "ms": 4350.5302389967255
+    },
+    {
+      "indices": [
+        32
+      ],
+      "ms": 3850.2784779993817
+    },
+    {
+      "indices": [
+        13
+      ],
+      "ms": 3067.4313219969918
+    }
+  ],
+  "accepted": 76,
+  "unadapted": 42,
+  "rejected_displayed": 0,
+  "visible_drc_groups": 93,
+  "interface_outcomes": [
+    {
+      "layer": "5/0",
+      "indices": [
+        41
+      ],
+      "via_layer": "4/0",
+      "via_index": 0,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        53
+      ],
+      "via_layer": "4/0",
+      "via_index": 1,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        67
+      ],
+      "via_layer": "4/0",
+      "via_index": 2,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        58
+      ],
+      "via_layer": "4/0",
+      "via_index": 3,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        26
+      ],
+      "via_layer": "4/0",
+      "via_index": 4,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        65
+      ],
+      "via_layer": "4/0",
+      "via_index": 5,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        60
+      ],
+      "via_layer": "4/0",
+      "via_index": 6,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        72
+      ],
+      "via_layer": "4/0",
+      "via_index": 7,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        71
+      ],
+      "via_layer": "4/0",
+      "via_index": 8,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "无法证明位移场无折叠（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        66
+      ],
+      "via_layer": "4/0",
+      "via_index": 9,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "无法证明位移场无折叠（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        62
+      ],
+      "via_layer": "4/0",
+      "via_index": 10,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        55
+      ],
+      "via_layer": "4/0",
+      "via_index": 11,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        63
+      ],
+      "via_layer": "4/0",
+      "via_index": 12,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        69
+      ],
+      "via_layer": "4/0",
+      "via_index": 13,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        70
+      ],
+      "via_layer": "4/0",
+      "via_index": 14,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        61
+      ],
+      "via_layer": "4/0",
+      "via_index": 15,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        56
+      ],
+      "via_layer": "4/0",
+      "via_index": 16,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        54
+      ],
+      "via_layer": "4/0",
+      "via_index": 17,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "无法证明位移场无折叠（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        49
+      ],
+      "via_layer": "4/0",
+      "via_index": 18,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：其他运动孔控制区侵入；异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        64
+      ],
+      "via_layer": "4/0",
+      "via_index": 19,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        28
+      ],
+      "via_layer": "4/0",
+      "via_index": 20,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        52
+      ],
+      "via_layer": "4/0",
+      "via_index": 21,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        68
+      ],
+      "via_layer": "4/0",
+      "via_index": 22,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "无法证明位移场无折叠（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        44,
+        45,
+        46,
+        47,
+        48
+      ],
+      "via_layer": "4/0",
+      "via_index": 23,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "无法证明位移场无折叠（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        44,
+        45,
+        46,
+        47,
+        48
+      ],
+      "via_layer": "4/0",
+      "via_index": 24,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "无法证明位移场无折叠（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        44,
+        45,
+        46,
+        47,
+        48
+      ],
+      "via_layer": "4/0",
+      "via_index": 25,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "无法证明位移场无折叠（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        44,
+        45,
+        46,
+        47,
+        48
+      ],
+      "via_layer": "4/0",
+      "via_index": 26,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "无法证明位移场无折叠（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        44,
+        45,
+        46,
+        47,
+        48
+      ],
+      "via_layer": "4/0",
+      "via_index": 37,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "无法证明位移场无折叠（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        44,
+        45,
+        46,
+        47,
+        48
+      ],
+      "via_layer": "4/0",
+      "via_index": 38,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "无法证明位移场无折叠（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        44,
+        45,
+        46,
+        47,
+        48
+      ],
+      "via_layer": "4/0",
+      "via_index": 39,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "无法证明位移场无折叠（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        44,
+        45,
+        46,
+        47,
+        48
+      ],
+      "via_layer": "4/0",
+      "via_index": 118,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "无法证明位移场无折叠（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        44,
+        45,
+        46,
+        47,
+        48
+      ],
+      "via_layer": "4/0",
+      "via_index": 119,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "无法证明位移场无折叠（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        44,
+        45,
+        46,
+        47,
+        48
+      ],
+      "via_layer": "4/0",
+      "via_index": 122,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "无法证明位移场无折叠（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        87
+      ],
+      "via_layer": "4/0",
+      "via_index": 27,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        82
+      ],
+      "via_layer": "4/0",
+      "via_index": 28,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：其他运动孔控制区侵入；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        38
+      ],
+      "via_layer": "4/0",
+      "via_index": 29,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        37
+      ],
+      "via_layer": "4/0",
+      "via_index": 30,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        36
+      ],
+      "via_layer": "4/0",
+      "via_index": 31,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        79
+      ],
+      "via_layer": "4/0",
+      "via_index": 32,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        75
+      ],
+      "via_layer": "4/0",
+      "via_index": 33,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        80
+      ],
+      "via_layer": "4/0",
+      "via_index": 34,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        43
+      ],
+      "via_layer": "4/0",
+      "via_index": 35,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        85
+      ],
+      "via_layer": "4/0",
+      "via_index": 36,
+      "owner": 0,
+      "status": "未适配，恢复原图",
+      "reason": "过渡范围到达固定连接端（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        85
+      ],
+      "via_layer": "4/0",
+      "via_index": 42,
+      "owner": 0,
+      "status": "未适配，恢复原图",
+      "reason": "过渡范围到达固定连接端（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        30
+      ],
+      "via_layer": "4/0",
+      "via_index": 40,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        29
+      ],
+      "via_layer": "4/0",
+      "via_index": 41,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        35
+      ],
+      "via_layer": "4/0",
+      "via_index": 43,
+      "owner": 0,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        35
+      ],
+      "via_layer": "4/0",
+      "via_index": 86,
+      "owner": 1,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        84
+      ],
+      "via_layer": "4/0",
+      "via_index": 44,
+      "owner": 0,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        34
+      ],
+      "via_layer": "4/0",
+      "via_index": 45,
+      "owner": 0,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        34
+      ],
+      "via_layer": "4/0",
+      "via_index": 91,
+      "owner": 1,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        39
+      ],
+      "via_layer": "4/0",
+      "via_index": 46,
+      "owner": 0,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        39
+      ],
+      "via_layer": "4/0",
+      "via_index": 92,
+      "owner": 1,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        40
+      ],
+      "via_layer": "4/0",
+      "via_index": 47,
+      "owner": 0,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：其他运动孔控制区侵入；异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        40
+      ],
+      "via_layer": "4/0",
+      "via_index": 95,
+      "owner": 1,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：其他运动孔控制区侵入；异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        32
+      ],
+      "via_layer": "4/0",
+      "via_index": 48,
+      "owner": 0,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        32
+      ],
+      "via_layer": "4/0",
+      "via_index": 97,
+      "owner": 1,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        33
+      ],
+      "via_layer": "4/0",
+      "via_index": 49,
+      "owner": 0,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        33
+      ],
+      "via_layer": "4/0",
+      "via_index": 98,
+      "owner": 1,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        74
+      ],
+      "via_layer": "4/0",
+      "via_index": 50,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        88
+      ],
+      "via_layer": "4/0",
+      "via_index": 51,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        89
+      ],
+      "via_layer": "4/0",
+      "via_index": 52,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        86
+      ],
+      "via_layer": "4/0",
+      "via_index": 53,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        25
+      ],
+      "via_layer": "4/0",
+      "via_index": 54,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        25
+      ],
+      "via_layer": "4/0",
+      "via_index": 110,
+      "owner": 1,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        25
+      ],
+      "via_layer": "4/0",
+      "via_index": 111,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        76
+      ],
+      "via_layer": "4/0",
+      "via_index": 55,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        5
+      ],
+      "via_layer": "4/0",
+      "via_index": 56,
+      "owner": 1,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：其他运动孔控制区侵入；异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        5
+      ],
+      "via_layer": "4/0",
+      "via_index": 127,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：其他运动孔控制区侵入；异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        9
+      ],
+      "via_layer": "4/0",
+      "via_index": 57,
+      "owner": 1,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        9
+      ],
+      "via_layer": "4/0",
+      "via_index": 129,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        8
+      ],
+      "via_layer": "4/0",
+      "via_index": 58,
+      "owner": 1,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        8
+      ],
+      "via_layer": "4/0",
+      "via_index": 131,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        3
+      ],
+      "via_layer": "4/0",
+      "via_index": 59,
+      "owner": 1,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        3
+      ],
+      "via_layer": "4/0",
+      "via_index": 133,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        7
+      ],
+      "via_layer": "4/0",
+      "via_index": 60,
+      "owner": 1,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        7
+      ],
+      "via_layer": "4/0",
+      "via_index": 134,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        11
+      ],
+      "via_layer": "4/0",
+      "via_index": 61,
+      "owner": 1,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        11
+      ],
+      "via_layer": "4/0",
+      "via_index": 137,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        1
+      ],
+      "via_layer": "4/0",
+      "via_index": 62,
+      "owner": 1,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        1
+      ],
+      "via_layer": "4/0",
+      "via_index": 63,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        2
+      ],
+      "via_layer": "4/0",
+      "via_index": 64,
+      "owner": 1,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        2
+      ],
+      "via_layer": "4/0",
+      "via_index": 65,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        99
+      ],
+      "via_layer": "4/0",
+      "via_index": 66,
+      "owner": 1,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        99
+      ],
+      "via_layer": "4/0",
+      "via_index": 67,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        95
+      ],
+      "via_layer": "4/0",
+      "via_index": 68,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        98
+      ],
+      "via_layer": "4/0",
+      "via_index": 69,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        14
+      ],
+      "via_layer": "4/0",
+      "via_index": 70,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        109
+      ],
+      "via_layer": "4/0",
+      "via_index": 71,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        97
+      ],
+      "via_layer": "4/0",
+      "via_index": 72,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        17
+      ],
+      "via_layer": "4/0",
+      "via_index": 73,
+      "owner": 1,
+      "status": "未适配，恢复原图",
+      "reason": "无法证明位移场无折叠（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        17
+      ],
+      "via_layer": "4/0",
+      "via_index": 75,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "无法证明位移场无折叠（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        17
+      ],
+      "via_layer": "4/0",
+      "via_index": 79,
+      "owner": 1,
+      "status": "未适配，恢复原图",
+      "reason": "无法证明位移场无折叠（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        17
+      ],
+      "via_layer": "4/0",
+      "via_index": 80,
+      "owner": 1,
+      "status": "未适配，恢复原图",
+      "reason": "无法证明位移场无折叠（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        0
+      ],
+      "via_layer": "4/0",
+      "via_index": 74,
+      "owner": 1,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        0
+      ],
+      "via_layer": "4/0",
+      "via_index": 151,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        100
+      ],
+      "via_layer": "4/0",
+      "via_index": 76,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        22
+      ],
+      "via_layer": "4/0",
+      "via_index": 77,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "过渡范围到达固定连接端（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        73
+      ],
+      "via_layer": "4/0",
+      "via_index": 78,
+      "owner": 1,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        12
+      ],
+      "via_layer": "4/0",
+      "via_index": 81,
+      "owner": 1,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        12
+      ],
+      "via_layer": "4/0",
+      "via_index": 142,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        96
+      ],
+      "via_layer": "4/0",
+      "via_index": 82,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        101
+      ],
+      "via_layer": "4/0",
+      "via_index": 83,
+      "owner": 1,
+      "status": "未适配，恢复原图",
+      "reason": "过渡范围到达固定连接端（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        102
+      ],
+      "via_layer": "4/0",
+      "via_index": 84,
+      "owner": 1,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        102
+      ],
+      "via_layer": "4/0",
+      "via_index": 85,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        94
+      ],
+      "via_layer": "4/0",
+      "via_index": 87,
+      "owner": 1,
+      "status": "未适配，恢复原图",
+      "reason": "过渡范围到达固定连接端（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        103
+      ],
+      "via_layer": "4/0",
+      "via_index": 88,
+      "owner": 1,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        24
+      ],
+      "via_layer": "4/0",
+      "via_index": 89,
+      "owner": 1,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        19
+      ],
+      "via_layer": "4/0",
+      "via_index": 90,
+      "owner": 1,
+      "status": "未适配，恢复原图",
+      "reason": "过渡范围到达固定连接端（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        81
+      ],
+      "via_layer": "4/0",
+      "via_index": 93,
+      "owner": 1,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        78
+      ],
+      "via_layer": "4/0",
+      "via_index": 94,
+      "owner": 1,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        77
+      ],
+      "via_layer": "4/0",
+      "via_index": 96,
+      "owner": 1,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        90
+      ],
+      "via_layer": "4/0",
+      "via_index": 99,
+      "owner": 1,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        13
+      ],
+      "via_layer": "4/0",
+      "via_index": 100,
+      "owner": 1,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        13
+      ],
+      "via_layer": "4/0",
+      "via_index": 102,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        13
+      ],
+      "via_layer": "4/0",
+      "via_index": 143,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        91
+      ],
+      "via_layer": "4/0",
+      "via_index": 101,
+      "owner": 1,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        83
+      ],
+      "via_layer": "4/0",
+      "via_index": 103,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        42
+      ],
+      "via_layer": "4/0",
+      "via_index": 104,
+      "owner": 1,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        27
+      ],
+      "via_layer": "4/0",
+      "via_index": 105,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        27
+      ],
+      "via_layer": "4/0",
+      "via_index": 106,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        31
+      ],
+      "via_layer": "4/0",
+      "via_index": 107,
+      "owner": 1,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        92
+      ],
+      "via_layer": "4/0",
+      "via_index": 108,
+      "owner": 1,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        4
+      ],
+      "via_layer": "4/0",
+      "via_index": 109,
+      "owner": 1,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        4
+      ],
+      "via_layer": "4/0",
+      "via_index": 157,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        10
+      ],
+      "via_layer": "4/0",
+      "via_index": 112,
+      "owner": 1,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        10
+      ],
+      "via_layer": "4/0",
+      "via_index": 120,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        6
+      ],
+      "via_layer": "4/0",
+      "via_index": 113,
+      "owner": 1,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        6
+      ],
+      "via_layer": "4/0",
+      "via_index": 125,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        16
+      ],
+      "via_layer": "4/0",
+      "via_index": 114,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        93
+      ],
+      "via_layer": "4/0",
+      "via_index": 115,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        93
+      ],
+      "via_layer": "4/0",
+      "via_index": 116,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        112
+      ],
+      "via_layer": "4/0",
+      "via_index": 117,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "无法证明位移场无折叠（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        105
+      ],
+      "via_layer": "4/0",
+      "via_index": 121,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        57
+      ],
+      "via_layer": "4/0",
+      "via_index": 123,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        50
+      ],
+      "via_layer": "4/0",
+      "via_index": 124,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        51
+      ],
+      "via_layer": "4/0",
+      "via_index": 126,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：其他运动孔控制区侵入；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        118
+      ],
+      "via_layer": "4/0",
+      "via_index": 128,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：其他运动孔控制区侵入；异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        114
+      ],
+      "via_layer": "4/0",
+      "via_index": 130,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        113
+      ],
+      "via_layer": "4/0",
+      "via_index": 132,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        108
+      ],
+      "via_layer": "4/0",
+      "via_index": 135,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        121
+      ],
+      "via_layer": "4/0",
+      "via_index": 136,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        117
+      ],
+      "via_layer": "4/0",
+      "via_index": 138,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        106
+      ],
+      "via_layer": "4/0",
+      "via_index": 139,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        107
+      ],
+      "via_layer": "4/0",
+      "via_index": 140,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "最优候选仍有DRC问题：异网最小净距不足；异网线距不足；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        111
+      ],
+      "via_layer": "4/0",
+      "via_index": 141,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        18
+      ],
+      "via_layer": "4/0",
+      "via_index": 144,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        23
+      ],
+      "via_layer": "4/0",
+      "via_index": 145,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        119
+      ],
+      "via_layer": "4/0",
+      "via_index": 146,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        110
+      ],
+      "via_layer": "4/0",
+      "via_index": 147,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "过渡范围到达固定连接端（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        15
+      ],
+      "via_layer": "4/0",
+      "via_index": 148,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        104
+      ],
+      "via_layer": "4/0",
+      "via_index": 149,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        120
+      ],
+      "via_layer": "4/0",
+      "via_index": 150,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        20
+      ],
+      "via_layer": "4/0",
+      "via_index": 152,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        59
+      ],
+      "via_layer": "4/0",
+      "via_index": 153,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        116
+      ],
+      "via_layer": "4/0",
+      "via_index": 154,
+      "owner": 2,
+      "status": "未适配，恢复原图",
+      "reason": "过渡范围到达固定连接端（有限搜索未解，保留源图形）；恢复原图"
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        21
+      ],
+      "via_layer": "4/0",
+      "via_index": 155,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        115
+      ],
+      "via_layer": "4/0",
+      "via_index": 156,
+      "owner": 2,
+      "status": "已适配",
+      "reason": ""
+    }
+  ],
+  "audit": [
+    {
+      "layer": "5/0",
+      "indices": [
+        41
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        53
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        67
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        58
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        26
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        65
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        60
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        72
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        62
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        55
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        63
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        69
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        70
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        61
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        56
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        28
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        52
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        87
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        38
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        37
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        36
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        79
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        75
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        80
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        43
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        30
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        29
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        35
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        84
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        39
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        33
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        74
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        88
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        89
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        86
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        76
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        2
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        99
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        95
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        98
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        14
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        109
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        97
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        100
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        73
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        12
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        96
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        102
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        90
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        83
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        27
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        4
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        16
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        93
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        105
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        57
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        50
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        108
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        117
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        106
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        111
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        18
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        23
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        119
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        15
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        104
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        120
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        20
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        59
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        21
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        115
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        11
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        81
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        31
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        7
+      ],
+      "verified": true
+    },
+    {
+      "layer": "5/0",
+      "indices": [
+        1
+      ],
+      "verified": true
+    }
+  ],
+  "iteration_history": [
+    {
+      "iteration": 1,
+      "newly_sufficient": 9,
+      "remaining": 26,
+      "accepted": 71
+    },
+    {
+      "iteration": 2,
+      "newly_sufficient": 3,
+      "remaining": 23,
+      "accepted": 74
+    },
+    {
+      "iteration": 3,
+      "newly_sufficient": 0,
+      "remaining": 23,
+      "accepted": 76
+    },
+    {
+      "iteration": 4,
+      "newly_sufficient": 0,
+      "remaining": 23,
+      "accepted": 76
+    }
+  ],
+  "joint_rounds": 3,
+  "rollback_rounds": 0,
+  "execution": "serial",
+  "workers": 1,
+  "three_part_count": 8,
+  "accepted_indices": [
+    [
+      41
+    ],
+    [
+      53
+    ],
+    [
+      67
+    ],
+    [
+      58
+    ],
+    [
+      26
+    ],
+    [
+      65
+    ],
+    [
+      60
+    ],
+    [
+      72
+    ],
+    [
+      62
+    ],
+    [
+      55
+    ],
+    [
+      63
+    ],
+    [
+      69
+    ],
+    [
+      70
+    ],
+    [
+      61
+    ],
+    [
+      56
+    ],
+    [
+      28
+    ],
+    [
+      52
+    ],
+    [
+      87
+    ],
+    [
+      38
+    ],
+    [
+      37
+    ],
+    [
+      36
+    ],
+    [
+      79
+    ],
+    [
+      75
+    ],
+    [
+      80
+    ],
+    [
+      43
+    ],
+    [
+      30
+    ],
+    [
+      29
+    ],
+    [
+      35
+    ],
+    [
+      84
+    ],
+    [
+      39
+    ],
+    [
+      33
+    ],
+    [
+      74
+    ],
+    [
+      88
+    ],
+    [
+      89
+    ],
+    [
+      86
+    ],
+    [
+      76
+    ],
+    [
+      2
+    ],
+    [
+      99
+    ],
+    [
+      95
+    ],
+    [
+      98
+    ],
+    [
+      14
+    ],
+    [
+      109
+    ],
+    [
+      97
+    ],
+    [
+      100
+    ],
+    [
+      73
+    ],
+    [
+      12
+    ],
+    [
+      96
+    ],
+    [
+      102
+    ],
+    [
+      90
+    ],
+    [
+      83
+    ],
+    [
+      27
+    ],
+    [
+      4
+    ],
+    [
+      16
+    ],
+    [
+      93
+    ],
+    [
+      105
+    ],
+    [
+      57
+    ],
+    [
+      50
+    ],
+    [
+      108
+    ],
+    [
+      117
+    ],
+    [
+      106
+    ],
+    [
+      111
+    ],
+    [
+      18
+    ],
+    [
+      23
+    ],
+    [
+      119
+    ],
+    [
+      15
+    ],
+    [
+      104
+    ],
+    [
+      120
+    ],
+    [
+      20
+    ],
+    [
+      59
+    ],
+    [
+      21
+    ],
+    [
+      115
+    ],
+    [
+      11
+    ],
+    [
+      81
+    ],
+    [
+      31
+    ],
+    [
+      7
+    ],
+    [
+      1
+    ]
+  ],
+  "scope": "V16 Git archive; nominal fixed width/space/enclosure 15/15/15 um; same GD55 and all-DIE pose (-25,+25,+1 deg). Separate process on shared host."
+}

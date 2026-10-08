@@ -24,6 +24,9 @@ class RouteField(Field):
         self.moving=moving;self.band=band;self.start=np.asarray(start);self.direction=np.asarray(direction)
         self.length=length;self.width=width;self.mode='three_part'
         self.support=moving.union(band);shapely.prepare(self.support);self.moving_test=boundary_tolerant(moving.wkb);self.band_test=boundary_tolerant(band.wkb)
+    def active_edges(self,a,b):
+        x0,y0,x1,y1=self.band.bounds;lo=np.minimum(a,b);hi=np.maximum(a,b)
+        return (lo[:,0]<=x1)&(hi[:,0]>=x0)&(lo[:,1]<=y1)&(hi[:,1]>=y0)
     def weights(self,xy):
         t=(xy-self.start)@self.direction/self.length
         inside=shapely.intersects_xy(self.band_test,xy[:,0],xy[:,1])
@@ -58,6 +61,7 @@ class CombinedRouteField:
         self.inner=np.concatenate([f.inner for f in fields]);self.support=shapely.union_all([f.support for f in fields])
         self.band=shapely.union_all([f.band for f in fields]);self.span=max(f.span for f in fields)
     def jacobian_bound(self):return max(f.jacobian_bound() for f in self.fields)
+    def active_edges(self,a,b):return np.logical_or.reduce([f.active_edges(a,b) for f in self.fields])
     def __call__(self,xy):
         xy=np.asarray(xy);out=xy.copy()
         for f in self.fields:out+=f(xy)-xy
@@ -72,7 +76,42 @@ class SlabField(RouteField):
     """
     def weights(self,xy):
         t=(xy-self.start)@self.direction/self.length
-        return np.repeat(smooth_weight(t,self.settings.deformation_continuity)[:,None],len(self.records),axis=1)
+        if getattr(self,'gentle_profile',False):
+            # C2 integral of a smoothstep-ramped derivative. A long linear
+            # middle limits peak slope to 1.25 instead of quintic's 1.875.
+            t=np.clip(t,0,1);r=.2;u=np.minimum(t,1-t)/r
+            edge=r/(1-r)*(u**3-.5*u**4)
+            integral=np.where(t<r,edge,np.where(t>1-r,1-edge,(t-r/2)/(1-r)))
+            w=1-integral
+        else:w=smooth_weight(t,self.settings.deformation_continuity)
+        return np.repeat(w[:,None],len(self.records),axis=1)
+    def active_edges(self,a,b):
+        left=(a-self.start)@self.direction;right=(b-self.start)@self.direction
+        return (np.minimum(left,right)<=self.length)&(np.maximum(left,right)>=0)
+
+    def injectivity_certificate(self,source):
+        """P-matrix certificate on a rectangle enclosing the WHOLE source.
+
+        A transverse shear can be injective even when ||DF-I|| > 1. In the
+        route basis, bound J11, J22 and det(J) over the entire transition slab.
+        Outside it the field is rigid or identity. Strictly positive principal
+        minors certify global injectivity on this rectangle (Gale-Nikaido).
+        Only the Bezier-weight affine blend has this analytic certificate.
+        """
+        if self.settings.deformation_method!='bezier':return False
+        owner=self.records[0]['owner'];state=self.states[owner];co=math.cos(state[2]);si=math.sin(state[2])
+        if co<=.02:return False
+        u=self.direction;n=np.array([-u[1],u[0]]);xy=shapely.get_coordinates(source)
+        v=(xy-self.start)@n;lo,hi=float(v.min()),float(v.max())
+        corners=np.array([self.start+u*s+n*t for s in (0,self.length) for t in (lo,hi)])
+        from .preview import rigid_transform
+        delta=rigid_transform(corners,self.centers[owner],state)-corners;du=delta@u;dv=delta@n
+        rate=(1.25 if getattr(self,'gentle_profile',False) else 1.5 if self.settings.deformation_continuity=='C1' else 1.875)/self.length
+        # w in [0,1], w' in [-rate,0]. Delta is affine in the rectangle.
+        determinant=math.cos(state[2]/2)**2-rate*max(0.,float(np.max(np.r_[du,co*du+si*dv])))
+        diagonal=co-rate*max(0.,float(du.max()))
+        self.injectivity_bounds=(diagonal,co,determinant)
+        return min(self.injectivity_bounds)>.02
 
 
 def section_candidates(source,records,anchors,minimum_width,dbu,settings):

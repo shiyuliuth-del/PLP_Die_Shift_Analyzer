@@ -118,6 +118,6 @@ def draw_yield_axis(figure,result):
     ax.set_xticks(positions,labels);ax.tick_params(labelsize=7.5,length=2,colors='#617c8c')
     for spine in ax.spines.values():spine.set_visible(False)
     ax.set_xlabel('无接触概率（尾部对数刻度，右端含100%）',fontsize=8,color=INK,labelpad=4)
-    figure.text(.17,.192,'浅绿：目标覆盖级别对应良率范围     ▼：当前估计',fontsize=8,color=INK)
+    figure.text(.17,.192,'浅绿：良率级别对应良率范围     ▼：当前估计',fontsize=8,color=INK)
     figure.text(.697,.18,result.get('interval_kind','积分区间')+'：\n'+format_yield(result['lower'])+' — '+format_yield(result['upper']),fontsize=8,color=INK,va='top')
     figure.text(.697,.10,('目标：'+str(sigma)+'σ') if math.isfinite(sigma) else '∞：当前名义状态二值',fontsize=8,color='#728593',va='top')
