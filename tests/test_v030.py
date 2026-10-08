@@ -16,7 +16,7 @@ class RevisionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         f=ROOT/'examples/示例C_多芯片晶圆接口.json';cls.project=json.loads(f.read_text())
-        cls.data=read_gds(f.parent/cls.project['gds_path']);cls.roles=cls.data.auto_roles;cls.data.layers={k:cls.data.layers[k] for k in cls.project['layer_order']}
+        cls.data=read_gds(f.parent/cls.project['gds_path']);cls.roles=cls.project['roles'];cls.data.layers={k:cls.data.layers[k] for k in cls.project['layer_order']}
         cls.case=build_case(cls.data,cls.roles);cls.params=Parameters.from_dict(cls.project['parameters'])
     def test_integer_sigma_and_twelve_no_tail_cancellation(self):
         for target in (1,3,6,12):

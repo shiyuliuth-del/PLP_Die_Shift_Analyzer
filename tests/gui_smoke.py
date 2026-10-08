@@ -20,7 +20,7 @@ with tempfile.TemporaryDirectory() as tmp:
         end=time.monotonic()+40
         while time.monotonic()<end:
             app.processEvents()
-            if window.worker is None and window.preview_worker is None and window.preview_pending is None and not window.coverage_timer.isActive() and not window._coverage_pending:break
+            if window.worker is None and window.preview_worker is None and window.preview_pending is None and not window.coverage_timer.isActive() and not window._coverage_pending and not window.viewport_timer.isActive() and not window.transition.timer.isActive():break
             time.sleep(.003)
         assert window.worker is None and window.preview_worker is None and window.preview_pending is None
         assert not errors,errors
@@ -30,6 +30,9 @@ with tempfile.TemporaryDirectory() as tmp:
     assert window.windowTitle().startswith('Die Shift Analyze')
     assert all(b.text()!='打开工程' for b in window.findChildren(W.QPushButton))
     assert not hasattr(window,'stage_boxes') and window.layer_table.columnCount()==4
+    assert all(role=='不参与' for role in window.roles().values())
+    for key,role in json.loads((ROOT/'examples/示例C_多芯片晶圆接口.json').read_text())['roles'].items():window.role_boxes[key].setCurrentText(role)
+    wait_idle()
     assert window.roles()['30/0']=='运动过孔'
     assert window.ordered_layers()==list(window.data.layers)
     # Apply the example's explicit physical stack as a manual drag sequence.
@@ -144,15 +147,17 @@ with tempfile.TemporaryDirectory() as tmp:
     assert not window.space_toggle.isChecked() and window.space_toggle.text()=='Space Map'
     window.space_toggle.setChecked(True);wait_idle();assert len(window.space_artists)==2
     assert all(q['layers']==['30/0'] for q in window.space_data['maps'])
-    assert all(a.get_visible() for a in window.space_artists)
+    viewport_visibility=[a.get_visible() for a in window.space_artists]
+    assert any(viewport_visibility)  # Off-screen DIE maps are deliberately culled.
     window.visible_boxes['30/0'].setChecked(False)
     assert not any(a.get_visible() for a in window.space_artists)
     assert not window.space_colorbar.ax.get_visible() and not window.connector_segments.size
     window.visible_boxes['30/0'].setChecked(True)
-    assert all(a.get_visible() for a in window.space_artists)
+    assert [a.get_visible() for a in window.space_artists]==viewport_visibility
     window.probability_toggle.setChecked(False);wait_idle()
+    assert [a.get_visible() for a in window.space_artists]==viewport_visibility
+    window.fit_plot();wait_idle();window.canvas.draw()
     assert all(a.get_visible() for a in window.space_artists)
-    window.fit_plot();window.canvas.draw()
     assert window.space_colorbar.ax.bbox.y1<window.ax.bbox.y0
     for width,height in [(1540,1000),(1800,820),(1200,1050)]:
         window.resize(width,height);app.processEvents();window.canvas.draw();app.processEvents()

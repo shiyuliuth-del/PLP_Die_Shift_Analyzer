@@ -157,7 +157,7 @@ class MainWindow(W.QMainWindow):
         self.coverage_timer=QtCore.QTimer(self);self.coverage_timer.setSingleShot(True);self.coverage_timer.setInterval(180);self.coverage_timer.timeout.connect(self.refresh_coverage)
         self._coverage_pending=False;self._evaluation_requested=False;self._motion_intent=None;self.motion_worker=None;self.motion_pending=None;self.motion_generation=0;self.deformation_artists={};self._plotting=False;self.viewport_index=None;self._viewport_stamp=None
         self.issue_navigation=QtCore.QTimer(self);self.issue_navigation.setSingleShot(True);self.issue_navigation.setInterval(0);self.issue_navigation.timeout.connect(lambda:self.locate_issue(self.issue_table.currentRow(),0))
-        self.viewport_timer=QtCore.QTimer(self);self.viewport_timer.setSingleShot(True);self.viewport_timer.setInterval(0);self.viewport_timer.timeout.connect(self.viewport_changed)
+        self.viewport_timer=QtCore.QTimer(self);self.viewport_timer.setSingleShot(True);self.viewport_timer.setInterval(16);self.viewport_timer.timeout.connect(self.viewport_changed)
         self.transition=Transition(self);self._animation_cleanup=None;self._legend_stamp=None
         self._build();self.selection=GeometrySelection(self);self.escape_shortcut=(QtGui.QShortcut if hasattr(QtGui,'QShortcut') else W.QShortcut)(QtGui.QKeySequence('Escape'),self);self.escape_shortcut.activated.connect(self.escape_action);self.scene_renderer=SceneRenderer(self.canvas,self.ax);self.refresh_jobs()
         for name in ('button_press_event','scroll_event'):self.canvas.mpl_connect(name,lambda e:self.stop_animation())
@@ -199,6 +199,7 @@ class MainWindow(W.QMainWindow):
         self.controls=W.QTabWidget();lay.addWidget(self.controls,1)
         page=self._page('偏移')
         summary=label('方案1：动静区之间局部重构RDL。\n方案2：RDL整体随动，固定RDL窗口捕获。\n方案3：预制运动RDL，动静接口适配。');summary.setObjectName('Notice');page.addWidget(summary)
+        self.shortcut_label=label('快捷键（鼠标位于图中）：F 恢复视图；M 选择芯片手动偏移；ESC 退出/取消选择。\n普通模式：滚轮缩放，中键拖动画面。\n手动偏移：右键拖动芯片，滚轮旋转，Ctrl＋滚轮缩放。');page.addWidget(self.shortcut_label)
         self.gds_label=label('尚未打开GDS');self.gds_label.setTextInteractionFlags(getattr(Qt,'TextInteractionFlag',Qt).TextSelectableByMouse);page.addWidget(self.gds_label)
         row=W.QHBoxLayout();row.addWidget(W.QLabel('顶层Cell'));self.top=W.QComboBox();self.top.currentTextChanged.connect(self.top_changed);row.addWidget(self.top,1);page.addLayout(row)
         self.open_gds_button=W.QPushButton('打开GDS');self.open_gds_button.setObjectName('Primary');self.open_gds_button.clicked.connect(self.open_gds);page.addWidget(self.open_gds_button)
@@ -271,23 +272,22 @@ class MainWindow(W.QMainWindow):
         info.setSizes([360,330,340]);self.info_split=info;self.preview_tabs.addTab(info,'信息')
         self.deformation_table=table(['预演层','源图形','未解原因（保留原图）']);self.preview_tabs.addTab(self.deformation_table,'型变校验');self.deformation_table.currentCellChanged.connect(lambda row,*_:self.locate_deformation(row))
         right_split.addWidget(bottom);right_split.setSizes([560,240]);self.tabs.addTab(page,'结果图形')
-        self.navigation=Navigation(self.canvas,self.ax)
+        self.canvas._managed_viewport=True;self.navigation=Navigation(self.canvas,self.ax)
         self.canvas.mpl_connect('resize_event',self.resize_plot)
         self.ax.callbacks.connect('xlim_changed',self.update_die_label_visibility);self.ax.callbacks.connect('ylim_changed',self.update_die_label_visibility)
         self.ax.callbacks.connect('xlim_changed',self.queue_viewport);self.ax.callbacks.connect('ylim_changed',self.queue_viewport)
-        self.scheme_figure=Figure(figsize=(9,5),layout='constrained');self.scheme_canvas=FigureCanvasQTAgg(self.scheme_figure);self.scheme_canvas.setMinimumHeight(160)
-        page=W.QWidget();v=W.QVBoxLayout(page);self.verdict=label('导入GDS后设置图层用途，再进行评估。');self.verdict.setObjectName('Notice');v.addWidget(self.verdict)
+        self.scheme_figure=Figure(figsize=(9,5));self.scheme_figure.subplots_adjust(left=.065,right=.97,bottom=.31,top=.83);self.scheme_canvas=FigureCanvasQTAgg(self.scheme_figure);self.scheme_canvas.setMinimumHeight(80)
+        page=W.QWidget();v=W.QVBoxLayout(page)
         self.analysis_page=page;upper=W.QWidget();uv=W.QVBoxLayout(upper);uv.setContentsMargins(0,0,0,0);uv.addWidget(self.scheme_canvas,1)
         self.scheme_table=table(['方案','状态','U','选择理由']);self.scheme_table.setMaximumHeight(160);uv.addWidget(self.scheme_table)
         self.analysis_split=W.QSplitter(VERTICAL);self.analysis_split.addWidget(upper);v.addWidget(self.analysis_split,1);self.tabs.addTab(page,'结果分析')
         safe_page=W.QWidget();sv=W.QVBoxLayout(safe_page);sv.setContentsMargins(0,0,0,0)
-        self.safe_range_caption=label('连续安全内范围：运行方案评估后显示。');sv.addWidget(self.safe_range_caption)
         self.safe_range_figure=Figure(figsize=(10,3.6));self.safe_range_canvas=FigureCanvasQTAgg(self.safe_range_figure)
         self.safe_range_canvas.setMinimumHeight(240);self.safe_range_plot_data=draw_safe_ranges(self.safe_range_figure,{})
         self.safe_range_scroll=W.QScrollArea();self.safe_range_scroll.setWidgetResizable(True);self.safe_range_scroll.setWidget(self.safe_range_canvas)
-        self.safe_range_scroll.setMinimumHeight(150);sv.addWidget(self.safe_range_scroll,1);self.analysis_split.addWidget(safe_page)
+        self.safe_range_scroll.setMinimumHeight(90);sv.addWidget(self.safe_range_scroll,1);self.analysis_split.addWidget(safe_page)
         chart_page=W.QWidget();cv=W.QVBoxLayout(chart_page);self.chart_status=label('选择极端情况后显示可见运动过孔的位移统计。');cv.addWidget(self.chart_status)
-        self.distribution_figure=Figure(figsize=(9,6),layout='constrained');self.distribution_canvas=FigureCanvasQTAgg(self.distribution_figure);self.distribution_canvas.setMinimumHeight(200);cv.addWidget(self.distribution_canvas,1)
+        self.distribution_figure=Figure(figsize=(9,6));self.distribution_figure.subplots_adjust(left=.07,right=.98,bottom=.26,top=.83,wspace=.25);self.distribution_canvas=FigureCanvasQTAgg(self.distribution_figure);self.distribution_canvas.setMinimumHeight(80);cv.addWidget(self.distribution_canvas,1)
         self.analysis_split.addWidget(chart_page);self.analysis_split.setSizes([330,400,0]);self.histogram_data=None;self._histogram_revealed=False
         self.detail=W.QTextBrowser();self.tabs.addTab(self.detail,'报告');self.tabs.currentChanged.connect(self.tab_changed)
         self.runtime_view=W.QPlainTextEdit();self.runtime_view.setReadOnly(True);self.runtime_view.setMaximumBlockCount(10000);self.runtime_view.setToolTip('界面保留最近10000行；完整日志：'+str(self.log_bus.path));self.runtime_view.setMaximumHeight(170);self.runtime_view.hide();root.addWidget(self.runtime_view)
@@ -368,6 +368,12 @@ class MainWindow(W.QMainWindow):
         spin(safe,'safe_box_budget','每候选连续验证盒预算',32,32768)
         spin(safe,'safe_box_starts','端点扩张起点数',1,6)
         spin(safe,'safe_box_passes','体积交换轮数',1,8)
+        yield_group=group('全输入无接触模型良率')
+        choices['yield_method']=[('蒙特卡洛 + 99%置信区间','monte_carlo'),('确定性状态盒积分（不随机采样）','partition')]
+        choice(yield_group,'yield_method','计算方法')
+        spin(yield_group,'yield_sample_exponent','每DIE样本数 = 2 的指数',8,20)
+        spin(yield_group,'yield_box_budget','全输入良率积分预算 / DIE',64,65536)
+        spin(yield_group,'yield_tolerance','良率区间宽度目标（概率）',.000001,.1,6)
         self.setting_fields['safe_box_precision'].setToolTip('返回包含输入均值的安全内盒；多个端点顺序比较体积。未定候选拒绝，精度不代表全局最优误差。')
         drawing=group('接触标记');spin(drawing,'intrusion_alpha','侵入面积不透明度',.05,.85,2)
         for prefix,title in [('contact','接触空心圆'),('unadapted','未适配叉号')]:
@@ -404,6 +410,9 @@ class MainWindow(W.QMainWindow):
         for key in ('deformation_general_bands','deformation_route_candidates','deformation_min_length','deformation_corner_guard'):
             self.setting_fields[key].setEnabled(self.setting_fields['deformation_route_enabled'].isChecked())
         self.setting_fields['deformation_workers'].setEnabled(self.setting_fields['deformation_execution'].currentData()!='serial')
+        partition=self.setting_fields['yield_method'].currentData()=='partition'
+        self.setting_fields['yield_sample_exponent'].setEnabled(not partition)
+        for key in ('yield_box_budget','yield_tolerance'):self.setting_fields[key].setEnabled(partition)
         deterministic=self.setting_fields['probability_method'].currentData()=='quadrature'
         for key in ('sample_exponent','random_seed','angle_bins'):self.setting_fields[key].setEnabled(not deterministic)
         for key in ('quadrature_order',):self.setting_fields[key].setEnabled(deterministic)
@@ -416,7 +425,6 @@ class MainWindow(W.QMainWindow):
         live_motion=any(getattr(updated,k)!=getattr(old_settings,k) for k in ('animation_enabled','animation_duration_ms','animation_fps','animation_speed'))
         if numeric:
             self.dirty=self.result is not None
-            if self.result:self.verdict.setText('计算设置已修改：以下为上次评估结果。\n'+self.result['recommendation']['name'])
             self.revision+=1;self.probability_data=None;self.space_data=None
             if self.worker and self._evaluation_requested:self._coverage_pending=True;self.coverage_timer.start()
             if self.data:self.request_preview()
@@ -459,7 +467,7 @@ class MainWindow(W.QMainWindow):
         if 0<data['target_nsigma']<math.inf:self.reference_nsigma=data['target_nsigma']
         mode,x,y=self.pivot_editor.value()
         data.update(reference_nsigma=self.reference_nsigma,rotation_center=mode,rotation_x_um=x,rotation_y_um=y,die_pivots=self.per_die_pivots,per_die_enabled=self.per_die_toggle.isChecked(),die_bounds=self.per_die_values if self._per_die_initialized else [])
-        data.update(input_nsigma=data['target_nsigma'],fixed_via_assignment=self.fixed_assignment);return Parameters.from_dict(data)
+        data.update(input_nsigma=data['target_nsigma'],fixed_via_assignment=self.fixed_assignment);return Parameters.from_dict(data,require_rdl=False)
     def per_die_changed(self,*_):
         if self.per_die_toggle.isChecked() and not self._per_die_initialized and not self.loading:
             self.per_die_values=[];self.per_die_pivots=[];self.per_die_table.setRowCount(0);self._per_die_initialized=True
@@ -554,16 +562,14 @@ class MainWindow(W.QMainWindow):
         else:self.request_preview()
     def invalidate(self,*_):
         if self.loading:return
-        self.revision+=1;self.dirty=self.result is not None;self.engine=None;self.connections=None;self.probability_data=None;self.space_data=None
+        self.revision+=1;self.dirty=self.result is not None;self.refresh_extreme_colors();self.engine=None;self.connections=None;self.probability_data=None;self.space_data=None
         self.statusBar().showMessage('参数已修改；保留上次计算结果。预演控制区使用当前工艺，重新评估后更新统计结论。')
-        if self.result:
-            self.verdict.setText('参数已修改：以下为上次计算结果。\n'+self.result['recommendation']['name'])
         if self.data and (self.active_preview is not None or self.manual_states is not None or self.probability_toggle.isChecked() or self.space_toggle.isChecked() or self.deformation_toggle.isChecked() or self.drc_toggle.isChecked()):
             try:self.request_preview()
             except ValueError:pass
     def drop_result(self):
         self.result=None;self.clear_preview();self.manual_states=None;self.dirty=False;self.probability_data=None;self.space_data=None
-        self.verdict.setText('正在评估…');self.scheme_table.setRowCount(0);self.die_table.setRowCount(0)
+        self.scheme_table.setRowCount(0);self.die_table.setRowCount(0)
         self.safe_range_plot_data=draw_safe_ranges(self.safe_range_figure,{});self.safe_range_canvas.setMinimumHeight(240);self.safe_range_canvas.draw_idle()
         self.scheme_figure.clear();self.scheme_canvas.draw_idle();self.detail.clear();self.plot_layout(preserve=True);self.update_histograms()
     def error(self,text):
@@ -607,7 +613,7 @@ class MainWindow(W.QMainWindow):
         self.start_worker(read_and_prepare,accepted)
     def set_data(self,data,project=None):
         self.reset_session_cache()
-        project=normalize_project(project) if project else {};pars=Parameters.from_dict(project.get('parameters',{}));self.manual_states=None;self.probability_data=None;self.space_data=None;self.dirty=False
+        project=normalize_project(project) if project else {};pars=Parameters.from_dict(project.get('parameters',{}),require_rdl=False);self.manual_states=None;self.probability_data=None;self.space_data=None;self.dirty=False
         self.coverage_timer.stop();self._coverage_pending=False;self._evaluation_requested=False
         self.loading=True
         try:
@@ -692,7 +698,7 @@ class MainWindow(W.QMainWindow):
                 item=W.QTableWidgetItem(value);item.setToolTip(value);self.motion_table.setItem(i,j,item)
         for j,width in enumerate((70,100,150)):self.motion_table.setColumnWidth(j,width)
         self.motion_table.horizontalHeader().setStretchLastSection(True)
-        if self.active_preview is None and self.manual_states is None:self.plot_layout(preserve=True)
+        if not self.loading and self.active_preview is None and self.manual_states is None:self.plot_layout(preserve=True)
     def visibility_changed(self,key):
         if self.loading:return
         self.plot_layout(preserve=True);self.update_histograms()
@@ -759,6 +765,7 @@ class MainWindow(W.QMainWindow):
             q=frame['deformation'];message+=f" · 型变 {q['accepted_count']} 个铜连通区，未解 {len(q['diagnostics'])} 个"
         if frame and frame.get('deformation',{}).get('search_quality')=='interactive':message+=' · 交互候选已复核，停止操作后完整搜索'
         self.statusBar().showMessage(message)
+        self.refresh_extreme_colors(frame)
     def present_frame(self,frame):
         self.stop_animation()
         self._motion_intent=('frame',frame)
@@ -823,7 +830,7 @@ class MainWindow(W.QMainWindow):
         self.set_view(((x0+x1)/2,(y0+y1)/2),max(1,x1-x0)*1.1,max(1,y1-y0)*1.1)
         self._default_view=(self.ax.get_xlim(),self.ax.get_ylim())
     def resize_plot(self,event=None):
-        if self._resizing or not self.data:return
+        if self._resizing or not self.data or self.tabs.currentIndex()!=0:return
         self._resizing=True
         try:
             limits=(self.ax.get_xlim(),self.ax.get_ylim())
@@ -837,7 +844,7 @@ class MainWindow(W.QMainWindow):
             self.update_die_label_visibility();self.canvas.draw_idle()
         finally:self._resizing=False
     def queue_viewport(self,*_):
-        if not self._plotting and self.data:self.viewport_timer.start()
+        if not self._plotting and self.data and self.tabs.currentIndex()==0:self.viewport_timer.start()
     def viewport_changed(self,force=False):
         if self._plotting or not self.data:return
         self._in_viewport=True
@@ -845,13 +852,46 @@ class MainWindow(W.QMainWindow):
         finally:self._in_viewport=False
     def plot_layout(self,preserve=False):
         if self._plotting:return
+        if self.tabs.currentIndex()!=0:
+            # Hidden layout canvases need no paths, raster compositing or Qt tables.
+            # Keep the numerical pose/connector data current for analysis charts.
+            self._layout_pending=True;frame=self.current_frame
+            self.preview_applied=frame is not None;self.shown_states=frame['states'] if frame else None
+            self.update_connector_segments();return
+        self._layout_pending=False
         self._plotting=True
         try:self._plot_layout(preserve)
         finally:self._plotting=False
+    def update_connector_segments(self):
+        frame=self.current_frame
+        roles=self.roles();motions=self.motions();segments=[]
+        if frame:
+            for key in self.ordered_layers():
+                if roles[key]!='运动过孔' or not self.visible_boxes[key].isChecked():continue
+                q=self.geometry_cache.layers[key]
+                if motions.get(key)=='fixed':continue
+                mask=np.zeros(len(q['centers']),bool)
+                for region in frame['contact']['regions']:
+                    if region['key']==key:mask[region['index']]=True
+                segments.append(np.stack((q['centers'][mask],frame['layers'][key]['centers'][mask]),axis=1))
+        self.connector_segments=np.concatenate(segments) if segments else np.empty((0,2,2))
+
+    def geometry_patch(self,geometry):
+        if not hasattr(self,'_path_cache'):self._path_cache={}
+        key=id(geometry)
+        if key not in self._path_cache:self._path_cache[key]=(geometry,geometry_path(geometry))
+        return PathPatch(self._path_cache[key][1])
+
     def _plot_layout(self,preserve=False):
-        self.ax.set(xlabel='',ylabel='');self.ax.set_aspect('equal',adjustable='datalim');self.ax.grid(alpha=.12)
+        if not getattr(self,'_axes_configured',False):
+            self.ax.set(xlabel='',ylabel='');self.ax.set_aspect('equal',adjustable='datalim');self.ax.grid(alpha=.12)
+            self.ax.ticklabel_format(style='plain',useOffset=False,axis='both')
+            self.ax.xaxis.set_minor_locator(DistanceMinorLocator());self.ax.yaxis.set_minor_locator(DistanceMinorLocator())
+            self.ax.tick_params(which='major',labelsize=8,pad=2,length=4);self.ax.tick_params(which='minor',length=2,width=.55)
+            self._axes_configured=True
         if not self.data:self.canvas.draw_idle();return
         roles=self.roles();motions=self.motions();order=self.ordered_layers();frame=self.current_frame
+        if getattr(self,'_path_frame',None) is not frame:self._path_frame=frame;self._path_cache={}
         if not preserve or self._default_view is None:self.fit_plot()
         from .viewport import ViewportIndex,expanded_bounds,overlaps
         self.view_bounds=expanded_bounds(self.ax.get_xlim(),self.ax.get_ylim())
@@ -890,10 +930,13 @@ class MainWindow(W.QMainWindow):
             base,dark,adapt=self.deformation_artists[key]
             visible_replacements=[q for q in replacements if overlaps(q['geometry'].bounds,self.view_bounds)]
             for overlay,part in ((base,'geometry'),(dark,'dark')):
-                overlay.set_paths([PathPatch(geometry_path(q[part])) for q in visible_replacements]);overlay.set_visible(visible and bool(visible_replacements));overlay.set_zorder(artist.get_zorder()+(.002 if part=='dark' else .001))
+
+                path_stamp=tuple(id(q[part]) for q in visible_replacements)
+                if getattr(overlay,'_path_stamp',None)!=path_stamp:overlay.set_paths([self.geometry_patch(q[part]) for q in visible_replacements]);overlay._path_stamp=path_stamp
+                overlay.set_visible(visible and bool(visible_replacements));overlay.set_zorder(artist.get_zorder()+(.002 if part=='dark' else .001))
                 color=np.array(matplotlib.colors.to_rgb(sty['color']))
                 overlay.set_facecolor(color if part=='geometry' else color*.70);overlay.set_alpha(sty['alpha'])
-            adapt.set_alpha(sty['alpha']);adapt.set_paths([PathPatch(geometry_path(q['adaptation'])) for q in visible_replacements if q.get('adaptation') is not None and not q['adaptation'].is_empty]);adapt.set_visible(visible and bool(visible_replacements));adapt.set_zorder(artist.get_zorder()+.003)
+            adapt.set_alpha(sty['alpha']);adapt.set_paths([self.geometry_patch(q['adaptation']) for q in visible_replacements if q.get('adaptation') is not None and not q['adaptation'].is_empty]);adapt.set_visible(visible and bool(visible_replacements));adapt.set_zorder(artist.get_zorder()+.003)
         self._artist_frame=stamp
         for artist in self.invalid_artists:artist.remove()
         self.invalid_artists=[]
@@ -903,17 +946,7 @@ class MainWindow(W.QMainWindow):
             path=np.array([[x0-pad,y0-pad],[x1+pad,y0-pad],[x1+pad,y1+pad],[x0-pad,y1+pad],[x0-pad,y0-pad]])
             artist=LineCollection([path],colors='#d72b91',linestyles=(0,(3,3)),linewidths=.7,zorder=13)
             self.ax.add_collection(artist);self.invalid_artists.append(artist)
-        segments=[]
-        if frame:
-            for key in order:
-                if roles[key]!='运动过孔' or not self.visible_boxes[key].isChecked():continue
-                q=self.geometry_cache.layers[key]
-                if motions.get(key)=='fixed':continue
-                mask=np.zeros(len(q['centers']),bool)
-                for region in frame['contact']['regions']:
-                    if region['key']==key:mask[region['index']]=True
-                segments.append(np.stack((q['centers'][mask],frame['layers'][key]['centers'][mask]),axis=1))
-        self.connector_segments=np.concatenate(segments) if segments else np.empty((0,2,2))
+        self.update_connector_segments()
         if self.shift_artist is None:self.shift_artist=LineCollection([],colors='#d9893e',linestyles=(0,(4,3)),linewidths=1.05,zorder=8);self.ax.add_collection(self.shift_artist)
         self.shift_artist.set_segments(self.connector_segments)
         scheme=self.issue_scheme.currentData()
@@ -933,14 +966,20 @@ class MainWindow(W.QMainWindow):
             lines=LineCollection([],colors='#6c747d',linestyles=(0,(4,3)),linewidths=1.05,zorder=9,path_effects=[patheffects.withStroke(linewidth=2.3,foreground='white',alpha=.7)]);self.ax.add_collection(lines)
             self.issue_artists=[area,circles,lines]
         area,circles,lines=self.issue_artists
-        patches=[PathPatch(geometry_path(q['geometry'])) for q in frame['contact'].get('intrusions',[]) if self.visible_boxes[q['key']].isChecked() and self.visible_boxes[q['target_layer']].isChecked() and overlaps(q['geometry'].bounds,self.view_bounds)] if frame else []
+        patches=[self.geometry_patch(q['geometry']) for q in frame['contact'].get('intrusions',[]) if self.visible_boxes[q['key']].isChecked() and self.visible_boxes[q['target_layer']].isChecked() and overlaps(q['geometry'].bounds,self.view_bounds)] if frame else []
         area.set_paths(patches);area.set_alpha(self.view_settings.intrusion_alpha);area.set_visible(self.show_issues.isChecked() and bool(patches))
-        circles.set_sizes([self.marker_size('contact')]);circles.set_edgecolor(self.view_settings.contact_marker_color);circles.set_offsets(np.asarray([q['point'] for q in self.display_issues]).reshape(-1,2));circles.set_visible(self.show_issues.isChecked() and bool(self.display_issues))
-        lines.set_segments([[self.issue_origin(q),q['point']] for q in self.display_issues]);lines.set_visible(circles.get_visible())
+        # Tables retain every issue; only in-view markers/connectors are drawn.
+        marker_area=self.marker_size('contact')
+        marker_radius=math.sqrt(marker_area)*self.figure.dpi/144*np.ptp(self.ax.get_xlim())/max(1,self.ax.bbox.width)
+        self.rendered_issues=[q for q in self.display_issues if overlaps((*np.asarray(q['point'])-marker_radius,*np.asarray(q['point'])+marker_radius),self.view_bounds)]
+        segments=[np.array([self.issue_origin(q),q['point']]) for q in self.display_issues]
+        segments=[a for a in segments if overlaps((*a.min(axis=0),*a.max(axis=0)),self.view_bounds)]
+        circles.set_sizes([marker_area]);circles.set_edgecolor(self.view_settings.contact_marker_color);circles.set_offsets(np.asarray([q['point'] for q in self.rendered_issues]).reshape(-1,2));circles.set_visible(self.show_issues.isChecked() and bool(self.rendered_issues))
+        lines.set_segments(segments);lines.set_visible(self.show_issues.isChecked() and bool(segments))
         if not hasattr(self,'violation_artist') or self.violation_artist.axes is None:
             self.violation_artist=PatchCollection([],facecolor='#e956b5',edgecolor='#ca398f',linewidth=.5,alpha=.48,zorder=10.2);self.ax.add_collection(self.violation_artist)
         violations=frame.get('drc',frame.get('deformation',{}).get('violations',[])) if frame else []
-        vp=[PathPatch(geometry_path(q['geometry'])) for q in violations if any(self.visible_boxes[k].isChecked() for k in q.get('layers',(q['layer'],))) and overlaps(q['geometry'].bounds,self.view_bounds)]
+        vp=[self.geometry_patch(q['geometry']) for q in violations if any(self.visible_boxes[k].isChecked() for k in q.get('layers',(q['layer'],))) and overlaps(q['geometry'].bounds,self.view_bounds)]
         self.violation_artist.set_paths(vp);self.violation_artist.set_visible(self.drc_toggle.isChecked() and bool(vp))
         diagnostics=frame.get('deformation',{}).get('diagnostics',[]) if frame and self.deformation_toggle.isChecked() else []
         self.deformation_diagnostics=diagnostics
@@ -976,9 +1015,6 @@ class MainWindow(W.QMainWindow):
                 if item:
                     background=QtGui.QColor(sty['color']).lighter(125);item.setForeground(QtGui.QColor('#ffffff' if background.lightnessF()<.55 else '#33465a'));item.setBackground(background);item.setToolTip(sty['label'])
                 self.role_boxes[key].setToolTip(roles[key])
-            self.ax.ticklabel_format(style='plain',useOffset=False,axis='both')
-            self.ax.xaxis.set_minor_locator(DistanceMinorLocator());self.ax.yaxis.set_minor_locator(DistanceMinorLocator())
-            self.ax.tick_params(which='major',labelsize=8,pad=2,length=4);self.ax.tick_params(which='minor',length=2,width=.55)
         if hasattr(self,'selection'):self.selection.draw(redraw=False)
         if hasattr(self,'mouse_die'):self.mouse_die.update_text()
         self.render_scene()
@@ -1020,7 +1056,7 @@ class MainWindow(W.QMainWindow):
             handles += [Line2D([],[],color='#3c9995',ls='--',label='最小包围区域'),Line2D([],[],color='#aa78ab',ls='--',label='线距控制区域'),Line2D([],[],color='#92979e',ls='--',label='当前孔中心→接触位置')]
         if self.probability_toggle.isChecked() and self.probability_data:
             maximum=max((float(q['probability'].max()) for q in self.probability_data['maps']),default=0)
-            handles += [Line2D([],[],color='#729cb5',ls=':',lw=.7,label='输入最大幅度包络（非等概率线）'),Patch(facecolor=self.probability_colormap()(0.),alpha=self.view_settings.probability_alpha,label='实体覆盖概率：浅色较低'),Patch(facecolor=self.probability_colormap()(maximum),alpha=self.view_settings.probability_alpha,label=f'实体覆盖概率高（最大{maximum:.1%}）')]
+            handles += [Patch(facecolor=self.probability_colormap()(.08),alpha=self.view_settings.probability_alpha,label='实体覆盖概率：浅色透明为低概率'),Patch(facecolor=self.probability_colormap()(maximum),alpha=self.view_settings.probability_alpha,label=f'实体覆盖概率高（最大{maximum:.1%}）')]
         if self.probability_toggle.isChecked() and self.probability_data and self.view_settings.probability_show_ranges:
             levels=dict(self.view_settings.probability_ranges);levels[self.params().target_nsigma]=self.view_settings.probability_target_color
             for level,color in levels.items():
@@ -1039,8 +1075,6 @@ class MainWindow(W.QMainWindow):
                     values=np.ma.masked_where(q['probability']==0,q['probability'])
                     a=self.ax.imshow(values,extent=q['extent'],origin='lower',cmap=cmap,norm=Normalize(0,1),interpolation=self.view_settings.probability_interpolation,alpha=self.view_settings.probability_alpha,zorder=4)
                     a._via_layer=q['key'];e=q['extent'];a._world_bounds=(e[0],e[2],e[1],e[3]);self.probability_artists.append(a)
-                    boundary=LineCollection([q['input_envelope']],colors='#729cb5',linewidths=.65,linestyles=(0,(2,3)),alpha=.5,zorder=4.1)
-                    boundary._via_layer=q['key'];xy=q['input_envelope'];boundary._world_bounds=(*xy.min(axis=0),*xy.max(axis=0));self.ax.add_collection(boundary);self.probability_artists.append(boundary)
                     if self.view_settings.probability_show_ranges:
                         from .probability_overlay import coverage_envelope
                         p=self.params().for_die(q['owner']);levels=dict(self.view_settings.probability_ranges)
@@ -1056,7 +1090,13 @@ class MainWindow(W.QMainWindow):
             a.set_visible(active and self.visible_boxes[a._via_layer].isChecked() and overlaps(a._world_bounds,self.view_bounds))
             a._static_preview=(self.probability_stamp,a._via_layer,a.get_visible())
     def probability_colormap(self):
-        return LinearSegmentedColormap.from_list('via_probability',['#ecf5f8','#abd1df','#287e98']) if self.view_settings.probability_cmap=='blue' else matplotlib.colormaps[self.view_settings.probability_cmap]
+        name=self.view_settings.probability_cmap
+        if getattr(self,'_probability_cmap_name',None)!=name:
+            base=LinearSegmentedColormap.from_list('via_probability',['#ecf5f8','#abd1df','#287e98']) if name=='blue' else matplotlib.colormaps[name]
+            x=np.linspace(0,1,4096);colors=base(x);colors[:,3]=np.sqrt(x)
+            from matplotlib.colors import ListedColormap
+            self._probability_cmap=ListedColormap(colors,name=base.name);self._probability_cmap.set_bad((0,0,0,0));self._probability_cmap_name=name
+        return self._probability_cmap
     def probability_changed(self,*_):
         if self.loading:return
         if self.probability_toggle.isChecked() and self.probability_data is None:self.request_preview()
@@ -1089,6 +1129,7 @@ class MainWindow(W.QMainWindow):
                     extent=[q['x_edges'][0],q['x_edges'][-1],q['y_edges'][0],q['y_edges'][-1]]
                     artist=self.ax.imshow(values,extent=extent,origin='lower',cmap=cmap,norm=norm,interpolation=cfg.space_interpolation,alpha=cfg.space_alpha,zorder=3.5,transform=trans)
                     artist._space_domain=geometry_path(q['domain']);artist._owner=q['owner']
+                    artist._source_bounds=q['domain'].bounds
                     artist.set_clip_path(artist._space_domain,trans)
                     artist._source_layers=q['layers'];self.space_artists.append(artist)
                 # Figure-level scale stays outside axes, aligned with the X label.
@@ -1117,13 +1158,19 @@ class MainWindow(W.QMainWindow):
                     artist.set_data(values);artist.set_extent(q['extent']);artist._field_key=key
                     domain=self.case['board'].difference(q['domain']) if artist._owner==-1 else q['domain']
                     artist.set_clip_path(geometry_path(domain),self.ax.transData);artist._has_domain=not domain.is_empty
-                artist.set_visible(active and artist._has_domain and any(k in visible for k in artist._source_layers));continue
+                artist.set_visible(active and artist._has_domain and any(k in visible for k in artist._source_layers))
+                artist._static_preview=('space',stamp,artist._owner,key,artist.get_visible());continue
             transform=Affine2D()
             if self.shown_states is not None:
                 center=self.rotation_centers()[artist._owner];state=self.shown_states[artist._owner]
                 transform.rotate_around(*center,state[2]).translate(*state[:2])
             trans=transform+self.ax.transData;artist.set_transform(trans);artist.set_clip_path(artist._space_domain,trans)
-            artist.set_visible(active and any(self.visible_boxes[k].isChecked() for k in artist._source_layers))
+            x0,y0,x1,y1=artist._source_bounds
+            corners=transform.transform([[x0,y0],[x0,y1],[x1,y0],[x1,y1]])
+            from .viewport import overlaps
+            in_view=overlaps((*corners.min(axis=0),*corners.max(axis=0)),self.view_bounds)
+            artist.set_visible(active and in_view and any(self.visible_boxes[k].isChecked() for k in artist._source_layers))
+            artist._static_preview=('space',stamp,artist._owner,transform.get_matrix().tobytes(),artist.get_visible())
         if self.space_colorbar is not None:self.space_colorbar.ax.set_visible(any(a.get_visible() for a in self.space_artists))
     def space_changed(self,*_):
         if self.loading:return
@@ -1272,14 +1319,24 @@ class MainWindow(W.QMainWindow):
             self.analysis_split.setSizes([320,320,220]);self._histogram_revealed=True
         self.histogram_dirty=False;q=self.histogram_data
         mag_edges=q['magnitude_edges'];mag_counts=q['magnitude_counts'];dir_edges=q['direction_edges'];dir_counts=q['direction_counts']
-        self.distribution_figure.clear();axes=self.distribution_figure.subplots(1,2)
-        axes[0].bar(mag_edges[:-1],mag_counts,width=np.diff(mag_edges)*.92,align='edge',color='#abc7df',edgecolor='#718fa7',linewidth=.5)
-        axes[0].set(xlabel='偏移幅值 / μm',ylabel='运动过孔数量',title='偏移数值分布')
-        axes[1].bar(dir_edges[:-1],dir_counts,width=27,align='edge',color='#bdd6c8',edgecolor='#719783',linewidth=.5)
-        axes[1].set(xlabel='位移方向 / °',ylabel='运动过孔数量',title='偏移方向分布',xlim=(0,360),xticks=np.arange(0,361,45))
-        from matplotlib.ticker import MaxNLocator
-        for ax in axes:
-            ax.spines[['top','right']].set_visible(False);ax.grid(axis='y',alpha=.15);ax.set_axisbelow(True);ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+        sizes=(len(mag_counts),len(dir_counts))
+        if getattr(self,'_histogram_bar_sizes',None)!=sizes or not self.distribution_figure.axes:
+            self.distribution_figure.clear();axes=self.distribution_figure.subplots(1,2)
+            self._histogram_axes=axes;self._histogram_bar_sizes=sizes
+            self._histogram_bars=[axes[0].bar(mag_edges[:-1],mag_counts,width=np.diff(mag_edges)*.92,align='edge',color='#abc7df',edgecolor='#718fa7',linewidth=.5),
+                                  axes[1].bar(dir_edges[:-1],dir_counts,width=27,align='edge',color='#bdd6c8',edgecolor='#719783',linewidth=.5)]
+            axes[0].set(xlabel='偏移幅值 / μm',ylabel='运动过孔数量',title='偏移数值分布')
+            axes[1].set(xlabel='位移方向 / °',ylabel='运动过孔数量',title='偏移方向分布',xlim=(0,360),xticks=np.arange(0,361,60))
+            from matplotlib.ticker import MaxNLocator
+            for ax in axes:
+                ax.spines[['top','right']].set_visible(False);ax.grid(axis='y',alpha=.15);ax.set_axisbelow(True);ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+                ax.tick_params(labelsize=8)
+        axes=self._histogram_axes
+        for bars,counts,edges in zip(self._histogram_bars,(mag_counts,dir_counts),(mag_edges,dir_edges)):
+            for bar,height,left,width in zip(bars,counts,edges[:-1],np.diff(edges)):
+                bar.set_height(height);bar.set_x(left);bar.set_width(width*.92)
+        axes[0].set_xlim(0,max(1e-6,mag_edges[-1])*1.02)
+        for ax,counts in zip(axes,(mag_counts,dir_counts)):ax.set_ylim(0,max(1,float(max(counts,default=0)))*1.15)
         self.distribution_canvas.draw_idle()
     def run_evaluation(self,automatic=False):
         if not self.data:self.error('请先打开GDS');return
@@ -1293,8 +1350,19 @@ class MainWindow(W.QMainWindow):
             progress(1,'构建图层连接与几何索引');actual_cache=cache or GeometryCache(data);connections=Connections(data,roles,order,actual_cache.geometries);case=build_case(data,roles,connections=connections)
             from .session_cache import fingerprint
             key=('assessment',fingerprint((data.sha256,data.top_name,roles,order,asdict(p),settings.numeric_key())))
-            r=values.get_or_compute(key,lambda:evaluate(data,roles,p,progress=progress,layer_order=order,connections=connections,motions=motions,settings=settings,safe_range_cache=values));r=dict(r,motions=motions,view_settings=asdict(settings))
+            r=values.get_or_compute(key,lambda:evaluate(data,roles,p,progress=lambda n,t:progress(round(n*.92),t),layer_order=order,connections=connections,motions=motions,settings=settings,safe_range_cache=values));r=dict(r,motions=motions,view_settings=asdict(settings))
             catalog=RepresentativeExtremes(case,p);r['preview_count']=catalog.total
+            from .extreme_validation import evaluate_states
+            def check_extremes():
+                validator=PreviewEngine(actual_cache,case,roles,motions,p,r,connections)
+                try:return evaluate_states(validator,catalog,settings,progress)
+                finally:validator.close()
+            try:r['extreme_validation']=values.get_or_compute(('extreme-validation',key,settings.deformation_min_angle_deg),check_extremes)
+            except InterruptedError:raise
+            except Exception:
+                message=traceback.format_exc();self.log_bus.emit('极端状态完整校验未完成，未校验行不会标绿：'+message,'ERROR')
+                r['extreme_validation']=[dict(safe=None,checked=False,reason=message) for _ in catalog]
+            progress(100,'方案评估与极端状态校验完成')
             return r,case,actual_cache,connections,catalog
         def accepted(value):
             if data is not self.data:return
@@ -1311,24 +1379,29 @@ class MainWindow(W.QMainWindow):
         self.show_extreme_page(0,redraw=False)
         first=next((s['scheme'] for s in r['schemes'] if any(q['scheme']==s['scheme'] for q in r.get('issues',[]))),r['recommendation'].get('scheme') or 1)
         self.issue_scheme.blockSignals(True);self.issue_scheme.setCurrentIndex(first-1);self.issue_scheme.blockSignals(False);self.fill_issues()
-        rec=r['recommendation'];self.verdict.setText('优先建议：'+rec['name']+'。\n'+rec['reason'])
+        rec=r['recommendation']
         self.scheme_table.setRowCount(3)
         for i,s in enumerate(r['schemes']):
             for j,v in enumerate([f"{s['scheme']} {s['name']}",s['status'],fmt(s['gamma']),'; '.join(s['reasons'])]):self.scheme_table.setItem(i,j,W.QTableWidgetItem(str(v)))
-        self.scheme_table.setColumnWidth(0,230);self.scheme_table.setColumnWidth(1,120);self.scheme_table.setColumnWidth(2,65);self.scheme_table.horizontalHeader().setStretchLastSection(True);self.scheme_table.resizeRowsToContents();self.scheme_table.setFixedHeight(min(280,self.scheme_table.horizontalHeader().height()+sum(self.scheme_table.rowHeight(i) for i in range(3))+8))
+            if s['scheme']==rec.get('scheme'):
+                for j in range(self.scheme_table.columnCount()):self.scheme_table.item(i,j).setBackground(QtGui.QColor('#fff0d9'))
+        self.scheme_table.setColumnWidth(0,230);self.scheme_table.setColumnWidth(1,120);self.scheme_table.setColumnWidth(2,65);self.scheme_table.horizontalHeader().setStretchLastSection(True);self.scheme_table.resizeRowsToContents();self.scheme_table.setMinimumHeight(64)
         self.scheme_figure.clear();ax=self.scheme_figure.add_subplot(111);values=[s['gamma'] for s in r['schemes']];finite=[x for x in values if math.isfinite(x)]
         cap=max(1.4,min(8,max(finite or [1])*1.2));display=[min(x,cap) for x in values];ax.barh([0,1,2],display,color=['#a8c5de','#accfbd','#d6bedf'],height=.48)
         ax.axvline(1,color='#708395',ls='--',lw=1);ax.set_yticks([0,1,2],['方案1','方案2','方案3']);ax.invert_yaxis();ax.set_xlim(0,cap*1.15)
         for i,s in enumerate(r['schemes']):ax.text(display[i]+cap*.02,i,fmt(s['gamma']),va='center',color='#42536b')
         ax.set(xlabel='空间需求 / 可用空间 U（≤1为初筛候选）',title='三方案比较');ax.spines[['top','right']].set_visible(False);self.scheme_canvas.draw_idle()
         ranges=r.get('safe_ranges',{});safe_rows=ranges.get('rows',[])
-        self.safe_range_caption.setText('原始固定RDL：各轴范围可任意组合；包含输入均值，未声明全局最大。')
-        self.safe_range_caption.setToolTip(ranges.get('scope','')+'；'+ranges.get('optimality',''))
-        self.safe_range_canvas.setMinimumHeight(max(240,105+len(safe_rows)*89))
-        self.safe_range_plot_data=draw_safe_ranges(self.safe_range_figure,ranges);self.safe_range_canvas.draw_idle()
-        self.safe_range_canvas.setToolTip('同一横轴以各DIE各轴的输入单边幅度归一化；0表示输入均值。右侧为实际安全端点，X/Y单位μm、O单位°；灰线是输入全范围。\n'+ranges.get('guarantee',''))
+        self.safe_range_canvas.setMinimumHeight(max(330,195+len(safe_rows)*89))
+        self.safe_range_plot_data=draw_safe_ranges(self.safe_range_figure,ranges,r.get('model_yield'));self.safe_range_canvas.draw_idle()
+        from .safe_range_plot import format_yield
+        yr=r.get('model_yield',{});yr_text=(f"全输入无接触模型概率：{format_yield(yr['estimate'])}；{yr.get('interval_kind','区间')} [{yr['lower']:.6%}, {yr['upper']:.6%}]\n"+yr['scope']) if yr else ''
+        self.safe_range_canvas.setToolTip(yr_text+'\n同一横轴以各DIE各轴的输入单边幅度归一化；0表示输入均值。右侧为实际安全端点，X/Y单位μm、O单位°；灰线是输入全范围。\n'+ranges.get('guarantee',''))
         if not preserve:
-            self.analysis_split.setSizes([330,max(330,105+len(safe_rows)*89),0]);self._histogram_revealed=False
+
+            if not getattr(self,'_analysis_initialized',False):
+                self.analysis_split.setSizes([290,max(320,105+len(safe_rows)*89),0]);self._analysis_initialized=True
+            self._histogram_revealed=False
         self.die_table.setRowCount(len(r['dies']))
         for i,d in enumerate(r['dies']):
             vals=[d['die'],d['width'],d['height'],d['pin_count'],d['output_count'],d['corner_bound_um'],d['screening']['u1'],d['screening']['u2'],d['screening']['u3']]
@@ -1344,6 +1417,8 @@ class MainWindow(W.QMainWindow):
         if self.tabs.currentWidget() is self.detail:self.update_report()
         self.statusBar().showMessage('评估完成：选择下方极端行预演，或打开“报告”查看逐步计算')
     def tab_changed(self,*_):
+        if self.tabs.currentIndex()==0 and self.data:
+            self.resize_plot();self.plot_layout(preserve=True)
         if self.tabs.currentWidget() is self.analysis_page:self.render_histograms()
         if self.tabs.currentWidget() is self.detail and self.result and self.report_dirty:self.update_report()
     def update_report(self):
@@ -1377,7 +1452,25 @@ class MainWindow(W.QMainWindow):
         self.extreme_table.setCurrentCell(0,0);self.extreme_table.blockSignals(False)
         for j,width in enumerate([125,135,135,125]):self.extreme_table.setColumnWidth(j,width)
         self.extreme_table.horizontalHeader().setStretchLastSection(True);self.state_table.setRowCount(0)
+        self.refresh_extreme_colors()
         if redraw:self.plot_layout(preserve=True)
+    def refresh_extreme_colors(self,frame=None):
+        from .extreme_validation import frame_status
+        baseline=(self.result or {}).get('extreme_validation',[])
+        for row,(index,item) in enumerate(self.page_items,1):
+            status=baseline[index] if index<len(baseline) and not self.dirty else {}
+            if frame is not None and not frame.get('nominal_global') and np.array_equal(frame['states'],item['states']):
+                current=frame_status(frame)
+                if current.get('checked') or current.get('safe') is False:status=current
+                elif self.deformation_toggle.isChecked() or self.dirty:status=current
+            safe=status.get('safe') is True
+            brush=QtGui.QBrush(QtGui.QColor('#e3f2e5')) if safe else QtGui.QBrush()
+            for col in range(self.extreme_table.columnCount()):
+                cell=self.extreme_table.item(row,col)
+                if cell:
+                    cell.setBackground(brush)
+                    detail='已完成接口接触、机械净距/禁布区及固定RDL DRC检查；无接触或失效。' if safe else '存在已检查的问题。' if status.get('safe') is False else '完整检查尚未完成；不标记为通过。'
+                    cell.setToolTip(cell.toolTip().split('\n校验：')[0]+'\n校验：'+detail)
     def select_preview(self,row,column,*_):
         if self.loading:return
         if hasattr(self,'mouse_die'):

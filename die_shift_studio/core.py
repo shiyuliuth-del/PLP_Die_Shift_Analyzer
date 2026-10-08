@@ -90,7 +90,7 @@ class Parameters:
         if 0<self.target_nsigma<math.inf:self.reference_nsigma=self.target_nsigma
 
     @classmethod
-    def from_dict(cls, data):
+    def from_dict(cls, data, require_rdl=True):
         data=dict(data)
         for key in ('input_nsigma','target_nsigma'):
             if data.get(key) in ('Infinity','∞','无穷大'):data[key]=math.inf
@@ -99,7 +99,7 @@ class Parameters:
         if unknown:
             raise ValueError("未知参数："+", ".join(sorted(unknown)))
         value = cls(**data)
-        value.validate()
+        value.validate(require_rdl=require_rdl)
         return value
 
     def for_die(self,owner):
@@ -119,7 +119,7 @@ class Parameters:
     def failure_threshold(self):
         return 0. if self.target_nsigma==0 else math.erfc(self.target_nsigma/math.sqrt(2))
 
-    def validate(self):
+    def validate(self,require_rdl=True):
         if not isinstance(self.per_die_enabled,bool):raise ValueError("逐芯片开关必须为布尔值")
         if not isinstance(self.die_bounds,list):raise ValueError("逐芯片幅度必须为表格")
         for i,row in enumerate(self.die_bounds):
@@ -143,7 +143,7 @@ class Parameters:
             value = getattr(self, key)
             if value != int(value) or not 0 <= value <= 32:
                 raise ValueError("RDL层数须为0～32的整数")
-        if self.panel_layers+self.wafer_layers < 1:
+        if require_rdl and self.panel_layers+self.wafer_layers < 1:
             raise ValueError("至少需要1层运动或固定RDL")
         positive = ("line_width_um", "line_space_um", "wafer_line_width_um", "wafer_line_space_um",
                     "via_diameter_um", "transition_length_um")
@@ -467,7 +467,16 @@ def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order
         range_key=('continuous-safe-box',fingerprint((data.sha256,data.top_name,roles,connections.order,geometric_parameters,
                     cfg.safe_box_precision,cfg.safe_box_budget,cfg.safe_box_starts,cfg.safe_box_passes)))
         ranges=safe_range_cache.get_or_compute(range_key,lambda:safe_ranges(contact_model,p,settings,progress))
-    progress(99,"整理窗口不足位置与安全范围")
+    from .model_yield import model_yield
+    from .settings import ViewSettings
+    cfg=settings or ViewSettings()
+    progress(97,'计算整个输入范围内的无接触概率')
+    compute_yield=lambda:model_yield(contact_model,p,cfg,progress)
+    if safe_range_cache is None:whole_yield=compute_yield()
+    else:
+        key=('whole-input-yield',fingerprint((data.sha256,data.top_name,roles,connections.order,asdict(p),cfg.yield_method,cfg.yield_sample_exponent,cfg.random_seed,cfg.yield_box_budget,cfg.yield_tolerance)))
+        whole_yield=safe_range_cache.get_or_compute(key,compute_yield)
+    progress(99,"整理窗口不足位置、安全范围与无接触概率")
     issues=contact['issues']
     progress(100,"评估完成")
     return dict(version=__version__,units="μm",source_path=data.path,source_sha256=data.sha256,
@@ -475,7 +484,7 @@ def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order
         die_count=count,target_failure=alpha,input_ellipsoid_radius=statistical_state(p,count)[2],
         distribution='binary' if math.isinf(p.target_nsigma) else 'normal',
         interdie_networks=contact_model.interdie_networks,
-        connections=connections.summary(),contact_analysis=contact,screening=metrics,safe_ranges=ranges,
+        connections=connections.summary(),contact_analysis=contact,screening=metrics,safe_ranges=ranges,model_yield=whole_yield,
         repaired_geometry=getattr(data,'repaired_geometry',[]),
         ignored_geometry=[{k:v for k,v in q.items() if k!='points'} for q in getattr(data,'ignored_geometry',[])],
         resources=profile,collision_ratio=collision_ratio,dies=rows,schemes=schemes,recommendation=recommendation,notes=common,issues=issues,

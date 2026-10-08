@@ -19,7 +19,7 @@ def main():
     parser=argparse.ArgumentParser();parser.add_argument('--repeat',type=int,default=7);parser.add_argument('--copies',type=int,default=48)
     args=parser.parse_args()
     if args.repeat<1 or args.copies<1:parser.error('repeat and copies must be positive')
-    f=ROOT/'examples/示例C_多芯片晶圆接口.json';project=json.loads(f.read_text());data=read_gds(f.parent/project['gds_path']);roles=data.auto_roles
+    f=ROOT/'examples/示例C_多芯片晶圆接口.json';project=json.loads(f.read_text());data=read_gds(f.parent/project['gds_path']);roles=project['roles']
     p=Parameters.from_dict(project['parameters']);result=evaluate(data,roles,p)
     # Evaluation of nominal contacts is done on the base example only. Repeated,
     # overlapping synthetic copies stress transforms, not connection extraction.

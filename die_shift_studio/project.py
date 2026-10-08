@@ -13,7 +13,7 @@ def normalize_project(project):
     pars=p.get('parameters',{})
     if 'bga_assignment' in pars:
         pars['fixed_via_assignment']=pars.pop('bga_assignment')
-    Parameters.from_dict(pars)
+    Parameters.from_dict(pars,require_rdl=False)
     p.setdefault('stage_hints',{k:r for k,r in p['roles'].items() if r in ('运动过孔','晶圆段输出接口')} if p.get('schema_version',1)<3 else {})
     from .settings import ViewSettings
     from dataclasses import asdict

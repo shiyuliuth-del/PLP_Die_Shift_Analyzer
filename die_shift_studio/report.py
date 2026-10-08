@@ -1,4 +1,4 @@
-"""Auditable V15 calculation report: bounded inputs, probabilities, geometry."""
+"""Auditable V16 calculation report: bounded inputs, probabilities, geometry."""
 from html import escape
 import math
 from .core import PARAMETER_DESCRIPTIONS,fmt,Parameters
@@ -39,7 +39,7 @@ def report_document(r,motions=None,progress=lambda *_:None):
          [r'z_j=\mu_j+\varepsilon_jB_j,\quad\varepsilon_j\in\{-1,1\}',
           r'\mu_j-B_j\leq z_j\leq\mu_j+B_j'],
          '每颗芯片均包含8种三参数端点叠加；补充各DIE不利方向、芯片对和封装边界方向，合并重复行',
-         'z=(DX,DY,θ)，ε为端点符号。输入35 μm、均值0时平移端点为±35 μm；过孔实际位移包含旋转，可大于35 μm。代表列表不穷举所有多DIE笛卡尔积，连续概率判定独立于代表列表。蓝灰虚线包络包含输入盒的连续刚体位置，不是等概率线。手动输入可超出最大幅度作指定工况检查，但不属于该概率模型支持范围。')
+         'z=(DX,DY,θ)，ε为端点符号。输入35 μm、均值0时平移端点为±35 μm；过孔实际位移包含旋转，可大于35 μm。代表列表不穷举所有多DIE笛卡尔积，连续概率判定独立于代表列表。可选的覆盖范围虚线包含相应连续刚体位置，不是等概率线；默认不绘制外包络。手动输入可超出最大幅度作指定工况检查，但不属于该概率模型支持范围。')
     step('逐芯片旋转中心解析','共用或逐DIE旋转中心选项；GDS芯片边框；自定义相对坐标',
          [r'C=C_{\mathrm{die}}+c_{\mathrm{relative}}',r'T_z(P)=C+R(\theta)(P-C)+D'],
          '；'.join(f"DIE {row['die']}：{row.get('rotation_origin_mode','center')}，旋转中心{row.get('rotation_origin_um')} μm" for row in r['dies']),
@@ -74,7 +74,7 @@ def report_document(r,motions=None,progress=lambda *_:None):
           r'\widehat p_{V,G}=\frac{1}{N}\sum_{n=1}^{N}\frac{|G\cap T_{z_n}(V)|}{|G|},\quad\int p_V(q)\,dq=|V|',
           r'\widehat p_{V,G}\simeq\sum_j\omega_j(H*K_j)_G',
           r'\omega_j=\frac{w_j}{2},\quad\theta_j=\mu_\theta+\sigma_\theta\Phi^{-1}\!\left(\Phi(-k)+\frac{h_j+1}{2}[\Phi(k)-\Phi(-k)]\right)'],
-         '半透明热图表示整孔覆盖概率；输入最大幅度包络独立绘制且跟随原层显隐',
+         '半透明热图表示整孔覆盖概率；透明度随概率增大，默认不描输入外包络；跟随原层显隐',
          'q为空间位置，G为网格，|·|为面积，N为样本数。Monte Carlo/Sobol采用同一相关母分布并联合拒绝超界状态；Sobol拒绝后仅为准随机近似，不沿用原平衡保证。确定性方法用[-1,1] Gauss–Legendre节点hj/权重wj，通过截断正态逆CDF映射得到θj；ω为角度积分权重（和为1），H为相关平移落入每格的条件概率，Kj为该朝向完整孔实体面积掩模，*为卷积。全部平移格覆盖硬输入范围并按Zxy归一化。面积积分应接近孔面积，格值之和不归一为1；角度/栅格/FFT有有限数值精度，可加密复算。低概率尾部可能没有采样命中或低于FFT有效精度，不伪造颜色补齐。极端包络外不可达，包络内也并非处处有可见概率。多个孔透明叠色不是联合覆盖率。')
     step('Space Map：所需线距',f'固定线距s={p.line_space_um:g} μm；连接归属；母协方差；芯片和扇出域',
          [r'A=P-C,\quad b=R(\mu_\theta)A,\quad J_{11}=J_{22}=1,\quad J_{12}=J_{21}=0',
@@ -131,6 +131,23 @@ def report_document(r,motions=None,progress=lambda *_:None):
          'l/h为候选各轴端点；v为占原输入盒的体积分数，零幅度轴从乘积移除（全零为1）。采用对称缩放起点和多个端点扩张顺序，分别调整六个正负端点；保留体积较大的已证安全盒，未证明全局最大。m/e为候选状态盒中点/半宽；先用Hausdorff界证明，再构造整孔旋转弧及平移矩形的外包络。θt为n等分角度节点，Δθ为该盒角度全宽，conv为凸包，εarc为弦高上界，ε为DBU数值保护，圆盘采用外接离散补偿；凹角/孔洞可被填平但不会低估占据区域。若包络还不能证明，继续分裂贡献最大的状态维；实际接触见证或耗尽预算均拒绝候选。安全结论不依靠极端点或随机采样；所有DIE可组合，因为被检查固定RDL保持原始状态。范围包含输入均值，默认均值0；无概率阈值豁免，∞同样搜索硬幅度。范围仅证明真实运动孔控制区对相邻固定RDL异网无接触，不包括预演型变、全层DRC或芯片机械碰撞。')
     blocks.append(grid(['DIE','X最小 / μm','X最大 / μm','Y最小 / μm','Y最大 / μm','O最小 / °','O最大 / °','体积分数','状态'],
         [[q['die'],*([fmt(q['minimum_display'][0],6),fmt(q['maximum_display'][0],6),fmt(q['minimum_display'][1],6),fmt(q['maximum_display'][1],6),fmt(q['minimum_display'][2],8),fmt(q['maximum_display'][2],8)] if q.get('certified') else ['—']*6),fmt(q.get('volume_fraction'),6) if q.get('certified') else '—',q['status']] for q in safe.get('rows',[])]))
+    yr=r.get('model_yield')
+    if yr:
+        from .safe_range_plot import format_yield
+        step('全输入范围的无接触模型良率',f'各DIE全部硬输入范围；原始固定RDL；{yr["method"]}',
+             [r'Y_d=\int_{\mathcal{H}_d}f_{T,d}(z)\prod_{i\in\mathcal{I}_d}\mathbf{1}\{d(T_z(V_i),F_{\ne i})>a+s\}\,dz',
+              r'Y=\prod_{d=1}^{D}Y_d,\qquad\mathcal{Y}_{target}=[1-2\Phi(-k),1]'],
+             '整包模型估计='+format_yield(yr['estimate'])+'；'+yr['interval_kind']+'=['+format_yield(yr['lower'])+', '+format_yield(yr['upper'])+']',
+             'D为DIE数，d为DIE编号（距离函数d(·,·)则表示实体最短距离），Id为该DIE所有真实运动过孔—固定RDL接口；H及fT为前述完整硬输入盒及其归一化截断密度。Vi为孔实体，Tz为采用真实旋转中心的刚体变换，F≠i为对应接收层全部其他几何网络，a为最小包围量，s为固定层线距。每个样本让同一DIE所有孔共同移动；不同DIE假设独立，因此只对DIE概率相乘，不对过孔概率相乘。积分包括安全内盒之外的状态。目标色带是用户k对应的数值参考，不代表每接口满足该阈值就保证整包达标；k=0时目标为1；∞按名义几何二值输出。图标题与倒三角显示估计值，区间表示精度，缺失接口/归属不明时不输出虚构百分比。范围只含原始固定RDL异网接触，不含型变后动态布线或其他生产失效。')
+        step('良率积分精度与计算预算',f'每DIE样本数2^{cfg.yield_sample_exponent}；状态盒预算{cfg.yield_box_budget}；确定性区间宽度目标{cfg.yield_tolerance:g}',
+             [r'\widehat{Y}_d=\frac{x_d}{N_d},\quad\widehat{Y}=\prod_d\widehat{Y}_d,\quad\eta=\frac{0.01}{D}',
+              r'L_d=B^{-1}_{x_d,N_d-x_d+1}\!\left(\frac{\eta}{2}\right),\quad U_d=B^{-1}_{x_d+1,N_d-x_d}\!\left(1-\frac{\eta}{2}\right)',
+              r'L=\prod_dL_d,\quad U=\prod_dU_d',
+              r'L_d^{box}=\sum_{B\in\mathcal{S}_d}P_{-}(B),\quad U_d^{box}=1-\sum_{B\in\mathcal{C}_d}P_{-}(B)',
+              r'P_{-}(B)=\max\!\left(0,\frac{P_N(B)-\varepsilon_B}{Z_d+\varepsilon_Z}\right),\quad\widehat{Y}^{box}=\frac{L^{box}+U^{box}}{2}'],
+             '抽样：输出99%联合置信区间；不随机采样：输出确定性几何积分区间，预算耗尽保留未定质量。',
+             'Nd是每DIE有效独立样本数，xd为全部接口同时无接触的样本数；抽样来自前述完整截断正态，种子固定可复算。B⁻¹(a,b)为Beta(a,b)分布逆CDF；xd=0令Ld=0，xd=Nd令Ud=1。η是每DIE的区间失覆盖预算；Bonferroni使所有DIE区间同时覆盖率至少99%，同一随机模型下乘积区间保护整包概率。零失效样本不能认证100%或6σ放行；只有整个支持域几何证明安全才给确定的100%。确定性方法将输入盒二分：Sd/Cd是所有接口均无接触/至少一个接口必接触的互斥子盒集合，PN(B)为母正态盒概率，由相关XY条件CDF积分乘独立角度CDF计算；εB与εZ为数值积分误差保护，P−(B)为减去误差后的子盒概率下界。对中点m、半宽e，使用前述Hausdorff位移δ：每孔距离> a+s+δ证明整盒安全；存在孔距离+δ≤a+s证明整盒接触。其余按空间变化最大的轴继续分裂，优先未定质量大的盒。确定性区间含未定质量与数值误差，不是随机置信区间。')
+        blocks.append(grid(['DIE','方法状态','模型估计','下界','上界','有效样本/状态盒'],[[q['die'],q['status'],format_yield(q['estimate']),format_yield(q['lower']),format_yield(q['upper']),q.get('samples',q.get('boxes',0))] for q in yr['rows']]))
     if p.per_die_enabled:
         step('逐芯片输入解析','GDS识别的DIE编号与独立单边幅度',
              [r'\sigma_{x,d}=\frac{B_{x,d}}{\kappa},\quad\sigma_{y,d}=\frac{B_{y,d}}{\kappa},\quad\sigma_{\theta,d}=\frac{\pi B_{O,d}}{180\kappa}'],

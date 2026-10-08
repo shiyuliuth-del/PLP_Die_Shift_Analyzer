@@ -26,13 +26,13 @@ def main():
     for folder in ['die_shift_studio', 'examples', 'tests']:
         files += [p for p in (ROOT / folder).rglob('*') if p.is_file()
                   and '__pycache__' not in p.parts and p.suffix not in {'.pyc', '.log'}]
-    files += list((ROOT/'figures').glob('software_V15_*.png'))
-    for pattern in ('v040_*.png','v040_*.svg','v060_*.png','v060_*.svg','v070_*.png','v070_*.svg','V10_*.png','V10_*.svg','V11_*.png','V11_*.svg','V12_*.png','V12_*.svg','V13_*.png','V13_*.svg','V14_*.png','V14_*.svg','V15_*.png','V15_*.svg','0[1-5]_*.png','0[1-5]_*.svg'):
+    files += list((ROOT/'figures').glob('software_V16_*.png'))
+    for pattern in ('v040_*.png','v040_*.svg','v060_*.png','v060_*.svg','v070_*.png','v070_*.svg','V10_*.png','V10_*.svg','V11_*.png','V11_*.svg','V12_*.png','V12_*.svg','V13_*.png','V13_*.svg','V14_*.png','V14_*.svg','V15_*.png','V15_*.svg','V16_*.png','V16_*.svg','0[1-5]_*.png','0[1-5]_*.svg'):
         files += list((ROOT/'figures').glob(pattern))
-    files += list((ROOT/'results').glob('*_V15.json'))
+    files += list((ROOT/'results').glob('*_V16.json'))
     files += [ROOT/'results/performance_v040.json']
-    files += [ROOT/'docs/V15_操作与验证说明.md']
-    files += [ROOT/'tools'/p for p in ('create_examples.py','package_release.py','benchmark_preview.py','benchmark_v050.py','research_figures.py','v040_figures.py','v050_figures.py','v060_figures.py','klayout_probe_v060.py','create_fanout_example.py','v070_evidence.py','gui_v070_evidence.py','benchmark_v8.py','v8_figures.py','benchmark_v9.py','v9_figures.py','create_deformation_example.py','benchmark_v10.py','v10_figures.py','create_iteration_example.py','benchmark_v11.py','v11_figures.py','create_trace_example.py','benchmark_v12.py','v12_figures.py','benchmark_v13.py','benchmark_v14.py','v14_figures.py','create_pivot_example.py','validate_gd55_v14.py','benchmark_v15.py','v15_figures.py','validate_gd55_v15.py')]
+    files += [ROOT/'docs/V16_操作与验证说明.md']
+    files += [ROOT/'tools'/p for p in ('create_examples.py','package_release.py','benchmark_preview.py','benchmark_v050.py','research_figures.py','v040_figures.py','v050_figures.py','v060_figures.py','klayout_probe_v060.py','create_fanout_example.py','v070_evidence.py','gui_v070_evidence.py','benchmark_v8.py','v8_figures.py','benchmark_v9.py','v9_figures.py','create_deformation_example.py','benchmark_v10.py','v10_figures.py','create_iteration_example.py','benchmark_v11.py','v11_figures.py','create_trace_example.py','benchmark_v12.py','v12_figures.py','benchmark_v13.py','benchmark_v14.py','v14_figures.py','create_pivot_example.py','validate_gd55_v14.py','benchmark_v15.py','v15_figures.py','validate_gd55_v15.py','validate_v16.py','v16_figures.py')]
     # Ship only our portable sample jobs, never a user's saved projects.
     files += [ROOT/'Jobs'/(p.stem+'.dshift.json') for p in sorted((ROOT/'examples').glob('*.json'))]
     # Follow the actual Markdown references instead of relying on version globs.
@@ -67,6 +67,7 @@ def main():
         [sys.executable, 'tests/gui_v13.py'],
         [sys.executable, 'tests/gui_v14.py'],
         [sys.executable, 'tests/gui_v15.py'],
+        [sys.executable, 'tests/gui_v16.py'],
         [sys.executable, 'main.py', '--smoke-test', 'results/package_source_smoke.json'],
         [sys.executable, '-c', "import os,runpy,sys; os.environ['DIE_SHIFT_NATIVE_BACKEND']='desktop'; sys.argv=['main.py','--smoke-test','results/package_desktop_smoke.json']; runpy.run_path('main.py',run_name='__main__')"],
         [sys.executable, '-m', 'die_shift_studio', '--project', 'examples/示例C_多芯片晶圆接口.json',
@@ -99,7 +100,7 @@ def main():
             if run.returncode:
                 raise SystemExit('Extracted archive validation failed: '+str(command)+' returncode='+str(run.returncode))
     record = {'version': __version__, 'package_revision':revision,'verified_at_utc': datetime.now(timezone.utc).isoformat(),
-              'method': 'Source-only ZIP; fresh extraction, file hashes, core tests, eight Qt suites and actual installed KLayout desktop backend, source startup and CLI; no frozen build',
+              'method': 'Source-only ZIP; fresh extraction, file hashes, core tests, nine Qt suites and actual installed KLayout desktop backend, source startup and CLI; no frozen build',
               'environment': 'Existing Linux Python environment; not a clean dependency-install or Windows test',
               'file_count_before_record': len(manifest), 'status': 'PASS', 'runs': records}
     record_text = json.dumps(record, ensure_ascii=False, indent=2)

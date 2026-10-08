@@ -16,7 +16,7 @@ class Revision040Tests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         f=ROOT/'examples/示例C_多芯片晶圆接口.json';project=json.loads(f.read_text())
-        cls.data=read_gds(f.parent/project['gds_path']);cls.roles=cls.data.auto_roles;cls.data.layers={k:cls.data.layers[k] for k in project['layer_order']};cls.case=build_case(cls.data,cls.roles)
+        cls.data=read_gds(f.parent/project['gds_path']);cls.roles=project['roles'];cls.data.layers={k:cls.data.layers[k] for k in project['layer_order']};cls.case=build_case(cls.data,cls.roles)
         cls.p=Parameters.from_dict(project['parameters']);cls.cache=GeometryCache(cls.data);cls.contacts=Connections(cls.data,cls.roles,geometries=cls.cache.geometries)
     def test_atomic_jobs_and_name_safety(self):
         with tempfile.TemporaryDirectory() as folder:

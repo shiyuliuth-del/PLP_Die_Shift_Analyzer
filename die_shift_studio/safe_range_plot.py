@@ -37,12 +37,12 @@ def range_rows(ranges):
     return items
 
 
-def draw_safe_ranges(figure, ranges):
+def draw_safe_ranges(figure, ranges, yield_result=None):
     """Draw one axes, return each plotted interval for UI inspection/export."""
     figure.clear(); figure.set_facecolor('white')
     items = range_rows(ranges)
     ax = figure.add_subplot(111)
-    figure.subplots_adjust(left=.17, right=.67, bottom=.16, top=.88)
+    figure.subplots_adjust(left=.17, right=.67, bottom=.35 if yield_result else .16, top=.88)
     if not items:
         ax.axis('off'); ax.text(.5, .5, '运行方案评估后显示连续安全范围',
                                transform=ax.transAxes, ha='center', va='center', color=INK)
@@ -83,7 +83,41 @@ def draw_safe_ranges(figure, ranges):
     ax.set_xlabel('相对输入均值的位置 / 各轴单边幅度', fontsize=9, color=INK, labelpad=7)
     ax.tick_params(axis='x', labelsize=8, colors='#6c818f', length=3)
     ax.spines[['top', 'right', 'left']].set_visible(False); ax.spines['bottom'].set_color('#d6dfe5')
-    figure.text(.025, .96, '各 DIE 连续安全内范围', va='top', fontsize=12, fontweight='bold', color=INK)
+    figure.text(.025, .96, '各DIE连续安全范围'+('（'+format_yield(yield_result['estimate'])+'）' if yield_result else ''), va='top', fontsize=12, fontweight='bold', color=INK)
     figure.text(.42, .96, '浅灰：输入范围    彩色：已证安全范围', va='top', fontsize=9, color='#728593')
     figure.text(.697, .90, '安全端点  [最小值, 最大值]', va='bottom', fontsize=9, color=INK)
+    if yield_result:draw_yield_axis(figure,yield_result)
     return items
+
+
+def format_yield(value):
+    # A midpoint estimate, with explicit numerical bounds in tooltip/report/axis.
+    if value is None:return '未能计算'
+    if not 0<value<1:return '100%' if value>=1 else '0%'
+    digits=max(2,min(14,math.ceil(-math.log10(min(value,1-value)))+1))
+    return f'{100*value:.{digits}f}'.rstrip('0').rstrip('.')+'%'
+
+
+def draw_yield_axis(figure,result):
+    from scipy.special import log_ndtr
+    sigma=result['target_sigma']
+    target=-float(math.log(2)+log_ndtr(-sigma))/math.log(10) if 0<sigma<math.inf else math.inf
+    end=max(6.,min(36.,math.ceil(target)+1)) if math.isfinite(target) else 8.
+    def coordinate(probability):return end if probability>=1 else min(end,max(0.,-math.log10(max(1e-300,1-probability))))
+    ax=figure.add_axes([.17,.11,.5,.055]);ax.set_xlim(0,end);ax.set_ylim(0,1);ax.set_yticks([])
+    ax.axhspan(0,1,color='#eef2f5',lw=0)
+    start=min(end,target)
+    ax.axvspan(start,end,color='#cce4d1',lw=0)
+    ax.axvline(start,color='#76a589',lw=1.5)
+    low=coordinate(result['lower']);high=coordinate(result['upper'])
+    ax.plot([low,high],[.52,.52],color='#9fb5c6',lw=9,alpha=.6,solid_capstyle='butt')
+    if result['estimate'] is not None:ax.plot(coordinate(result['estimate']),.52,marker='v',markersize=8,color='#b16d45',clip_on=False)
+    positions=sorted(set([0.,float(round(end/3)),float(round(2*end/3)),end]))
+    labels=['0%' if x==0 else '≈100%' if x==end else
+            (format_yield(1-10**(-x)) if x<=6 else rf'$(100-10^{{{2-int(x)}}})\%$') for x in positions]
+    ax.set_xticks(positions,labels);ax.tick_params(labelsize=7.5,length=2,colors='#617c8c')
+    for spine in ax.spines.values():spine.set_visible(False)
+    ax.set_xlabel('无接触概率（尾部对数刻度，右端含100%）',fontsize=8,color=INK,labelpad=4)
+    figure.text(.17,.192,'浅绿：目标覆盖级别对应良率范围     ▼：当前估计',fontsize=8,color=INK)
+    figure.text(.697,.18,result.get('interval_kind','积分区间')+'：\n'+format_yield(result['lower'])+' — '+format_yield(result['upper']),fontsize=8,color=INK,va='top')
+    figure.text(.697,.10,('目标：'+str(sigma)+'σ') if math.isfinite(sigma) else '∞：当前名义状态二值',fontsize=8,color='#728593',va='top')

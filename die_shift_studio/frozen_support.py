@@ -28,18 +28,18 @@ def smoke(output):
     root=installation_root();app=W.QApplication.instance() or W.QApplication([]);window=MainWindow();window.show()
     record=dict(status='FAIL',frozen=bool(getattr(sys,'frozen',False)),platform=sys.platform)
     try:
-        path=root/'examples/示例C_多芯片晶圆接口.gds';data=read_gds(path);project=json.loads(path.with_suffix('.json').read_text(encoding='utf-8'));order=project['layer_order'];window.set_data(data,project)
-        p=Parameters.from_dict(dict(interdie='present',**automatic_parameters(data,data.auto_roles)[0]))
-        result=evaluate(data,data.auto_roles,p,layer_order=order);window.display_result(result)
+        path=root/'examples/示例C_多芯片晶圆接口.gds';data=read_gds(path);project=json.loads(path.with_suffix('.json').read_text(encoding='utf-8'));order=project['layer_order'];roles=project['roles'];window.set_data(data,project)
+        p=Parameters.from_dict(dict(interdie='present',**automatic_parameters(data,roles)[0]))
+        result=evaluate(data,roles,p,layer_order=order);window.display_result(result)
         html,resources=report_document(result);set_document(window.detail,html,resources);app.processEvents();window.canvas.draw()
-        cache=GeometryCache(data);con=Connections(data,data.auto_roles,order);motions={k:default_motion(v) for k,v in data.auto_roles.items()}
-        engine=PreviewEngine(cache,window.case,data.auto_roles,motions,p,result,con)
+        cache=GeometryCache(data);con=Connections(data,roles,order);motions={k:default_motion(v) for k,v in roles.items()}
+        engine=PreviewEngine(cache,window.case,roles,motions,p,result,con)
         frame=engine.frame(np.zeros((2,3)))
         from .space_map import space_maps
         from .probability_overlay import probability_maps
         window.engine=engine;window.geometry_cache=cache;window.current_frame=frame
         window.space_data=space_maps(engine.contact,p);window.space_toggle.setChecked(True)
-        window.probability_data=probability_maps(cache,engine.bound,data.auto_roles,p,masks=engine.contact.interface_masks)
+        window.probability_data=probability_maps(cache,engine.bound,roles,p,masks=engine.contact.interface_masks)
         window.probability_toggle.setChecked(True);app.processEvents();window.canvas.draw()
         assert len(window.space_artists)==2 and len(frame['contact']['regions'])==64
         masses=[q['probability'] for q in window.probability_data['maps']]
@@ -52,7 +52,7 @@ def smoke(output):
         external=read_gds(root/'examples/示例D_芯片外扇出.gds')
         from .core import build_case
         external_project=json.loads((root/'examples/示例D_芯片外扇出.json').read_text(encoding='utf-8'))
-        external_case=build_case(external,external.auto_roles,layer_order=external_project['layer_order']);model=ContactModel(external,external_case,external.auto_roles,external_case['connections'])
+        external_case=build_case(external,external_project['roles'],layer_order=external_project['layer_order']);model=ContactModel(external,external_case,external_project['roles'],external_case['connections'])
         deterministic=probability_maps(model.cache,model.bound,model.roles,p,masks=model.interface_masks,settings=ViewSettings(probability_method='quadrature'))
         assert len(deterministic['maps'])==2 and deterministic['samples']==0
         assert model.current([[65,0,0],[0,0,0]],p)['intrusions']

@@ -17,7 +17,7 @@ def wait():
     assert not errors,errors
 w.load_project(ROOT/'Jobs/示例G_小偏移与三段追溯.dshift.json');wait();w.run_evaluation();wait()
 assert not hasattr(w,'safe_range_table')
-assert len(w.safe_range_figure.axes)==1 and len(w.safe_range_plot_data)==6
+assert len(w.safe_range_figure.axes)==2 and len(w.safe_range_plot_data)==6
 for i,row in enumerate(w.result['safe_ranges']['rows']):
     assert row['certified']
     for j in range(3):

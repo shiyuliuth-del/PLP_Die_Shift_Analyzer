@@ -18,7 +18,7 @@ def measure(name,fn,repeats=1):
     records[name]={'samples_ms':times,'median_ms':statistics.median(times)}
     return value
 data=measure('read_gds',lambda:read_gds(ROOT/'examples/示例C_多芯片晶圆接口.gds'))
-roles=data.auto_roles;case=build_case(data,roles)
+roles=json.loads((ROOT/'examples/示例C_多芯片晶圆接口.json').read_text())['roles'];case=build_case(data,roles)
 p=Parameters.from_dict(dict(interdie='present',**automatic_parameters(data,roles)[0]))
 cache=measure('geometry_cache',lambda:GeometryCache(data))
 con=measure('nominal_connections',lambda:Connections(data,roles,geometries=cache.geometries))

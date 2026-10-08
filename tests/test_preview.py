@@ -13,9 +13,9 @@ ROOT=Path(__file__).resolve().parents[1]
 class PreviewTests(unittest.TestCase):
     def setUp(self):
         path=ROOT/'examples/示例C_多芯片晶圆接口.json';self.project=json.loads(path.read_text());self.data=read_gds(path.parent/self.project['gds_path'])
-        self.roles=self.data.auto_roles;self.case=build_case(self.data,self.roles);self.params=Parameters.from_dict(self.project['parameters'])
+        self.roles=self.project['roles'];self.case=build_case(self.data,self.roles);self.params=Parameters.from_dict(self.project['parameters'])
     def test_auto_semantics_and_parameters(self):
-        self.assertEqual(self.roles['20/0'],'固定过孔');self.assertEqual(self.roles['90/0'],'不参与')
+        self.assertEqual(self.roles['20/0'],'固定过孔');self.assertEqual(self.roles.get('90/0','不参与'),'不参与')
         values,_=automatic_parameters(self.data,self.roles)
         self.assertEqual(values['panel_layers'],2);self.assertEqual(values['wafer_layers'],1)
         self.assertGreater(values['via_diameter_um'],319);self.assertLess(values['via_diameter_um'],321) # all actual moving-via geometries, including migrated output vias

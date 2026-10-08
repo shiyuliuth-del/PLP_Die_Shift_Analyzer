@@ -28,7 +28,7 @@ def measure(fn,repeats=1):
         start=time.perf_counter();value=fn();elapsed.append((time.perf_counter()-start)*1000)
     return value,dict(median_ms=float(np.median(elapsed)),p95_ms=float(np.quantile(elapsed,.95)),samples_ms=elapsed)
 def setup(path,roles=None,params=None):
-    d=read_gds(path);roles=roles or d.auto_roles;c=build_case(d,roles);m=ContactModel(d,c,roles,c['connections'])
+    d=read_gds(path);roles=roles if roles is not None else json.loads(Path(path).with_suffix('.json').read_text())['roles'];c=build_case(d,roles);m=ContactModel(d,c,roles,c['connections'])
     p=params or Parameters(**automatic_parameters(d,roles)[0]);return d,c,m,p
 
 def fanout_figures():
