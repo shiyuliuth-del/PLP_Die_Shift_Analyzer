@@ -1,0 +1,15 @@
+# Keep online report figures in Git, but exclude them from source archives.
+figures export-ignore
+DIE_SHIFT评估报告.md export-ignore
+docs/*操作与验证说明.md export-ignore
+*.[pP][nN][gG] export-ignore
+*.[jJ][pP][gG] export-ignore
+*.[jJ][pP][eE][gG] export-ignore
+*.[gG][iI][fF] export-ignore
+*.[wW][eE][bB][pP] export-ignore
+*.[bB][mM][pP] export-ignore
+*.[tT][iI][fF] export-ignore
+*.[tT][iI][fF][fF] export-ignore
+*.[sS][vV][gG] export-ignore
+*.[iI][cC][oO] export-ignore
+*.[pP][dD][fF] export-ignore
