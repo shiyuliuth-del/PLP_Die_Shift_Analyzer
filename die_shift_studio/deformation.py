@@ -190,7 +190,8 @@ class DeformationPreview:
         self.rule_width,self.rule_space=effective_rules(self.p,self.settings)
         self.originals={k:contact.cache.layers[k]['geometry'] for k in {c.key for c in self.components}}
         self.trees={k:STRtree(v) for k,v in self.originals.items()}
-        self.component_base={};self.contours={};self.preferred_span={};self.route_templates={};self.last_fields={};self.sources={};self.intrinsic_cache=OrderedDict()
+        import threading
+        self.component_base={};self.contours={};self.preferred_span={};self.route_templates={};self.last_fields={};self.sources={};self.intrinsic_cache=OrderedDict();self.candidate_cache=OrderedDict();self.candidate_bytes=0;self.candidate_lock=threading.RLock()
         from .resources import parallel_map,resource_profile
         vertices=sum(shapely.get_num_coordinates(c.poly) for c in self.components)
         process=len(self.components)>=8 and vertices>=200000 and resource_profile()['process_workers']>1
@@ -204,7 +205,39 @@ class DeformationPreview:
             self.executor.shutdown(wait=True,cancel_futures=True);self.executor=None
 
     def close(self):
-        self.release_workers();self.cache.close()
+        self.release_workers();self.cache.close();self.candidate_cache.clear();self.candidate_bytes=0
+
+    @staticmethod
+    def field_stamp(field):
+        if hasattr(field,'fields'):return ('combined',tuple(DeformationPreview.field_stamp(f) for f in field.fields))
+        def pack(value):
+            if isinstance(value,np.ndarray):return (value.shape,value.tobytes())
+            if isinstance(value,(list,tuple)):return tuple(pack(v) for v in value)
+            return value
+        names=('mode','inner','span','start','direction','length','moving','band','origin','intervals','gentle_profile','radii','smoothing')
+        return (type(field).__name__,tuple((name,pack(getattr(field,name,None))) for name in names))
+
+    def remember_candidate(self,key,candidate):
+        size=len(candidate.wkb)
+        with self.candidate_lock:
+            previous=self.candidate_cache.pop(key,None)
+            if previous is not None:self.candidate_bytes-=previous[1]
+            self.candidate_cache[key]=(candidate,size);self.candidate_bytes+=size
+            while len(self.candidate_cache)>2048 or self.candidate_bytes>32*1024**2:
+                _,(_,old_size)=self.candidate_cache.popitem(last=False);self.candidate_bytes-=old_size
+
+    def cached_candidate(self,key):
+        with self.candidate_lock:
+            entry=self.candidate_cache.get(key)
+            if entry is None:return None
+            self.candidate_cache.move_to_end(key);return entry[0]
+
+    def adaptation_band(self,field,candidate,states):
+        key=('adaptation_band',states.tobytes(),self.field_stamp(field),candidate)
+        cached=self.cached_candidate(key)
+        if cached is not None:return cached
+        band=warp_polygon(field.band,field,max(self.model.data.dbu_um,self.settings.deformation_tolerance_um),max(1,self.p.line_width_um/2)).intersection(candidate)
+        self.remember_candidate(key,band);return band
 
     def prepare_pose(self,states):
         moved=[self.model.moved(r['poly'],r['owner'],states) for r in self.model.records]
@@ -331,8 +364,8 @@ class DeformationPreview:
                             if bad:candidate_result=self.search(c,active,anchors,states,moved_vias,latest,progress,quick)
                             else:
                                 field.verified=True;field.failure_reasons=[];field.candidate_violations=[]
-                                if field.mode=='three_part' and not hasattr(field,'adapted_band'):
-                                    field.adapted_band=warp_polygon(field.band,field,max(self.model.data.dbu_um,self.settings.deformation_tolerance_um),max(1,self.p.line_width_um/2)).intersection(candidate)
+                                if field.mode in ('three_part','axial') and not hasattr(field,'adapted_band'):
+                                    field.adapted_band=self.adaptation_band(field,candidate,states)
                         except (ValueError,RuntimeError) as exc:reason=str(exc)
                     if not reason:
                         candidate,field,span=candidate_result
@@ -395,8 +428,8 @@ class DeformationPreview:
             c=a['component']
             if self.candidate_violations(c,a['geometry'],c.records,c.anchors,states,moved_vias,joint_snapshot):continue
             a['field'].verified=True;a['field'].candidate_violations=[];a['field'].failure_reasons=[];a.pop('display',None)
-            if a['field'].mode=='three_part' and not hasattr(a['field'],'adapted_band'):
-                a['field'].adapted_band=warp_polygon(a['field'].band,a['field'],max(self.model.data.dbu_um,self.settings.deformation_tolerance_um),max(1,self.p.line_width_um/2)).intersection(a['geometry'])
+            if a['field'].mode in ('three_part','axial') and not hasattr(a['field'],'adapted_band'):
+                a['field'].adapted_band=self.adaptation_band(a['field'],a['geometry'],states)
             accepted[ck]=a;diagnostics.pop(ck,None)
         # Roll back unsafe copper, then recheck neighbours against the ACTUAL
         # restored source. Removing one replacement can invalidate another.
@@ -519,6 +552,17 @@ class DeformationPreview:
         contour=self.contours.setdefault((c.key,c.indices),{});preferred=self.preferred_span.get((c.key,c.indices),0.)
         spans=sorted(set([scale*cfg.deformation_growth**i for i in range(cfg.deformation_local_steps)]+([preferred] if preferred else [])))
         field_key=(c.key,c.indices,tuple((r['key'],r['index']) for r in records))
+        def axial_fields():
+            # Cross-section plateaus preserve the entire moving pad, and may
+            # have fixed anchors on BOTH sides of an interior connection.
+            from .axial_adaptation import axial_candidates
+            axial_key=('axial_sections',source_key)
+            if axial_key not in self.route_templates:
+                self.route_templates[axial_key]=list(axial_candidates(source,routing_records,anchors,self.model.bound.centers,states,cfg,p.line_width_um,dbu))
+            import copy
+            for original in self.route_templates[axial_key]:
+                field=copy.copy(original);field.states=states
+                yield field,field.span
         def fields():
             if field_key in self.last_fields:
                 import copy
@@ -529,6 +573,10 @@ class DeformationPreview:
                     return q
                 field=at_pose(self.last_fields[field_key]);yield field,field.span
                 if quick:return
+            from .pad_envelope import pad_envelopes
+            for field in pad_envelopes(c.poly,records,anchors,self.model.bound.centers,states,cfg,p.annulus_um,p.line_width_um,dbu):
+                yield field,field.span
+            yield from axial_fields()
             for span in spans:
                 field=Field(records,self.model.bound.centers,states,inner,span,cfg);field.mode='local'
                 if any(records[i]['owner']!=records[j]['owner'] and np.linalg.norm(np.array(records[i]['center'])-records[j]['center'])<inner[i]+inner[j]+2*span for i in range(len(records)) for j in range(i)):continue
@@ -548,42 +596,50 @@ class DeformationPreview:
                 for option in self.route_templates[local_key]:
                     field=SlabField(records,self.model.bound.centers,states,cfg,*option);field.mode='directional_pad'
                     yield field,field.span
-            if not cfg.deformation_route_enabled:return
-            from .route_adaptation import routed_fields
-            foreign=[]
-            if snapshot is not None:
-                ids,geoms,tree=snapshot[c.key.split('/')[0]]
-                foreign=[geoms[j] for j in tree.query(source.buffer(travel+p.line_space_um)) if self.model.nodes[ids[j]]['net']!=c.net]
-            from itertools import islice
-            options=routed_fields(source,routing_records,anchors,self.model.bound.centers,states,cfg,p.line_width_um,dbu,foreign,self.route_templates)
-            yield from islice(options,min(2,cfg.deformation_route_candidates) if quick else cfg.deformation_route_candidates)
+            if cfg.deformation_route_enabled:
+                from .route_adaptation import routed_fields
+                foreign=[]
+                if snapshot is not None:
+                    ids,geoms,tree=snapshot[c.key.split('/')[0]]
+                    foreign=[geoms[j] for j in tree.query(source.buffer(travel+p.line_space_um)) if self.model.nodes[ids[j]]['net']!=c.net]
+                from itertools import islice
+                options=routed_fields(source,routing_records,anchors,self.model.bound.centers,states,cfg,p.line_width_um,dbu,foreign,self.route_templates)
+                yield from islice(options,min(2,cfg.deformation_route_candidates) if quick else cfg.deformation_route_candidates)
+        seen_candidates=set()
         for attempt,(field,span) in enumerate(fields()):
             progress(20,f'型变搜索 · {c.key} · '+('三段追溯' if field.mode=='three_part' else '孔盘调整')+f' {attempt+1}')
-            if field.jacobian_bound()>=.98 and not (hasattr(field,'injectivity_certificate') and field.injectivity_certificate(source)):
-                if hasattr(field,'injectivity_certificate'):
+            direct_contour=hasattr(field,'candidate_geometry')
+            if not direct_contour and field.jacobian_bound()>=.98 and not (hasattr(field,'injectivity_certificate') and field.injectivity_certificate(source)):
+                if hasattr(field,'injectivity_certificate') and field.mode!='axial':
                     field.gentle_profile=True
                     if not field.injectivity_certificate(source):last='无法证明位移场无折叠';continue
                 else:last='无法证明位移场无折叠';continue
-            if anchors:
+            if anchors and not direct_contour:
                 pts=shapely.get_coordinates(anchors)
                 if np.max(np.linalg.norm(field(pts)-pts,axis=1),initial=0)>dbu*.01:last='过渡范围到达固定连接端';continue
-            try:
-                candidate=warp_polygon(source,field,tol,max(1.,min(inner)/2,p.line_width_um/2),contour)
-                candidate,region=snapped(candidate,dbu)
-            except ValueError as exc:last=str(exc);continue
-            if candidate.geom_type!='Polygon' or not candidate.is_valid or len(candidate.interiors)!=len(c.poly.interiors):last='型变拓扑改变';continue
-            support=getattr(field,'support',None)
-            if support is None:support=shapely.union_all([Point(r['center']).buffer(inner[i]+span,quad_segs=32) for i,r in enumerate(records)])
-            angle_bad=angle_regions(candidate,cfg.deformation_min_angle_deg,dbu)
-            if not angle_bad.is_empty and support.covers(angle_bad):
-                for radius in (p.line_width_um*.25,p.line_width_um*.5,p.line_width_um,2*p.line_width_um):
-                    q=native_operation("round",candidate,dbu,radius)
-                    delta=q.symmetric_difference(candidate)
-                    local=[g for g in shapely.get_parts(delta) if support.covers(g)]
-                    if not local:continue
-                    q=candidate.symmetric_difference(shapely.union_all(local))
-                    if q.is_valid and q.geom_type=='Polygon' and len(q.interiors)==len(c.poly.interiors) and angle_regions(q,cfg.deformation_min_angle_deg,dbu).is_empty:
-                        candidate,region=snapped(q,dbu);break
+            candidate_key=(source_key,states.tobytes(),self.field_stamp(field))
+            if candidate_key in seen_candidates:continue
+            seen_candidates.add(candidate_key)
+            candidate=self.cached_candidate(candidate_key)
+            if candidate is None:
+                try:
+                    candidate=field.candidate_geometry(tol,dbu) if direct_contour else warp_polygon(source,field,tol,max(1.,min(inner)/2,p.line_width_um/2),contour)
+                    candidate,region=snapped(candidate,dbu)
+                except ValueError as exc:last=str(exc);continue
+                if candidate.geom_type!='Polygon' or not candidate.is_valid or len(candidate.interiors)!=len(c.poly.interiors):last='型变拓扑改变';continue
+                support=getattr(field,'support',None)
+                if support is None:support=shapely.union_all([Point(r['center']).buffer(inner[i]+span,quad_segs=32) for i,r in enumerate(records)])
+                angle_bad=angle_regions(candidate,cfg.deformation_min_angle_deg,dbu)
+                if not angle_bad.is_empty and support.covers(angle_bad):
+                    for radius in (p.line_width_um*.25,p.line_width_um*.5,p.line_width_um,2*p.line_width_um):
+                        q=native_operation("round",candidate,dbu,radius)
+                        delta=q.symmetric_difference(candidate)
+                        local=[g for g in shapely.get_parts(delta) if support.covers(g)]
+                        if not local:continue
+                        q=candidate.symmetric_difference(shapely.union_all(local))
+                        if q.is_valid and q.geom_type=='Polygon' and len(q.interiors)==len(c.poly.interiors) and angle_regions(q,cfg.deformation_min_angle_deg,dbu).is_empty:
+                            candidate,region=snapped(q,dbu);break
+                self.remember_candidate(candidate_key,candidate)
             # GEOS rejects impossible envelope/anchor/clearance candidates before
             # native edge extraction. Only promising shapes pay the full DRC cost.
             bad=self.candidate_violations(c,candidate,records,anchors,states,moved_vias,snapshot,cheap=True)
@@ -593,13 +649,13 @@ class DeformationPreview:
             if best is None or score<best[0]:best=(score,candidate,field,span)
             if not bad:
                 self.preferred_span[c.key,c.indices]=span;self.last_fields[field_key]=field
-                if field.mode=='three_part':field.adapted_band=warp_polygon(field.band,field,tol,max(1,p.line_width_um/2)).intersection(candidate)
+                if field.mode in ('three_part','axial'):field.adapted_band=self.adaptation_band(field,candidate,states)
                 return candidate,field,span
             last='；'.join(field.failure_reasons)
         if best is not None:
             _,candidate,field,span=best;self.last_fields[field_key]=field
             bad=self.candidate_violations(c,candidate,records,anchors,states,moved_vias,snapshot)
             field.verified=not bad;field.failure_reasons=sorted({v['kind'] for v in bad});field.candidate_violations=bad
-            if field.mode=='three_part':field.adapted_band=warp_polygon(field.band,field,tol,max(1,p.line_width_um/2)).intersection(candidate)
+            if field.mode in ('three_part','axial'):field.adapted_band=self.adaptation_band(field,candidate,states)
             return candidate,field,span
         raise ValueError(last+'（有限搜索未解，保留源图形）')

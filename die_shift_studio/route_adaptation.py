@@ -36,13 +36,9 @@ class RouteField(Field):
         # All records in this topological moving segment share one DIE. Do not
         # combine repeated weights as independent fields (which changes C1/C2).
         xy=np.asarray(xy);w=self.weights(xy)[:,0];owner=self.records[0]['owner']
-        from .preview import rigid_transform
-        delta=rigid_transform(xy,self.centers[owner],self.states[owner])-xy
-        if self.settings.deformation_method=='bezier':return xy+w[:,None]*delta
-        gamma=math.radians(self.settings.deformation_arc_angle_deg)*(1 if self.states[owner,2]>=0 else -1)
-        phase=gamma*w;cot=1/math.tan(gamma/2)
-        a=.5*(1-np.cos(phase)+cot*np.sin(phase));b=.5*(cot*(1-np.cos(phase))-np.sin(phase))
-        return xy+a[:,None]*delta+b[:,None]*np.column_stack((-delta[:,1],delta[:,0]))
+        from .acceleration import blend_points
+        return blend_points(xy,w,self.centers[owner],self.states[owner],self.settings.deformation_method,
+                            self.settings.deformation_arc_angle_deg,self.settings.acceleration)
     def jacobian_bound(self):
         owner=self.records[0]['owner'];z=self.states[owner];coords=shapely.get_coordinates(self.band)
         from .preview import rigid_transform

@@ -110,4 +110,4 @@ class ViewSettings:
             'quadrature_order','probability_cell_um','angle_bins','space_resolution','contact_box_budget','safe_box_precision','safe_box_budget','safe_box_starts','safe_box_passes','yield_method','yield_sample_exponent','yield_box_budget','yield_tolerance'))
 
     def deformation_key(self):
-        return (self.drc_tolerance_um,)+tuple(getattr(self,f.name) for f in fields(self) if f.name.startswith('deformation_'))
+        return (self.drc_tolerance_um,self.acceleration)+tuple(getattr(self,f.name) for f in fields(self) if f.name.startswith('deformation_'))

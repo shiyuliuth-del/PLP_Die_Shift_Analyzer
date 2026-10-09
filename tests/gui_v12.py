@@ -37,7 +37,7 @@ w.visible_boxes['3/0'].setChecked(True);w.drc_toggle.setChecked(False);assert no
 w.fields['line_width_um'].setValue(20);wait();w.run_evaluation();wait()
 w.manual_states=np.array([[1.,1,0],[0,35,0]]);w.request_preview();wait();w.deformation_toggle.setChecked(True);wait()
 assert w.current_frame['deformation']['accepted_count']==2
-values=w.current_frame['deformation']['replacements']['5/0'];assert any(v['mode']=='three_part' for v in values)
+values=w.current_frame['deformation']['replacements']['5/0'];assert any(v['mode'] in ('three_part','axial') and not v['adaptation'].is_empty for v in values)
 base,dark,outline=w.deformation_artists['5/0'];assert outline.get_visible() and outline.get_paths()
 assert outline.get_facecolor().size==0;assert any(dashes is not None for _,dashes in outline.get_linestyle())
 w.fit_plot();wait();shot('three_part')

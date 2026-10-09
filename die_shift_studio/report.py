@@ -1,4 +1,4 @@
-"""Auditable V17 calculation report: bounded inputs, probabilities, geometry."""
+"""Auditable V18 calculation report: bounded inputs, probabilities, geometry."""
 from html import escape
 import math
 from .core import PARAMETER_DESCRIPTIONS,fmt,Parameters
@@ -117,6 +117,17 @@ def report_document(r,motions=None,progress=lambda *_:None):
           r'Q=\left(\sum_{j=1}^{m}A_j,\ m,\ \operatorname{Area}(G^{\prime}\bigtriangleup G)\right)'],
          '局部孔盘调整无通过结果时，沿实际连通铜图形寻找运动段、适配段、固定段；固定端不动。独立DRC开关控制粉色违规显示，关闭开关不改变判定。',
          'L0/w0是候选对边的共同长度/间距；S为长宽排序值，βg为设置的拐角端部预留倍数，g为两端避开拐角的保留长度，Lmax为可用长度，wmin为固定最小线宽。先居中取Lmax，再尝试0.75/0.5倍及偏中心位置，候选预算由设置控制；同时增加完整投影截面法处理弯曲、宽孔盘及分支，截面前为运动段、后为固定段。设置允许关闭这类通用截面。b为适配起点，u为指向固定端的单位向量，L为适配长度，P为源点；运动段W=1、固定段W=0，适配段使用前述C1/C2权重与贝塞尔/圆弧公式。e1/e2为两条非零边的方向；只检查近似平行、非共享顶点的边，粉色定位真实不足段；实际异网相交始终算短接。没有完全合格结果时，对合法拓扑候选按Q字典序选取：Aj为第j组违规区域面积（μm²），m为违规组数，最后一项为改动铜面积；这是有限搜索中的最佳候选，不是合格解或全局最优证明。Q仅用于内部搜索排序；不合格候选不会显示。最终再次检查所有候选与候选、候选与恢复原图之间的冲突，迭代回退至稳定。交互帧复核已有结构，停止操作后完整搜索；所有标记与图形用同一当前状态。')
+    step('中段连接：双侧固定平台与整截面过渡','来源连通铜、实际运动孔和两侧固定连接；既有连续性和曲线误差设置',
+         [r's=(P-o)\cdot u,\quad \Psi(P)=P+w(s)[T(P)-P]',
+          r'w(s)=w_a+(w_b-w_a)\left[1-w_{Ck}\!\left(\frac{s-a}{b-a}\right)\right]'],
+         '运动平台w=1、固定平台w=0；截面同权重，保持中段孔两侧连接；适配段用虚线描边。无证明或最终DRC失败时恢复原图。',
+         'P为源铜点，o为源铜顶点均值，u为候选轴单位方向，s为投影距离（μm）；a/b为相邻固定/运动约束投影区间间的过渡端点。wa/wb为两端0或1平台值，wCk为前述C1/C2权重，区间外保持平台。方向来自主轴、源边方向及连接端方向；允许多个交替平台。所有平台必须完整覆盖对应过孔约束且不互相冲突。最终仍检查所有孔包围、固定端和异网净距。')
+    step('短孔盘：平滑凸包络轮廓','单运动孔、单固定端、无孔洞且接近凸形的短孔盘；实际偏移、原始铜、包围量和曲线误差',
+         [r'h_i(\varphi)=c_i\cdot n(\varphi)+r_i,\quad n=(\cos\varphi,\sin\varphi),\quad t=(-\sin\varphi,\cos\varphi)',
+          r'h(\varphi)=\frac{1}{\beta}\log\sum_i e^{\beta h_i(\varphi)},\quad \beta=\frac{\log 2}{\delta_s}',
+          r'P(\varphi)=h(\varphi)n(\varphi)+h^{\prime}(\varphi)t(\varphi)'],
+         '生成顺滑无凹陷的孔盘轮廓，移动端满足包围量、固定过孔保持覆盖；最终按同一DRC验收，禁止失败形状显示。',
+         'ci是运动后孔中心或不动的固定孔中心；ri是保留原孔盘半径与实体包围所需半径的较大值，再加max(4×DBU,2×曲线误差)保护量。原孔盘半径按原中心到源铜边界最短距离计算，实体半径取孔顶点到中心最大距离；仅运动孔加最小包围量。φ为轮廓法线方向，n/t为单位法向/切向，hi/h为支持函数，β为平滑系数（1/μm）；δs依次尝试0.2w、0.05w且不低于8×DBU，w为工艺固定线宽。该轮廓法仅用于单孔短岛，不把分支、孔洞或长绕线直接填成凸包；验收不依赖视觉平滑。')
     step('三方案空间判据：一个需求／空间比值', '硬输入最大幅度、实际旋转中心、几何网络、实际RDL平面、线宽线距及固定端',
          [r'Q_i=\sqrt{(|\mu_x|+B_x)^2+(|\mu_y|+B_y)^2}+2R_i\sin\!\left(\frac{\min(\pi,|\mu_\theta|+B_\theta)}{2}\right)',
           r'n_b=\left\lceil\frac{N_b}{L}\right\rceil,\quad W_b=n_bw+(n_b-1)s+2Q\quad(N_b>0)',

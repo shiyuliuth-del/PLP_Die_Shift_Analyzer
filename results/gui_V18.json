@@ -1,0 +1,13 @@
+{
+  "status": "PASS",
+  "accepted": 2,
+  "modes": [
+    "axial",
+    "pad_envelope"
+  ],
+  "dashed_middle_band": true,
+  "first_animation_frames": 3,
+  "cached_animation_frames": 4,
+  "hidden_layer_hides_deformation": true,
+  "report_formula_rendered": true
+}

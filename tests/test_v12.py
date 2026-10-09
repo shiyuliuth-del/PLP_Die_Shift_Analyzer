@@ -37,7 +37,12 @@ class V12Tests(unittest.TestCase):
         for method in ('bezier','arc'):
             for continuity in ('C1','C2'):
                 dp=DeformationPreview(m,p,{},ViewSettings(deformation_method=method,deformation_continuity=continuity))
-                f=dp.frame(z,m.current(z,p));self.assertEqual(f['accepted_count'],2,f['diagnostics'])
+                # Exercise the traced fallback itself; the default V18 search
+                # can now solve this case with a whole-section field earlier.
+                from unittest.mock import patch
+                with patch('die_shift_studio.axial_adaptation.axial_candidates',return_value=iter(())):
+                    f=dp.frame(z,m.current(z,p))
+                self.assertEqual(f['accepted_count'],2,f['diagnostics'])
                 self.assertFalse(f['violations']);v=next(v for v in f['replacements']['5/0'] if v['mode']=='three_part')
                 self.assertGreater(v['span_um'],500);self.assertGreater(v['adaptation'].area,20000)
                 self.assertAlmostEqual(v['adaptation'].centroid.x,450,delta=8)
