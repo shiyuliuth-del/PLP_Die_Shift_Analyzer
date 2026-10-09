@@ -1,0 +1,26 @@
+{
+  "status": "PASS",
+  "source_sha256": "83c850f8b9ac5ac458016036664136703b89495614f23b5c4294bdaa819eba38",
+  "output_sha256": "6db4b4306fc2490cac0f7ee85dd96d168b77bc990d01b6f0b12975a03ad4becd",
+  "output_size": 31093892,
+  "file_count": 315,
+  "unchanged_payloads": true,
+  "method": "ZIP Store, explicit regular-file/directory types and DOS flags, UTF-8 names where required, no ZIP64",
+  "independent_extraction": [
+    {
+      "tool": "7z",
+      "status": "PASS",
+      "verified_files": 315,
+      "pngs_verified_and_decoded": 64,
+      "source_startup": "PASS"
+    },
+    {
+      "tool": "unzip",
+      "status": "PASS",
+      "verified_files": 315,
+      "pngs_verified_and_decoded": 64
+    }
+  ],
+  "platform": "Linux; no Windows execution",
+  "original_pngs_valid": 64
+}
