@@ -1,0 +1,8 @@
+{
+  "status": "PASS",
+  "high_load_queued": true,
+  "low_load_parallel": true,
+  "stale_result_did_not_overwrite": true,
+  "cached_return_without_worker": true,
+  "engine_count": 2
+}

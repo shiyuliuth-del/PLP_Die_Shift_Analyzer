@@ -32,7 +32,7 @@ class ProjectCacheGroup:
     def __init__(self,key,max_entries=2000):
         self.key=key;self.max_entries=max_entries;self.lock=threading.RLock()
         self.caches={};self.recent=OrderedDict();self.pinned=set();self.bytes=0;self.enabled=True
-        self.values=None;self.engines={};self.last_assessment=None;self.nominal={}
+        self.values=None;self.engines={};self.frame_stores={};self.last_assessment=None;self.nominal={}
     def register(self,cache):self.caches[id(cache)]=cache
     def touch(self,cache,key):
         identity=(id(cache),key)
@@ -114,7 +114,7 @@ class SessionCache(MutableMapping):
         self.budget=max(0,budget_bytes);self.memory=OrderedDict();self.sizes={};self.paths={};self.used=0
         self.directory=tempfile.TemporaryDirectory(prefix='die_shift_cache_')
         self.root=Path(self.directory.name);self.group=group;self.lock=group.lock if group is not None else threading.RLock();self.pinned=set()
-        self.hits=0;self.misses=0;self.closed=False
+        self.hits=0;self.misses=0;self.closed=False;self.inflight={}
         if group is not None:group.register(self)
 
     def __getitem__(self,key):
@@ -173,9 +173,19 @@ class SessionCache(MutableMapping):
             self.memory.clear();self.sizes.clear();self.used=0;self.closed=True;self.directory.cleanup()
             if self.group is not None:self.group.caches.pop(id(self),None)
     def get_or_compute(self,key,fn):
-        try:return self[key]
-        except KeyError:
-            value=fn();self[key]=value;return value
+        while True:
+            with self.lock:
+                if key in self.sizes:return self[key]
+                pending=self.inflight.get(key)
+                if pending is None:
+                    pending=threading.Event();self.inflight[key]=pending;owner=True
+                else:owner=False
+            if owner:
+                try:
+                    value=fn();self[key]=value;return value
+                finally:
+                    with self.lock:self.inflight.pop(key,None);pending.set()
+            pending.wait()  # Releases the GIL; never holds the shared disk lock.
 
     def __del__(self):
         if hasattr(self,'directory') and not getattr(self,'closed',True):self.close()

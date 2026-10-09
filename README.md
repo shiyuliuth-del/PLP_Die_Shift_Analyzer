@@ -1,9 +1,12 @@
-# Die Shift Analyze V19
+# Die Shift Analyze V20
 
-GDS芯片偏移分析，长度单位为μm。V19按工程保留计算缓存，固定保留无位移状态，增加缓存数量与清理管理；改进同网分接口适配、局部铜重建与障碍绕行。所有候选仍须通过最终DRC，失败线路保留原图。
+GDS芯片偏移分析，长度单位为μm。V20使用原始铜材料位移进行预演，修复反向动画缓存，并按实时CPU/内存负载调度后台任务。失败线路保留原图并说明原因。
 
-- [研究报告](DIE_SHIFT评估报告.md)
-- [本版图文操作、公式与逐接口验证](docs/V19_操作与验证说明.md)
+- [本版使用说明（随源码提供）](docs/V20_使用说明.md)
+- [研究报告](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/blob/main/DIE_SHIFT评估报告.md)
+- [本版图文验证报告](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/blob/main/docs/V20_操作与验证说明.md)
+
+源码ZIP不含图片或图表文件。界面图形和公式由程序动态绘制，报告图片单独提供。
 
 ## 启动
 
@@ -63,13 +66,14 @@ QT_QPA_PLATFORM=offscreen python3 tests/gui_v15.py
 QT_QPA_PLATFORM=offscreen python3 tests/gui_v16.py
 QT_QPA_PLATFORM=offscreen python3 tests/gui_v17.py
 QT_QPA_PLATFORM=offscreen python3 tests/gui_v18.py
-QT_QPA_PLATFORM=offscreen python3 tests/gui_v19.py
+QT_QPA_PLATFORM=offscreen python3 tests/gui_v20.py
+QT_QPA_PLATFORM=offscreen python3 tests/gui_scheduler_v20.py
 python3 -m die_shift_studio --project examples/示例C_多芯片晶圆接口.json --json results/复算.json
-python3 tools/validate_gd55_v15.py --gds /path/to/GD55_9-21.gds
+python3 tools/validate_gd55_v20.py --gds /path/to/GD55_9-21.gds --out results/gd55_material_V20.json
 python3 tools/package_release.py
 ```
 
-本地Git首个提交保留v0.4.0基线`fef0933`，本版标签`V19`；本版源码快照发布到用户授权的私有GitHub仓库，历史大型分析数据不上传。发布ZIP包含文件哈希与独立解压后的验证记录。附件图纸本身不打入通用包。
+本地Git首个提交保留v0.4.0基线`fef0933`，本版标签`V20`；本版源码快照发布到用户授权的私有GitHub仓库，历史大型分析数据不上传。发布ZIP包含文件哈希与独立解压后的验证记录。附件图纸本身不打入通用包。
 
 全输入模型良率统计全部真实运动孔接口同时无异网接触的概率，包含安全内盒外状态；默认蒙特卡洛与99%联合置信区间，也可选不随机采样的状态盒积分。各DIE独立、同DIE各孔共用姿态。仅针对原始固定RDL接口，不代表含其他缺陷的实际生产良率。设置中可调整样本量或确定性预算。
 
@@ -78,3 +82,5 @@ V17：图例与DIE编号同步显隐。设置中的型变动画可选“算完�
 V18新增示例K：中段运动孔两侧固定端保持连接、短孔盘采用顺滑轮廓。CUDA可用于大型型变坐标批次，小任务与多进程工作器仍用CPU，最终几何/DRC不交给GPU；本机没有CUDA实测。具体GD55对照与未适配限制见本版说明。
 
 V19新增示例L：同一固定铜区两个接口中，一个接触、一个可适配；另一个网络的运动孔在远端存在接触。可适配接口独立处理，原接触仍显示，最终检查不允许新增接触或超出一DBU量化边界的侵入扩张。
+
+V20：不再采用新增孔盘包络或拼接新铜作为适配成功依据；实际铜轮廓由原材料位移产生，并核验原孔盘和连接弧的随动误差。反向路径复用验证帧；新路径仍需首算。完成状态与无位移结果保持缓存，高负载排队、资源允许时最多两项预演并行。

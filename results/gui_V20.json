@@ -1,0 +1,20 @@
+{
+  "status": "PASS",
+  "accepted": 2,
+  "modes": [
+    "axial",
+    "axial"
+  ],
+  "animation_enabled_during_revisits": true,
+  "dashed_middle_band": true,
+  "first_animation_frames": 4,
+  "cached_animation_frames": 3,
+  "hidden_layer_hides_deformation": true,
+  "report_formula_rendered": true,
+  "repeated_pose_switches": 18,
+  "repeated_switch_median_ms": 697.4502680004662,
+  "project_switch_keeps_results": true,
+  "zero_restore_ms": 53.30325099930633,
+  "clear_all_projects_bytes": 0,
+  "environment": "Independently extracted source ZIP on Linux"
+}

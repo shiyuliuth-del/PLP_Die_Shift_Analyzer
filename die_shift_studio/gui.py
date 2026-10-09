@@ -150,7 +150,7 @@ class MainWindow(W.QMainWindow):
         self.loading=False;self.revision=0;self.extremes=None;self.active_preview=None;self.owner_cache=None;self.auto_values={}
         self.preview_page=0;self.page_items=[];self.state_result=None;self.issue_artists=[];self.shift_artist=None
         self.rendered_layers={};self.layer_artists={};self._layer_keys=[];self.geometry_cache=None;self.connections=None
-        self.preview_worker=None;self.preview_pending=None;self.preview_ticket=0;self.engine=None;self.current_frame=None;self.shown_states=None
+        self.preview_worker=None;self.preview_workers=[];self.preview_pending=None;self.preview_ticket=0;self.engine=None;self.current_frame=None;self.shown_states=None
         self.die_labels=[];self._default_view=None;self._artist_frame=None;self.report_dirty=True;self._reordering=False
         self.space_data=None;self.space_artists=[];self.space_stamp=None;self.space_colorbar=None;self._resizing=False
         self._issue_table_stamp=None;self.dirty=False;self.manual_states=None;self.evaluation_motions={};self.probability_data=None;self.probability_artists=[];self.probability_stamp=None;self.legend=None;self.zone_artists=[];self.invalid_artists=[]
@@ -555,13 +555,13 @@ class MainWindow(W.QMainWindow):
         self.session_values=self.cache_group.values;self.session_engines=self.cache_group.engines;self.engine=None
     def switch_project_cache(self,key,count):
         self.stop_animation();self._prepared_motion=None;self._prepared_package=None
-        if self.preview_worker:self.preview_worker.cancelled.set()
+        self.cancel_previews()
         if self.motion_worker:self.motion_worker.cancelled.set()
         if self.cache_group.key!=key:self.parked_groups.append(self.cache_group)
         self._attach_cache_group(key,count);self.cleanup_retired_sessions();self.refresh_cache_status()
     def reset_session_cache(self):
         self.stop_animation();self._prepared_motion=None;self._prepared_package=None
-        if self.preview_worker:self.preview_worker.cancelled.set()
+        self.cancel_previews()
         if self.motion_worker:self.motion_worker.cancelled.set()
         old=self.cache_registry.retire(self.cache_project_key)
         if old is not None:old.enabled=False;self.retired_sessions.append(old)
@@ -571,7 +571,7 @@ class MainWindow(W.QMainWindow):
         if self.cache_clear_worker is not None:return
         self.stop_animation();self._prepared_motion=None;self._prepared_package=None
         self.preview_ticket+=1;self.preview_pending=None;self.motion_pending=None;self.motion_generation+=1
-        for worker in (self.worker,self.preview_worker,self.motion_worker):
+        for worker in [self.worker,self.motion_worker,*self.preview_workers]:
             if worker:worker.cancelled.set()
         keys=list(self.cache_registry.groups) if all_projects else [self.cache_project_key]
         groups=[self.cache_registry.retire(key) for key in keys if key in self.cache_registry.groups]
@@ -617,7 +617,7 @@ class MainWindow(W.QMainWindow):
         if self.target_sigma.currentText() not in ('0','∞'):self.reference_nsigma=float(self.target_sigma.currentText())
         self.stop_animation();self.revision+=1;self.engine=None;self.connections=None
         self.probability_data=None;self.space_data=None;self.preview_ticket+=1;self.preview_pending=None
-        if self.preview_worker:self.preview_worker.cancelled.set()
+        self.cancel_previews()
         self._coverage_pending=True;self.coverage_timer.start()
         self.statusBar().showMessage('良率级别已改变，正在更新概率、Space Map和窗口判定…')
     def refresh_coverage(self):
@@ -898,7 +898,7 @@ class MainWindow(W.QMainWindow):
                 elif item.text()!=text:item.setText(text)
 
     def launch_motion_frame(self):
-        if self.motion_worker is not None or self.motion_pending is None:return
+        if self.motion_worker is not None or self.motion_pending is None or self.preview_workers:return
         generation,revision,engine,states=self.motion_pending;self.motion_pending=None
         worker=Worker(lambda progress:engine.frame(states,progress,quick=True),self);self.motion_worker=worker;self.watch_worker(worker,'插值帧')
         def accepted(frame):
@@ -1297,16 +1297,22 @@ class MainWindow(W.QMainWindow):
         point=rows[row].get('points',[rows[row]['point']])[0]
         span=max(120,self.params().line_width_um*12)
         self.animate_view(point,span*1.6,span)
+    def cancel_previews(self):
+        for worker in self.preview_workers:worker.cancelled.set()
     def request_preview(self,direct=False,settle=False):
         if not self.data:return
         self.stop_animation()
         self.preview_ticket+=1;ticket=self.preview_ticket;self._prepared_motion=None
-        if self.preview_worker is not None:self.preview_worker.cancelled.set()
+        # Committed extreme poses finish into cache even if a later pose wins
+        # the display ticket. Only transient mouse-drag refinements are stale.
+        for running in self.preview_workers:
+            if getattr(running,'transient',False):running.cancelled.set()
         state=self.manual_states if self.manual_states is not None else (self.extremes[self.active_preview]['states'].copy() if self.active_preview is not None and self.extremes else None)
         if state is None and not self.probability_toggle.isChecked() and not self.space_toggle.isChecked() and not self.drc_toggle.isChecked() and not (self.deformation_toggle.isChecked() and self.result):
             self.preview_pending=None;self.present_frame(None);return
         try:p=self.params();roles=self.roles();case=self.case or build_case(self.data,roles,layer_order=self.ordered_layers())
         except ValueError as exc:self.error(exc);return
+        origin=self.shown_states.copy() if self.shown_states is not None else np.zeros((len(case['dies']),3))
         show_frame=state is not None
         if state is None:
             state=np.zeros((len(case['dies']),3))
@@ -1319,24 +1325,74 @@ class MainWindow(W.QMainWindow):
             global_ready=not (self.deformation_toggle.isChecked() and self.result and math.isfinite(p.target_nsigma)) or bool(cached and cached.get('global_deformation'))
             if cached is not None and overlays_ready and global_ready:
                 self.preview_pending=None;self.statusBar().showMessage('已恢复固定保留的无位移缓存');return
+        state=np.array(state,float,copy=True);state[state==0]=0.
+        if show_frame:
+            signature=self.preview_identity(self.data,roles,self.ordered_layers(),self.motions(),p,self.result)
+            store=self.cache_group.frame_stores.get(signature)
+            expected=((bool(self.deformation_toggle.isChecked() and self.result is not None),*self.view_settings.deformation_key()),(self.drc_toggle.isChecked(),self.view_settings.deformation_min_angle_deg,self.view_settings.drc_tolerance_um))
+            cached=store.get((expected,np.asarray(state,float).tobytes(),False)) if store is not None else None
+            matches=[e for e in list(self.session_engines.values()) if getattr(e,'signature',None)==signature]
+            actual=next((e for e in matches if not getattr(e,'busy',False) and e.cache_key()==expected),next(iter(matches),None))
+            overlays_ready=(not self.probability_toggle.isChecked() or self.probability_data is not None) and (not self.space_toggle.isChecked() or self.space_data is not None)
+            if cached is not None and actual is not None and overlays_ready:
+                self.engine=actual
+                if self.deformation_toggle.isChecked() and self.view_settings.animation_enabled and not direct and not np.array_equal(origin,state):
+                    from .prepared_motion import motion_packet
+                    from types import SimpleNamespace
+                    view=SimpleNamespace(signature=signature,cache_key=lambda:expected,bound=actual.bound)
+                    _,_,duration,steps,requested,_,packet=motion_packet(view,origin,state,self.view_settings,max(np.ptp(self.ax.get_xlim()),np.ptp(self.ax.get_ylim())),self.session_values)
+                    if packet and packet['complete']:
+                        motion=dict(prepared=True,streamed=False,frames=packet['frames'],duration=duration,steps=steps,requested_steps=requested,cached=True,count=len(packet['frames']))
+                        self._prepared_motion=motion;self.preview_pending=None;self.play_prepared_motion(cached,motion);return
+                    # A new transition needs its own verified intermediate
+                    # states. Cached paths below play without any worker.
+                    self.statusBar().showMessage('目标状态已缓存；准备首次过渡动画')
+                else:
+                    self.preview_pending=None
+                    if getattr(actual,'busy',False) or actual.cache_key()!=expected:
+                        # Never run a legacy interpolation callback on a leased
+                        # solver or on a differently configured engine.
+                        self._interpolated_states=None;self.current_frame=cached
+                        self.plot_layout(preserve=True);self.update_state_table(state);self.update_histograms();self.show_frame_status(cached)
+                    else:self.present_frame(cached)
+                    return
         self.preview_pending=(self.revision,self.view_settings,ticket,state.copy(),self.motions(),roles,p,self.result,case,self.geometry_cache,self.connections,self.ordered_layers(),show_frame,self.probability_toggle.isChecked(),self.space_toggle.isChecked())
-        self.preview_pending+=(self.deformation_toggle.isChecked(),self.drc_toggle.isChecked(),direct,settle)
+        self.preview_pending+=(self.deformation_toggle.isChecked(),self.drc_toggle.isChecked(),direct,settle,origin)
         self.statusBar().showMessage('正在后台生成预演…保留已显示状态。');self.launch_preview()
     def launch_preview(self):
-        if self.preview_worker is not None or self.motion_worker is not None or self.preview_pending is None:return
-        revision,settings,ticket,states,motions,roles,params,result,case,cache,connections,order,show_frame,heat,space,deform,drc,direct,settle=self.preview_pending;self.preview_pending=None;engine=self.engine;probability=self.probability_data;space_data=self.space_data;data=self.data
+        if self._closing or self.motion_worker is not None or self.preview_pending is None:return
+        request=self.preview_pending
+        request_key=(self.preview_identity(self.data,request[5],request[11],request[4],request[6],request[7]),request[1].deformation_key(),request[1].numeric_key(),request[3].tobytes(),request[12:19])
+        if any(getattr(w,'request_key',None)==request_key and not w.cancelled.is_set() for w in self.preview_workers):return
+        from .scheduling import admission
+        estimate=max(256,getattr(self.geometry_cache,'bytes',0)/1024**2*16)
+        admitted=admission(len(self.preview_workers)+(1 if self.worker is not None else 0),estimate)
+        if not admitted['start']:
+            if not getattr(self,'_preview_retry',False):
+                self._preview_retry=True
+                def retry():
+                    self._preview_retry=False;self.launch_preview()
+                QtCore.QTimer.singleShot(400,retry)
+            return
+        revision,settings,ticket,states,motions,roles,params,result,case,cache,connections,order,show_frame,heat,space,deform,drc,direct,settle,origin=self.preview_pending;self.preview_pending=None;data=self.data
         visible=tuple(sorted(k for k,b in self.visible_boxes.items() if b.isChecked()))
         session_values=self.session_values;engines=self.session_engines;cache_group=self.cache_group
-        start_states=self.shown_states.copy() if self.shown_states is not None else np.zeros_like(states)
+        start_states=origin.copy()
         view_span=max(np.ptp(self.ax.get_xlim()),np.ptp(self.ax.get_ylim()))
-        def work(progress):
+        signature=self.preview_identity(data,roles,order,motions,params,result)
+        # Mutable solver engines are leased exclusively. Their completed frame
+        # store is shared, while working arrays and geometry searches are not.
+        actual=next((e for e in list(engines.values()) if getattr(e,'signature',None)==signature and not getattr(e,'busy',False)),None)
+        if actual is not None:actual.busy=True
+        def solve(progress):
+            nonlocal actual
             from .probability_overlay import probability_maps
             from .space_map import space_maps
             actual_cache=cache or GeometryCache(data);con=connections or Connections(data,roles,order,actual_cache.geometries)
-            signature=self.preview_identity(data,roles,order,motions,params,result)
-            actual=engines.get(signature)
             if actual is None:
-                actual=PreviewEngine(actual_cache,case,roles,motions,params,result,con,cache_group=cache_group);engines[signature]=actual
+                actual=PreviewEngine(actual_cache,case,roles,motions,params,result,con,cache_group=cache_group,cache_identity=signature)
+                actual.busy=True;actual.signature=signature
+                with cache_group.lock:engines[(signature,id(actual))]=actual
             actual.signature=signature
             actual.configure_deformation(deform,settings);actual.configure_drc(drc,settings)
             distribution=None;field=None
@@ -1366,7 +1422,12 @@ class MainWindow(W.QMainWindow):
                 motion=prepare_motion(actual,start_states,states,settings,view_span,session_values,progress,publish,worker.cancelled)
             if direct:motion=dict(direct=True,settled=settle)
             return actual,frame,distribution,con,actual_cache,field,prepared,motion
-        worker=Worker(work,self);worker.interactive_refinement=bool(direct and settle);self.preview_worker=worker;self.watch_worker(worker,'预演计算')
+        def work(progress):
+            from .scheduling import job_budget
+            with job_budget(admitted['threads'],admitted['processes']):return solve(progress)
+        worker=Worker(work,self);worker.interactive_refinement=bool(direct and settle);worker.transient=bool(direct);worker.request_key=request_key
+        self.preview_workers.append(worker);self.preview_worker=worker;self.watch_worker(worker,'预演计算')
+        self.log_bus.emit(admitted['reason']+f" · 活跃预演 {len(self.preview_workers)} · CPU {admitted['load'].get('cpu_percent')}% · 可用内存 {admitted['load']['available_memory_mb']} MiB")
         def partial(_):
             value=worker.take_partial()
             if value is None:return
@@ -1383,7 +1444,7 @@ class MainWindow(W.QMainWindow):
             if frame and frame.get('global_deformation') and self.result:
                 self.result['adaptive_preview']=frame['global_deformation'];self.report_dirty=True
             if self._prepared_motion and (self._prepared_motion.get('streamed') or self._prepared_motion.get('direct')):
-                self.current_frame=frame;self.plot_layout(preserve=True);self.update_histograms();self.show_frame_status(frame);self.log_bus.emit('交互帧已更新' if self._prepared_motion.get('direct') else '型变流式帧完成：'+str(self._prepared_motion['count']))
+                self._interpolated_states=None;self.current_frame=frame;self.plot_layout(preserve=True);self.update_histograms();self.show_frame_status(frame);self.log_bus.emit('交互帧已更新' if self._prepared_motion.get('direct') else '型变流式帧完成：'+str(self._prepared_motion['count']))
             elif self._prepared_motion and self._prepared_motion.get('prepared'):
                 self.play_prepared_motion(frame,self._prepared_motion)
             else:self.present_frame(frame)
@@ -1394,7 +1455,10 @@ class MainWindow(W.QMainWindow):
         worker.progress.connect(lambda n,t:self.statusBar().showMessage(t) if ticket==self.preview_ticket else None)
         worker.done.connect(accepted);worker.failed.connect(rejected)
         def finished():
-            self.preview_worker=None;worker.deleteLater();self.launch_preview()
+            if actual is not None:actual.busy=False
+            if worker in self.preview_workers:self.preview_workers.remove(worker)
+            self.preview_worker=self.preview_workers[-1] if self.preview_workers else None
+            worker.deleteLater();self.launch_preview()
         worker.finished.connect(finished);worker.start()
     def update_histograms(self,clear=False):
         if not hasattr(self,'distribution_figure'):return
@@ -1672,7 +1736,7 @@ class MainWindow(W.QMainWindow):
     def closeEvent(self,event):
         self.stop_animation()
         if hasattr(self,'mouse_die'):self.mouse_die.pending=False;self.mouse_die.full_pending=False;self.mouse_die.timer.stop();self.mouse_die.idle.stop()
-        running=[w for w in (self.worker,self.preview_worker,self.motion_worker,self.hardware_worker,self.cache_clear_worker) if w is not None and w.isRunning()]
+        running=[w for w in [self.worker,self.motion_worker,self.hardware_worker,self.cache_clear_worker,*self.preview_workers] if w is not None and w.isRunning()]
         if running:
             self._closing=True
             self.preview_pending=None;self.preview_ticket+=1;self.motion_pending=None;self.motion_generation+=1;self.coverage_timer.stop();self._coverage_pending=False

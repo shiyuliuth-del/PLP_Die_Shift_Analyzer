@@ -81,7 +81,7 @@ class V17Tests(unittest.TestCase):
         try:
             engine.configure_deformation(True,ViewSettings());f=engine.frame(np.array([[-25.,-25.,0]]))
             self.assertEqual(f['deformation']['accepted_count'],1)
-            value=f['deformation']['replacements']['5/0'][0];self.assertIn(value['mode'],('directional_pad','pad_envelope'))
+            value=f['deformation']['replacements']['5/0'][0];self.assertIn(value['mode'],('directional_pad','axial','material_geodesic'))
             self.assertTrue(value['verified'])
             for anchor in engine.deformer.components[0].anchors:self.assertTrue(value['geometry'].covers(anchor))
         finally:engine.close()

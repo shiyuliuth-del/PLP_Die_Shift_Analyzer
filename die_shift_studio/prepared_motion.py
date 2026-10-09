@@ -3,8 +3,9 @@ import numpy as np
 from .animation import motion_timing
 
 
-def prepare_motion(engine,start,end,settings,view_span,cache,progress,publish=None,cancelled=None):
-    start=np.asarray(start,float);end=np.asarray(end,float)
+def motion_packet(engine,start,end,settings,view_span,cache):
+    start=np.array(start,float,copy=True);end=np.array(end,float,copy=True)
+    start[start==0]=0.;end[end==0]=0.
     travel=float(np.max(np.linalg.norm(end[:,:2]-start[:,:2],axis=1)+engine.bound.owner_radii*np.abs(end[:,2]-start[:,2])))
     duration,steps=motion_timing(settings,travel,view_span)
     requested_steps=max(2,steps)
@@ -17,8 +18,23 @@ def prepare_motion(engine,start,end,settings,view_span,cache,progress,publish=No
         estimate=max(1024**2,geometry.bytes*8)
         steps=max(2,min(requested_steps,int(budget/estimate)))
     else:steps=requested_steps
-    key=('validated-motion-v19',engine.signature,engine.cache_key(),start.tobytes(),end.tobytes(),steps)
-    packet=cache.get(key);saved=[] if packet is None else list(packet['frames']);cached=bool(packet and packet['complete'])
+    key=('validated-motion-v20',engine.signature,engine.cache_key(),start.tobytes(),end.tobytes(),steps)
+    packet=cache.get(key)
+    if packet is None:
+        reverse=cache.get(key[:3]+(end.tobytes(),start.tobytes(),steps))
+        if reverse and reverse['complete']:
+            packet=dict(frames=[(1-f,frame) for f,frame in reversed(reverse['frames'])],complete=True)
+    return start,end,duration,steps,requested_steps,key,packet
+
+
+def cached_motion(engine,start,end,settings,view_span,cache):
+    packet=motion_packet(engine,start,end,settings,view_span,cache)[-1]
+    return packet if packet and packet['complete'] else None
+
+
+def prepare_motion(engine,start,end,settings,view_span,cache,progress,publish=None,cancelled=None):
+    start,end,duration,steps,requested_steps,key,packet=motion_packet(engine,start,end,settings,view_span,cache)
+    saved=[] if packet is None else list(packet['frames']);cached=bool(packet and packet['complete'])
     fractions=np.arange(1,steps,dtype=float)/steps
     fractions=fractions*fractions*(3-2*fractions)
     if not cached:

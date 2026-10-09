@@ -88,7 +88,7 @@ class V18Tests(unittest.TestCase):
             cfg=ViewSettings();e.configure_deformation(True,cfg);z=np.array([[-35.,-35.,-math.pi/180]])
             f=e.frame(z);self.assertEqual(f['deformation']['accepted_count'],2)
             self.assertFalse(f['deformation']['violations'])
-            self.assertEqual({v['mode'] for v in f['deformation']['replacements']['5/0']},{'axial','pad_envelope'})
+            self.assertEqual({v['mode'] for v in f['deformation']['replacements']['5/0']},{'axial'})
             with patch.object(e.deformer,'search',side_effect=AssertionError('Recomputed')):self.assertIs(e.frame(z),f)
             co=e.deformer.components[0];dp=e.deformer;dp.prepare_pose(z)
             # A changed neighbour context must rerun DRC, but can reuse contours.

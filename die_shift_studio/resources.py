@@ -27,9 +27,11 @@ def resource_profile():
         if limit!='max':total=min(total,int(limit));available=min(available,max(0,int(limit)-int(Path('/sys/fs/cgroup/memory.current').read_text())))
     except (OSError,ValueError):pass
     workers=max(1,min(12,max(1,cpu-2),int(available*.35)//(384*1024**2)))
-    return dict(cpu=cpu,total_memory_mb=round(total/1024**2),available_memory_mb=round(available/1024**2),workers=workers,
+    profile=dict(cpu=cpu,total_memory_mb=round(total/1024**2),available_memory_mb=round(available/1024**2),workers=workers,
                 process_workers=max(1,min(4,workers,int(available*.35)//(768*1024**2))),
                 policy='预留2逻辑CPU与65%可用内存；原生几何/FFT使用线程；大型独立原图DRC与RDL候选搜索使用spawn进程；小任务串行')
+    from .scheduling import constrain
+    return constrain(profile)
 
 
 def parallel_map(fn,items,profile=None,progress=None,process=False):

@@ -22,6 +22,14 @@ def smooth_weight(t,continuity='C2'):
     return 1-(t*t*(3-2*t) if continuity=='C1' else t**3*(10+t*(-15+6*t)))
 
 
+def plateau_weight(t,continuity='C2',ramp=0.):
+    if not ramp:return smooth_weight(t,continuity)
+    t=np.clip(np.asarray(t,float),0,1);u=np.minimum(t,1-t)/ramp
+    edge=ramp/(1-ramp)*(u**3-.5*u**4)
+    integral=np.where(t<ramp,edge,np.where(t>1-ramp,1-edge,(t-ramp/2)/(1-ramp)))
+    return 1-integral
+
+
 from .native_backend import compute as _cached_native_region, geometry as native_operation
 
 def snapped(geometry,dbu):
@@ -188,7 +196,7 @@ class DeformationPreview:
         self.originals={k:contact.cache.layers[k]['geometry'] for k in {c.key for c in self.components}};self.reference_components={}
         self.trees={k:STRtree(v) for k,v in self.originals.items()}
         import threading
-        self.component_base={};self.contours={};self.preferred_span={};self.route_templates={};self.last_fields={};self.sources={};self.base_sources={};self.intrinsic_cache=OrderedDict();self.candidate_cache=OrderedDict();self.candidate_bytes=0;self.candidate_lock=threading.RLock()
+        self.component_base={};self.contours={};self.preferred_span={};self.route_templates={};self.last_fields={};self.sources={};self.base_sources={};self.intrinsic_cache=OrderedDict();self.candidate_cache=OrderedDict();self.candidate_bytes=0;self.candidate_lock=threading.RLock();self.search_results=OrderedDict();self.search_result_bytes=0
         from .resources import parallel_map,resource_profile
         vertices=sum(shapely.get_num_coordinates(c.poly) for c in self.components)
         process=len(self.components)>=8 and vertices>=200000 and resource_profile()['process_workers']>1
@@ -204,16 +212,18 @@ class DeformationPreview:
             self.executor.shutdown(wait=True,cancel_futures=True);self.executor=None
 
     def close(self):
-        self.release_workers();self.cache.close();self.intermediate.clear();self.candidate_cache.clear();self.candidate_bytes=0
+        self.release_workers();self.cache.close();self.intermediate.clear();self.candidate_cache.clear();self.candidate_bytes=0;self.search_results.clear();self.search_result_bytes=0
 
     @staticmethod
     def field_stamp(field):
+        if getattr(field,'mode',None)=='material_geodesic':
+            return ('material_geodesic',field.mesh.source.wkb,field.distance.tobytes(),field.start,field.end)
         if hasattr(field,'fields'):return ('combined',tuple(DeformationPreview.field_stamp(f) for f in field.fields))
         def pack(value):
             if isinstance(value,np.ndarray):return (value.shape,value.tobytes())
             if isinstance(value,(list,tuple)):return tuple(pack(v) for v in value)
             return value
-        names=('mode','inner','span','start','direction','length','moving','band','origin','intervals','gentle_profile','radii','smoothing','trim_scale','obstacles','clip_clearance')
+        names=('mode','inner','span','start','direction','length','moving','band','origin','intervals','gentle_profile','radii','smoothing','trim_scale','obstacles','clip_clearance','end','distance','profile_ramp')
         return (type(field).__name__,tuple((name,pack(getattr(field,name,None))) for name in names))
 
     def remember_candidate(self,key,candidate):
@@ -305,7 +315,7 @@ class DeformationPreview:
             if support is None:support=shapely.union_all([Point(r['center']).buffer(inner+a['span'],quad_segs=32) for r,inner in zip(field.records,field.inner)])
             dark=g.difference(c.poly.difference(support))
             adaptation=getattr(field,'adapted_band',Polygon())
-            a['display']=dict(indices=c.indices,geometry=g,dark=dark,adaptation=adaptation,mode=getattr(field,'mode','local'),adapted_vias=[(r['key'],r['index']) for r in field.records],filled_micro_holes=getattr(field,'source_micro_holes',[]),span_um=a['span'],net=c.net,verified=getattr(field,'verified',True))
+            a['display']=dict(indices=c.indices,geometry=g,dark=dark,adaptation=adaptation,mode=getattr(field,'mode','local'),material_certificate=getattr(field,'material_certificate',None),adapted_vias=[(r['key'],r['index']) for r in field.records],filled_micro_holes=getattr(field,'source_micro_holes',[]),span_um=a['span'],net=c.net,verified=getattr(field,'verified',True))
             out.setdefault(c.key,[]).append(a['display'])
         return out
     def _snapshot(self,replacements):
@@ -371,7 +381,7 @@ class DeformationPreview:
                             if bad:candidate_result=self.search(c,active,anchors,states,moved_vias,latest,progress,quick)
                             else:
                                 field.verified=True;field.failure_reasons=[];field.candidate_violations=[]
-                                if field.mode in ('three_part','axial') and not hasattr(field,'adapted_band'):
+                                if field.mode in ('three_part','axial','material_geodesic') and not hasattr(field,'adapted_band'):
                                     field.adapted_band=self.adaptation_band(field,candidate,states)
                         except (ValueError,RuntimeError) as exc:reason=str(exc)
                     if not reason:
@@ -438,7 +448,7 @@ class DeformationPreview:
             c=a['component']
             if self.validate_field(c,a['geometry'],a['field'],states,moved_vias,joint_snapshot):continue
             a['field'].verified=True;a['field'].candidate_violations=[];a['field'].failure_reasons=[];a.pop('display',None)
-            if a['field'].mode in ('three_part','axial') and not hasattr(a['field'],'adapted_band'):
+            if a['field'].mode in ('three_part','axial','material_geodesic') and not hasattr(a['field'],'adapted_band'):
                 a['field'].adapted_band=self.adaptation_band(a['field'],a['geometry'],states)
             accepted[ck]=a;diagnostics.pop(ck,None)
         # Parallel proposals were made against an earlier neighbourhood. A
@@ -464,8 +474,10 @@ class DeformationPreview:
                 # in its canonical order instead of privileging that winner.
                 field_key=(c.key,c.indices,tuple((r['key'],r['index']) for r in active));self.last_fields.pop(field_key,None)
                 anchors=c.anchors+[r['poly'] for r in c.records if r not in active]
+                self._canonical_search=True
                 try:geometry,field,span=self.search(c,active,anchors,states,moved_vias,snapshot,progress,False)
                 except (ValueError,RuntimeError):continue
+                finally:self._canonical_search=False
                 new={(r['key'],r['index']) for r in field.records}
                 if not field.verified or not chosen<new:continue
                 if self.validate_field(c,geometry,field,states,moved_vias,snapshot):continue
@@ -627,6 +639,42 @@ class DeformationPreview:
         return self.candidate_violations(c,candidate,records,anchors,states,moved_vias,snapshot)
 
     def search(self,c,records,anchors,states,moved_vias,snapshot=None,progress=lambda *_:None,quick=False):
+        if snapshot is None:return self._search_uncached(c,records,anchors,states,moved_vias,snapshot,progress,quick)
+        # A settled neighbour context is often revisited by later passes.
+        # Reuse both failures and proposals; a changed neighbour invalidates
+        # only searches whose full possible swept copper can reach it.
+        import copy
+        ids,geoms,tree=snapshot[c.key.split('/')[0]]
+        xy=shapely.get_coordinates(c.poly)
+        travel=max((np.linalg.norm(states[r['owner'],:2])+2*abs(math.sin(states[r['owner'],2]/2))*np.linalg.norm(xy-self.model.bound.centers[r['owner']],axis=1).max() for r in records),default=0.)
+        radius=travel*1.5+self.p.annulus_um+self.p.line_space_um+self.rule_space+self.p.line_width_um*4
+        near=tree.query(c.poly,predicate='dwithin',distance=radius)
+        context=tuple(sorted((ids[j],hash(geoms[j])) for j in near if self.model.nodes[ids[j]]['net']!=c.net))
+        selected=tuple(sorted(getattr(self,'_mandatory_selected',{}).get((c.key,c.indices),set())))
+        key=(c.key,c.indices,states.tobytes(),tuple((r['key'],r['index']) for r in records),tuple(g.wkb for g in anchors),context,selected,bool(quick),getattr(self,'_canonical_search',False))
+        with self.candidate_lock:
+            entry=self.search_results.get(key)
+            if entry is not None:self.search_results.move_to_end(key)
+        if entry is not None:
+            progress(20,'重用相同邻域的型变搜索缓存')
+            value,failure,_=entry
+            if failure:raise ValueError(failure)
+            geometry,field,span=value;return geometry,copy.copy(field),span
+        try:value=self._search_uncached(c,records,anchors,states,moved_vias,snapshot,progress,quick);failure=''
+        except (ValueError,RuntimeError) as exc:value=None;failure=str(exc)
+        size=512+len(str(key))+(len(value[0].wkb) if value is not None else len(failure))
+        if size<16*1024**2:
+            saved=(value[0],copy.copy(value[1]),value[2]) if value is not None else None
+            with self.candidate_lock:
+                previous=self.search_results.pop(key,None)
+                if previous:self.search_result_bytes-=previous[2]
+                self.search_results[key]=(saved,failure,size);self.search_result_bytes+=size
+                while self.search_result_bytes>32*1024**2 or len(self.search_results)>256:
+                    _,old=self.search_results.popitem(last=False);self.search_result_bytes-=old[2]
+        if failure:raise ValueError(failure)
+        return value
+
+    def _search_uncached(self,c,records,anchors,states,moved_vias,snapshot=None,progress=lambda *_:None,quick=False):
         first=None;failure='未找到满足约束的候选'
         def clear_landing(r):
             if snapshot is None:return (r['key'],r['index']) not in getattr(self,'_initial_hits',set())
@@ -679,13 +727,15 @@ class DeformationPreview:
         # a DBU-sized guard against inscribed buffer chords and snapping.
         source_key=(c.key,c.indices,tuple((r['key'],r['index']) for r in records))
         base,micro_holes=self.prepared_source(c)
+        from .material_field import landing_material,material_certificate
+        landmarks=landing_material(base,records,p.line_width_um,p.annulus_um,dbu,anchors)
         prepared=self.sources.get(source_key)
         if prepared is None:
             landing=[r['poly'].buffer(p.annulus_um/math.cos(math.pi/128)+2*dbu,quad_segs=32) for r in records]
             source=shapely.union_all([base,*landing])
             if source.geom_type!='Polygon' or not source.is_valid or len(source.interiors)!=len(base.interiors):raise ValueError('孔盘生长改变连通拓扑，未生成不合法候选')
-            inner=[max(np.linalg.norm(shapely.get_coordinates(g)-r['center'],axis=1))+2*dbu for r,g in zip(records,landing)]
-            routing_records=[dict(r,poly=g) for r,g in zip(records,landing)]
+            inner=[max(radius,max(np.linalg.norm(shapely.get_coordinates(g)-r['center'],axis=1)))+2*dbu for (r,xy,radius),g in zip(landmarks,landing)]
+            routing_records=[dict(r,poly=shapely.union_all([g,shapely.MultiPoint(xy)]).convex_hull.intersection(source)) for (r,xy,_),g in zip(landmarks,landing)]
             self.sources[source_key]=(source,inner,routing_records)
         else:source,inner,routing_records=prepared
         travel=max(np.linalg.norm(rigid_transform(np.array([r['center']]),self.model.bound.centers[r['owner']],states[r['owner']])[0]-r['center']) for r in records)
@@ -701,9 +751,10 @@ class DeformationPreview:
             if axial_key not in self.route_templates:
                 self.route_templates[axial_key]=list(axial_candidates(source,routing_records,anchors,self.model.bound.centers,states,cfg,p.line_width_um,dbu))
             import copy
-            for original in self.route_templates[axial_key]:
-                field=copy.copy(original);field.states=states
-                yield field,field.span
+            for ramp in (0.,.2,.08,.025):
+                for original in self.route_templates[axial_key]:
+                    field=copy.copy(original);field.states=states;field.profile_ramp=ramp
+                    yield field,field.span
         def fields():
             if field_key in self.last_fields:
                 import copy
@@ -714,9 +765,6 @@ class DeformationPreview:
                     return q
                 field=at_pose(self.last_fields[field_key]);yield field,field.span
                 if quick:return
-            from .pad_envelope import pad_envelopes
-            for field in pad_envelopes(c.poly,records,anchors,self.model.bound.centers,states,cfg,p.annulus_um,p.line_width_um,dbu):
-                yield field,field.span
             yield from axial_fields()
             for span in spans:
                 field=Field(records,self.model.bound.centers,states,inner,span,cfg);field.mode='local'
@@ -737,11 +785,8 @@ class DeformationPreview:
                 for option in self.route_templates[local_key]:
                     field=SlabField(records,self.model.bound.centers,states,cfg,*option);field.mode='directional_pad'
                     yield field,field.span
-            if cfg.deformation_method=='bezier':
-                from .local_rebuild import LocalRebuild
-                for clip_clearance,trim_scale in [(clip,scale) for clip in (False,True) for scale in (0.,.5,1.,-1.)]:
-                    field=LocalRebuild(base,records,anchors,self.model.bound.centers,states,cfg,p.annulus_um,max(p.line_width_um,self.rule_width),dbu,trim_scale);field.clip_clearance=clip_clearance
-                    yield field,field.span
+            from .material_field import material_candidates
+            for field in material_candidates(source,records,anchors,self.model.bound.centers,states,cfg,p.line_width_um,dbu,self.route_templates):yield field,field.span
             if cfg.deformation_route_enabled:
                 from .route_adaptation import routed_fields
                 foreign=[]
@@ -751,6 +796,13 @@ class DeformationPreview:
                 from itertools import islice
                 options=routed_fields(source,routing_records,anchors,self.model.bound.centers,states,cfg,p.line_width_um,dbu,foreign,self.route_templates)
                 yield from islice(options,min(2,cfg.deformation_route_candidates) if quick else cfg.deformation_route_candidates)
+        blocked_landing=False
+        if snapshot is not None:
+            ids,neighbours,tree=snapshot[c.key.split('/')[0]]
+            for r in records:
+                landing=self._via_required[r['key'],r['index']]
+                if any(self.model.nodes[ids[j]]['net']!=c.net and landing.distance(neighbours[j])+dbu*.01<self.rule_space for j in tree.query(landing,predicate='dwithin',distance=self.rule_space)):
+                    blocked_landing=True;break
         seen_candidates=set();routing_obstacles=None
         for attempt,(field,span) in enumerate(fields()):
             if hasattr(field,'refresh_support'):
@@ -767,6 +819,9 @@ class DeformationPreview:
             if anchors and not direct_contour:
                 pts=shapely.get_coordinates(anchors)
                 if np.max(np.linalg.norm(field(pts)-pts,axis=1),initial=0)>dbu*.01:last='过渡范围到达固定连接端';continue
+            certificate=material_certificate(field,landmarks,self.model.bound.centers,states,max(dbu*2,tol*.1))
+            if certificate is None or not certificate['verified']:last='原孔盘及连接材料未完整随动';continue
+            field.material_certificate=certificate
             candidate_key=(source_key,states.tobytes(),self.field_stamp(field))
             if candidate_key in seen_candidates:continue
             seen_candidates.add(candidate_key)
@@ -777,9 +832,11 @@ class DeformationPreview:
                     candidate,region=snapped(candidate,dbu)
                 except ValueError as exc:last=str(exc);continue
                 if candidate.geom_type!='Polygon' or not candidate.is_valid or len(candidate.interiors)!=len(base.interiors):last='型变拓扑改变';continue
-                support=getattr(field,'support',None)
-                if support is None:support=shapely.union_all([Point(r['center']).buffer(inner[i]+span,quad_segs=32) for i,r in enumerate(records)])
                 angle_bad=angle_regions(candidate,cfg.deformation_min_angle_deg,dbu)
+                support=None
+                if not angle_bad.is_empty:
+                    support=getattr(field,'support',None)
+                    if support is None:support=shapely.union_all([Point(r['center']).buffer(inner[i]+span,quad_segs=32) for i,r in enumerate(records)])
                 if direct_contour and not angle_bad.is_empty and support.covers(angle_bad):
                     from .local_rebuild import fair_concave_joins
                     q=snapped(fair_concave_joins(candidate,support,tol,p.line_width_um,minimum=cfg.deformation_min_angle_deg),dbu)[0]
@@ -804,6 +861,18 @@ class DeformationPreview:
                         if q.is_valid and q.geom_type=='Polygon' and len(q.interiors)==len(base.interiors) and angle_regions(q,cfg.deformation_min_angle_deg,dbu).is_empty:
                             candidate,region=snapped(q,dbu);break
                 self.remember_candidate(candidate_key,candidate)
+            # Validate source samples against the actual snapped/rounded output,
+            # not just the ideal field that produced its first candidate.
+            material_error=0.;boundary_error=0.
+            for sample in certificate['samples']:
+                old=np.asarray(sample['source']);new=np.asarray(sample['mapped'])
+                points=shapely.points(new)
+                material_error=max(material_error,float(shapely.distance(points,candidate).max(initial=0)))
+                on_edge=shapely.distance(shapely.points(old),source.boundary)<=dbu*.1
+                if on_edge.any():boundary_error=max(boundary_error,float(shapely.distance(points[on_edge],candidate.boundary).max(initial=0)))
+            certificate['output_material_error_um']=material_error;certificate['output_boundary_error_um']=boundary_error
+            if max(material_error,boundary_error)>tol+2*dbu:
+                last='最终轮廓未保留原孔盘材料映射';continue
             # GEOS rejects impossible envelope/anchor/clearance candidates before
             # native edge extraction. Only promising shapes pay the full DRC cost.
             bad=self.candidate_violations(c,candidate,records,anchors,states,moved_vias,snapshot,cheap=True)
@@ -812,9 +881,15 @@ class DeformationPreview:
             field.verified=not bad;field.failure_reasons=sorted({v['kind'] for v in bad});field.candidate_violations=bad
             score=(sum(v['area_um2'] for v in bad),len(bad),candidate.symmetric_difference(c.poly).area)
             if best is None or score<best[0]:best=(score,candidate,field,span)
+            if blocked_landing and bad and not self.candidate_violations(c,candidate,records,anchors,states,moved_vias,snapshot,intrinsic_only=True):
+                # Required landing itself violates the current neighbour space:
+                # no shape can pass this snapshot. Keep a material-correct
+                # proposal for simultaneous moves, retry if neighbours change.
+                # Do not spend dozens of full contour solves proving it again.
+                best=(score,candidate,field,span);break
             if not bad:
                 self.preferred_span[c.key,c.indices]=span;self.last_fields[field_key]=field
-                if field.mode in ('three_part','axial'):field.adapted_band=self.adaptation_band(field,candidate,states)
+                if field.mode in ('three_part','axial','material_geodesic'):field.adapted_band=self.adaptation_band(field,candidate,states)
                 return candidate,field,span
             last='；'.join(field.failure_reasons)
         if best is not None:
@@ -822,6 +897,6 @@ class DeformationPreview:
             bad=self.candidate_violations(c,candidate,records,anchors,states,moved_vias,snapshot)
             field.source_micro_holes=micro_holes
             field.verified=not bad;field.failure_reasons=sorted({v['kind'] for v in bad});field.candidate_violations=bad
-            if field.mode in ('three_part','axial'):field.adapted_band=self.adaptation_band(field,candidate,states)
+            if field.mode in ('three_part','axial','material_geodesic'):field.adapted_band=self.adaptation_band(field,candidate,states)
             return candidate,field,span
         raise ValueError(last+'（有限搜索未解，保留源图形）')

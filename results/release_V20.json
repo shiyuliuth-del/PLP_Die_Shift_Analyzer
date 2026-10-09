@@ -1,0 +1,27 @@
+{
+  "version": "V20",
+  "source_commit": "835ad03",
+  "bytes": 1793330,
+  "sha256": "e36bf4faf921cfff8096f058e99e96f13ab0fc633228b232e1414a1c4b40dfb7",
+  "image_files": 0,
+  "files": 194,
+  "manifest_files": 192,
+  "git_payloads_match": true,
+  "zipfile_crc": "PASS",
+  "seven_zip": "PASS",
+  "unzip": "PASS",
+  "core_tests": 185,
+  "qt_suites": 4,
+  "sample_jobs": 12,
+  "platform": "Linux; Windows real-machine acceptance not performed",
+  "gd55": {
+    "states": 6,
+    "interface_states": 948,
+    "noncontact_interface_states": 635,
+    "material_adapted": 525,
+    "unresolved": 110,
+    "accepted_geometry_audit": "PASS",
+    "new_contacts": 0,
+    "gds_unchanged": true
+  }
+}

@@ -16,7 +16,7 @@ def wait():
 w.load_project(ROOT/'Jobs/示例K_中段连接与平滑孔盘.dshift.json');wait();w.run_evaluation();wait()
 w.manual_states=np.array([[-35.,-35.,-math.pi/180]]);w.request_preview(direct=True);wait();w.deformation_toggle.setChecked(True);wait()
 frame=w.current_frame;d=frame['deformation'];assert d['accepted_count']==2 and not d['violations']
-values=d['replacements']['5/0'];assert {v['mode'] for v in values}=={'axial','pad_envelope'}
+values=d['replacements']['5/0'];assert {v['mode'] for v in values}=={'axial'}
 assert any(not v['adaptation'].is_empty for v in values)
 assert any(a.get_visible() for a in w.deformation_artists['5/0'])
 w.visible_boxes['5/0'].setChecked(False);wait();assert not any(a.get_visible() for a in w.deformation_artists['5/0'])
@@ -55,7 +55,7 @@ w.manual_states=None;w.active_preview=None;started=time.perf_counter();w.request
 assert w.current_frame is None or not np.any(w.current_frame['states']);wait()
 w.manual_states=poses[0];w.request_preview();wait()
 w.manual_states=None;w.active_preview=None;w.request_preview();assert not np.any(w.current_frame['states']);wait()
-w.tabs.setCurrentWidget(w.detail);wait();text=w.detail.toPlainText();assert '中段连接' in text and '平滑凸包络' in text
+w.tabs.setCurrentWidget(w.detail);wait();text=w.detail.toPlainText();assert '中段连接' in text and '原始材料' in text
 w.grab().save(str(ROOT/'figures/software_V19_report.png'))
 w.controls.setCurrentIndex(2);scroll=w.controls.currentWidget();scroll.ensureWidgetVisible(w.clear_cache_button);app.processEvents();w.refresh_cache_status()
 w.grab().save(str(ROOT/'figures/software_V19_cache.png'))

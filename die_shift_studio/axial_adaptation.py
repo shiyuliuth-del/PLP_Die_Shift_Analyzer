@@ -9,7 +9,7 @@ import math
 import numpy as np
 import shapely
 from shapely.geometry import Polygon
-from .deformation import Field, smooth_weight
+from .deformation import Field, smooth_weight,plateau_weight
 from .preview import rigid_transform
 
 
@@ -37,7 +37,7 @@ class AxialField(Field):
     def scalar_weights(self,s):
         result=np.full(len(s),float(self.intervals[0][2]))
         for a,b,wa,wb in self.transitions:
-            w=smooth_weight((s-a)/(b-a),self.settings.deformation_continuity)
+            w=plateau_weight((s-a)/(b-a),self.settings.deformation_continuity,getattr(self,'profile_ramp',0.))
             result+=np.where(s>=a,(wb-wa)*(1-w),0)
         return np.clip(result,0,1)
     def weights(self,xy):
@@ -54,7 +54,7 @@ class AxialField(Field):
                             self.settings.deformation_arc_angle_deg,self.settings.acceleration)
     def jacobian_bound(self):
         owner=self.records[0]['owner'];state=self.states[owner];u=self.direction;n=np.array([-u[1],u[0]])
-        gradient=1.5 if self.settings.deformation_continuity=='C1' else 1.875
+        gradient=1/(1-self.profile_ramp) if getattr(self,'profile_ramp',0.) else 1.5 if self.settings.deformation_continuity=='C1' else 1.875
         gamma=math.radians(self.settings.deformation_arc_angle_deg)
         factor=1 if self.settings.deformation_method=='bezier' else gamma/(2*math.sin(gamma/2))
         worst=0.
@@ -68,7 +68,7 @@ class AxialField(Field):
         owner=self.records[0]['owner'];state=self.states[owner]
         co,si=math.cos(state[2]),math.sin(state[2]);u=self.direction;n=np.array([-u[1],u[0]])
         if co<=.02:return False
-        bounds=[];gradient=1.5 if self.settings.deformation_continuity=='C1' else 1.875
+        bounds=[];gradient=1/(1-self.profile_ramp) if getattr(self,'profile_ramp',0.) else 1.5 if self.settings.deformation_continuity=='C1' else 1.875
         for a,b,wa,wb in self.transitions:
             corners=np.array([self.origin+u*s+n*t for s in (a,b) for t in self.normal_range])
             delta=rigid_transform(corners,self.centers[owner],state)-corners

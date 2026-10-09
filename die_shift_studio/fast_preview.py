@@ -118,9 +118,16 @@ def check_frame(bound,roles,p,result,states,layers,scheme,connections=None,check
 
 class PreviewEngine:
     """One engine per geometry/role/motion generation; called by one UI worker."""
-    def __init__(self,cache,case,roles,motions,p,result,connections,cache_group=None):
+    def __init__(self,cache,case,roles,motions,p,result,connections,cache_group=None,cache_identity=None):
         self.bound=cache.bind(case,motions,[k for k in cache.layers if roles.get(k)!='不参与'],p)
-        self.roles=roles;self.p=p;self.result=result;self.connections=connections;self.cache_group=cache_group;self.frames=__import__('die_shift_studio.session_cache',fromlist=['SessionCache']).SessionCache(group=cache_group);self.deformer=None;self.deformers={}
+        self.roles=roles;self.p=p;self.result=result;self.connections=connections;self.cache_group=cache_group
+        from .session_cache import SessionCache
+        if cache_group is not None and cache_identity is not None:
+            with cache_group.lock:
+                if cache_identity not in cache_group.frame_stores:cache_group.frame_stores[cache_identity]=SessionCache(group=cache_group)
+                self.frames=cache_group.frame_stores[cache_identity]
+        else:self.frames=SessionCache(group=cache_group)
+        self.deformer=None;self.deformers={}
         from .contact import ContactModel
         self.contact=ContactModel(cache.data,case,roles,connections,cache,motions,p)
         from .session_cache import EphemeralCache
@@ -156,7 +163,8 @@ class PreviewEngine:
         cached=self.frames.get(complete) if quick else None
         if cached is None:cached=self.frames.get(key)
         if cached is None and quick:cached=self.intermediate.get(key)
-        if cached is not None:return cached
+        if cached is not None:
+            progress(100,'重用已完成的预演状态缓存');return cached
         progress(0,'生成当前几何状态')
         layers=self.bound.calibrate(states) if self.bound.calibration is None else self.bound.transform(states)
         current=self.contact.current(states,self.p)
