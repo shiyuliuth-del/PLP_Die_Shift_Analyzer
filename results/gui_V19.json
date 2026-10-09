@@ -1,0 +1,18 @@
+{
+  "status": "PASS",
+  "accepted": 2,
+  "modes": [
+    "axial",
+    "pad_envelope"
+  ],
+  "dashed_middle_band": true,
+  "first_animation_frames": 3,
+  "cached_animation_frames": 3,
+  "hidden_layer_hides_deformation": true,
+  "report_formula_rendered": true,
+  "repeated_pose_switches": 18,
+  "repeated_switch_median_ms": 27.53506550016027,
+  "project_switch_keeps_results": true,
+  "zero_restore_ms": 15.30895900032192,
+  "clear_all_projects_bytes": 0
+}

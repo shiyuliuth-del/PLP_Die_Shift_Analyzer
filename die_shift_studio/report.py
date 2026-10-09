@@ -1,4 +1,4 @@
-"""Auditable V18 calculation report: bounded inputs, probabilities, geometry."""
+"""Auditable V19 calculation report: bounded inputs, probabilities, geometry."""
 from html import escape
 import math
 from .core import PARAMETER_DESCRIPTIONS,fmt,Parameters
@@ -128,6 +128,15 @@ def report_document(r,motions=None,progress=lambda *_:None):
           r'P(\varphi)=h(\varphi)n(\varphi)+h^{\prime}(\varphi)t(\varphi)'],
          '生成顺滑无凹陷的孔盘轮廓，移动端满足包围量、固定过孔保持覆盖；最终按同一DRC验收，禁止失败形状显示。',
          'ci是运动后孔中心或不动的固定孔中心；ri是保留原孔盘半径与实体包围所需半径的较大值，再加max(4×DBU,2×曲线误差)保护量。原孔盘半径按原中心到源铜边界最短距离计算，实体半径取孔顶点到中心最大距离；仅运动孔加最小包围量。φ为轮廓法线方向，n/t为单位法向/切向，hi/h为支持函数，β为平滑系数（1/μm）；δs依次尝试0.2w、0.05w且不低于8×DBU，w为工艺固定线宽。该轮廓法仅用于单孔短岛，不把分支、孔洞或长绕线直接填成凸包；验收不依赖视觉平滑。')
+    step('同网分接口适配与局部铜重建','同层源铜G、运动接口集合R、固定端A、当前偏移z、线宽线距及最小包围量',
+         [r'L_i=T_{z_i}(V_i)\oplus\mathcal{B}_{a},\quad A_R=A\cup\bigcup_{i\notin R}V_i',
+          r'G_c=(G\backslash K)\cup\bigcup_{i\in R}L_i\cup\bigcup_j(\gamma_j\oplus\mathcal{B}_{\frac{w}{2}})',
+          r'\Delta_j=(G_c\cap C_j)\backslash[(G\cap C_j)\oplus\mathcal{B}_{\delta}],\quad\Delta_j=\varnothing'],
+         '同网某接口接触时，其他接口仍独立搜索；只显示通过全图复核的局部适配。既有接触保留标记，不算全网通过。',
+         'R为本轮选择适配的接口集合；Vi为名义过孔，Li为运动后实体所需孔盘；未选择接口作为名义锚A_R保留。K仅移除旧孔盘局部且避开锚区；γj连接剩余铜分量，线宽取工艺值和有效DRC线宽的较大者，并加DBU保护。直线受阻时用可见图最短路并平滑转接；Gc为候选而非直接输出，仍须满足全部包围、固定锚、全铜线宽/线距、最小内角和拓扑检查。Cj为其他运动孔的a+s控制区；只允许源图已有接触区及一个源DBUδ的量化边界，不允许出现新接触接口。默认曲线误差内、横纵两边均小于该误差的源铜微孔允许闭合，并记录修整；其余原孔洞保留。量化尖刺只在曲线误差内简化，随后重做全部规则检查。此局部轮廓候选使用贝塞尔方式；弧线选项继续采用原有位移场候选。')
+    step('工程缓存与无位移恢复',f'当前工程普通缓存上限={cfg.cache_max_entries}；GDS内容、层序/用途、偏移、工艺与计算设置',
+         [],'按实际内容复用状态、概率、Space Map及已验证动画；无位移帧固定保留。',
+         '缓存上限按一个工程的普通结果条目数计，达到上限时淘汰最久未使用条目；固定无位移结果不占普通额度。取消的动画保留已完成帧，重试接着计算。工程切换保留本次运行中各工程缓存；清理菜单可清当前或全部工程，文件大小每0.5秒刷新。主动重新方案评估清当前工程，关闭软件清全部会话缓存，不从用户工程反序列化缓存文件。')
     step('三方案空间判据：一个需求／空间比值', '硬输入最大幅度、实际旋转中心、几何网络、实际RDL平面、线宽线距及固定端',
          [r'Q_i=\sqrt{(|\mu_x|+B_x)^2+(|\mu_y|+B_y)^2}+2R_i\sin\!\left(\frac{\min(\pi,|\mu_\theta|+B_\theta)}{2}\right)',
           r'n_b=\left\lceil\frac{N_b}{L}\right\rceil,\quad W_b=n_bw+(n_b-1)s+2Q\quad(N_b>0)',

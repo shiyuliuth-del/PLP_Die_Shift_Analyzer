@@ -4,6 +4,7 @@ import math
 
 @dataclass(frozen=True)
 class ViewSettings:
+    cache_max_entries:int=2000
     acceleration:str='auto'
     deformation_min_angle_deg:float=90.
     drc_tolerance_um:float=0.
@@ -84,11 +85,11 @@ class ViewSettings:
                 'footprint_samples':(1,8),'space_resolution':(31,401),
                 'animation_fps':(10,120),'animation_speed':(1,5),'camera_speed':(1,5),'contact_box_budget':(128,32768),'animation_duration_ms':(80,3000),'animation_steps':(2,60),'probability_alpha':(.05,.95),'space_alpha':(.05,.95),'intrusion_alpha':(.05,.85)}
         integers={'animation_fps','animation_speed','camera_speed','contact_box_budget','sample_exponent','random_seed','quadrature_order','angle_bins','footprint_samples','space_resolution','animation_duration_ms','animation_steps'}
-        limits.update(yield_sample_exponent=(8,20),yield_box_budget=(64,65536),yield_tolerance=(.000001,.1),deformation_iterations=(1,64),deformation_local_steps=(1,12),deformation_growth=(1.1,3.),
+        limits.update(cache_max_entries=(10,100000),yield_sample_exponent=(8,20),yield_box_budget=(64,65536),yield_tolerance=(.000001,.1),deformation_iterations=(1,64),deformation_local_steps=(1,12),deformation_growth=(1.1,3.),
                       deformation_route_candidates=(1,256),deformation_min_length=(1,20),deformation_corner_guard=(0,3),
                       deformation_joint_rounds=(0,32),deformation_workers=(0,16),safe_box_precision=(.0001,.1),
                       safe_box_budget=(32,32768),safe_box_starts=(1,6),safe_box_passes=(1,8))
-        integers.update(('yield_sample_exponent','yield_box_budget','safe_box_budget','safe_box_starts','safe_box_passes','deformation_iterations','deformation_local_steps','deformation_route_candidates','deformation_joint_rounds','deformation_workers'))
+        integers.update(('cache_max_entries','yield_sample_exponent','yield_box_budget','safe_box_budget','safe_box_starts','safe_box_passes','deformation_iterations','deformation_local_steps','deformation_route_candidates','deformation_joint_rounds','deformation_workers'))
         for key,(lo,hi) in limits.items():
             v=getattr(q,key)
             if not isinstance(v,(int,float)) or not math.isfinite(v) or not lo<=v<=hi or (key in integers and int(v)!=v):

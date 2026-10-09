@@ -24,11 +24,19 @@ def detail(path):
             candidate,field,span=dp.search(co,co.records,co.anchors,z,vias,dp._snapshot({}))
             verified=field.verified;reason=field.failure_reasons
             if verified:
-                assert not dp.candidate_violations(co,candidate,co.records,co.anchors,z,vias,dp._snapshot({}))
+                assert not dp.validate_field(co,candidate,field,z,vias,dp._snapshot({}))
                 assert rule_region(candidate,20,d.dbu_um).is_empty
-                if signs==(-1,1,1):rendered=(candidate,field,z,span)
+                selected={(r['key'],r['index']) for r in field.records}
+                for record in co.records:
+                    if (record['key'],record['index']) in selected:
+                        via=e.contact.moved(record['poly'],record['owner'],z)
+                        assert candidate.covers(via) and candidate.boundary.distance(via)+d.dbu_um*.01>=15
+                    else:assert candidate.covers(record['poly'])
+                if signs==(-1,1,1):
+                    assert len(selected)==len(co.records),'Both red-circle interfaces must adapt'
+                    rendered=(candidate,field,z,span)
         except (ValueError,RuntimeError) as exc:verified=False;reason=[str(exc)];span=None
-        rows.append(dict(signs=signs,verified=verified,reason=reason,span_um=span,seconds=time.perf_counter()-start))
+        rows.append(dict(signs=signs,verified=verified,adapted_vias=[r['index'] for r in field.records] if verified else [],reason=reason,span_um=span,seconds=time.perf_counter()-start))
     assert rendered is not None,'User red-circle state must adapt with annulus 15'
     draw_detail(e,co,*rendered)
     out=dict(status='PASS',source_sha256=d.sha256,parameters=p.__dict__,source_layer='5/0',source_index=93,via_indices=[r['index'] for r in co.records],states=rows,

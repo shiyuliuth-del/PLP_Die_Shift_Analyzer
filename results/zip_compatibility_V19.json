@@ -1,0 +1,25 @@
+{
+  "status": "PASS",
+  "version": "V19",
+  "verified_at_utc": "2026-10-09T04:51:26.316680+00:00",
+  "archive": "Die_Shift_Analyze_V19_Source.zip",
+  "sha256": "5dbc0feb5cbf56fae050d7e8e9deee33ee660140e90099f06b27fc8c533f8cdf",
+  "bytes": 33575476,
+  "method": "ZIP Store; explicit file/directory types; UTF-8 names; CRC and every extracted payload hash",
+  "readers": [
+    {
+      "reader": "7z",
+      "files": 338,
+      "pngs_verified_and_decoded": 68,
+      "status": "PASS",
+      "source_startup": "PASS"
+    },
+    {
+      "reader": "unzip",
+      "files": 338,
+      "pngs_verified_and_decoded": 68,
+      "status": "PASS"
+    }
+  ],
+  "environment": "Linux; not Windows acceptance"
+}

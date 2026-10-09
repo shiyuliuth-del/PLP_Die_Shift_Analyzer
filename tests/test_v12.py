@@ -40,7 +40,7 @@ class V12Tests(unittest.TestCase):
                 # Exercise the traced fallback itself; the default V18 search
                 # can now solve this case with a whole-section field earlier.
                 from unittest.mock import patch
-                with patch('die_shift_studio.axial_adaptation.axial_candidates',return_value=iter(())):
+                with patch('die_shift_studio.axial_adaptation.axial_candidates',return_value=iter(())), patch('die_shift_studio.local_rebuild.LocalRebuild.candidate_geometry',side_effect=ValueError('Exercise traced fallback')):
                     f=dp.frame(z,m.current(z,p))
                 self.assertEqual(f['accepted_count'],2,f['diagnostics'])
                 self.assertFalse(f['violations']);v=next(v for v in f['replacements']['5/0'] if v['mode']=='three_part')

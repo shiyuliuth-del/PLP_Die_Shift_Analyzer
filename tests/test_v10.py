@@ -60,7 +60,7 @@ class V10Tests(unittest.TestCase):
                                 self.assertGreaterEqual(g.boundary.distance(m.moved(r['poly'],r['owner'],z)),p.annulus_um)
                                 for foreign in r['foreign']:self.assertGreaterEqual(g.distance(m.nodes[foreign]['poly'])+.00001,p.line_space_um)
         self.assertEqual(hashlib.sha256(Path(d.path).read_bytes()).hexdigest(),original)
-    def test_blocked_and_unresolved_vias_never_acquire_deformed_pads(self):
+    def test_current_failures_are_retained_without_statistical_freeze(self):
         *_,p,m,res=fixture();dp=DeformationPreview(m,p,res,ViewSettings());z=np.tile([0.,35,0],(3,1));out=dp.frame(z,m.current(z,p))
         self.assertGreater(out['blocked_count'],0)
         self.assertTrue(any('原图形线宽不足' in d['reason'] for d in out['diagnostics']))
@@ -68,7 +68,14 @@ class V10Tests(unittest.TestCase):
             for v in values:
                 self.assertTrue(v['verified'])
                 c=next(c for c in dp.components if c.key==key and c.indices==v['indices'])
-                self.assertTrue(all((r['key'],r['index']) not in dp.blocked for r in c.records))
+                for r in c.records:
+                    if (r['key'],r['index']) in set(map(tuple,v['adapted_vias'])):
+                        via=m.moved(r['poly'],r['owner'],z)
+                        self.assertTrue(v['geometry'].covers(via))
+                        self.assertGreaterEqual(v['geometry'].boundary.distance(via)+m.data.dbu_um*.01,p.annulus_um)
+        initial={(q['source_layer'],q['source_index']) for q in m.current(z,p)['issues']}
+        final={(q['source_layer'],q['source_index']) for q in m.current(z,p,out['replacements'])['issues']}
+        self.assertFalse(final-initial)
         # An inconclusive probability interval is not promoted to a safe interface.
         res['contact_analysis']['unresolved']=[dict(source_layer=r['key'],source_index=r['index']) for r in m.records]
         dp=DeformationPreview(m,p,res,ViewSettings());self.assertGreater(dp.frame(z,m.current(z,p))['accepted_count'],0)  # Specific poses use actual geometry, not global probability freezes.

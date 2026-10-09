@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+import stat
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -31,9 +32,10 @@ def main():
         files += list((ROOT/'figures').glob(pattern))
     files += list((ROOT/'results').glob('*_V17.json'))
     files += list((ROOT/'results').glob('*_V18.json'))
+    files += list((ROOT/'results').glob('*_V19.json'))
     files += [ROOT/'results/performance_v040.json']
-    files += [ROOT/'docs/V17_操作与验证说明.md',ROOT/'docs/V18_操作与验证说明.md']
-    files += [ROOT/'tools'/p for p in ('create_examples.py','package_release.py','benchmark_preview.py','benchmark_v050.py','research_figures.py','v040_figures.py','v050_figures.py','v060_figures.py','klayout_probe_v060.py','create_fanout_example.py','v070_evidence.py','gui_v070_evidence.py','benchmark_v8.py','v8_figures.py','benchmark_v9.py','v9_figures.py','create_deformation_example.py','benchmark_v10.py','v10_figures.py','create_iteration_example.py','benchmark_v11.py','v11_figures.py','create_trace_example.py','benchmark_v12.py','v12_figures.py','benchmark_v13.py','benchmark_v14.py','v14_figures.py','create_pivot_example.py','validate_gd55_v14.py','benchmark_v15.py','v15_figures.py','validate_gd55_v15.py','validate_v16.py','v16_figures.py','benchmark_v17.py','v17_figures.py','create_directional_example.py','create_middle_example.py','validate_gd55_v18.py','v18_figures.py')]
+    files += [ROOT/'docs/V17_操作与验证说明.md',ROOT/'docs/V18_操作与验证说明.md',ROOT/'docs/V19_操作与验证说明.md']
+    files += [ROOT/'tools'/p for p in ('create_examples.py','package_release.py','benchmark_preview.py','benchmark_v050.py','research_figures.py','v040_figures.py','v050_figures.py','v060_figures.py','klayout_probe_v060.py','create_fanout_example.py','v070_evidence.py','gui_v070_evidence.py','benchmark_v8.py','v8_figures.py','benchmark_v9.py','v9_figures.py','create_deformation_example.py','benchmark_v10.py','v10_figures.py','create_iteration_example.py','benchmark_v11.py','v11_figures.py','create_trace_example.py','benchmark_v12.py','v12_figures.py','benchmark_v13.py','benchmark_v14.py','v14_figures.py','create_pivot_example.py','validate_gd55_v14.py','benchmark_v15.py','v15_figures.py','validate_gd55_v15.py','validate_v16.py','v16_figures.py','benchmark_v17.py','v17_figures.py','create_directional_example.py','create_middle_example.py','validate_gd55_v18.py','v18_figures.py','create_partial_example.py','audit_gd55_v19.py','validate_gd55_v19.py','v19_figures.py','repack_compatible_zip.py')]
     # Ship only our portable sample jobs, never a user's saved projects.
     files += [ROOT/'Jobs'/(p.stem+'.dshift.json') for p in sorted((ROOT/'examples').glob('*.json'))]
     # Follow the actual Markdown references instead of relying on version globs.
@@ -54,10 +56,18 @@ def main():
     files=sorted(set(files))
     manifest = {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
                 for p in sorted(files)}
-    with zipfile.ZipFile(target, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
-        for p in sorted(files):
-            archive.write(p, f'{name}/{p.relative_to(ROOT)}')
-        archive.writestr(name + '/SHA256SUMS.json', json.dumps(manifest, ensure_ascii=False, indent=2))
+    def entry(path,directory=False):
+        info=zipfile.ZipInfo(path,datetime.now().timetuple()[:6]);info.create_system=3
+        info.external_attr=((stat.S_IFDIR|0o755)<<16)|0x10 if directory else ((stat.S_IFREG|0o644)<<16)|0x20
+        info.compress_type=zipfile.ZIP_STORED;return info
+    with zipfile.ZipFile(target,'w',zipfile.ZIP_STORED,allowZip64=False) as archive:
+        folders={name+'/'}
+        for p in files:
+            parent=Path(name)/p.relative_to(ROOT).parent
+            while str(parent)!='.':folders.add(parent.as_posix()+'/');parent=parent.parent
+        for folder in sorted(folders):archive.writestr(entry(folder,True),b'')
+        for p in files:archive.writestr(entry(f'{name}/{p.relative_to(ROOT)}'),p.read_bytes())
+        archive.writestr(entry(name+'/SHA256SUMS.json'),json.dumps(manifest,ensure_ascii=False,indent=2))
     commands = [
         [sys.executable, '-m', 'unittest', 'discover', '-s', 'tests', '-p', 'test_*.py', '-v'],
         [sys.executable, 'tests/gui_smoke.py'],
@@ -71,6 +81,7 @@ def main():
         [sys.executable, 'tests/gui_v16.py'],
         [sys.executable, 'tests/gui_v17.py'],
         [sys.executable, 'tests/gui_v18.py'],
+        [sys.executable, 'tests/gui_v19.py'],
         [sys.executable, 'main.py', '--smoke-test', 'results/package_source_smoke.json'],
         [sys.executable, '-c', "import os,runpy,sys; os.environ['DIE_SHIFT_NATIVE_BACKEND']='desktop'; sys.argv=['main.py','--smoke-test','results/package_desktop_smoke.json']; runpy.run_path('main.py',run_name='__main__')"],
         [sys.executable, '-m', 'die_shift_studio', '--project', 'examples/示例C_多芯片晶圆接口.json',
@@ -87,7 +98,7 @@ def main():
     if attachment is not None:
         commands.append([sys.executable,'tools/validate_gd55_v15.py','--gds',str(attachment.resolve()),'--detail-only'])
     if attachment is not None:
-        commands.append([sys.executable,'tools/validate_gd55_v18.py','--gds',str(attachment.resolve()),'--only-user-state'])
+        commands.append([sys.executable,'tools/validate_gd55_v19.py','--gds',str(attachment.resolve()),'--out','results/gd55_package_V19.json'])
     records = []
     with tempfile.TemporaryDirectory(prefix='die_shift_release_') as temp:
         with zipfile.ZipFile(target) as archive:
@@ -105,16 +116,23 @@ def main():
             if run.returncode:
                 raise SystemExit('Extracted archive validation failed: '+str(command)+' returncode='+str(run.returncode))
     record = {'version': __version__, 'package_revision':revision,'verified_at_utc': datetime.now(timezone.utc).isoformat(),
-              'method': 'Source-only ZIP; fresh extraction, file hashes, core tests, eleven Qt suites and actual installed KLayout desktop backend, source startup and CLI; no frozen build',
+              'method': 'Source-only ZIP; fresh extraction, file hashes, core tests, twelve Qt suites and actual installed KLayout desktop backend, source startup and CLI; no frozen build',
               'environment': 'Existing Linux Python environment; not a clean dependency-install or Windows test',
               'file_count_before_record': len(manifest), 'status': 'PASS', 'runs': records}
     record_text = json.dumps(record, ensure_ascii=False, indent=2)
     (ROOT / 'docs' / 'package_verification.json').write_text(record_text, encoding='utf-8')
     # Only add the verification record; the verified implementation stays byte-identical.
-    with zipfile.ZipFile(target, 'a', zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr(name + '/docs/package_verification.json', record_text)
+    with zipfile.ZipFile(target,'a',zipfile.ZIP_STORED,allowZip64=False) as archive:
+        archive.writestr(entry(name+'/docs/package_verification.json'),record_text)
     with zipfile.ZipFile(target) as archive:
         assert archive.testzip() is None
+        from PIL import Image
+        import io
+        for item in archive.infolist():
+            assert item.compress_type==zipfile.ZIP_STORED
+            if item.filename.endswith('.png'):
+                with Image.open(io.BytesIO(archive.read(item))) as im:im.verify()
+                with Image.open(io.BytesIO(archive.read(item))) as im:im.load()
         for rel, expected in manifest.items():
             assert hashlib.sha256(archive.read(name + '/' + rel)).hexdigest() == expected
         import posixpath

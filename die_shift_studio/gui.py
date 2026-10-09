@@ -143,8 +143,9 @@ class MainWindow(W.QMainWindow):
         from .runtime_log import LogBus,RuntimeCapture
         self.log_bus=LogBus(self,self.jobs_dir.parent/'logs'/'runtime.log');self.runtime_capture=RuntimeCapture(self.log_bus);self._tasks={};self._closing=False
         self.per_die_values=[];self.per_die_pivots=[];self.reference_nsigma=6.;self._per_die_initialized=False;self.hardware_worker=None
-        from .session_cache import SessionCache
-        self.session_values=SessionCache();self.session_engines={};self.retired_sessions=[]
+        from .session_cache import ProjectCacheRegistry
+        self.cache_registry=ProjectCacheRegistry();self.cache_project_key="empty";self.cache_group=self.cache_registry.get("empty")
+        self.session_values=self.cache_group.values;self.session_engines=self.cache_group.engines;self.retired_sessions=[];self.parked_groups=[];self.cache_clear_worker=None
         self.fields={};self.role_boxes={};self.stage_hints={};self.visible_boxes={};self.motion_boxes={}
         self.loading=False;self.revision=0;self.extremes=None;self.active_preview=None;self.owner_cache=None;self.auto_values={}
         self.preview_page=0;self.page_items=[];self.state_result=None;self.issue_artists=[];self.shift_artist=None
@@ -164,6 +165,7 @@ class MainWindow(W.QMainWindow):
         from .mouse_die import MouseDieMode
         self.mouse_die=MouseDieMode(self)
         self.job_watcher=QtCore.QFileSystemWatcher([str(self.jobs_dir)],self);self.job_watcher.directoryChanged.connect(self.refresh_jobs)
+        self.cache_status_timer=QtCore.QTimer(self);self.cache_status_timer.setInterval(500);self.cache_status_timer.timeout.connect(self.refresh_cache_status);self.cache_status_timer.start()
         QtCore.QTimer.singleShot(0,self.discover_hardware)
         self.statusBar().showMessage('打开GDS → 指定图层 → 设置偏移/工艺 → 评估 → 查看报告与极端预演')
     def _page(self,title):
@@ -318,6 +320,13 @@ class MainWindow(W.QMainWindow):
             widget=W.QDoubleSpinBox() if decimals else W.QSpinBox();widget.setRange(low,high)
             if decimals:widget.setDecimals(decimals)
             widget.setKeyboardTracking(False);self.setting_fields[key]=widget;form.addRow(title,widget);widget.valueChanged.connect(self.settings_changed)
+        caches=group('缓存管理')
+        spin(caches,'cache_max_entries','最大缓存个数 / 工程',10,100000)
+        self.setting_fields['cache_max_entries'].setToolTip('普通结果超过上限后按最近使用淘汰；无位移状态固定保留。包括状态、动画、概率与Space Map。关闭软件后清理本次运行缓存。')
+        cache_row=W.QWidget();cache_layout=W.QHBoxLayout(cache_row);cache_layout.setContentsMargins(0,0,0,0)
+        self.clear_cache_button=W.QPushButton('清除缓存');menu=W.QMenu(self.clear_cache_button)
+        menu.addAction('清除当前工程',lambda:self.clear_cached_results(False));menu.addAction('清除所有工程',lambda:self.clear_cached_results(True));self.clear_cache_button.setMenu(menu)
+        self.cache_size_label=label('当前工程：0 B · 全部工程：0 B');cache_layout.addWidget(self.clear_cache_button);cache_layout.addWidget(self.cache_size_label,1);caches.addRow(cache_row)
         choice(probability,'probability_method','计算方法')
         spin(probability,'sample_exponent','样本数 = 2 的指数',8,18)
         spin(probability,'random_seed','随机种子',0,2147483647)
@@ -427,13 +436,16 @@ class MainWindow(W.QMainWindow):
     def settings_changed(self,*_):
         if self.loading:return
         values={k:(w.currentData() if isinstance(w,W.QComboBox) else w.isChecked() if isinstance(w,W.QCheckBox) else w.value()) for k,w in self.setting_fields.items()}
+        updated=ViewSettings.from_dict(values)
+        if all(getattr(updated,k)==getattr(self.view_settings,k) for k in values if k!='cache_max_entries'):
+            self.view_settings=updated;self.cache_group.limit(updated.cache_max_entries);self.refresh_cache_status();return
         intent=self._motion_intent if self.transition.timer.isActive() else None
         self.stop_animation()
         old_settings=self.view_settings;updated=ViewSettings.from_dict(values)
         from .drc_rules import effective_rules
         try:effective_rules(self.params(),updated)
         except ValueError as exc:self.load_view_settings();self.error(str(exc));return
-        deform=updated.deformation_key()!=old_settings.deformation_key();numeric=(updated.numeric_key()!=self.view_settings.numeric_key() or (updated.probability_show_ranges!=old_settings.probability_show_ranges and self.target_sigma.currentText()=='∞'));self.view_settings=updated;self.enable_settings();self.refresh_extreme_colors()
+        deform=updated.deformation_key()!=old_settings.deformation_key();numeric=(updated.numeric_key()!=self.view_settings.numeric_key() or (updated.probability_show_ranges!=old_settings.probability_show_ranges and self.target_sigma.currentText()=='∞'));self.view_settings=updated;self.enable_settings();self.refresh_extreme_colors();self.cache_group.limit(updated.cache_max_entries);self.refresh_cache_status()
         live_motion=any(getattr(updated,k)!=getattr(old_settings,k) for k in ('animation_enabled','animation_duration_ms','animation_fps','animation_speed','animation_strategy'))
         if numeric:
             self.dirty=self.result is not None
@@ -532,27 +544,69 @@ class MainWindow(W.QMainWindow):
             else:
                 n,t=next(reversed(self._tasks.values()));self.progress.setValue(n);self.progress.setFormat(f'{n}% · '+t[:36])
         worker.finished.connect(finish)
+    def refresh_cache_status(self):
+        size,total,count,pinned=self.cache_registry.statistics(self.cache_project_key)
+        def fmt_size(n):
+            return f'{n/1024**3:.2f} GiB' if n>=1024**3 else f'{n/1024**2:.2f} MiB' if n>=1024**2 else f'{n/1024:.1f} KiB' if n>=1024 else f'{n} B'
+        self.cache_size_label.setText(f'当前工程：{fmt_size(size)}\n全部工程：{fmt_size(total)}'+(' · 清理中' if self.cache_clear_worker is not None else ''))
+        self.cache_size_label.setToolTip(f'当前普通结果 {count-pinned} 个；固定保留 {pinned} 个。统计本次运行中所有打开过的工程缓存文件，关闭软件后清理。')
+    def _attach_cache_group(self,key,count):
+        self.cache_project_key=key;self.cache_group=self.cache_registry.get(key,count)
+        self.session_values=self.cache_group.values;self.session_engines=self.cache_group.engines;self.engine=None
+    def switch_project_cache(self,key,count):
+        self.stop_animation();self._prepared_motion=None;self._prepared_package=None
+        if self.preview_worker:self.preview_worker.cancelled.set()
+        if self.motion_worker:self.motion_worker.cancelled.set()
+        if self.cache_group.key!=key:self.parked_groups.append(self.cache_group)
+        self._attach_cache_group(key,count);self.cleanup_retired_sessions();self.refresh_cache_status()
     def reset_session_cache(self):
         self.stop_animation();self._prepared_motion=None;self._prepared_package=None
         if self.preview_worker:self.preview_worker.cancelled.set()
         if self.motion_worker:self.motion_worker.cancelled.set()
-        self.retired_sessions.append((self.session_values,self.session_engines))
-        from .session_cache import SessionCache
-        self.session_values=SessionCache();self.session_engines={};self.engine=None
-        self.cleanup_retired_sessions()
+        old=self.cache_registry.retire(self.cache_project_key)
+        if old is not None:old.enabled=False;self.retired_sessions.append(old)
+        self._attach_cache_group(self.cache_project_key,self.view_settings.cache_max_entries)
+        self.cleanup_retired_sessions();self.refresh_cache_status()
+    def clear_cached_results(self,all_projects=False):
+        if self.cache_clear_worker is not None:return
+        self.stop_animation();self._prepared_motion=None;self._prepared_package=None
+        self.preview_ticket+=1;self.preview_pending=None;self.motion_pending=None;self.motion_generation+=1
+        for worker in (self.worker,self.preview_worker,self.motion_worker):
+            if worker:worker.cancelled.set()
+        keys=list(self.cache_registry.groups) if all_projects else [self.cache_project_key]
+        groups=[self.cache_registry.retire(key) for key in keys if key in self.cache_registry.groups]
+        self._clear_native_when_idle=True
+        for group_ in groups:group_.enabled=False
+        self.retired_sessions.extend(groups);self._attach_cache_group(self.cache_project_key,self.view_settings.cache_max_entries)
+        self.cache_size_label.setText('正在清除缓存文件…');self.clear_cache_button.setEnabled(False)
+        def work(progress):
+            for i,group_ in enumerate(groups):
+                progress(round(100*i/max(1,len(groups))),'清除工程缓存');group_.clear()
+            progress(100,'缓存文件已清除')
+        worker=Worker(work,self);self.cache_clear_worker=worker;self.watch_worker(worker,'清理缓存')
+        def finish():
+            self.cache_clear_worker=None;self.clear_cache_button.setEnabled(True);self.refresh_cache_status();self.cleanup_retired_sessions();worker.deleteLater()
+        worker.finished.connect(finish);worker.start()
     def cleanup_retired_sessions(self):
         if self._tasks:return
-        for values,engines in self.retired_sessions:
-            values.close()
-            for engine in engines.values():engine.close()
-        if self.retired_sessions:
-            from .deformation import _cached_native_region
-            from .route_adaptation import boundary_tolerant
-            from .distribution import normalization
-            _cached_native_region.cache_clear();boundary_tolerant.cache_clear();normalization.cache_clear()
-            from . import native_backend
-            if native_backend._backend is not None:native_backend._backend.execute({'op':'clear'})
+        for group_ in self.retired_sessions:
+            group_.close()
+            if group_ in self.cache_registry.retired:self.cache_registry.retired.remove(group_)
         self.retired_sessions.clear()
+        if getattr(self,'_clear_native_when_idle',False):
+            from . import native_backend
+            native_backend.close();self._clear_native_when_idle=False
+        for group_ in self.parked_groups:
+            if group_ is self.cache_group:continue
+            for engine in group_.engines.values():
+                for deformer in engine.deformers.values():deformer.release_workers()
+        self.parked_groups.clear()
+    def assessment_identity(self,data,roles,order,p,settings):
+        from .session_cache import logical_fingerprint
+        return ('assessment',logical_fingerprint((data.sha256,data.top_name,roles,order,asdict(p),settings.numeric_key(),settings.drc_tolerance_um)))
+    def preview_identity(self,data,roles,order,motions,params,result):
+        from .session_cache import logical_fingerprint
+        return logical_fingerprint((data.sha256,data.top_name,roles,order,motions,asdict(params),result is not None,(result or {}).get('parameters'),(result or {}).get('contact_analysis'),(result or {}).get('issues')))
     def clear_preview(self):
         self.extremes=None;self.active_preview=None;self.owner_cache=None;self.page_items=[];self.preview_page=0;self.state_result=None
         self.preview_ticket+=1;self.preview_pending=None;self._prepared_motion=None;self.engine=None;self.current_frame=None;self.shown_states=None;self.report_dirty=True
@@ -619,13 +673,17 @@ class MainWindow(W.QMainWindow):
                 return
             if settings and settings.get('sha256') and settings['sha256']!=data.sha256:
                 self.error('GDS已改变，请重新设置图层。');settings=None
-            self.set_data(data,settings)
+            self.set_data(data,settings,project_path=project_path)
             self.project_path=Path(project_path).resolve() if settings and project_path and Path(project_path).resolve().parent==self.jobs_dir.resolve() else None
             self.refresh_jobs()
         self.start_worker(read_and_prepare,accepted)
-    def set_data(self,data,project=None):
-        self.reset_session_cache()
-        project=normalize_project(project) if project else {};pars=Parameters.from_dict(project.get('parameters',{}),require_rdl=False);self.manual_states=None;self.probability_data=None;self.space_data=None;self.dirty=False
+    def set_data(self,data,project=None,project_path=None):
+        from .session_cache import logical_fingerprint
+        project=normalize_project(project) if project else {}
+        cache_settings=ViewSettings.from_dict(project.get('settings'))
+        cache_id=logical_fingerprint((str(Path(project_path or data.path).resolve()),data.sha256,data.top_name))
+        self.switch_project_cache(cache_id,cache_settings.cache_max_entries)
+        pars=Parameters.from_dict(project.get('parameters',{}),require_rdl=False);self.manual_states=None;self.probability_data=None;self.space_data=None;self.dirty=False
         self.coverage_timer.stop();self._coverage_pending=False;self._evaluation_requested=False
         self.loading=True
         try:
@@ -659,6 +717,10 @@ class MainWindow(W.QMainWindow):
             self.apply_automatic();self.per_die_changed();self.refresh_motion_table(project.get('motions',{}))
         finally:self.loading=False
         self.clear_preview();self.invalidate();self.plot_layout()
+        remembered=self.cache_group.last_assessment
+        if remembered is not None:
+            key=self.assessment_identity(data,self.roles(),self.ordered_layers(),self.params(),self.view_settings)
+            if remembered[0]==key:self.display_result(remembered[1]);self.log_bus.emit('已恢复本次运行中此工程的评估缓存')
     def role_changed(self,key):
         if self.loading:return
         self.stage_hints.pop(key,None)
@@ -1246,7 +1308,17 @@ class MainWindow(W.QMainWindow):
         try:p=self.params();roles=self.roles();case=self.case or build_case(self.data,roles,layer_order=self.ordered_layers())
         except ValueError as exc:self.error(exc);return
         show_frame=state is not None
-        if state is None:state=np.zeros((len(case['dies']),3))
+        if state is None:
+            state=np.zeros((len(case['dies']),3))
+            signature=self.preview_identity(self.data,roles,self.ordered_layers(),self.motions(),p,self.result)
+            nominal_key=(signature,self.deformation_toggle.isChecked(),self.view_settings.deformation_key(),self.drc_toggle.isChecked(),self.view_settings.numeric_key())
+            cached=self.cache_group.nominal.get(nominal_key)
+            self._interpolated_states=None;self.current_frame=cached;self.plot_layout(preserve=True)
+            self.update_state_table(state);self.update_histograms();self.show_frame_status(cached)
+            overlays_ready=(not self.probability_toggle.isChecked() or self.probability_data is not None) and (not self.space_toggle.isChecked() or self.space_data is not None)
+            global_ready=not (self.deformation_toggle.isChecked() and self.result and math.isfinite(p.target_nsigma)) or bool(cached and cached.get('global_deformation'))
+            if cached is not None and overlays_ready and global_ready:
+                self.preview_pending=None;self.statusBar().showMessage('已恢复固定保留的无位移缓存');return
         self.preview_pending=(self.revision,self.view_settings,ticket,state.copy(),self.motions(),roles,p,self.result,case,self.geometry_cache,self.connections,self.ordered_layers(),show_frame,self.probability_toggle.isChecked(),self.space_toggle.isChecked())
         self.preview_pending+=(self.deformation_toggle.isChecked(),self.drc_toggle.isChecked(),direct,settle)
         self.statusBar().showMessage('正在后台生成预演…保留已显示状态。');self.launch_preview()
@@ -1254,18 +1326,17 @@ class MainWindow(W.QMainWindow):
         if self.preview_worker is not None or self.motion_worker is not None or self.preview_pending is None:return
         revision,settings,ticket,states,motions,roles,params,result,case,cache,connections,order,show_frame,heat,space,deform,drc,direct,settle=self.preview_pending;self.preview_pending=None;engine=self.engine;probability=self.probability_data;space_data=self.space_data;data=self.data
         visible=tuple(sorted(k for k,b in self.visible_boxes.items() if b.isChecked()))
-        session_values=self.session_values;engines=self.session_engines
+        session_values=self.session_values;engines=self.session_engines;cache_group=self.cache_group
         start_states=self.shown_states.copy() if self.shown_states is not None else np.zeros_like(states)
         view_span=max(np.ptp(self.ax.get_xlim()),np.ptp(self.ax.get_ylim()))
         def work(progress):
             from .probability_overlay import probability_maps
             from .space_map import space_maps
             actual_cache=cache or GeometryCache(data);con=connections or Connections(data,roles,order,actual_cache.geometries)
-            from .session_cache import fingerprint
-            signature=fingerprint((data.sha256,data.top_name,roles,order,motions,asdict(params),result is not None,(result or {}).get('parameters'),(result or {}).get('contact_analysis'),(result or {}).get('issues')))
+            signature=self.preview_identity(data,roles,order,motions,params,result)
             actual=engines.get(signature)
             if actual is None:
-                actual=PreviewEngine(actual_cache,case,roles,motions,params,result,con);engines[signature]=actual
+                actual=PreviewEngine(actual_cache,case,roles,motions,params,result,con,cache_group=cache_group);engines[signature]=actual
             actual.signature=signature
             actual.configure_deformation(deform,settings);actual.configure_drc(drc,settings)
             distribution=None;field=None
@@ -1280,11 +1351,16 @@ class MainWindow(W.QMainWindow):
             frame=actual.frame(states,progress,quick=direct and not settle) if show_frame or drc or (deform and result is not None) else None
             if frame is not None and not show_frame:
                 frame=dict(frame,nominal_global=True)
+                nominal_key=(signature,deform,settings.deformation_key(),drc,settings.numeric_key())
+                base=dict(frame,contact=dict(frame['contact'],issues=(result or {}).get('issues',frame['contact']['issues']),intrusions=[])) if math.isfinite(params.target_nsigma) else frame
+                cache_group.nominal.setdefault(nominal_key,base)
+                worker.publish((actual,cache_group.nominal[nominal_key],distribution,con,actual_cache,field))
                 if deform and result is not None and math.isfinite(params.target_nsigma):
                     frame=actual.global_frame(frame,settings,progress)
                 elif math.isfinite(params.target_nsigma):
                     frame['contact']=dict(frame['contact'],issues=(result or {}).get('issues',[]),intrusions=[])
-            if deform and result is not None and settings.animation_enabled and not direct and not np.array_equal(start_states,states):
+                cache_group.nominal[nominal_key]=frame
+            if deform and result is not None and settings.animation_enabled and not direct and np.any(states) and not np.array_equal(start_states,states):
                 from .prepared_motion import prepare_motion
                 publish=(lambda intermediate:worker.publish((actual,intermediate,distribution,con,actual_cache,field))) if settings.animation_strategy=='stream' else None
                 motion=prepare_motion(actual,start_states,states,settings,view_span,session_values,progress,publish,worker.cancelled)
@@ -1369,8 +1445,7 @@ class MainWindow(W.QMainWindow):
         rev=self.revision;data=self.data;cache=self.geometry_cache;motions=self.motions();settings=self.view_settings;values=self.session_values
         def work(progress):
             progress(1,'构建图层连接与几何索引');actual_cache=cache or GeometryCache(data);connections=Connections(data,roles,order,actual_cache.geometries);case=build_case(data,roles,connections=connections)
-            from .session_cache import fingerprint
-            key=('assessment',fingerprint((data.sha256,data.top_name,roles,order,asdict(p),settings.numeric_key())))
+            key=self.assessment_identity(data,roles,order,p,settings)
             r=values.get_or_compute(key,lambda:evaluate(data,roles,p,progress=lambda n,t:progress(round(n*.92),t),layer_order=order,connections=connections,motions=motions,settings=settings,safe_range_cache=values));r=dict(r,motions=motions,view_settings=asdict(settings))
             catalog=RepresentativeExtremes(case,p);r['preview_count']=catalog.total
             from .extreme_validation import evaluate_states
@@ -1394,6 +1469,7 @@ class MainWindow(W.QMainWindow):
         self.start_worker(work,accepted,interactive=True)
     def display_result(self,r,catalog=None,preserve=False):
         saved=(self.active_preview,self.manual_states,self.extreme_table.currentRow(),self.issue_scheme.currentIndex())
+        self.cache_group.last_assessment=(self.assessment_identity(self.data,self.roles(),self.ordered_layers(),self.params(),self.view_settings),r)
         self.result=r;self.dirty=False;self.evaluation_motions=r.get('motions',self.motions());self.manual_states=None
         if self.case is None:self.case=build_case(self.data,self.roles(),layer_order=self.ordered_layers())
         self.extremes=catalog or RepresentativeExtremes(self.case,self.params());self.active_preview=None;self.owner_cache=None;self.engine=None;self.current_frame=None;self.report_dirty=True
@@ -1579,6 +1655,14 @@ class MainWindow(W.QMainWindow):
                      roles=self.roles(),parameters=asdict(self.params()),settings=asdict(self.view_settings),layer_styles=self.layer_styles,visibility={k:w.isChecked() for k,w in self.visible_boxes.items()},motions=self.motions(),layer_order=self.ordered_layers())
         from .core import clean_json
         atomic_save(path,clean_json(project));self.project_path=path
+        from .session_cache import logical_fingerprint
+        cache_id=logical_fingerprint((str(path),self.data.sha256,self.data.top_name))
+        if cache_id!=self.cache_project_key:
+            # First save names the same engineering session; keep solved poses.
+            previous=self.cache_registry.retire(cache_id)
+            if previous is not None:self.retired_sessions.append(previous)
+            self.cache_registry.rekey(self.cache_project_key,cache_id);self.cache_project_key=cache_id
+            self.cleanup_retired_sessions();self.refresh_cache_status()
     def load_project(self,path):
         try:
             path=Path(path).resolve();project=normalize_project(json.loads(path.read_text(encoding='utf-8')));gds=Path(project['gds_path'])
@@ -1588,14 +1672,13 @@ class MainWindow(W.QMainWindow):
     def closeEvent(self,event):
         self.stop_animation()
         if hasattr(self,'mouse_die'):self.mouse_die.pending=False;self.mouse_die.full_pending=False;self.mouse_die.timer.stop();self.mouse_die.idle.stop()
-        running=[w for w in (self.worker,self.preview_worker,self.motion_worker,self.hardware_worker) if w is not None and w.isRunning()]
+        running=[w for w in (self.worker,self.preview_worker,self.motion_worker,self.hardware_worker,self.cache_clear_worker) if w is not None and w.isRunning()]
         if running:
             self._closing=True
             self.preview_pending=None;self.preview_ticket+=1;self.motion_pending=None;self.motion_generation+=1;self.coverage_timer.stop();self._coverage_pending=False
             for w in running:w.cancelled.set()
             event.ignore();return
-        self.session_values.close()
-        for engine in self.session_engines.values():engine.close()
+        self.cache_status_timer.stop();self.cache_registry.close()
         self.cleanup_retired_sessions();self.runtime_capture.close();event.accept()
 
 

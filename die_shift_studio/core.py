@@ -463,7 +463,7 @@ def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order
     progress(96,'求取各DIE连续无异常接触的安全内盒')
     if safe_range_cache is None:ranges=safe_ranges(contact_model,p,settings,progress)
     else:
-        from .session_cache import fingerprint
+        from .session_cache import logical_fingerprint as fingerprint
         from .settings import ViewSettings
         cfg=settings or ViewSettings();geometric_parameters=asdict(p)
         for key in ('input_nsigma','target_nsigma','reference_nsigma','rho_xy'):geometric_parameters.pop(key,None)

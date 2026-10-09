@@ -27,6 +27,7 @@ def search_job(payload):
         d._job_snapshot_key=stamp
         d._job_vias=d.prepare_pose(np.asarray(states,float))
         d._job_snapshot=d._snapshot(replacements)
+        d._mandatory_selected={(layer,tuple(v['indices'])):set(tuple(x) for x in v.get('adapted_vias',[])) for layer,values in replacements.items() for v in values}
     c=d._component_lookup[key]
     active=[r for r in c.records if (r['key'],r['index']) in active_ids]
     anchors=c.anchors+[r['poly'] for r in c.records if (r['key'],r['index']) not in active_ids]
