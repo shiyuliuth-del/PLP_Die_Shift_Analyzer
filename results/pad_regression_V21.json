@@ -1,0 +1,44 @@
+{
+  "baseline_commit": "bc4c3ba",
+  "case": "示例M_不同芯片底层与Pad随动",
+  "sha256": "edae44f1d8c65c89fb4aecbdb2895fbf52ba04baef3c9a4eeca08dba17316e6f",
+  "rows": [
+    {
+      "version": "V20",
+      "owners": [
+        0,
+        -2
+      ],
+      "pad_center_displacement_um": [
+        [
+          35.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "version": "V21",
+      "owners": [
+        0,
+        1
+      ],
+      "pad_center_displacement_um": [
+        [
+          35.0,
+          0.0
+        ],
+        [
+          35.0,
+          0.0
+        ]
+      ]
+    }
+  ],
+  "status": "PASS",
+  "baseline_stack_sha256": "bc194d658789cb669e4e38368865f11597cd003ac48e665796192cdcfbf45dc8",
+  "published_baseline_tag": "V20"
+}

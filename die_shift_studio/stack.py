@@ -35,7 +35,8 @@ class Connections:
         planes={}
         for key in self.order:
             if self.roles.get(key) in PHYSICAL:planes.setdefault(key.split('/')[0],[]).append(key)
-        self.groups=list(planes.values());self.ids={};self.nodes=[];self.plane_nodes=[]
+        self.empty_metal_layers=[k for group in planes.values() for k in group if len(self.geometry[k])==0]
+        self.groups=[group for group in planes.values() if any(len(self.geometry[k]) for k in group)];self.ids={};self.nodes=[];self.plane_nodes=[]
         for group in self.groups:
             ids=[]
             for key in group:
@@ -49,6 +50,8 @@ class Connections:
                 a,b=tree.query(polygons[start:start+512],predicate='intersects')
                 for i,j in zip(a+start,b):
                     if i<j:self.same_plane.union(ids[i],ids[j])
+        self.components={};self._component_geometry={}
+        for i in range(len(self.nodes)):self.components.setdefault(self.same_plane.find(i),[]).append(i)
         def between(pair):
             up,down=pair;lower=[(k,i,g) for k in down for i,g in enumerate(self.geometry[k])]
             if not lower:return []
@@ -69,8 +72,6 @@ class Connections:
             self.outgoing[link['upper']].setdefault(link['upper_index'],[]).append(link)
             self.incoming[link['lower']].setdefault(link['lower_index'],[]).append(link)
         self.ownership=None;self.ownership_notes=[]
-        self.components={};self._component_geometry={}
-        for i in range(len(self.nodes)):self.components.setdefault(self.same_plane.find(i),[]).append(i)
     def component(self,key,index):return self.same_plane.find(self.ids[key,index])
     def component_geometry(self,key,index):
         component=self.component(key,index)
@@ -87,18 +88,31 @@ class Connections:
     def eligible(self,key):
         return np.array([bool(self.fixed_interfaces(key,i)) for i in range(len(self.geometry[key]))],bool)
     def resolve_ownership(self,case):
-        if self.ownership is not None:return self.ownership
+        signature=tuple(p.wkb for p in case['dies'])
+        if self.ownership is not None and getattr(self,'_root_signature',None)==signature:return self.ownership
+        self._root_signature=signature
         uf=self.same_plane;sets={uf.find(i):set() for i in range(len(self.nodes))};down={k:set() for k in sets}
         for link in self.links:
             u=uf.find(self.ids[link['upper'],link['upper_index']]);v=uf.find(self.ids[link['lower'],link['lower_index']]);down[u].add(v)
-        # Only the lowest metal plane defines chip terminals. An intermediate
-        # trace passing over another DIE is never treated as that DIE's terminal.
-        if self.plane_nodes:
-            tree=STRtree(case['dies']);eps=max(1e-12,self.data.dbu_um**2*.01)
-            for node in self.plane_nodes[-1]:
+        # Different DIEs can end at different metal heights. Seed the deepest
+        # actual terminal component for EACH DIE, not the global final plane.
+        # A component with downward links is a carrier, never a new chip root:
+        # fanout over another DIE must continue to follow its original DIE.
+        tree=STRtree(case['dies']);eps=max(1e-12,self.data.dbu_um**2*.01)
+        candidates={i:[] for i in range(len(case['dies']))}
+        for rank,ids in enumerate(self.plane_nodes):
+            for node in ids:
+                component=uf.find(node)
+                if down[component]:continue
                 p=self.nodes[node][2]
                 for owner in tree.query(p,predicate='intersects'):
-                    if p.intersection(case['dies'][owner]).area>eps:sets[uf.find(node)].add(int(owner))
+                    if p.intersection(case['dies'][owner]).area>eps:candidates[int(owner)].append((rank,component,self.nodes[node][0]))
+        self.terminal_planes_by_die=[]
+        for owner,choices in candidates.items():
+            rank=max((r for r,_,_ in choices),default=-1)
+            roots=[(component,key) for r,component,key in choices if r==rank]
+            for component,_ in roots:sets[component].add(owner)
+            self.terminal_planes_by_die.append(dict(die=owner+1,layers=sorted({k for _,k in roots}),components=sorted({c for c,_ in roots})))
         for ids in reversed(self.plane_nodes):
             for component in {uf.find(i) for i in ids}:
                 for child in down[component]:sets[component].update(sets[child])
@@ -109,11 +123,11 @@ class Connections:
         for key,values in self.possible_owners.items():
             if self.roles[key] not in MOVING:continue
             for i,owners in enumerate(values):
-                if len(owners)!=1:self.ownership_notes.append(dict(layer=key,index=i+1,dies=[n+1 for n in owners],reason='连接多颗芯片，不能作单一刚体' if owners else '未沿下层连接追溯到芯片'))
+                if len(owners)!=1:self.ownership_notes.append(dict(layer=key,index=i+1,dies=[n+1 for n in owners],reason='连接多颗芯片，不能作单一刚体' if owners else '未沿相邻下层连接追溯到芯片；请检查该层用途、层序及名义接触'))
         return self.ownership
     def filter_case(self,case):return case
     def summary(self):
         return dict(layer_order=self.order,contact_count=len(self.links),
                     connected_by_layer={k:int(self.eligible(k).sum()) for k in self.order if self.roles.get(k)=='运动过孔'},
-                    ownership_notes=self.ownership_notes,chip_terminal_plane=self.groups[-1] if self.groups else [],
-                    rule='按上→下相邻金属连接追溯；最下金属与芯片接触定义根；仅运动过孔—固定RDL界面参与不足和叠加')
+                    ownership_notes=self.ownership_notes,chip_terminal_plane=sorted({k for row in getattr(self,'terminal_planes_by_die',[]) for k in row['layers']}),chip_terminal_planes_by_die=getattr(self,'terminal_planes_by_die',[]),ignored_empty_metal_layers=self.empty_metal_layers,
+                    rule='按上→下相邻非空金属连接追溯；各DIE最深的局部末端接触定义根；跨DIE扇出不按坐标就近归属；仅运动过孔—固定RDL界面参与不足和叠加')

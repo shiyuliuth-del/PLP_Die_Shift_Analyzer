@@ -22,11 +22,11 @@ def report_document(r,motions=None,progress=lambda *_:None):
     step('GDS、金属层序与几何修复',r['top_cell']+'；上→下：'+' → '.join(con['layer_order']),[],
          f"{count}颗芯片；{con['contact_count']}对相邻层连接；{analysis.get('network_count',0)}个几何网络；修复{len(r.get('repaired_geometry',[]))}个，忽略{len(r.get('ignored_geometry',[]))}个图形",
          '长度统一为μm。边框、不参与和禁布层不建立电连接；同物理层号的datatype共用一个金属平面。Merge修复保留孔洞，失败图形用玫红细虚线框出并忽略，不改源GDS。')
-    step('连接、芯片归属与跨芯片自动识别','同层接触与相邻金属层重叠；最下层与DIE的实际接触根',
+    step('连接、芯片归属与跨芯片自动识别','同层接触与用户定义的相邻金属层重叠；逐DIE最深末端接触根',
          [r'E_{ij}=\mathbf{1}\{\operatorname{Area}(A_i\cap B_j)>\epsilon_A\},\quad\epsilon_A=\max(10^{-12},0.01\delta^2)',
           r'\mathcal{D}(A)=\bigcup_{B\in\mathrm{down}(A)}\mathcal{D}(B)'],
          f"运动归属待确认{len(con.get('ownership_notes',[]))}个；跨芯片几何网络{len(r.get('interdie_networks',[]))}个",
-         'A、B为相邻层图形，δ为GDS网格（μm），εA为面积容差（μm²）。同层相连先合并，再沿下层追溯D(A)芯片集合；唯一根允许随动，多根/无根待确认。全电连接分量包含两个以上DIE根即跨芯片网络，不需要手动指定。支持过孔—过孔、过孔—RDL等连接。只评估运动过孔与相邻固定RDL的真实名义接口。芯片外扇出沿连接归属，绝不按最近芯片分配。')
+         'A、B为相邻层图形，δ为GDS网格（μm），εA为面积容差（μm²）。保留用户层序；空金属行不阻断连接。各DIE分别以最深的末端接触定义根，不能强迫不同堆叠共用一个全局底层。相邻参与金属层之间必须有真实面积重叠；即使某颗DIE局部没有中间层图形，也不跨过该参与层补造连接。此为几何推定，无法代替工艺网表。同层相连先合并，再沿下层追溯D(A)芯片集合；唯一根允许随动，多根/无根待确认，偏移时以橙色虚线标明并计入失败。全电连接分量包含两个以上DIE根即跨芯片网络。支持过孔—过孔、过孔—RDL等连接。只评估运动过孔与固定RDL的真实名义接口。芯片外扇出沿连接归属，绝不按最近芯片分配。')
     step('最大输入幅度与统一统计模型',f'Bx={bounds[0]:g} μm；By={bounds[1]:g} μm；Bθ={p.bound_angle_deg:g}°；目标={fmt(p.target_nsigma)}',
          [r'\sigma_x=\frac{B_x}{\kappa},\quad\sigma_y=\frac{B_y}{\kappa},\quad\sigma_\theta=\frac{B_\theta\pi}{180\kappa}',
           r'\Sigma_{11}=\sigma_x^2,\quad\Sigma_{22}=\sigma_y^2,\quad\Sigma_{33}=\sigma_\theta^2',
@@ -191,6 +191,18 @@ def report_document(r,motions=None,progress=lambda *_:None):
     if adaptive:
         if not adaptive.get('statistics_match_saved_evaluation',True):blocks.append('<p>本表使用当前预演参数，与上次方案评估快照不同；重新点击方案评估可同步。目标σ='+h(fmt(adaptive['target_sigma']))+'；包围/固定线宽/固定线距（μm）='+h(str([adaptive['annulus_um'],adaptive['line_width_um'],adaptive['line_space_um']]))+'；逐芯片幅度（μm、μm、°）='+h(str(adaptive['die_bounds']))+'</p>')
         blocks.append('<h3>预演分析的迭代结果</h3><p>'+h(adaptive['continuous_probability'])+'</p>'+grid(['代表状态','初始不足','最终不足','释放','迭代轮数'],[[q['name'],q['initial'],q['remaining'],q['released'],len(q['iterations'])] for q in adaptive['states']]))
+    width=r.get('preview_width_analysis')
+    if width:
+        step('当前姿态的局部宽度分析','当前RDL（含已接受型变）、Pad包围区、固定图形、封装边缘；工艺线宽/线距及共同DRC容差',
+             [r'w=w_0-\tau,\quad s=s_0-\tau,\quad w>0,\ s>0',
+              r'N=\sum_j\max(n_j^{(0)},n_j^{(t)}),\quad W_{\rm need}=Nw+(N+1)s',
+              r'N_{\rm cap}=\max\left(0,\left\lfloor\frac{g-s}{w+s}\right\rfloor\right),\quad M=g-W_{\rm need}'],
+             '；'.join(f'{k}{v}处' for k,v in width['counts'].items()),
+             'w₀、s₀为该物理层工艺线宽/线距，τ为共用容差，均以μm计；正τ放宽、负τ收紧。混合规则取较大值。g为连接两侧边界的截面净宽，Pad先外扩最小包围量，再扣除与端点相连的实际铜区；两侧各保留s。nⱼ⁽⁰⁾、nⱼ⁽ᵗ⁾分别是第j个铜连通区在名义/当前截面内的独立穿越段数；同一网络的多次穿越不合并为一根。Pad压住线路时仍保留名义需求。N为需要通过的总根数；Ncap为可容根数；M为宽度余量。Ncap>N为绿色、相等为黄色、小于为红色。第三障碍分割通道时各空隙分别计算容量再相加，分配无法确认显示灰色。逐对检查最短截面，固定图形另检查代表点轴截面；具体姿态重新发现通道，不仅复用名义通道。有限截面检查不能穷尽任意曲线瓶颈，也不证明整图可布通；本项不改变模型良率或三方案评分。')
+        blocks.append('<p>以下为最近一次完成的宽度分析姿态；其计算独立于方案评估快照。</p>'+grid(['DIE','DX / μm','DY / μm','O / °'],[[i+1,fmt(z[0]),fmt(z[1]),fmt(math.degrees(z[2]))] for i,z in enumerate(width['states'])]))
+        selected=[q for q in width['rows'] if q['status']!='充足']
+        blocks.append(grid(['物理层','风险','净宽 / μm','需求根数','可容根数','需求宽度 / μm','位置 / μm'],[[q['plane'],q['status'],fmt(q['gap_um']),q['strands'],q['capacity'],fmt(q['required_um']),str([round(x,3) for x in q['point']])] for q in selected[:100]]))
+        if len(selected)>100:blocks.append(f'<p>风险截面共{len(selected)}处，报告列出前100处；图形下方“宽度分析”表可定位当前可见窄口。</p>')
     hidden={'per_die_enabled','die_bounds','die_pivots','input_nsigma','interdie','fixed_via_assignment','residual_budget_um','transition_length_um','max_route_angle_deg','routing_edge_keepout_um'}
     appendix='<h2>附录：输入与几何明细</h2>'+grid(['参数','含义/单位','值'],[[key,PARAMETER_DESCRIPTIONS.get(key,key),fmt(value,8)] for key,value in r['parameters'].items() if key not in hidden])
     appendix+=grid(['图层','图形编号','归属问题','可达DIE'],[[q['layer'],q['index'],q['reason'],q['dies']] for q in con.get('ownership_notes',[])])

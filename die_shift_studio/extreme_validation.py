@@ -7,8 +7,11 @@ def frame_status(frame):
     drc=frame.get('drc')
     deformation=frame.get('deformation',{})
     pending=len(deformation.get('diagnostics',[]))
-    if failures or contact or pending or drc:
-        return dict(safe=False,contact=contact,failures=failures,drc=len(drc or []),unadapted=pending,checked=drc is not None)
+    width=frame.get('width_analysis',{});counts=width.get('counts',{})
+    width_failures=counts.get('不足',0);width_pending=counts.get('待确认',0) or (bool(width) and not width.get('complete',True))
+    if failures or contact or pending or drc or width_failures:
+        return dict(safe=False,contact=contact,failures=failures,drc=len(drc or []),unadapted=pending,checked=drc is not None,width_failures=width_failures)
+    if width_pending:return dict(safe=None,contact=0,failures=0,drc=0,unadapted=0,checked=False,width_pending=True)
     return dict(safe=True if drc is not None and len(checks)==3 else None,contact=0,failures=0,drc=0,unadapted=0,checked=drc is not None)
 
 

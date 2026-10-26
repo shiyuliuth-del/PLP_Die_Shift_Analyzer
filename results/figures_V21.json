@@ -1,0 +1,24 @@
+{
+  "source": "examples/示例N_三线路窄通道宽度.gds",
+  "channels": [
+    {
+      "gap_um": 110.0,
+      "strands": 3,
+      "capacity": 3,
+      "status": "临界"
+    },
+    {
+      "gap_um": 75.0,
+      "strands": 3,
+      "capacity": 2,
+      "status": "不足"
+    },
+    {
+      "gap_um": 144.993,
+      "strands": 3,
+      "capacity": 4,
+      "status": "充足"
+    }
+  ],
+  "scope": "Local width capacity; no claim of complete DRC or global routability."
+}

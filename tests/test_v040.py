@@ -60,8 +60,14 @@ class Revision040Tests(unittest.TestCase):
     def test_orphan_raw_pins_are_excluded_from_numeric_and_location_checks(self):
         layers=dict(self.data.layers);layers['10/0']=[self.data.layers['10/0'][0]*.001+[-3100,1100]]
         data=GDSData('','','',[],.001,layers);r=evaluate(data,self.roles,self.p)
-        self.assertEqual(sum(d['pin_count'] for d in r['dies']),0)
-        self.assertFalse(any(q['scheme']==1 for q in r['issues']))
+        case=build_case(data,self.roles)
+        self.assertFalse(case['connections'].eligible('10/0')[0])
+        self.assertFalse(any(q['source_layer']=='10/0' for q in r['issues']))
+        # Other DIE-local terminal RDL can remain rooted when this low plane
+        # is absent over those DIEs; only the actual orphan must be excluded.
+        from shapely.geometry import Polygon
+        orphan=Polygon(layers['10/0'][0])
+        self.assertFalse(any(p.equals(orphan) for group in case['pins'] for p in group))
     def test_vectorized_transform_and_checks_match_reference(self):
         modes={k:default_motion(r) for k,r in self.roles.items()};modes['40/0']='auto'
         z=np.array([[35,-20,.01],[-12,28,-.01]])

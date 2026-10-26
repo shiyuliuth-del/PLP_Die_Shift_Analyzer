@@ -1,0 +1,14 @@
+{
+  "status": "PASS",
+  "extreme_and_m_key_pad_motion": true,
+  "independent_die_stacks": true,
+  "channel_requirement": 3,
+  "channel_capacity_after_shift": 2,
+  "channel_gap_um": 75,
+  "animation_frames_seen": 61,
+  "cached_replay": true,
+  "zero_cache": true,
+  "layer_visibility": true,
+  "table_focus": true,
+  "report_formulas": true
+}

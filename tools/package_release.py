@@ -21,7 +21,7 @@ def main():
     name = f'Die_Shift_Analyze_{__version__}_Source'
     target = ROOT / 'dist' / (name + '.zip')
     target.parent.mkdir(exist_ok=True)
-    files = [ROOT / p for p in ['README.md','main.py','die_shift_model.py','requirements.txt','run.sh','RUN.bat','SELECT_PYTHON.bat','BUILD_WINDOWS.bat','TEST_WINDOWS.bat','Die_Shift_Analyze.spec','docs/V20_使用说明.md']]
+    files = [ROOT / p for p in ['README.md','main.py','die_shift_model.py','requirements.txt','run.sh','RUN.bat','SELECT_PYTHON.bat','BUILD_WINDOWS.bat','TEST_WINDOWS.bat','Die_Shift_Analyze.spec','docs/V21_使用说明.md']]
     # Explicit source/data whitelist. No images, screenshots, old archives,
     # generated cache, user jobs or large historical report assets.
     for folder in ('die_shift_studio','examples','tests','tools'):
@@ -51,6 +51,7 @@ def main():
         [sys.executable,'tests/gui_v14.py'],
         [sys.executable,'tests/gui_v20.py'],
         [sys.executable,'tests/gui_scheduler_v20.py'],
+        [sys.executable,'tests/gui_v21.py'],
         [sys.executable,'main.py','--smoke-test','results/package_source_smoke.json'],
         [sys.executable,'-c',"import os,runpy,sys; os.environ['DIE_SHIFT_NATIVE_BACKEND']='desktop'; sys.argv=['main.py','--smoke-test','results/package_desktop_smoke.json']; runpy.run_path('main.py',run_name='__main__')"],
     ]
@@ -74,7 +75,7 @@ def main():
             if run.returncode:
                 raise SystemExit('Extracted archive validation failed: '+str(command)+' returncode='+str(run.returncode))
     record = {'version': __version__, 'package_revision':revision,'verified_at_utc': datetime.now(timezone.utc).isoformat(),
-              'method': 'Image-free source ZIP; fresh extraction, file hashes, all core tests, four Qt suites, actual installed KLayout desktop backend, source startup and sample CLI; no frozen build',
+              'method': 'Image-free source ZIP; fresh extraction, file hashes, all core tests, five Qt suites, actual installed KLayout desktop backend, source startup and sample CLI; no frozen build',
               'environment': 'Existing Linux Python environment; not a clean dependency-install or Windows test',
               'file_count_before_record': len(manifest), 'status': 'PASS', 'runs': records}
     record_text = json.dumps(record, ensure_ascii=False, indent=2)

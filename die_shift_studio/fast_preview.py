@@ -94,6 +94,11 @@ def check_frame(bound,roles,p,result,states,layers,scheme,connections=None,check
     case=bound.case;tol=max(1e-9,bound.cache.data.dbu_um*1e-6);failures=[]
     def fail(kind,points):
         for point in np.asarray(points).reshape(-1,2):failures.append(dict(kind=kind,point=point.tolist()))
+    if np.any(states):
+        for key,owners in bound.owners.items():
+            if roles.get(key) not in ('运动RDL','运动过孔'):continue
+            for index in np.flatnonzero(owners<0):
+                fail(f'运动归属未解析：{key} #{index+1}，保持名义位置，不能判为随动通过',[bound.cache.layers[key]['centers'][index]])
     moved=[Polygon(rigid_transform(np.asarray(d.exterior.coords),c,z)) for d,c,z in zip(case['dies'],bound.centers,states)]
     for i,die in enumerate(moved):
         if not case['board'].covers(die) or die.distance(case['board'].boundary)<=p.min_package_clearance_um+tol:fail(f'DIE {i+1}触碰封装净距边界',[die.centroid.coords[0]])
@@ -149,12 +154,22 @@ class PreviewEngine:
             from .drc import GlobalDRC
             self.global_drc=GlobalDRC(self.contact,self.p)
         self.drc_key=key;self.drc_enabled=enabled;self.drc_settings=settings
+    def configure_width(self,enabled,settings):
+        key=(True,settings.drc_tolerance_um) if enabled else (False,)
+        if getattr(self,'width_key',(False,))==key:return
+        if enabled:
+            from .width_analysis import WidthAnalyzer
+            if not hasattr(self,'width_analyzers'):self.width_analyzers={}
+            if key not in self.width_analyzers:self.width_analyzers[key]=WidthAnalyzer(self.contact,self.p,settings,self.cache_group)
+            self.width_analyzer=self.width_analyzers[key]
+        self.width_key=key
     def cache_key(self):
-        return (getattr(self,'deformation_key',None),getattr(self,'drc_key',None))
+        return (getattr(self,'deformation_key',None),getattr(self,'drc_key',None),getattr(self,'width_key',(False,)))
     def close(self):
         self.frames.close();self.intermediate.clear()
         for d in self.deformers.values():d.close()
         self.deformers.clear()
+        for analyzer in getattr(self,'width_analyzers',{}).values():analyzer.close()
     def frame(self,states,progress=lambda *_:None,quick=False):
         states=np.array(states,dtype=float,copy=True);states[states==0]=0.
         if not np.any(states):quick=False
@@ -176,7 +191,7 @@ class PreviewEngine:
             check['failures'] += [dict(kind=q['kind'],point=q['point']) for q in current['issues'] if q['scheme']==s]
             check['problem_percent']=100 if check['failures'] else 0
             check['scope']='当前状态：线距控制区与下一金属层其他几何网络接触，另检查净距/禁布区'
-        frame=dict(layers=layers,checks=checks,states=np.asarray(states).copy(),rotation_centers=self.bound.centers.copy(),contact=current)
+        frame=dict(motion_issues=list(self.connections.ownership_notes) if np.any(states) else [],layers=layers,checks=checks,states=np.asarray(states).copy(),rotation_centers=self.bound.centers.copy(),contact=current)
         if deformation is not None:frame['deformation']=deformation
         if getattr(self,'drc_enabled',False):
             frame['drc']=deformation['violations'] if deformation is not None else self.global_drc.frame(states,settings=self.drc_settings,progress=progress)
@@ -185,6 +200,7 @@ class PreviewEngine:
             cfg=self.deformer.settings if self.deformer is not None else self.drc_settings
             width,space=effective_rules(self.p,cfg)
             frame['drc_rules']=dict(tolerance_um=cfg.drc_tolerance_um,nominal_width_um=self.p.line_width_um,nominal_space_um=self.p.line_space_um,effective_width_um=width,effective_space_um=space,annulus_um=self.p.annulus_um)
+        if getattr(self,'width_key',(False,))[0]:frame['width_analysis']=self.width_analyzer.frame(frame,progress,quick=quick)
         if quick:self.intermediate.put(key,frame)
         else:
             if not np.any(states):self.frames.pin(key)

@@ -69,7 +69,12 @@ class Revision060Tests(unittest.TestCase):
         d,r,*_=traced_fixture();d.layers['30/0'].append(np.asarray(box(898,0,902,200).exterior.coords))
         c=build_case(d,r);self.assertTrue(np.all(c['ownership']['40/0']==-2))
         self.assertTrue(all(len(q['dies'])==2 for q in c['connections'].ownership_notes))
-        d,r,*_=traced_fixture();d.layers['10/0']=[];c=build_case(d,r)
+        d,r,*_=traced_fixture();d.layers['10/0']=[]
+        # Empty metal rows do not freeze valid local terminal stacks. For the
+        # no-root contract, remove actual die contact instead of an empty row.
+        d.layers['1/0']=[np.asarray(box(-1600,-2000,1600,2000).exterior.coords)]
+        d.layers['2/0']=[a+np.array([0.,1000.]) for a in d.layers['2/0']]
+        c=build_case(d,r)
         self.assertTrue(np.all(c['ownership']['40/0']==-2))
         self.assertEqual(ContactModel(d,c,r,c['connections']).records,[])
     def test_space_map_full_die_uniform_translation_and_rotation_gradient(self):
