@@ -32,6 +32,18 @@ def fixture():
 
 
 class V26Tests(unittest.TestCase):
+    def test_zero_rotation_does_not_certify_an_unbounded_local_transition(self):
+        from die_shift_studio.deformation import Field
+        settings=replace(ViewSettings(),deformation_continuity='C1',deformation_method='bezier')
+        def bound(span):
+            field=Field([{'center':(5.,0.),'owner':0}],np.zeros((1,2)),
+                        np.array([[3.,0.,0.]]),[5.],span,settings)
+            return field.jacobian_bound()
+        with np.errstate(invalid='raise',divide='raise'):
+            self.assertAlmostEqual(bound(10.),.45)
+            for span in (np.inf,np.nan,0.):
+                self.assertEqual(bound(span),np.inf)
+
     def test_ternary_dedup_frozen_bias_and_big_integer_last_page(self):
         c={'dies':[None,None,None]};p=Parameters(per_die_enabled=True,die_bounds=[[0,0,0],[5,0,0],[4,9,1]],mean_x_um=5,mean_y_um=3)
         g=ExtremeCatalog(c,p)
