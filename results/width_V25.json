@@ -1,0 +1,231 @@
+{
+  "version": "V25",
+  "source_sha256": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+  "die_count": 3,
+  "hardware": {
+    "cpu": 8,
+    "total_memory_mb": 15708,
+    "available_memory_mb": 7208,
+    "workers": 6,
+    "process_workers": 3,
+    "policy": "预留2逻辑CPU与65%可用内存；原生几何/FFT使用线程；大型独立原图DRC与RDL候选搜索使用spawn进程；小任务串行"
+  },
+  "focus_um": [
+    -1346.5,
+    -464.5
+  ],
+  "focus_radius_um": 65,
+  "process_um": {
+    "width": 15,
+    "space": 15,
+    "enclosure": 15
+  },
+  "v24_focus_risks_minus_minus_minus": 4,
+  "states": [
+    {
+      "state": [
+        0,
+        0,
+        0
+      ],
+      "counts": {
+        "宽度不足": 0,
+        "需局部收窄": 0,
+        "宽度足够": 1900
+      },
+      "sections": 1900,
+      "verified_open_rectangles": 1900,
+      "endpoint_error_um": 3.0370047332208526e-13,
+      "axis_cross_error_um": 2.2737367544323206e-13,
+      "focus_risks": [],
+      "first_request_s": 18.655,
+      "repeat_ms": 0.089
+    },
+    {
+      "state": [
+        -35,
+        -35,
+        -1
+      ],
+      "counts": {
+        "宽度不足": 0,
+        "需局部收窄": 1,
+        "宽度足够": 1763
+      },
+      "sections": 1764,
+      "verified_open_rectangles": 1764,
+      "endpoint_error_um": 5.226183528338317e-13,
+      "axis_cross_error_um": 2.2737367544323206e-13,
+      "focus_risks": [
+        {
+          "pair": [
+            "固定过孔孔盘 6/0 #67",
+            "运动过孔孔盘 4/0 #102"
+          ],
+          "status": "需局部收窄",
+          "refs": [
+            [
+              "5/0",
+              25
+            ],
+            [
+              "5/0",
+              102
+            ]
+          ],
+          "required": 2,
+          "point": [
+            -1358.3972660223794,
+            -436.22178104753306
+          ],
+          "witness_um": [
+            [
+              -1377.2835050088995,
+              -506.3998851155362
+            ],
+            [
+              -1339.5110270358596,
+              -366.0436769795299
+            ]
+          ],
+          "gap_um": 145.35000947554738
+        }
+      ],
+      "first_request_s": 1.833,
+      "repeat_ms": 0.069
+    },
+    {
+      "state": [
+        -35,
+        -35,
+        1
+      ],
+      "counts": {
+        "宽度不足": 1,
+        "需局部收窄": 0,
+        "宽度足够": 1753
+      },
+      "sections": 1754,
+      "verified_open_rectangles": 1754,
+      "endpoint_error_um": 3.7957919553281517e-13,
+      "axis_cross_error_um": 1.1368683772161603e-13,
+      "focus_risks": [],
+      "first_request_s": 2.152,
+      "repeat_ms": 0.122
+    },
+    {
+      "state": [
+        -35,
+        35,
+        -1
+      ],
+      "counts": {
+        "宽度不足": 0,
+        "需局部收窄": 0,
+        "宽度足够": 1755
+      },
+      "sections": 1755,
+      "verified_open_rectangles": 1755,
+      "endpoint_error_um": 5.204128541853093e-13,
+      "axis_cross_error_um": 2.2737367544323206e-13,
+      "focus_risks": [],
+      "first_request_s": 2.911,
+      "repeat_ms": 0.114
+    },
+    {
+      "state": [
+        -35,
+        35,
+        1
+      ],
+      "counts": {
+        "宽度不足": 0,
+        "需局部收窄": 0,
+        "宽度足够": 1763
+      },
+      "sections": 1763,
+      "verified_open_rectangles": 1763,
+      "endpoint_error_um": 3.7957919553281517e-13,
+      "axis_cross_error_um": 2.2737367544323206e-13,
+      "focus_risks": [],
+      "first_request_s": 2.646,
+      "repeat_ms": 0.091
+    },
+    {
+      "state": [
+        35,
+        -35,
+        -1
+      ],
+      "counts": {
+        "宽度不足": 1,
+        "需局部收窄": 1,
+        "宽度足够": 1798
+      },
+      "sections": 1800,
+      "verified_open_rectangles": 1800,
+      "endpoint_error_um": 5.226183528338317e-13,
+      "axis_cross_error_um": 2.2737367544323206e-13,
+      "focus_risks": [],
+      "first_request_s": 1.84,
+      "repeat_ms": 0.144
+    },
+    {
+      "state": [
+        35,
+        -35,
+        1
+      ],
+      "counts": {
+        "宽度不足": 0,
+        "需局部收窄": 2,
+        "宽度足够": 1773
+      },
+      "sections": 1775,
+      "verified_open_rectangles": 1775,
+      "endpoint_error_um": 3.7957919553281517e-13,
+      "axis_cross_error_um": 1.1368683772161603e-13,
+      "focus_risks": [],
+      "first_request_s": 4.425,
+      "repeat_ms": 0.195
+    },
+    {
+      "state": [
+        35,
+        35,
+        -1
+      ],
+      "counts": {
+        "宽度不足": 0,
+        "需局部收窄": 3,
+        "宽度足够": 1728
+      },
+      "sections": 1731,
+      "verified_open_rectangles": 1731,
+      "endpoint_error_um": 5.204128541853093e-13,
+      "axis_cross_error_um": 1.1368683772161603e-13,
+      "focus_risks": [],
+      "first_request_s": 4.709,
+      "repeat_ms": 0.1
+    },
+    {
+      "state": [
+        35,
+        35,
+        1
+      ],
+      "counts": {
+        "宽度不足": 1,
+        "需局部收窄": 3,
+        "宽度足够": 1776
+      },
+      "sections": 1780,
+      "verified_open_rectangles": 1780,
+      "endpoint_error_um": 3.7957919553281517e-13,
+      "axis_cross_error_um": 2.2737367544323206e-13,
+      "focus_risks": [],
+      "first_request_s": 6.195,
+      "repeat_ms": 0.12
+    }
+  ]
+}

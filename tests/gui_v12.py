@@ -83,7 +83,8 @@ def record(*a,**kw):
 w.plot_layout=record;started=time.perf_counter()
 for t in np.linspace(0,1,80):w.mouse_die.submit(old*(1-t)+target*t)
 wait();w.plot_layout=plot;np.testing.assert_allclose(w.shown_states,target)
-assert w._prepared_motion.get('direct') and not w.transition.timer.isActive()
+assert w._prepared_motion.get('prepared') and not w.transition.timer.isActive()
+assert any(not np.array_equal(z,target) and not np.array_equal(z,old) for z in published)
 assert len(published)<10;metrics['coalesced_display_frames']=len(published);metrics['direct_pose_with_overlays_ms']=(time.perf_counter()-started)*1000
 assert w.probability_data and w.space_data;shot('direct_motion')
 w.canvas.setFocus();QTest.keyClick(w.canvas,Qt.Key_Escape);app.processEvents();assert w.mouse_die.owner is None and not w.mouse_die.text.isVisible()

@@ -19,6 +19,7 @@ def normalize_display(values):
 @dataclass(frozen=True)
 class ViewSettings:
     width_display:dict=field(default_factory=lambda:dict(DEFAULTS),hash=False)
+    width_label_font_pt:float=8.
     cache_max_entries:int=2000
     acceleration:str='auto'
     deformation_min_angle_deg:float=90.
@@ -105,7 +106,7 @@ class ViewSettings:
                  'deformation_execution':('auto','serial','thread','process')}
         for key,allowed in choices.items():
             if getattr(q,key) not in allowed:raise ValueError('无效设置：'+key)
-        limits={'drc_tolerance_um':(-10000,10000),'probability_gamma':(.1,1.),'contact_marker_size':(.1,10000),'unadapted_marker_size':(.1,10000),'deformation_min_angle_deg':(1,179),'deformation_arc_angle_deg':(1,120),'deformation_tolerance_um':(.001,1.),'sample_exponent':(8,18),'random_seed':(0,2147483647),'quadrature_order':(5,81),
+        limits={'width_label_font_pt':(6,24),'drc_tolerance_um':(-10000,10000),'probability_gamma':(.1,1.),'contact_marker_size':(.1,10000),'unadapted_marker_size':(.1,10000),'deformation_min_angle_deg':(1,179),'deformation_arc_angle_deg':(1,120),'deformation_tolerance_um':(.001,1.),'sample_exponent':(8,18),'random_seed':(0,2147483647),'quadrature_order':(5,81),
                 'tail_sigma':(4,10),'probability_cell_um':(0,1000),'angle_bins':(4,128),
                 'footprint_samples':(1,8),'space_resolution':(31,401),
                 'animation_fps':(10,120),'animation_speed':(1,5),'camera_speed':(1,5),'contact_box_budget':(128,32768),'animation_duration_ms':(80,3000),'animation_steps':(2,60),'probability_alpha':(.05,.95),'space_alpha':(.05,.95),'intrusion_alpha':(.05,.85)}
@@ -134,7 +135,7 @@ class ViewSettings:
         return cls(**data)
 
     def width_key(self):
-        return (True,'neighbor-pads-v24',self.drc_tolerance_um)
+        return (True,'nominal-physical-throat-v25',self.drc_tolerance_um)
 
     def numeric_key(self):
         return tuple(getattr(self,k) for k in ('acceleration','probability_method','sample_exponent','random_seed',

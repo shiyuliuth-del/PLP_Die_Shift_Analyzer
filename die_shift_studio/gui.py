@@ -149,6 +149,8 @@ class MainWindow(W.QMainWindow):
         self.per_die_values=[];self.per_die_pivots=[];self.reference_nsigma=6.;self._per_die_initialized=False;self.hardware_worker=None
         from .session_cache import ProjectCacheRegistry
         self.cache_registry=ProjectCacheRegistry();self.cache_project_key="empty";self.cache_group=self.cache_registry.get("empty")
+        from .session_cache import EphemeralCache
+        self.space_motion_fields=EphemeralCache()
         self.session_values=self.cache_group.values;self.session_engines=self.cache_group.engines;self.retired_sessions=[];self.parked_groups=[];self.cache_clear_worker=None
         self.fields={};self.role_boxes={};self.stage_hints={};self.visible_boxes={};self.motion_boxes={}
         self.loading=False;self.revision=0;self.extremes=None;self.active_preview=None;self.owner_cache=None;self.auto_values={}
@@ -339,8 +341,21 @@ class MainWindow(W.QMainWindow):
         self.log_bus.emit('启动 '+__version__+'；硬件资源 '+str(resource_profile()))
         self.plot_layout()
     def build_settings(self,page):
+        self.setting_sections={}
         def group(title):
-            box=W.QGroupBox(title);form=W.QFormLayout(box);page.addWidget(box);return form
+            header=W.QToolButton()
+            header.setText(title);header.setCheckable(True)
+            header.setToolButtonStyle(getattr(Qt,'ToolButtonStyle',Qt).ToolButtonTextBesideIcon)
+            header.setArrowType(getattr(Qt,'ArrowType',Qt).RightArrow)
+            policy=getattr(W.QSizePolicy,'Policy',W.QSizePolicy);header.setSizePolicy(policy.Expanding,policy.Fixed)
+            header.setStyleSheet('QToolButton {text-align:left; padding:5px; background:white; border:1px solid #dae1eb; border-radius:4px; font-weight:bold;}')
+            body=W.QWidget();form=W.QFormLayout(body);body.hide()
+            def expand(opened):
+                body.setVisible(opened)
+                header.setArrowType(getattr(Qt,'ArrowType',Qt).DownArrow if opened else getattr(Qt,'ArrowType',Qt).RightArrow)
+            header.toggled.connect(expand);page.addWidget(header);page.addWidget(body)
+            self.setting_sections[title]=header
+            return form
         hardware=group('硬件与计算资源')
         profile=resource_profile()
         self.hardware_label=label(f"{profile['cpu']} 逻辑CPU · 可用内存 {profile['available_memory_mb']} MB · 最多 {profile['workers']} 线程 / {profile['process_workers']} 进程\n显卡检测中…");hardware.addRow(self.hardware_label)
@@ -364,7 +379,7 @@ class MainWindow(W.QMainWindow):
             widget.setKeyboardTracking(False);self.setting_fields[key]=widget;form.addRow(title,widget);widget.valueChanged.connect(self.settings_changed)
         caches=group('缓存管理')
         spin(caches,'cache_max_entries','最大缓存个数 / 工程',10,100000)
-        self.setting_fields['cache_max_entries'].setToolTip('普通结果超过上限后按最近使用淘汰；无位移状态固定保留。包括状态、动画、概率与Space Map。关闭软件后清理本次运行缓存。')
+        self.setting_fields['cache_max_entries'].setToolTip('数值结果和动画各自按此上限保留。命中只更新最近使用顺序，正反动画共用一项。无位移状态固定保留。')
         cache_row=W.QWidget();cache_layout=W.QHBoxLayout(cache_row);cache_layout.setContentsMargins(0,0,0,0)
         self.clear_cache_button=W.QPushButton('清除缓存');menu=W.QMenu(self.clear_cache_button)
         menu.addAction('清除当前工程',lambda:self.clear_cached_results(False));menu.addAction('清除所有工程',lambda:self.clear_cached_results(True));self.clear_cache_button.setMenu(menu)
@@ -383,7 +398,7 @@ class MainWindow(W.QMainWindow):
         spin(probability,'probability_gamma','低概率增强 γ（越小越明显）',.1,1.,2)
         self.setting_fields['probability_gamma'].setToolTip('只调整颜色和透明度，不改变概率数值、边界或良率判定。0概率保持透明。')
         spin(probability,'contact_box_budget','接触概率自适应积分预算',128,32768)
-        page.addWidget(label('实体概率按所选方法计算；虚线包络表示输入幅度全部组合，并非等概率边界。默认接触判定用概率上下界；积分不足时明确标为待细化。∞仅作当前位置二值判断。'))
+        probability.addRow(label('实体概率按所选方法计算；虚线包络表示输入幅度全部组合，并非等概率边界。默认接触判定用概率上下界；积分不足时明确标为待细化。∞仅作当前位置二值判断。'))
         space=group('Space Map')
         choice(space,'space_scope','显示范围')
         choice(space,'space_cmap','配色方案');choice(space,'space_interpolation','显示平滑')
@@ -419,7 +434,7 @@ class MainWindow(W.QMainWindow):
         choice(deformation,'deformation_execution','搜索并行模式')
         spin(deformation,'deformation_workers','并行数量上限（0自动）',0,16)
         self.setting_fields['deformation_iterations'].setToolTip('达到预算仍未完成者显示未适配；减少搜索不会放宽最终DRC。')
-        page.addWidget(label('连续性约束作用于型变位移场。孔盘调整失败后自动追溯三段式适配；未通过则恢复原图并显示琥珀叉号，型变校验列出原因。DRC检查固定RDL的≤5°非相邻边；型变另验证异网最小净距。'))
+        deformation.addRow(label('连续性约束作用于型变位移场。孔盘调整失败后自动追溯三段式适配；未通过则恢复原图并显示琥珀叉号，型变校验列出原因。DRC检查固定RDL的≤5°非相邻边；型变另验证异网最小净距。'))
         safe=group('连续无异常接触范围')
         spin(safe,'safe_box_precision','端点搜索精度 / 输入单边幅度',.0001,.1,4)
         spin(safe,'safe_box_budget','每候选连续验证盒预算',32,32768)
@@ -435,6 +450,7 @@ class MainWindow(W.QMainWindow):
         channel=group('宽度分析 · 元素显示')
         drawing_modes=WidthDisplayEditor();self.setting_fields['width_display']=drawing_modes
         channel.addRow(drawing_modes);drawing_modes.valueChanged.connect(self.settings_changed)
+        spin(channel,'width_label_font_pt','标签字号 / pt',6,24,1)
         drc_group=group('DRC检查')
         spin(drc_group,'drc_tolerance_um','线宽/线距容差 ± / μm',-10000,10000,3)
         self.setting_fields['drc_tolerance_um'].setToolTip('有效最小值 = 工艺值 − 容差。正值放宽，负值收紧；默认0。只影响DRC与型变验收，不改变包围量或概率。')
@@ -453,7 +469,7 @@ class MainWindow(W.QMainWindow):
             color=ColorButton();self.setting_fields[prefix+'_marker_color']=color;drawing.addRow(title+'颜色',color);color.valueChanged.connect(self.settings_changed)
             spin(drawing,prefix+'_marker_size',title+'直径 / pt 或 μm',.1,10000,2)
             check=W.QCheckBox(title+'使用图纸绝对大小 / μm');self.setting_fields[prefix+'_marker_absolute']=check;drawing.addRow(check);check.toggled.connect(self.settings_changed)
-        page.addWidget(label('平滑只改变热图显示，不改变线距需求、连接归属和接触判定。资源由CPU/内存自动限额，多线程计算几何和概率，切换预演复用数值结果。'))
+        space.addRow(label('平滑只改变热图显示，不改变线距需求、连接归属和接触判定。资源由CPU/内存自动限额，多线程计算几何和概率，切换预演复用数值结果。'))
         page.addStretch();self.load_view_settings()
     def discover_hardware(self):
         from .acceleration import capabilities,graphics_inventory
@@ -493,8 +509,8 @@ class MainWindow(W.QMainWindow):
         if self.loading:return
         values={k:(w.currentData() if isinstance(w,W.QComboBox) else w.isChecked() if isinstance(w,W.QCheckBox) else w.value()) for k,w in self.setting_fields.items()}
         updated=ViewSettings.from_dict(values)
-        if all(getattr(updated,k)==getattr(self.view_settings,k) for k in values if k not in ('cache_max_entries','width_display')):
-            display_change=updated.width_display!=self.view_settings.width_display
+        if all(getattr(updated,k)==getattr(self.view_settings,k) for k in values if k not in ('cache_max_entries','width_display','width_label_font_pt')):
+            display_change=(updated.width_display!=self.view_settings.width_display or updated.width_label_font_pt!=self.view_settings.width_label_font_pt)
             self.view_settings=updated;self.cache_group.limit(updated.cache_max_entries);self.refresh_cache_status()
             if display_change and self.data:self._legend_stamp=None;self.plot_layout(preserve=True)
             return
@@ -611,10 +627,12 @@ class MainWindow(W.QMainWindow):
         def fmt_size(n):
             return f'{n/1024**3:.2f} GiB' if n>=1024**3 else f'{n/1024**2:.2f} MiB' if n>=1024**2 else f'{n/1024:.1f} KiB' if n>=1024 else f'{n} B'
         self.cache_size_label.setText(f'当前工程：{fmt_size(size)}\n全部工程：{fmt_size(total)}'+(' · 清理中' if self.cache_clear_worker is not None else ''))
-        self.cache_size_label.setToolTip(f'当前普通结果 {count-pinned} 个；固定保留 {pinned} 个。统计本次运行中所有打开过的工程缓存文件，关闭软件后清理。')
+        self.cache_size_label.setToolTip(f'当前普通结果 {count-pinned} 个；固定保留 {pinned} 个；动画 {len(self.cache_group.replays)} 个。统计本次运行中所有打开过的工程缓存文件，关闭软件后清理。')
     def _attach_cache_group(self,key,count):
         self.cache_project_key=key;self.cache_group=self.cache_registry.get(key,count)
         self.session_values=self.cache_group.values;self.session_engines=self.cache_group.engines;self.engine=None
+        from .session_cache import EphemeralCache
+        self.space_motion_fields=EphemeralCache()
     def switch_project_cache(self,key,count):
         self.stop_animation();self._prepared_motion=None;self._prepared_package=None
         self.cancel_previews()
@@ -760,6 +778,7 @@ class MainWindow(W.QMainWindow):
         self.loading=True
         try:
             self.data=data;self.gds_label.setText(Path(data.path).name+'\n'+str(Path(data.path).resolve()));self.gds_label.setToolTip(str(Path(data.path).resolve()))
+            for title,header in self.setting_sections.items():header.setChecked(title in project.get('expanded_settings',[]))
             self.view_settings=ViewSettings.from_dict(project.get('settings'));self.load_view_settings();self.layer_styles=project.get('layer_styles',{})
             for name,value in project_overlays(project).items():
                 toggle=getattr(self,name+'_toggle')
@@ -972,7 +991,7 @@ class MainWindow(W.QMainWindow):
             elif self.case:self.update_state_table(np.zeros((len(self.case['dies']),3)))
         if not self.view_settings.animation_enabled or (not self.view_settings.animation_return_zero and (frame is None or not np.any(frame['states']))):complete();return
         self.statusBar().showMessage(('播放缓存型变动画' if motion['cached'] else '播放已校验型变动画')+f" · {len(replay)} 个中间帧")
-        if replay and (frame is None or not np.any(frame['states'])):
+        if replay:
             self.show_motion_frame(replay[0][1]);last[0]=0
         self.transition.start(motion['duration'],motion['steps'],update,complete)
 
@@ -1416,7 +1435,13 @@ class MainWindow(W.QMainWindow):
                     prepared=getattr(self,'_prepared_package',None)
                     full_key=(key[0],key[1],resolution)
                     cache_key=('package',getattr(self.engine,'signature',id(self.space_data)),key[1],resolution)
-                    full=prepared[1] if prepared is not None and prepared[0]==full_key else self.session_values.get_or_compute(cache_key,lambda:package_map(self.space_data,self.case['board'],centers,self.shown_states,None,resolution))
+                    def compute_field():return package_map(self.space_data,self.case['board'],centers,self.shown_states,None,resolution)
+                    if prepared is not None and prepared[0]==full_key:full=prepared[1]
+                    elif getattr(self,'_in_animation',False):
+                        full=self.space_motion_fields.get(cache_key)
+                        if full is None:
+                            full=compute_field();self.space_motion_fields.put(cache_key,full)
+                    else:full=self.session_values.get_or_compute(cache_key,compute_field)
                     self._package_field=package_display(full,visible);self._package_field_key=key
                 q=self._package_field
                 if getattr(artist,'_field_key',None)!=key:
@@ -1442,15 +1467,24 @@ class MainWindow(W.QMainWindow):
         if self.loading:return
         if self.space_toggle.isChecked() and self.space_data is None:self.request_preview()
         else:self.plot_layout(preserve=True)
+    def leave_extreme_selection(self):
+        # Clearing the highlight alone leaves row 0 current in Qt. A click on
+        # that already-current row would never deliver currentCellChanged.
+        table=self.extreme_table
+        blocked=table.blockSignals(True)
+        table.clearSelection();table.setCurrentCell(-1,-1);table.blockSignals(blocked)
+
     def apply_manual(self):
         if not self.data:return
         try:
-            self.case=build_case(self.data,self.roles(),layer_order=self.ordered_layers());count=len(self.case['dies']);index=self.manual_die.currentIndex()
+            self.case=self.case or build_case(self.data,self.roles(),layer_order=self.ordered_layers());count=len(self.case['dies']);index=self.manual_die.currentIndex()
             if not 0<=index<count:return
-            states=self.shown_states.copy() if self.shown_states is not None and len(self.shown_states)==count else np.zeros((count,3))
+            previous=self.manual_states if self.manual_states is not None else self.shown_states
+            states=previous.copy() if previous is not None and len(previous)==count else np.zeros((count,3))
             states[index]=[self.manual_fields['dx'].value(),self.manual_fields['dy'].value(),math.radians(self.manual_fields['angle'].value())]
-            self.manual_states=states;self.active_preview=None
-            self.extreme_table.blockSignals(True);self.extreme_table.clearSelection();self.extreme_table.blockSignals(False)
+            self.mouse_die.cancel_pending()
+            if self.mouse_die.owner is not None:self.mouse_die.exit()
+            self.manual_states=states;self.active_preview=None;self.leave_extreme_selection()
             self.request_preview()
         except ValueError as exc:self.error(exc)
     def locate_deformation(self,row):
@@ -1515,20 +1549,20 @@ class MainWindow(W.QMainWindow):
         if cached is not None and actual is not None and ready and global_ready and self.repair_lookup(signature,state,deform):
             self.engine=actual
             animate=settings.animation_enabled and not direct and not np.array_equal(origin,state)
-            prepared=animate and ((not np.any(state) and animate_back) or (np.any(state) and (deform or width[0] or recon[0])))
+            prepared=animate and (np.any(state) or animate_back)
             target=cached if show_frame or overlays else None
             if prepared:
                 from .prepared_motion import motion_packet
                 from types import SimpleNamespace
                 view=SimpleNamespace(signature=signature,cache_key=lambda:expected,bound=actual.bound)
-                _,_,duration,steps,requested,_,packet=motion_packet(view,origin,state,settings,max(np.ptp(self.ax.get_xlim()),np.ptp(self.ax.get_ylim())),self.session_values)
+                _,_,duration,steps,requested,_,packet=motion_packet(view,origin,state,settings,max(np.ptp(self.ax.get_xlim()),np.ptp(self.ax.get_ylim())),self.cache_group.motions)
                 if packet and packet['complete']:
                     motion=dict(prepared=True,streamed=False,frames=packet['frames'],duration=duration,steps=steps,requested_steps=requested,cached=True,count=len(packet['frames']))
                     self._prepared_motion=motion;self.preview_pending=None;self.play_prepared_motion(target,motion);return
                 self.statusBar().showMessage('目标状态已缓存，正在准备首次过渡动画。')
             else:
                 self.preview_pending=None
-                if not show_frame or getattr(actual,'busy',False) or actual.cache_key()!=expected:
+                if direct or not show_frame or getattr(actual,'busy',False) or actual.cache_key()!=expected:
                     self._interpolated_states=None;self.current_frame=target;self.plot_layout(preserve=True)
                     self.update_state_table(state);self.update_histograms();self.show_frame_status(target)
                 else:self.present_frame(target)
@@ -1540,7 +1574,10 @@ class MainWindow(W.QMainWindow):
         if self._closing or self.motion_worker is not None or self.preview_pending is None:return
         request=self.preview_pending
         request_key=(self.preview_identity(self.data,request[5],request[11],request[4],request[6],request[7]),request[1].deformation_key(),request[1].numeric_key(),request[3].tobytes(),request[12:19],request[19].tobytes(),request[20:],request[1].animation_enabled,request[1].animation_return_zero,request[1].animation_strategy,request[1].animation_speed,request[1].animation_fps,request[1].animation_duration_ms)
-        if any(getattr(w,'request_key',None)==request_key and not w.cancelled.is_set() for w in self.preview_workers):return
+        for running in self.preview_workers:
+            if getattr(running,'request_key',None)==request_key and not running.cancelled.is_set() and not getattr(running,'delivered',False) and not running.isFinished():
+                # The identical in-flight result can answer the latest display ticket.
+                running.view_ticket=request[2];self.preview_pending=None;return
         from .scheduling import admission
         estimate=max(256,getattr(self.geometry_cache,'bytes',0)/1024**2*16)
         admitted=admission(len(self.preview_workers)+(1 if self.worker is not None else 0),estimate)
@@ -1603,31 +1640,32 @@ class MainWindow(W.QMainWindow):
                             float(settings.repair_patch_width_um))
                 repair=session_values.get_or_compute(repair_key,lambda:repair_frame(
                     actual.contact,states,settings,params,replacements=deform_replacements,progress=progress))
-            if back or ((width_analysis or reconstruction_view or (deform and result is not None)) and settings.animation_enabled and not direct and np.any(states) and not np.array_equal(start_states,states)):
+            if back or (settings.animation_enabled and not direct and np.any(states) and not np.array_equal(start_states,states)):
                 from .prepared_motion import prepare_motion
                 publish=(lambda intermediate:worker.publish((actual,intermediate,distribution,con,actual_cache,field))) if settings.animation_strategy=='stream' else None
-                motion=prepare_motion(actual,start_states,states,settings,view_span,session_values,progress,publish,worker.cancelled)
+                motion=prepare_motion(actual,start_states,states,settings,view_span,cache_group.motions,progress,publish,worker.cancelled)
             if direct:motion=dict(direct=True,settled=settle)
             if not show_frame and not (drc or width_analysis or repair_view or heat or space or reconstruction_view or (deform and result is not None)):frame=None
             return actual,frame,distribution,con,actual_cache,field,prepared,motion,repair
         def work(progress):
             from .scheduling import job_budget
             with job_budget(admitted['threads'],admitted['processes']):return solve(progress)
-        worker=Worker(work,self);worker.interactive_refinement=bool(direct and settle);worker.transient=bool(direct);worker.request_key=request_key
+        worker=Worker(work,self);worker.interactive_refinement=bool(direct and settle);worker.transient=bool(direct);worker.request_key=request_key;worker.view_ticket=ticket
         self.preview_workers.append(worker);self.preview_worker=worker;self.watch_worker(worker,'预演计算')
         self.log_bus.emit(admitted['reason']+f" · 活跃预演 {len(self.preview_workers)} · CPU {admitted['load'].get('cpu_percent')}% · 可用内存 {admitted['load']['available_memory_mb']} MiB")
         def partial(_):
             value=worker.take_partial()
             if value is None:return
-            if revision!=self.revision or ticket!=self.preview_ticket or data is not self.data:return
+            if revision!=self.revision or worker.view_ticket!=self.preview_ticket or data is not self.data:return
             actual,frame,distribution,con,cache,field=value
             self.engine=actual;self.case=case;self.probability_data=distribution;self.connections=con;self.geometry_cache=cache;self.space_data=field
             self.show_motion_frame(frame)
         worker.partial.connect(partial)
         def accepted(value):
-            if revision!=self.revision or data is not self.data or ticket!=self.preview_ticket:return
+            worker.delivered=True
+            if revision!=self.revision or data is not self.data or worker.view_ticket!=self.preview_ticket:return
             self.engine,frame,self.probability_data,self.connections,self.geometry_cache,self.space_data,self._prepared_package,self._prepared_motion,self.repair_data=value
-            if ticket!=self.preview_ticket:return
+            if worker.view_ticket!=self.preview_ticket:return
             self.case=case;self.refresh_motion_table()
             if frame and frame.get('global_deformation') and self.result:
                 self.result['adaptive_preview']=frame['global_deformation'];self.report_dirty=True
@@ -1638,9 +1676,9 @@ class MainWindow(W.QMainWindow):
             else:self.present_frame(frame)
             if self.current_frame is not None and not self.transition.timer.isActive():self.update_state_table(self.current_frame['states'])
         def rejected(message):
-            if ticket!=self.preview_ticket:return
+            if worker.view_ticket!=self.preview_ticket:return
             self.statusBar().showMessage('预演未应用：'+message.split('Traceback')[0]);self.error(message)
-        worker.progress.connect(lambda n,t:self.statusBar().showMessage(t) if ticket==self.preview_ticket else None)
+        worker.progress.connect(lambda n,t:self.statusBar().showMessage(t) if worker.view_ticket==self.preview_ticket else None)
         worker.done.connect(accepted);worker.failed.connect(rejected)
         def finished():
             if actual is not None:actual.busy=False
@@ -1902,6 +1940,7 @@ class MainWindow(W.QMainWindow):
     def project_settings(self):
         return dict(schema_version=5,app_version=__version__,sha256=self.data.sha256,top_cell=self.data.top_name,
                     roles=self.roles(),parameters=asdict(self.params()),settings=asdict(self.view_settings),node_edits=list(self.data.node_edits),
+                    expanded_settings=[title for title,header in self.setting_sections.items() if header.isChecked()],
                     overlays={name:getattr(self,name+'_toggle').isChecked() for name in OVERLAY_DEFAULTS},layer_styles=self.layer_styles,
                     visibility={k:w.isChecked() for k,w in self.visible_boxes.items()},motions=self.motions(),layer_order=self.ordered_layers())
 

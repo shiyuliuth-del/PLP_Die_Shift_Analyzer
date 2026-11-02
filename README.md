@@ -1,12 +1,12 @@
-# Die Shift Analyze V24
+# Die Shift Analyze V25
 
-当前唯一长期主线为 **main**，规范仓库为 [shiyuliuth-del/PLP_Die_Shift_Analyzer](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer)（末尾有r）。V22接入用户2026-11-02提供的 `1102.zip`；V24 支持单点 PATH 圆、Q 属性编辑、封装边距与相邻孔盘三档分析，历史标签可复现。
+当前唯一长期主线为 **main**，规范仓库为 [shiyuliuth-del/PLP_Die_Shift_Analyzer](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer)（末尾有r）。V22接入用户2026-11-02提供的 `1102.zip`；V24 支持单点 PATH 圆、Q 属性编辑、封装边距与相邻孔盘三档分析，V25 修复手动回零，按实际穿线窄口定位并避让宽度标签，增加 Windows 无控制台源码入口。
 
 **参与开发前必读：** [AGENTS.md](AGENTS.md) → [Agent.md](Agent.md) → [设计要求](docs/DESIGN_REQUIREMENTS.md) → [1102交接记录](docs/BASELINE_1102.md) → [已知问题](docs/KNOWN_ISSUES.md)。提交使用[PR模板](.github/pull_request_template.md)，合并后清理自己的任务分支。
 
 GDS芯片偏移分析，长度单位为μm。当前包含运动归属、概率/Space Map、原材料型变、固定 RDL 通道容量、直线修复补块与切分重构预演；各功能按自己的几何来源和验证范围解释。
 
-- [本版使用说明（随源码提供）](docs/V24_使用说明.md)
+- [本版使用说明（随源码提供）](docs/V25_使用说明.md)
 - [研究报告](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/blob/main/DIE_SHIFT评估报告.md)
 - [1102接入与验证记录](docs/BASELINE_1102.md)
 - [首次V21历史图文验证（旧宽度口径）](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/blob/V21/docs/V21_操作与验证说明.md)
@@ -19,7 +19,7 @@ GDS芯片偏移分析，长度单位为μm。当前包含运动归属、概率/S
 python3 main.py
 ```
 
-Linux可运行`bash run.sh`。Windows双击`RUN.bat`：使用已有Python环境，自动识别KLayout模块或已安装的桌面程序，**不联网、不创建空环境、不补装依赖**。可用`DIE_SHIFT_PYTHON`指定已有完整解释器；KLayout通常从PATH、环境变量、注册表或常用安装目录找到，也支持`DIE_SHIFT_KLAYOUT`指定exe路径。仅安装KLayout不能替代本应用的NumPy、Qt等依赖；已有环境不完整时会明确提示。
+Linux可运行`bash run.sh`。Windows 双击 `RUN.vbs` 无控制台启动（系统已关联图形版 Python 时也可双击 `main.pyw`）：使用已有Python环境，自动识别KLayout模块或已安装的桌面程序，**不联网、不创建空环境、不补装依赖**。可用`DIE_SHIFT_PYTHON`指定已有完整解释器；KLayout通常从PATH、环境变量、注册表或常用安装目录找到，也支持`DIE_SHIFT_KLAYOUT`指定exe路径。仅安装KLayout不能替代本应用的NumPy、Qt等依赖；已有环境不完整时会明确提示。
 
 `TEST_WINDOWS.bat`检查默认与强制桌面后端。`BUILD_WINDOWS.bat`在已有完整PyInstaller环境中离线构建EXE，源包同时包含桌面调用宏。此次仅输出源码包；已验证Linux上的真实KLayout桌面进程，未执行Windows实机验证。
 
@@ -80,7 +80,7 @@ python3 tools/validate_width_v24.py --gds /path/to/GD55_9-21.gds
 python3 tools/package_release.py
 ```
 
-本地Git首个提交保留v0.4.0基线`fef0933`，本版标签`V24`；本版源码快照发布到用户指定的GitHub仓库，历史大型分析数据不上传。发布ZIP包含文件哈希与独立解压后的验证记录。附件图纸本身不打入通用包。
+本地Git首个提交保留v0.4.0基线`fef0933`，本版标签`V25`；本版源码快照发布到用户指定的GitHub仓库，历史大型分析数据不上传。发布ZIP包含文件哈希与独立解压后的验证记录。附件图纸本身不打入通用包。
 
 全输入模型良率统计全部真实运动孔接口同时无异网接触的概率，包含安全内盒外状态；默认蒙特卡洛与99%联合置信区间，也可选不随机采样的状态盒积分。各DIE独立、同DIE各孔共用姿态。仅针对原始固定RDL接口，不代表含其他缺陷的实际生产良率。设置中可调整样本量或确定性预算。
 

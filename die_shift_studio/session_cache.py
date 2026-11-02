@@ -32,24 +32,30 @@ class ProjectCacheGroup:
     def __init__(self,key,max_entries=2000):
         self.key=key;self.max_entries=max_entries;self.lock=threading.RLock()
         self.caches={};self.recent=OrderedDict();self.pinned=set();self.bytes=0;self.enabled=True
-        self.values=None;self.engines={};self.frame_stores={};self.last_assessment=None;self.nominal={}
-    def register(self,cache):self.caches[id(cache)]=cache
+        self.values=None;self.motions=None;self.replays=OrderedDict();self.engines={};self.frame_stores={};self.last_assessment=None;self.nominal={}
+    def register(self,cache):
+        with self.lock:self.caches[id(cache)]=cache
+    def entries(self,cache):
+        return self.replays if cache is self.motions else self.recent
     def touch(self,cache,key):
-        identity=(id(cache),key)
-        if identity in self.recent:self.recent.move_to_end(identity)
+        records=self.entries(cache);identity=(id(cache),key)
+        if identity in records:records.move_to_end(identity)
     def stored(self,cache,key,delta):
-        self.bytes+=delta;identity=(id(cache),key);self.recent[identity]=None;self.recent.move_to_end(identity)
+        records=self.entries(cache);identity=(id(cache),key);new=identity not in records
+        self.bytes+=delta;records[identity]=None;records.move_to_end(identity)
         if key in cache.pinned:self.pinned.add(identity)
-        self.trim()
+        if new:self.trim(records)
     def removed(self,cache,key,size):
-        identity=(id(cache),key);self.bytes-=size;self.recent.pop(identity,None);self.pinned.discard(identity)
-    def trim(self):
-        while len(self.recent)-len(self.pinned)>self.max_entries:
-            identity=next((v for v in self.recent if v not in self.pinned),None)
-            if identity is None:break
+        identity=(id(cache),key);self.bytes-=size;self.entries(cache).pop(identity,None);self.pinned.discard(identity)
+    def trim(self,records):
+        pinned=len(self.pinned) if records is self.recent else 0
+        while len(records)-pinned>self.max_entries:
+            identity=next(v for v in records if v not in self.pinned)
             uid,key=identity;del self.caches[uid][key]
     def limit(self,count):
-        with self.lock:self.max_entries=int(count);self.trim()
+        with self.lock:
+            if self.max_entries!=count:
+                self.max_entries=int(count);self.trim(self.recent);self.trim(self.replays)
     def clear(self):
         with self.lock:
             for cache in list(self.caches.values()):cache.clear()
@@ -74,7 +80,7 @@ class ProjectCacheRegistry:
         group=self.groups.pop(old);group.key=new;self.groups[new]=group
     def get(self,key,max_entries=2000):
         if key not in self.groups:
-            group=ProjectCacheGroup(key,max_entries);group.values=SessionCache(group=group);self.groups[key]=group
+            group=ProjectCacheGroup(key,max_entries);group.values=SessionCache(group=group);group.motions=SessionCache(group=group);self.groups[key]=group
         group=self.groups[key];group.limit(max_entries);return group
     def statistics(self,current):
         # The UI timer never waits for a large pickle read/write in a worker.

@@ -6,7 +6,8 @@ import sys
 if __name__=='__main__':
     multiprocessing.freeze_support()
     try:
-        from die_shift_studio.frozen_support import prepare_runtime,smoke
+        from die_shift_studio.frozen_support import prepare_runtime,hide_owned_console,smoke
+        if '--smoke-test' not in sys.argv:hide_owned_console()
         prepare_runtime()
         from die_shift_studio.dependencies import verify
         verify()

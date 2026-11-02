@@ -120,6 +120,9 @@ assert w.current_frame['nominal_global'] and not np.any(w.current_frame['states'
 assert w.current_frame.get('global_deformation') is not None
 w.deformation_toggle.setChecked(False);strategy.setCurrentIndex(strategy.findData('prepared'));wait()
 w.show_motion_frame=original_frame;w.width_toggle.setChecked(True);wait()
+# The true P throat is 52.6 um. At 19 um spacing a single 15 um line
+# needs 53 um; exercise highlighting at this genuine deficit.
+w.fields['line_space_um'].setValue(19);wait()
 w.manual_states=np.array([[3.,0,0]]);w.request_preview();wait()
 assert w.width_overlay.boxes.get_zorder()>w.width_overlay.outlines.get_zorder()
 assert all(a.get_zorder()<w.width_overlay.boxes.get_zorder() for a in w.width_overlay.inset.values())

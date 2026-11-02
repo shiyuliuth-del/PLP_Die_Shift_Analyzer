@@ -40,6 +40,9 @@ def normalize_project(project):
     edits=p.setdefault('node_edits',[])
     if not isinstance(edits,list) or any(not isinstance(q,dict) or not {'layer','index','original','nodes'}<=q.keys() for q in edits):
         raise ValueError('工程节点编辑必须为含图层、图形编号、源指纹与坐标的列表')
+    sections=p.setdefault('expanded_settings',[])
+    if not isinstance(sections,list) or any(not isinstance(title,str) for title in sections):
+        raise ValueError('工程设置栏目列表必须由标题字符串组成')
     p['overlays']=project_overlays(p)
     p['settings']=asdict(ViewSettings.from_dict(p.get('settings')))
     p['schema_version']=5;p.pop('geometry',None)

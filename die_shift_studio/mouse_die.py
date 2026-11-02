@@ -29,7 +29,7 @@ class MouseDieMode:
         w.canvas.die_move_active=True
         states=np.zeros((len(w.case['dies']),3)) if w.shown_states is None else w.shown_states.copy()
         w.manual_states=states;w.active_preview=None;w.manual_die.setCurrentIndex(owner)
-        w.extreme_table.blockSignals(True);w.extreme_table.clearSelection();w.extreme_table.blockSignals(False)
+        w.leave_extreme_selection()
         self.update_text();w.render_scene();w.statusBar().showMessage(f'DIE {owner+1} 交互偏移：右键平移；滚轮上/下逆时针/顺时针旋转；Ctrl+滚轮缩放；ESC退出')
     def exit(self):
         active=self.owner is not None;self.owner=None;self.drag=None;self.w.canvas.die_move_active=False
@@ -59,10 +59,13 @@ class MouseDieMode:
         pose=self.w.manual_states.copy();pose[self.owner,2]+=math.radians(.1)*float(event.step)
         self.submit(pose)
     def submit(self,states):
-        self.w.manual_states=states;self.w.active_preview=None;self.pending=True;self.full_pending=False;self.idle.start()
+        self.w.manual_states=states;self.w.active_preview=None;self.pending=True;self.full_pending=False
+        if self.w.view_settings.animation_enabled:self.idle.stop()
+        else:self.idle.start()
         if self.w.preview_worker is not None and getattr(self.w.preview_worker,'interactive_refinement',False):self.w.preview_worker.cancelled.set()
         if not self.timer.isActive():self.timer.start()
     def refine(self):
+        if self.w.view_settings.animation_enabled:return
         self.full_pending=True
         if not self.timer.isActive():self.timer.start()
     def flush(self):
@@ -70,11 +73,13 @@ class MouseDieMode:
         if not self.pending and not self.full_pending:self.timer.stop();return
         # Do not cancel a frame for every pointer event: that starves completion.
         # At most one worker and one latest requested pose are retained.
-        if w.preview_worker is not None or w.motion_worker is not None or w.worker is not None:return
+        if w.preview_worker is not None or w.motion_worker is not None or w.worker is not None or w.transition.timer.isActive():return
         settle=not self.pending and self.full_pending
         self.pending=False
         if settle:self.full_pending=False
-        w.request_preview(direct=True,settle=settle)
+        # Keep one newest pointer target while a segment is playing. Its final
+        # pose is fully solved and uses the same replay packet as numeric input.
+        w.request_preview(direct=not w.view_settings.animation_enabled,settle=settle)
     def update_text(self):
         w=self.w
         if not hasattr(self,'text'):
