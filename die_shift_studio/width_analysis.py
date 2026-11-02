@@ -171,7 +171,23 @@ def _crossings(ends, plane, tol):
     ids = np.flatnonzero(through)
     boundaries = plane['boundaries'][ri[ids]]
     widths = 2*shapely.distance(shapely.points(middle[ids]),boundaries)
-    for idx,width in zip(ids,widths):
+    # Copper running along the gate can cover both epsilon probes without
+    # conveying any line across it. For long chords, test a transverse strip
+    # beyond the two sides of the original linewidth. A straight parallel
+    # track stops inside the strip, an oblique through-route reaches both sides.
+    long = (hi[ids]-lo[ids])>widths+2*tol
+    use = np.ones(len(ids),bool)
+    if np.any(long):
+        probe_ids = ids[long]
+        c = ci[probe_ids]
+        first = ends[c,0]+lo[probe_ids,None]*direction[c]
+        last = ends[c,0]+hi[probe_ids,None]*direction[c]
+        shift = (widths[long]/2+2*tol)[:,None]*cross[probe_ids]
+        traces = plane['routes'][ri[probe_ids]]
+        front = shapely.linestrings(np.stack((first+shift,last+shift),axis=1))
+        back = shapely.linestrings(np.stack((first-shift,last-shift),axis=1))
+        use[long] = shapely.intersects(traces,front) & shapely.intersects(traces,back)
+    for idx,width in zip(ids[use],widths[use]):
         sources = plane['route_sources'][int(ri[idx])]
         refs = ((sources[0][0],) if len(sources)==1 else
                 tuple(ref for ref,geometry in sources if geometry.intersection(parts[idx]).length>tol))
@@ -186,20 +202,39 @@ def _intruders(lines, pairs, walls, tree, tol):
     result = defaultdict(list)
     if not len(lines):
         return result
-    ci, wi = tree.query(lines,predicate='intersects')
+    ci, wi = tree.query(lines)
     keep = (wi!=pairs[ci,0]) & (wi!=pairs[ci,1])
     ci, wi = ci[keep], wi[keep]
+    if not len(ci):
+        return result
+    ends = shapely.get_coordinates(lines).reshape(-1,2,2)
+    length = np.linalg.norm(ends[:,1]-ends[:,0],axis=1)
+    valid = length>2*tol
+    trimmed = np.zeros_like(ends)
+    direction = (ends[valid,1]-ends[valid,0])/length[valid,None]
+    trimmed[valid,0] = ends[valid,0]+tol*direction
+    trimmed[valid,1] = ends[valid,1]-tol*direction
+    # STRtree indexes axis-aligned boxes. The box of a long diagonal segment
+    # can cover most of the package. Clip against each candidate box in NumPy
+    # before invoking GEOS on the actual wall. Exact touching still counts.
+    bounds = shapely.bounds(walls)
+    start = trimmed[ci,0]
+    delta = trimmed[ci,1]-start
+    parallel = delta==0
+    lo = bounds[wi,:2]
+    hi = bounds[wi,2:]
+    stationary = np.all(~parallel | ((lo<=start) & (start<=hi)),axis=1)
+    with np.errstate(divide='ignore',invalid='ignore'):
+        low,high = (lo-start)/delta,(hi-start)/delta
+    enter = np.maximum(0.,np.max(np.where(parallel,-np.inf,np.minimum(low,high)),axis=1))
+    leave = np.minimum(1.,np.min(np.where(parallel,np.inf,np.maximum(low,high)),axis=1))
+    mask = valid[ci] & stationary & (enter<=leave+8*np.finfo(float).eps)
+    ci,wi = ci[mask],wi[mask]
     if len(ci):
-        length = shapely.length(lines[ci])
-        usable = length > 2*tol
-        ci, wi, length = ci[usable], wi[usable], length[usable]
-        if len(ci):
-            xy = shapely.get_coordinates(lines[ci]).reshape(-1,2,2)
-            d = (xy[:,1]-xy[:,0])*(tol/length)[:,None]
-            inner = shapely.linestrings(np.stack((xy[:,0]+d,xy[:,1]-d),axis=1))
-            hits = shapely.intersects(inner,walls[wi])
-            for c,w in zip(ci[hits],wi[hits]):
-                result[int(c)].append(int(w))
+        inner = shapely.linestrings(trimmed[ci])
+        hits = shapely.intersects(walls[wi],inner)
+        for c,w in zip(ci[hits],wi[hits]):
+            result[int(c)].append(int(w))
     return result
 
 
@@ -295,6 +330,7 @@ class WidthAnalyzer:
                     walls.append(Wall(name,'固定障碍',g,refs,layers=tuple(sorted({k for k,_ in refs if k in keys}))))
             route_sources = list(sources.values())
             routes = np.asarray([shapely.union_all([g for _,g in src]) for src in route_sources],object)
+            shapely.prepare(routes)
             planes[plane] = dict(keys=keys,walls=walls+edges,metal_count=len(walls),routes=routes,
                                  route_sources=route_sources,tree=STRtree(routes),boundaries=shapely.boundary(routes),width=self.width,gates=None)
         return planes
@@ -302,6 +338,7 @@ class WidthAnalyzer:
     def _catalogue(self, plane, progress):
         walls = plane['walls']
         geometries = np.array([o.geometry for o in walls],object)
+        shapely.prepare(geometries)
         tree = STRtree(geometries)
         if not len(plane['routes']):
             return []
@@ -400,6 +437,8 @@ class WidthAnalyzer:
                 mask = plane['local'][features[:,side]]
                 if np.any(mask):
                     inside[mask] &= ~shapely.relate_pattern(lines[mask],geometries[pairs[mask,side]],'T********')
+        if not nominal:
+            shapely.prepare(geometries)
         intruding = {} if nominal else _intruders(lines,pairs,geometries,STRtree(geometries),self.tol)
         # A pad that has travelled through the opposite wall cannot reopen the
         # original routing order on the far side. Rotate the reference with a

@@ -3,7 +3,7 @@
   "hardware": {
     "cpu": 8,
     "total_memory_mb": 15708,
-    "available_memory_mb": 7294,
+    "available_memory_mb": 7930,
     "workers": 6,
     "process_workers": 3,
     "policy": "预留2逻辑CPU与65%可用内存；原生几何/FFT使用线程；大型独立原图DRC与RDL候选搜索使用spawn进程；小任务串行"
@@ -26,8 +26,8 @@
           "宽度足够": 27
         },
         "retained": 12,
-        "first_request_s": 0.0284,
-        "repeat_ms": 0.042,
+        "first_request_s": 0.0952,
+        "repeat_ms": 0.098,
         "central_gate": {
           "nominal_gap_um": 110.0,
           "gap_um": 110.0,
@@ -57,8 +57,8 @@
           "宽度足够": 23
         },
         "retained": 12,
-        "first_request_s": 0.0039,
-        "repeat_ms": 0.03,
+        "first_request_s": 0.0107,
+        "repeat_ms": 0.092,
         "central_gate": {
           "nominal_gap_um": 110.0,
           "gap_um": 107.0,
@@ -88,8 +88,8 @@
           "宽度足够": 23
         },
         "retained": 12,
-        "first_request_s": 0.0044,
-        "repeat_ms": 0.029,
+        "first_request_s": 0.0138,
+        "repeat_ms": 0.116,
         "central_gate": {
           "nominal_gap_um": 110.0,
           "gap_um": 75.0,
@@ -119,8 +119,8 @@
           "宽度足够": 27
         },
         "retained": 12,
-        "first_request_s": 0.0034,
-        "repeat_ms": 0.065,
+        "first_request_s": 0.0114,
+        "repeat_ms": 0.08,
         "central_gate": {
           "nominal_gap_um": 110.0,
           "gap_um": 145.0,
@@ -150,143 +150,143 @@
           0,
           0
         ],
-        "sections": 6612,
+        "sections": 6609,
         "counts": {
           "宽度不足": 0,
           "需局部收窄": 0,
-          "宽度足够": 6612
-        },
-        "retained": 267,
-        "first_request_s": 31.6725,
-        "repeat_ms": 0.1
-      },
-      {
-        "state": [
-          -35,
-          -35,
-          -1
-        ],
-        "sections": 6612,
-        "counts": {
-          "宽度不足": 0,
-          "需局部收窄": 5,
-          "宽度足够": 6607
-        },
-        "retained": 267,
-        "first_request_s": 2.6689,
-        "repeat_ms": 0.134
-      },
-      {
-        "state": [
-          -35,
-          -35,
-          1
-        ],
-        "sections": 6612,
-        "counts": {
-          "宽度不足": 0,
-          "需局部收窄": 15,
-          "宽度足够": 6597
-        },
-        "retained": 267,
-        "first_request_s": 2.974,
-        "repeat_ms": 0.111
-      },
-      {
-        "state": [
-          -35,
-          35,
-          -1
-        ],
-        "sections": 6612,
-        "counts": {
-          "宽度不足": 0,
-          "需局部收窄": 1,
-          "宽度足够": 6611
-        },
-        "retained": 267,
-        "first_request_s": 2.0956,
-        "repeat_ms": 0.089
-      },
-      {
-        "state": [
-          -35,
-          35,
-          1
-        ],
-        "sections": 6612,
-        "counts": {
-          "宽度不足": 2,
-          "需局部收窄": 1,
           "宽度足够": 6609
         },
         "retained": 267,
-        "first_request_s": 1.689,
-        "repeat_ms": 0.082
+        "first_request_s": 21.3929,
+        "repeat_ms": 0.139
       },
       {
         "state": [
-          35,
+          -35,
           -35,
           -1
         ],
-        "sections": 6612,
+        "sections": 6609,
         "counts": {
           "宽度不足": 0,
-          "需局部收窄": 2,
-          "宽度足够": 6610
+          "需局部收窄": 5,
+          "宽度足够": 6604
         },
         "retained": 267,
-        "first_request_s": 1.8723,
-        "repeat_ms": 0.081
+        "first_request_s": 2.3089,
+        "repeat_ms": 0.15
       },
       {
         "state": [
-          35,
+          -35,
           -35,
           1
         ],
-        "sections": 6612,
+        "sections": 6609,
         "counts": {
           "宽度不足": 0,
-          "需局部收窄": 14,
-          "宽度足够": 6598
+          "需局部收窄": 15,
+          "宽度足够": 6594
         },
         "retained": 267,
-        "first_request_s": 1.8629,
-        "repeat_ms": 0.08
+        "first_request_s": 2.0227,
+        "repeat_ms": 0.098
       },
       {
         "state": [
-          35,
+          -35,
           35,
           -1
         ],
-        "sections": 6612,
+        "sections": 6609,
         "counts": {
           "宽度不足": 0,
-          "需局部收窄": 0,
-          "宽度足够": 6612
-        },
-        "retained": 267,
-        "first_request_s": 2.0,
-        "repeat_ms": 0.094
-      },
-      {
-        "state": [
-          35,
-          35,
-          1
-        ],
-        "sections": 6612,
-        "counts": {
-          "宽度不足": 0,
-          "需局部收窄": 4,
+          "需局部收窄": 1,
           "宽度足够": 6608
         },
         "retained": 267,
-        "first_request_s": 1.6833,
-        "repeat_ms": 0.08
+        "first_request_s": 2.8681,
+        "repeat_ms": 0.238
+      },
+      {
+        "state": [
+          -35,
+          35,
+          1
+        ],
+        "sections": 6609,
+        "counts": {
+          "宽度不足": 2,
+          "需局部收窄": 1,
+          "宽度足够": 6606
+        },
+        "retained": 267,
+        "first_request_s": 2.2743,
+        "repeat_ms": 0.205
+      },
+      {
+        "state": [
+          35,
+          -35,
+          -1
+        ],
+        "sections": 6609,
+        "counts": {
+          "宽度不足": 0,
+          "需局部收窄": 2,
+          "宽度足够": 6607
+        },
+        "retained": 267,
+        "first_request_s": 3.316,
+        "repeat_ms": 0.226
+      },
+      {
+        "state": [
+          35,
+          -35,
+          1
+        ],
+        "sections": 6609,
+        "counts": {
+          "宽度不足": 0,
+          "需局部收窄": 14,
+          "宽度足够": 6595
+        },
+        "retained": 267,
+        "first_request_s": 2.1714,
+        "repeat_ms": 0.096
+      },
+      {
+        "state": [
+          35,
+          35,
+          -1
+        ],
+        "sections": 6609,
+        "counts": {
+          "宽度不足": 0,
+          "需局部收窄": 0,
+          "宽度足够": 6609
+        },
+        "retained": 267,
+        "first_request_s": 2.4488,
+        "repeat_ms": 0.13
+      },
+      {
+        "state": [
+          35,
+          35,
+          1
+        ],
+        "sections": 6609,
+        "counts": {
+          "宽度不足": 0,
+          "需局部收窄": 4,
+          "宽度足够": 6605
+        },
+        "retained": 267,
+        "first_request_s": 3.5502,
+        "repeat_ms": 0.16
       }
     ]
   }

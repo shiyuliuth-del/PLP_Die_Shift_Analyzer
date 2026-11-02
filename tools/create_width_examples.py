@@ -43,7 +43,7 @@ def create():
   for y in (-500,500):rect(6,(x-5,y-5,x+5,y+5))
  # A fixed metal obstruction also creates a Pad-to-fixed-graphic channel.
  rect(5,(300,250,430,390))
- second=save(lib,cell,'示例N_三线路窄通道宽度',roles,order,'15/15 μm工艺，两个Pad包围区间距110 μm；3条线需105 μm。DIE1 DX=35时通道75 μm，仅容2条；成功预演型变后DX=-35时145 μm，可容4条；未型变的旧固定铜仍占空间。',Parameters(multi_bound_x_um=35,multi_bound_y_um=35,annulus_um=15))
+ second=save(lib,cell,'示例N_三线路窄通道宽度',roles,order,'两孔盘之间三条固定 RDL 线只连接固定过孔，V23 将其整块保留为固定障碍。需要验证有三根运动网络线路穿越的通道时，请打开示例 O。',Parameters(multi_bound_x_um=35,multi_bound_y_um=35,annulus_um=15))
  return first,second
 if __name__=='__main__':
  for p in create():print(p)

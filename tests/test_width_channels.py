@@ -12,7 +12,7 @@ from die_shift_studio.core import Parameters,GDSData,build_case
 from die_shift_studio.fast_preview import GeometryCache,PreviewEngine
 from die_shift_studio.project import normalize_project,OVERLAY_DEFAULTS
 from die_shift_studio.settings import ViewSettings
-from die_shift_studio.width_analysis import capacity,WidthAnalyzer,_crossings,holds_original,gate_rectangle,ADEQUATE,NARROW,BLOCKED
+from die_shift_studio.width_analysis import capacity,WidthAnalyzer,_crossings,holds_original,gate_rectangle,_intruders,ADEQUATE,NARROW,BLOCKED
 from tests.test_v21 import example
 
 CASE='示例O_运动网络三线路通道'
@@ -106,6 +106,15 @@ class ChannelTests(unittest.TestCase):
         answer=_crossings(np.array([[[-40,0],[40,0]]]),plane,1.e-8)[0]
         self.assertEqual([r[1:] for r in answer],[(6.,(('5/0',0),)),(6.,(('5/0',0),))])
 
+    def test_parallel_trace_has_zero_demand_but_a_bent_through_route_counts(self):
+        flat=box(-28,-3,28,3)
+        bend=shapely.union_all([flat,box(-28,-25,-22,2),box(22,-2,28,25)])
+        for trace,n in ((flat,0),(bend,1)):
+            plane=dict(routes=np.array([trace],object),boundaries=np.array([trace.boundary],object),
+                       tree=STRtree([trace]),route_sources=[[(('5/0',0),trace)]],width=6)
+            cut=np.array([[[-40,0],[40,0]]])
+            self.assertEqual(len(_crossings(cut,plane,1.e-8)[0]),n)
+
     def test_tolerance_and_enclosure_are_independent(self):
         d,q,c,p,e=example(CASE)
         e.close()
@@ -165,6 +174,21 @@ class ChannelTests(unittest.TestCase):
                    tree=STRtree([g]),route_sources=[[(('5/0',1),g)]],width=8)
         strand=_crossings(np.array([[[-40,0],[40,0]]]),plane,1.e-8)[0][0]
         self.assertAlmostEqual(strand[1],10.)  # the longer oblique chord is not the linewidth
+
+    def test_fast_barrier_lookup_matches_exact_geometry_including_tangency(self):
+        # Identical bounding boxes are not sufficient for a diagonal line.
+        lines=shapely.linestrings([[(0.,0.),(100.,100.)],[(0.,2.),(100.,2.)],
+                                   [(5.,0.),(5.,100.)],[(0.,0.),(0.,0.)]])
+        walls=np.array([box(-10,-10,0,0),box(100,100,110,110),box(38,44,43,60),
+                        box(40,40,50,55),box(4,40,5,55),box(1,2,3,3)],object)
+        pairs=np.tile([0,1],(len(lines),1))
+        actual=_intruders(lines,pairs,walls,STRtree(walls),1.e-8)
+        for i,line in enumerate(lines):
+            expected=set()
+            if line.length>2.e-8:
+                trimmed=shapely.LineString([line.interpolate(1.e-8),line.interpolate(-1.e-8)])
+                expected={j for j in range(2,len(walls)) if trimmed.intersects(walls[j])}
+            self.assertEqual(set(actual.get(i,[])),expected)
 
     def test_jobs_with_retired_fields_keep_independent_options(self):
         for version in range(1,6):
