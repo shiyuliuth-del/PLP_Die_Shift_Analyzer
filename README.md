@@ -1,10 +1,15 @@
-# Die Shift Analyze V21
+# Die Shift Analyze V22
 
-GDS芯片偏移分析，长度单位为μm。V21修复不同芯片金属起始层导致的Pad不随动，增加当前姿态的局部宽度分析（落盘 air-gap，含固定RDL重构预演）；用彩色矩形标记窄口、用轮廓高亮风险线路。失败型变保留原图并说明原因。
+当前唯一长期主线为 **main**，规范仓库为 [shiyuliuth-del/PLP_Die_Shift_Analyzer](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer)（末尾有r）。V22接入用户2026-11-02提供的 `1102.zip`；算法行为沿用附件，保留旧tag以供复现。
 
-- [本版使用说明（随源码提供）](docs/V21_使用说明.md)
+**参与开发前必读：** [AGENTS.md](AGENTS.md) → [Agent.md](Agent.md) → [设计要求](docs/DESIGN_REQUIREMENTS.md) → [1102交接记录](docs/BASELINE_1102.md) → [已知问题](docs/KNOWN_ISSUES.md)。提交使用[PR模板](.github/pull_request_template.md)，合并后清理自己的任务分支。
+
+GDS芯片偏移分析，长度单位为μm。当前包含运动归属、概率/Space Map、原材料型变、落盘air-gap、直线修复补块与切分重构预演；各功能按自己的几何来源和验证范围解释。
+
+- [本版使用说明（随源码提供）](docs/V22_使用说明.md)
 - [研究报告](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/blob/main/DIE_SHIFT评估报告.md)
-- [本版图文验证报告](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/blob/main/docs/V21_操作与验证说明.md)
+- [1102接入与验证记录](docs/BASELINE_1102.md)
+- [首次V21历史图文验证（旧宽度口径）](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/blob/V21/docs/V21_操作与验证说明.md)
 
 源码ZIP不含图片或图表文件。界面图形和公式由程序动态绘制，报告图片单独提供。
 
@@ -75,7 +80,7 @@ python3 tools/validate_width_v21.py --gds /path/to/GD55_9-21.gds
 python3 tools/package_release.py
 ```
 
-本地Git首个提交保留v0.4.0基线`fef0933`，本版标签`V21`；本版源码快照发布到用户授权的私有GitHub仓库，历史大型分析数据不上传。发布ZIP包含文件哈希与独立解压后的验证记录。附件图纸本身不打入通用包。
+本地Git首个提交保留v0.4.0基线`fef0933`，本版标签`V22`；本版源码快照发布到用户指定的GitHub仓库，历史大型分析数据不上传。发布ZIP包含文件哈希与独立解压后的验证记录。附件图纸本身不打入通用包。
 
 全输入模型良率统计全部真实运动孔接口同时无异网接触的概率，包含安全内盒外状态；默认蒙特卡洛与99%联合置信区间，也可选不随机采样的状态盒积分。各DIE独立、同DIE各孔共用姿态。仅针对原始固定RDL接口，不代表含其他缺陷的实际生产良率。设置中可调整样本量或确定性预算。
 

@@ -1,0 +1,24 @@
+{
+  "version": "V22",
+  "archive_sha256": "5251f6ac4bbce60f68428d8e9d0dc04ea527b76d947d029837aa0b463f3fe6b2",
+  "archive_bytes": 2174702,
+  "manifest_payloads": 226,
+  "executed_commands": 24,
+  "all_packaged_commands_passed": true,
+  "package_core_tests": 234,
+  "package_core_skipped": 1,
+  "external_fixture_separate_run": {
+    "gds_sha256": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+    "test": "test_user_gds_522_vertex_shape_restored_against_klayout_area (test_v060.Revision060Tests.test_user_gds_522_vertex_shape_restored_against_klayout_area) ... ok",
+    "passed": true
+  },
+  "qt_suites": 6,
+  "cli_projects": 14,
+  "native_and_desktop_klayout_smoke": true,
+  "zip_crc": true,
+  "seven_zip": true,
+  "unzip": true,
+  "package_images": 0,
+  "known_issues": "See docs/KNOWN_ISSUES.md; K-01 through K-03 reproduced, K-04 static review.",
+  "windows_physical_test": false
+}
