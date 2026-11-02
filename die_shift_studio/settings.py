@@ -60,11 +60,7 @@ class ViewSettings:
     deformation_workers:int=0
     repair_landing_pad:bool=False
     repair_patch_width_um:float=0.
-    width_overlap_um:float=0.
-    width_search_radius_um:float=100.
-    width_gap_threshold_um:float=0.
-    width_mode:str='vertical'
-    reconstruction_enabled:bool=False
+    reconstruction_overlap_um:float=0.
     reconstruction_length_um:float=0.
     reconstruction_width_um:float=0.
     yield_method:str='monte_carlo'
@@ -78,6 +74,9 @@ class ViewSettings:
 
     @classmethod
     def from_dict(cls,values=None):
+        values=dict(values or {})
+        if 'reconstruction_overlap_um' not in values and 'width_overlap_um' in values:
+            values['reconstruction_overlap_um']=values['width_overlap_um']
         known={f.name for f in fields(cls)};q=cls(**{k:v for k,v in (values or {}).items() if k in known})
         choices={'yield_method':('monte_carlo','partition'),'acceleration':('auto','cpu','cuda'),'probability_method':('sobol','monte_carlo','quadrature'),
                  'space_cmap':('pastel','YlGnBu','BuPu','viridis','cividis'),
@@ -86,7 +85,6 @@ class ViewSettings:
                  'probability_cmap':('blue','teal','amber','rose','YlGnBu','BuPu','viridis','cividis','plasma','magma','turbo'),
                  'animation_strategy':('prepared','stream'),
                  'space_scope':('moving','package'),'deformation_continuity':('C1','C2'),'deformation_method':('bezier','arc'),
-                 'width_mode':('vertical','landing'),
                  'deformation_execution':('auto','serial','thread','process')}
         for key,allowed in choices.items():
             if getattr(q,key) not in allowed:raise ValueError('无效设置：'+key)
@@ -99,14 +97,14 @@ class ViewSettings:
                       deformation_route_candidates=(1,256),deformation_min_length=(1,20),deformation_corner_guard=(0,3),
                       deformation_joint_rounds=(0,32),deformation_workers=(0,16),safe_box_precision=(.0001,.1),
                       safe_box_budget=(32,32768),safe_box_starts=(1,6),safe_box_passes=(1,8),repair_patch_width_um=(0,10000),
-                      width_overlap_um=(0,10000),width_search_radius_um=(.001,100000),width_gap_threshold_um=(0,10000),
+                      reconstruction_overlap_um=(0,10000),
                       reconstruction_length_um=(0,100000),reconstruction_width_um=(0,10000))
         integers.update(('cache_max_entries','yield_sample_exponent','yield_box_budget','safe_box_budget','safe_box_starts','safe_box_passes','deformation_iterations','deformation_local_steps','deformation_route_candidates','deformation_joint_rounds','deformation_workers'))
         for key,(lo,hi) in limits.items():
             v=getattr(q,key)
             if not isinstance(v,(int,float)) or not math.isfinite(v) or not lo<=v<=hi or (key in integers and int(v)!=v):
                 raise ValueError(f'设置 {key} 超出范围 {lo}—{hi}')
-        for key in ('animation_enabled','probability_show_ranges','contact_marker_absolute','unadapted_marker_absolute','deformation_route_enabled','deformation_general_bands','repair_landing_pad','reconstruction_enabled'):
+        for key in ('animation_enabled','probability_show_ranges','contact_marker_absolute','unadapted_marker_absolute','deformation_route_enabled','deformation_general_bands','repair_landing_pad'):
             if not isinstance(getattr(q,key),bool):raise ValueError(key+'必须为布尔值')
         import re
         color=lambda v:isinstance(v,str) and re.fullmatch(r'#[0-9a-fA-F]{6}',v)
@@ -119,13 +117,7 @@ class ViewSettings:
         return cls(**data)
 
     def width_key(self):
-        """Everything the air-gap result depends on besides the pose.
-
-        One definition shared by the engine and the window, so the frame cache
-        and the analyzer configuration can never drift apart.
-        """
-        return (True,self.drc_tolerance_um,self.width_overlap_um,self.width_search_radius_um,
-                self.width_gap_threshold_um,self.width_mode)
+        return (True,'pad-channels-v23',self.drc_tolerance_um)
 
     def numeric_key(self):
         return tuple(getattr(self,k) for k in ('acceleration','probability_method','sample_exponent','random_seed',
@@ -133,7 +125,7 @@ class ViewSettings:
 
     def reconstruction_key(self):
         """Everything the reconstruction result depends on besides the pose."""
-        return (self.reconstruction_enabled,self.reconstruction_length_um,self.reconstruction_width_um,
-                self.width_overlap_um,self.drc_tolerance_um)
+        return (True,self.reconstruction_length_um,self.reconstruction_width_um,
+                self.reconstruction_overlap_um,self.drc_tolerance_um)
     def deformation_key(self):
         return (self.drc_tolerance_um,self.acceleration)+tuple(getattr(self,f.name) for f in fields(self) if f.name.startswith('deformation_'))

@@ -8,7 +8,7 @@ from urllib.parse import unquote
 ROOT=Path(__file__).resolve().parents[1]
 IMAGES={'.png','.jpg','.jpeg','.gif','.webp','.bmp','.tif','.tiff','.svg','.ico','.pdf'}
 DOCUMENTS=['AGENTS.md','Agent.md','CONTRIBUTING.md','README.md',
-           'docs/DESIGN_REQUIREMENTS.md','docs/BASELINE_1102.md','docs/KNOWN_ISSUES.md']
+           'docs/DESIGN_REQUIREMENTS.md','docs/Agents.md','docs/BASELINE_1102.md','docs/KNOWN_ISSUES.md']
 
 def main():
     tree=ast.parse((ROOT/'die_shift_studio/__init__.py').read_text(encoding='utf-8'))

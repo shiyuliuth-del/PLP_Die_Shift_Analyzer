@@ -21,7 +21,7 @@ def main():
     name = f'Die_Shift_Analyze_{__version__}_Source'
     target = ROOT / 'dist' / (name + '.zip')
     target.parent.mkdir(exist_ok=True)
-    files = [ROOT / p for p in ['README.md','main.py','die_shift_model.py','requirements.txt','run.sh','RUN.bat','SELECT_PYTHON.bat','BUILD_WINDOWS.bat','TEST_WINDOWS.bat','Die_Shift_Analyze.spec',f'docs/{__version__}_使用说明.md','AGENTS.md','Agent.md','CONTRIBUTING.md','.gitignore','.gitattributes','.github/pull_request_template.md','docs/DESIGN_REQUIREMENTS.md','docs/BASELINE_1102.md','docs/KNOWN_ISSUES.md','docs/imports/1102_source_manifest.json','results/1102_edge_audit.json']]
+    files = [ROOT / p for p in ['README.md','main.py','die_shift_model.py','requirements.txt','run.sh','RUN.bat','SELECT_PYTHON.bat','BUILD_WINDOWS.bat','TEST_WINDOWS.bat','Die_Shift_Analyze.spec',f'docs/{__version__}_使用说明.md','AGENTS.md','Agent.md','CONTRIBUTING.md','.gitignore','.gitattributes','.github/pull_request_template.md','docs/DESIGN_REQUIREMENTS.md','docs/Agents.md','results/width_V23.json','docs/BASELINE_1102.md','docs/KNOWN_ISSUES.md','docs/imports/1102_source_manifest.json','results/1102_edge_audit.json']]
     # Explicit source/data whitelist. No images, screenshots, old archives,
     # generated cache, user jobs or large historical report assets.
     for folder in ('die_shift_studio','examples','tests','tools'):
@@ -82,7 +82,7 @@ def main():
               'file_count_before_record': len(manifest), 'status': 'PASS', 'runs': records,
               'validation_scope':'Source/archive integrity and the executed checks; not a defect-free model or manufacturing signoff',
               'known_issues_document':'docs/KNOWN_ISSUES.md',
-              'boundary_audit':json.loads((ROOT/'results/1102_edge_audit.json').read_text(encoding='utf-8'))}
+              'historical_v22_boundary_audit':json.loads((ROOT/'results/1102_edge_audit.json').read_text(encoding='utf-8'))}
     record_text = json.dumps(record, ensure_ascii=False, indent=2)
     (ROOT / 'docs' / 'package_verification.json').write_text(record_text, encoding='utf-8')
     # Only add the verification record; the verified implementation stays byte-identical.

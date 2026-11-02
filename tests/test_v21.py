@@ -103,6 +103,6 @@ class V21Tests(unittest.TestCase):
    before=shapely.union_all([v['geometry'] for v in baseline]);after=shapely.union_all([v['geometry'] for v in f['deformation']['violations']])
    self.assertLess(after.difference(before).area,1e-8)
    quick=e.frame(np.array([[-17.5,0,0],[0,0,0]]),quick=True)
-   self.assertFalse(quick['width_analysis']['complete']);self.assertIsNot(frame_status(quick)['safe'],True)
+   self.assertTrue(quick['width_analysis']['complete']);self.assertEqual(quick['width_analysis']['examined'],0);self.assertIsNot(frame_status(quick)['safe'],True)
   finally:e.close()
 if __name__=='__main__':unittest.main()

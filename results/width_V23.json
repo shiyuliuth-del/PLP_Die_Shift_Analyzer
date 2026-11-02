@@ -1,0 +1,293 @@
+{
+  "version": "V23",
+  "hardware": {
+    "cpu": 8,
+    "total_memory_mb": 15708,
+    "available_memory_mb": 7930,
+    "workers": 6,
+    "process_workers": 3,
+    "policy": "预留2逻辑CPU与65%可用内存；原生几何/FFT使用线程；大型独立原图DRC与RDL候选搜索使用spawn进程；小任务串行"
+  },
+  "sample": {
+    "source": "示例O_运动网络三线路通道.gds",
+    "sha256": "bd6ec5d695a985356b89501e6e1e81edf1b042fe314d9fc62f8bb759ed802bc6",
+    "die_count": 2,
+    "states": [
+      {
+        "state": [
+          0,
+          0,
+          0
+        ],
+        "sections": 27,
+        "counts": {
+          "宽度不足": 0,
+          "需局部收窄": 0,
+          "宽度足够": 27
+        },
+        "retained": 12,
+        "first_request_s": 0.0952,
+        "repeat_ms": 0.098,
+        "central_gate": {
+          "nominal_gap_um": 110.0,
+          "gap_um": 110.0,
+          "original": 3,
+          "required": 3,
+          "current": 3,
+          "status": "宽度足够",
+          "widths_um": [
+            20.0,
+            15.0,
+            15.0
+          ],
+          "keep_um": 110.0,
+          "minimum_um": 105.0
+        }
+      },
+      {
+        "state": [
+          3,
+          0,
+          0
+        ],
+        "sections": 27,
+        "counts": {
+          "宽度不足": 0,
+          "需局部收窄": 4,
+          "宽度足够": 23
+        },
+        "retained": 12,
+        "first_request_s": 0.0107,
+        "repeat_ms": 0.092,
+        "central_gate": {
+          "nominal_gap_um": 110.0,
+          "gap_um": 107.0,
+          "original": 3,
+          "required": 3,
+          "current": 3,
+          "status": "需局部收窄",
+          "widths_um": [
+            20.0,
+            15.0,
+            15.0
+          ],
+          "keep_um": 110.0,
+          "minimum_um": 105.0
+        }
+      },
+      {
+        "state": [
+          35,
+          0,
+          0
+        ],
+        "sections": 27,
+        "counts": {
+          "宽度不足": 4,
+          "需局部收窄": 0,
+          "宽度足够": 23
+        },
+        "retained": 12,
+        "first_request_s": 0.0138,
+        "repeat_ms": 0.116,
+        "central_gate": {
+          "nominal_gap_um": 110.0,
+          "gap_um": 75.0,
+          "original": 3,
+          "required": 3,
+          "current": 2,
+          "status": "宽度不足",
+          "widths_um": [
+            20.0,
+            15.0,
+            15.0
+          ],
+          "keep_um": 110.0,
+          "minimum_um": 105.0
+        }
+      },
+      {
+        "state": [
+          -35,
+          0,
+          0
+        ],
+        "sections": 27,
+        "counts": {
+          "宽度不足": 0,
+          "需局部收窄": 0,
+          "宽度足够": 27
+        },
+        "retained": 12,
+        "first_request_s": 0.0114,
+        "repeat_ms": 0.08,
+        "central_gate": {
+          "nominal_gap_um": 110.0,
+          "gap_um": 145.0,
+          "original": 3,
+          "required": 3,
+          "current": 4,
+          "status": "宽度足够",
+          "widths_um": [
+            20.0,
+            15.0,
+            15.0
+          ],
+          "keep_um": 110.0,
+          "minimum_um": 105.0
+        }
+      }
+    ]
+  },
+  "gd55": {
+    "source": "GD55_9-21.gds",
+    "sha256": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+    "die_count": 3,
+    "states": [
+      {
+        "state": [
+          0,
+          0,
+          0
+        ],
+        "sections": 6609,
+        "counts": {
+          "宽度不足": 0,
+          "需局部收窄": 0,
+          "宽度足够": 6609
+        },
+        "retained": 267,
+        "first_request_s": 21.3929,
+        "repeat_ms": 0.139
+      },
+      {
+        "state": [
+          -35,
+          -35,
+          -1
+        ],
+        "sections": 6609,
+        "counts": {
+          "宽度不足": 0,
+          "需局部收窄": 5,
+          "宽度足够": 6604
+        },
+        "retained": 267,
+        "first_request_s": 2.3089,
+        "repeat_ms": 0.15
+      },
+      {
+        "state": [
+          -35,
+          -35,
+          1
+        ],
+        "sections": 6609,
+        "counts": {
+          "宽度不足": 0,
+          "需局部收窄": 15,
+          "宽度足够": 6594
+        },
+        "retained": 267,
+        "first_request_s": 2.0227,
+        "repeat_ms": 0.098
+      },
+      {
+        "state": [
+          -35,
+          35,
+          -1
+        ],
+        "sections": 6609,
+        "counts": {
+          "宽度不足": 0,
+          "需局部收窄": 1,
+          "宽度足够": 6608
+        },
+        "retained": 267,
+        "first_request_s": 2.8681,
+        "repeat_ms": 0.238
+      },
+      {
+        "state": [
+          -35,
+          35,
+          1
+        ],
+        "sections": 6609,
+        "counts": {
+          "宽度不足": 2,
+          "需局部收窄": 1,
+          "宽度足够": 6606
+        },
+        "retained": 267,
+        "first_request_s": 2.2743,
+        "repeat_ms": 0.205
+      },
+      {
+        "state": [
+          35,
+          -35,
+          -1
+        ],
+        "sections": 6609,
+        "counts": {
+          "宽度不足": 0,
+          "需局部收窄": 2,
+          "宽度足够": 6607
+        },
+        "retained": 267,
+        "first_request_s": 3.316,
+        "repeat_ms": 0.226
+      },
+      {
+        "state": [
+          35,
+          -35,
+          1
+        ],
+        "sections": 6609,
+        "counts": {
+          "宽度不足": 0,
+          "需局部收窄": 14,
+          "宽度足够": 6595
+        },
+        "retained": 267,
+        "first_request_s": 2.1714,
+        "repeat_ms": 0.096
+      },
+      {
+        "state": [
+          35,
+          35,
+          -1
+        ],
+        "sections": 6609,
+        "counts": {
+          "宽度不足": 0,
+          "需局部收窄": 0,
+          "宽度足够": 6609
+        },
+        "retained": 267,
+        "first_request_s": 2.4488,
+        "repeat_ms": 0.13
+      },
+      {
+        "state": [
+          35,
+          35,
+          1
+        ],
+        "sections": 6609,
+        "counts": {
+          "宽度不足": 0,
+          "需局部收窄": 4,
+          "宽度足够": 6605
+        },
+        "retained": 267,
+        "first_request_s": 3.5502,
+        "repeat_ms": 0.16
+      }
+    ]
+  }
+}

@@ -9,10 +9,38 @@ from die_shift_studio.plot_geometry import geometry_path
 from die_shift_studio.core import read_gds,build_case,Parameters
 from die_shift_studio.fast_preview import GeometryCache,PreviewEngine
 from die_shift_studio.settings import ViewSettings
-from die_shift_studio.width_analysis import COLORS
+from die_shift_studio.width_analysis import COLORS,gate_rectangle
 
 def fixture(name):
  q=json.loads((ROOT/'examples'/(name+'.json')).read_text(encoding='utf-8'));d=read_gds(ROOT/'examples'/q['gds_path']);c=build_case(d,q['roles'],layer_order=q['layer_order']);p=Parameters.from_dict(q['parameters']);return d,c,PreviewEngine(GeometryCache(d),c,q['roles'],{},p,{},c['connections'])
+
+def channel_figure(save):
+ d,c,e=fixture('示例O_运动网络三线路通道')
+ e.configure_width(True,ViewSettings())
+ fig,axes=plt.subplots(1,3,figsize=(9,3.6),layout='constrained')
+ values=[]
+ for ax,dx in zip(axes,[0,3,35]):
+  f=e.frame(np.array([[dx,0.,0.],[0.,0.,0.]]))
+  analysis=f['width_analysis']
+  for o in analysis['retained']:
+   ax.add_patch(PathPatch(geometry_path(o['geometry']),fc='#dbe6eb',ec='#78909c',lw=.8))
+  r=min((row for row in analysis['rows'] if row['pair']==('运动过孔孔盘 4/0 #1','运动过孔孔盘 4/0 #2')),key=lambda q:abs(q['point'][1]))
+  for key,i in r['refs']:
+   ax.add_patch(PathPatch(geometry_path(shapely.Polygon(d.layers[key][i])),fc='#eff3f5',ec=COLORS[r['status']],lw=1.0))
+  box=gate_rectangle(r,15,15)
+  ax.add_patch(PathPatch(geometry_path(box),fc=COLORS[r['status']],alpha=.22))
+  ax.add_patch(PathPatch(geometry_path(box),fc='none',ec=COLORS[r['status']],lw=1.4))
+  ax.annotate(f"{r['gap_um']:g} μm",xy=r['point'],xytext=(r['point'][0]+11,70),color='#414f59',fontsize=9,
+              arrowprops=dict(arrowstyle='->',lw=.8,color='#526777'),bbox=dict(fc='white',ec='none',alpha=.9,pad=1))
+  ax.set(xlim=(-163,163),ylim=(-145,145),aspect='equal',xlabel='X / μm',
+         title=f"DX {dx:+g} μm  ·  {r['status']}\n原可通 {r['original']}　必须 {r['required']}　现可通 {r['current']}")
+  ax.grid(color='#ecf1f3',linewidth=.5);ax.set_axisbelow(True)
+  values.append({k:r[k] for k in ('original','required','current','gap_um','status')})
+ axes[0].set_ylabel('Y / μm')
+ save(fig,'V23_channel_classes')
+ e.close()
+ return values
+
 
 def main():
  fonts={f.name for f in font_manager.fontManager.ttflist};font=next((f for f in ('Noto Sans CJK SC','Noto Sans CJK JP','Microsoft YaHei') if f in fonts),'DejaVu Sans')
@@ -36,27 +64,7 @@ def main():
  ax.set(xlim=(-1600,1800),ylim=(-550,1000),aspect='equal',xlabel='X / μm',ylabel='Y / μm',title='不同芯片可从不同金属层开始；外部 Pad 沿连接归属随动')
  ax.grid(color='#edf1f4',lw=.6);ax.set_axisbelow(True);ax.legend(handles=[Patch(fc='none',ec='#acb9c5',ls='--',label='名义图形'),Patch(fc='#78aaa2',label='DIE 1：+35 / −35 μm，−1°'),Patch(fc='#899dc2',label='DIE 2：−35 / +35 μm，+1°')],loc='lower center',bbox_to_anchor=(.5,-.22),ncol=3,frameon=False,fontsize=9)
  save(fig,'V21_local_stack_motion');e.close()
- d,c,e=fixture('示例N_三线路窄通道宽度');e.configure_width(True,ViewSettings(width_overlap_um=15.,width_gap_threshold_um=60.));fig,axes=plt.subplots(1,3,figsize=(11,4.4),layout='constrained');values=[]
- for ax,(dx,title) in zip(axes,[(0,'a  名义位置'),(35,'b  DIE 1 偏移 +35 μm'),(-35,'c  DIE 1 反向 −35 μm')]):
-  z=np.array([[dx,0.,0.],[0.,0.,0.]]);f=e.frame(z)
-  for i,g in enumerate(d.layers['5/0']):ax.add_patch(PathPatch(geometry_path(shapely.Polygon(g)),fc='#d9e4ee',ec='none'))
-  for v in f['layers']['4/0']['polygons']:
-   g=shapely.Polygon(v);ax.add_patch(PathPatch(geometry_path(g),fc='#397c85',ec='none'))
-  q=next(r for r in f['width_analysis']['rows'] if r['key']=='4/0' and r['index']==0)
-  values.append({k:q[k] for k in ('status','gap_um','land_radius_um','target')})
-  color=COLORS[q['status']];ax.add_patch(PathPatch(geometry_path(q['land']),fc=color,alpha=.13,ec=color,lw=1.3))
-  if q['link']:
-   (x0,y0),(x1,y1)=q['link']
-   ax.annotate('',xy=(x1,y1),xytext=(x0,y0),arrowprops=dict(arrowstyle='<->',color='#4e6470',lw=1.0))
-   ax.text((x0+x1)/2.,max(y0,y1)+18.,f"{q['gap_um']:.2f} μm",ha='center',fontsize=10,color='#33475a',
-           bbox=dict(fc='white',ec=color,alpha=.9,pad=1.4))
-  else:
-   ax.text(q['point'][0],150.,'R 内无',ha='center',fontsize=10,color='#33475a')
-  ax.set(xlim=(-210,210),ylim=(-175,205),aspect='equal',xlabel='X / μm',ylabel='Y / μm',
-         title=title+'\n'+f"落盘半径 {q['land_radius_um']:.1f} μm · air-gap {q['gap_um']:.2f} μm · {q['status']}")
-  ax.grid(color='#edf1f4',lw=.5);ax.set_axisbelow(True);ax.tick_params(labelsize=8)
- fig.supxlabel('示例 N 局部放大 · 落盘区＝过孔外扩 overlap 15 μm；异网固定RDL最短距离为 air-gap；虚线为标注阈值 60 μm',fontsize=11)
- save(fig,'V21_landing_air_gap');e.close()
+ values=channel_figure(save)
  d,c,e=fixture('示例F_逐芯片幅度与迭代窗口');e.configure_reconstruction(True,ViewSettings());f=e.frame(np.array([[35,0.,0.],[0.,0.,0.]]))
  piece=next(iter(f['reconstruction']['pieces']))
  fig,ax=plt.subplots(figsize=(6.6,5.6),layout='constrained')
@@ -87,5 +95,5 @@ def main():
             landing_diameters=f['reconstruction']['parameters']['landing_diameters'],
             movable_area_um2=piece['movable_area_um2'],scope=f['reconstruction']['scope'])
  e.close()
- (ROOT/'results/figures_V21.json').write_text(json.dumps(dict(source='examples/示例N_三线路窄通道宽度.gds',overlap_um=15.,threshold_um=60.,landings=values,reconstruction=recon,scope='Local landing air-gap inside radius R; no claim of complete DRC or global routability.'),ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+ (ROOT/'results/figures_V23.json').write_text(json.dumps(dict(channels=values,reconstruction=recon),ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
 if __name__=='__main__':main()

@@ -1,6 +1,6 @@
 # 多 Agent 协作与 GitHub 提交规范
 
-适用范围：本仓库全部源码、文档、示例和发布物。维护日期：2026-11-02。本文以 **V22（1102 协作基线）**编制；当前软件版本以`__init__.py`和README为准。原附件自身仍标记为V21，不能把它与此前已发布的V21标签混为一谈。
+适用范围：本仓库全部源码、文档、示例和发布物。维护日期：2026-11-02。本文以 **V23（固定 RDL 通道容量）**编制；当前软件版本以`__init__.py`和README为准。原附件自身仍标记为V21，不能把它与此前已发布的V21标签混为一谈。
 
 ## 1. 唯一可信主线与需求优先级
 
@@ -9,6 +9,8 @@
 - 历史 tag 保留用于复现；短期任务分支不是第二主线。禁止新增长期并行的 `master` / `develop` / `latest` 版本体系。
 - 最新用户明确指令 > 当前设计合同 > 历史说明。代码是当前行为的证据，不是“代码现有问题必须永远保留”的理由。未授权更改含义时，应记录分歧；接到修复任务后可按证据修正并同步文档。
 - 必读：[设计要求](docs/DESIGN_REQUIREMENTS.md)、[基线交接](docs/BASELINE_1102.md)、[已知问题](docs/KNOWN_ISSUES.md)。本轮接入专门记录了与本对话旧要求不同的1102行为。
+
+每轮从本地维护的 [Agents.md 轮次记录](docs/Agents.md) 开始，完成验证、记录新工程字段和兼容措施后通过 GitHub PR 集成。
 
 ## 2. 开工与并行协作
 
@@ -48,7 +50,7 @@ QT_QPA_PLATFORM=offscreen python3 tests/gui_repair.py
 | 改动 | 必查内容 |
 |---|---|
 | 归属/层序/旋转 | `test_v060.py`、`test_v21.py`、极端状态与M键；多芯片、外部扇出、推定归属 |
-| 落盘 air-gap | `test_width_airgap.py`；两种模式、半径、同网排除、重构后铜、缓存和动画 |
+| 固定 RDL 通道 | `test_width_channels.py`、示例 O 与 Qt 回归。验证三档、原宽、名义根数、固定障碍、工程恢复和动画 |
 | 直线补块 | `test_repair_patch.py`、`gui_repair.py`；仍接触时不补、新旧DRC分开、直径与定位 |
 | 切分重构 | `test_reconstruction.py`、`gui_v21.py`；斜线、串联落盘、共享铜、旋转、零裂隙 |
 | 几何型变/DRC | V12–V20相关核心测试；失败保留源铜、原材料随动、固定端、连通、最终全局复核 |
@@ -62,7 +64,7 @@ QT_QPA_PLATFORM=offscreen python3 tests/gui_repair.py
 
 ## 5. Commit 与 PR 要求
 
-- 使用明确的提交主题，例如 `Fix current-geometry air-gap candidate search`。一次提交只包含相干改动；来源导入、行为修复、规范整理可分开，方便审查与回退。
+- 使用明确的提交主题，例如 `Classify fixed-RDL channels by retained linewidth`。一次提交只包含相干改动；来源导入、行为修复、规范整理可分开，方便审查与回退。
 - 用明确路径 `git add -- <files>`；不使用 `git add .` 混入别人的产物。提交前检查 staged diff 和文件清单。
 - 源码/文档检查：`git -c core.whitespace=cr-at-eol diff --check -- . ':(exclude)figures/*.svg'`。SVG由绘图工具生成，允许其路径数据空白，不借此放过源码错误。
 - 每个完成任务推送自己的分支并创建指向 `main` 的PR，使用仓库模板。PR必须写：解决的问题、最终行为、变更文件、兼容/模型边界、实际测试命令与结果、未验证项、是否改变设计合同/缓存/工程格式。
@@ -80,7 +82,7 @@ QT_QPA_PLATFORM=offscreen python3 tests/gui_repair.py
 
 ## 7. 版本、源码ZIP与发布
 
-- 当前1102接入编号为V22，后续用户交付依次V23、V24。由集成者统一分配发布号；并行Agent不要各自占用同一个号。
+- 1102 接入标签为 V22，本轮为 V23，后续每轮依次递增。由集成者统一分配发布号；并行Agent不要各自占用同一个号。
 - 更新 `die_shift_studio/__init__.py`、README、当前使用说明、`AGENTS.md`入口链接及发布记录；旧tag及历史证据不改写。
 - 源码ZIP只包含运行源码、必要示例、规范/使用文档和验证记录，**不含图片（含SVG/PDF/图标）、日志、缓存、旧ZIP、exe**。图文报告保留在线，`.gitattributes`须令GitHub自动源代码归档同样排除图片。
 - 不能沿用输入附件内的旧 `SHA256SUMS.json` 或旧 `package_verification.json`。新包生成自己的清单，在独立解压目录运行测试，再做CRC、哈希和7-Zip检查。
