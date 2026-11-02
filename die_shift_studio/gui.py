@@ -1934,6 +1934,9 @@ class MainWindow(W.QMainWindow):
             count=self._cached_pose_counts.get(key,0);safe=status.get('safe') is True
             brush=QtGui.QBrush() if not count and not safe else QtGui.QBrush(self.cache_row_color(count,safe))
             check=('通过已检查规则' if safe else '存在已检查的问题' if status.get('safe') is False else '未作完整校验') if item else '名义位置 / 全局判定'
+            if not item:
+                zero=(self.result or {}).get('nominal_discrete_check',{}) if not self.dirty else {}
+                if zero.get('checked'):check+=' · 零位几何'+('通过' if zero['safe'] else '存在问题')
             if status.get('reason'):check+=' · '+status['reason']
             detail=f'{check}；当前工程同一评估输入下可复用缓存 {count} 项。绿色表示通过，蓝色表示其他已有缓存；颜色越深，缓存越多。'
             for col in range(self.extreme_table.columnCount()):

@@ -534,6 +534,7 @@ def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order
         result['focused_states']=len(RepresentativeExtremes.from_result(original_case,p,result,grid))
         counts=[grid.radices[r['owner']] for r in contact_model.records if grid.radices[r['owner']]>1]
         result['footprint_vias']=len(counts);result['footprint_poses']=sum(counts)
+        result['nominal_discrete_check']=status_for(factors,[0]*grid.count)
         result['extreme_validation']=[status_for(factors,row['choices']) for _,row in grid.page(0)]
         notify(100,'方案评估与离散极端校验完成')
     return result
