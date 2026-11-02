@@ -49,13 +49,13 @@ class PreviewTests(unittest.TestCase):
         with patch('die_shift_studio.core.resource_profile',return_value={'workers':2}):b=evaluate(self.data,self.roles,self.params)
         self.assertEqual(a['dies'],b['dies']);self.assertEqual(a['schemes'],b['schemes'])
     def test_resources_bounded(self):
-        profile=resource_profile();self.assertGreaterEqual(profile['workers'],1);self.assertLessEqual(profile['workers'],12);self.assertLessEqual(profile['workers'],max(1,profile['cpu']-2))
+        profile=resource_profile();self.assertGreaterEqual(profile['workers'],1);self.assertLessEqual(profile['workers'],profile['worker_capacity']);self.assertLessEqual(profile['workers'],max(1,profile['cpu']-2))
         self.assertLessEqual(profile['workers'],max(1,profile['cpu']-2))
-    def test_zero_variance_still_previews_nonzero_mean(self):
+    def test_all_zero_amplitudes_lock_die_at_physical_zero(self):
         p=replace(self.params,multi_bound_x_um=0,multi_bound_y_um=0,bound_angle_deg=0,mean_x_um=10)
         items=extreme_cases(self.case,p)
-        self.assertEqual(len(items),1);self.assertEqual(items[0]['name'],'组合 1')
-        np.testing.assert_array_equal(items[0]['states'][:,0],[10,10])
+        self.assertEqual(items.total,0);self.assertEqual(items.radices,[1,1])
+        np.testing.assert_array_equal(items.locals[0],np.zeros((1,3)))
     def test_old_manual_project_is_rejected(self):
         p=dict(self.project,geometry={'dies':[{}]})
         with self.assertRaisesRegex(ValueError,'手动边框'):normalize_project(p)

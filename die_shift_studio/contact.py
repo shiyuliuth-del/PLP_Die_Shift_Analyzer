@@ -20,6 +20,19 @@ class UnionFind:
         a,b=self.find(a),self.find(b)
         if a!=b:self.parent[b]=a
 
+def nearby_foreign(model,record,via,radius):
+    """Exact dwithin filter on nominal fixed planes; preserve record ordering."""
+    foreign=np.asarray(record['foreign'],int)
+    trees=getattr(model,'fixed_trees',None)
+    if not len(foreign) or not trees:
+        return foreign[shapely.dwithin(via,model.node_geometry[foreign],radius)]
+    hits=set()
+    for plane in {k.split('/')[0] for k in record['target_layers']}:
+        ids,tree=trees[plane]
+        hits.update(ids[i] for i in tree.query(via,predicate='dwithin',distance=radius))
+    return np.asarray([j for j in foreign if j in hits],int)
+
+
 class ContactModel:
     def __init__(self,data,case,roles,connections,cache=None,motions=None,parameters=None):
         from .layer_roles import canonical_roles
@@ -72,25 +85,50 @@ class ContactModel:
     def configure_parameters(self,p):
         signature=(p.per_die_enabled,p.rotation_center,p.rotation_x_um,p.rotation_y_um,tuple(tuple(v) for v in p.die_pivots))
         if getattr(self,'_pivot_signature',None)==signature:return
-        self.bound=self.cache.bind(self.case,self.motions,self.bound.keys,p);self._pivot_signature=signature
+        backend=getattr(self.bound,'acceleration','auto')
+        self.bound=self.cache.bind(self.case,self.motions,self.bound.keys,p);self.bound.acceleration=backend;self._pivot_signature=signature
     def spacing(self,record,p):return p.line_space_um
     def moved(self,poly,owner,states):
         if owner<0:return poly
         c=self.bound.centers[owner]
         return shapely.set_coordinates(poly,rigid_transform(shapely.get_coordinates(poly),c,states[owner]))
-    def current(self,states,p,replacements=None):
+    def current(self,states,p,replacements=None,counts_only=False,owners=None):
         self.configure_parameters(p)
         states=np.asarray(states);issues=[];regions=[];intrusions=[];tol=max(1e-9,self.data.dbu_um*1e-6)
         records=self.records
-        if not records:return dict(issues=[],regions=[],intrusions=[],problem_percent=0)
+        if not records:return np.zeros(len(states),int) if counts_only else dict(issues=[],regions=[],intrusions=[],problem_percent=0)
         if not hasattr(self,'_record_geometry'):
             self._record_geometry=np.array([r['poly'] for r in records],object)
-            self._record_coordinates=shapely.get_coordinates(self._record_geometry)
+            self._via_owners=np.array([r['owner'] for r in records]);self._record_coordinates=shapely.get_coordinates(self._record_geometry)
             self._record_owners=np.repeat([r['owner'] for r in records],shapely.get_num_coordinates(self._record_geometry))
             self._record_planes=[{self.nodes[j]['key'].split('/')[0] for j in r['lower']} for r in records]
-        coordinates=self.bound.transform_points(self._record_coordinates,self._record_owners,states)
-        vias=shapely.set_coordinates(self._record_geometry.copy(),coordinates)
+        selection=None
+        if counts_only and owners is not None:
+            selection=np.flatnonzero(np.isin(self._via_owners,list(owners)))
+            if not len(selection):return np.zeros(len(states),int)
+            shapes=self._record_geometry[selection]
+            xy,ids=shapely.get_coordinates(shapes,return_index=True)
+            coordinates=self.bound.transform_points(xy,self._via_owners[selection][ids],states)
+        else:
+            shapes=self._record_geometry;coordinates=self.bound.transform_points(self._record_coordinates,self._record_owners,states)
+        vias=shapely.set_coordinates(shapes.copy(),coordinates)
         radius=p.annulus_um+p.line_space_um
+        pairs=[];overrides={};removed=set()
+        for key,values in (replacements or {}).items():
+            for q in values:
+                ids=[self.ids[key,index] for index in q['indices']]
+                overrides[ids[0]]=q['geometry'];removed.update(ids[1:])
+        for plane,(ids,tree) in self.fixed_trees.items():
+            if overrides:
+                ids=[j for j in ids if j not in removed]
+                tree=STRtree([overrides.get(j,self.nodes[j]['poly']) for j in ids])
+            a,b=tree.query(vias,predicate='dwithin',distance=radius+tol)
+            if selection is not None:a=selection[a]
+            pairs.extend((int(i),ids[int(j)]) for i,j in zip(a,b) if plane in self._record_planes[i] and records[i]['net']!=self.nodes[ids[j]]['net'])
+        if counts_only:
+            counts=np.zeros(len(states),int)
+            for i,_ in pairs:counts[records[i]['owner']]+=len(records[i]['schemes'])
+            return counts
         buffer_key=(p.annulus_um,radius)
         if getattr(self,'_buffer_key',None)!=buffer_key:
             self._buffer_key=buffer_key;self._buffer_templates=[]
@@ -103,17 +141,6 @@ class ContactModel:
         region_bounds=shapely.bounds(spacing)
         for i,r in enumerate(records):
             regions.append(dict(key=r['key'],index=r['index'],virtual=False,schemes=(1,2,3),annulus=annuli[i],spacing=spacing[i],bounds=region_bounds[i]))
-        pairs=[];overrides={};removed=set()
-        for key,values in (replacements or {}).items():
-            for q in values:
-                ids=[self.ids[key,index] for index in q['indices']]
-                overrides[ids[0]]=q['geometry'];removed.update(ids[1:])
-        for plane,(ids,tree) in self.fixed_trees.items():
-            if overrides:
-                ids=[j for j in ids if j not in removed]
-                tree=STRtree([overrides.get(j,self.nodes[j]['poly']) for j in ids])
-            a,b=tree.query(vias,predicate='dwithin',distance=radius+tol)
-            pairs.extend((int(i),ids[int(j)]) for i,j in zip(a,b) if plane in self._record_planes[i] and records[i]['net']!=self.nodes[ids[j]]['net'])
         if pairs:
             ri,ni=np.asarray(pairs).T;others=np.array([overrides.get(int(j),self.nodes[j]['poly']) for j in ni],object) if overrides else self.node_geometry[ni]
             distances=shapely.distance(vias[ri],others);intersections=shapely.intersection(spacing[ri],others)

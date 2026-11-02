@@ -39,7 +39,7 @@ class GeometryCache:
 
 class BoundGeometry:
     def __init__(self,cache,case,motions,keys,parameters=None):
-        self.cache=cache;self.case=case;self.keys=list(keys);self.owners={};self.vertex_owners={};self.workers=1;self.calibration=None
+        self.cache=cache;self.case=case;self.keys=list(keys);self.owners={};self.vertex_owners={};self.moving_owners={};self.workers=1;self.calibration=None
         from .pivots import rotation_centers
         self.centers=rotation_centers(case,parameters)
         for key in self.keys:
@@ -52,7 +52,7 @@ class BoundGeometry:
             else:
                 # Auxiliary graphics do not acquire an owner from XY proximity.
                 own=np.full(n,-2,np.int32)
-            self.owners[key]=own;self.vertex_owners[key]=np.repeat(own,q['counts']) if np.any(own>=0) else None
+            self.owners[key]=own;self.moving_owners[key]=np.unique(own[own>=0]);self.vertex_owners[key]=np.repeat(own,q['counts']) if len(self.moving_owners[key]) else None
         self.owner_radii=np.zeros(len(self.centers))
         for key in self.keys:
             owners=self.vertex_owners[key]
@@ -60,15 +60,13 @@ class BoundGeometry:
             valid=owners>=0;radius=np.linalg.norm(cache.layers[key]['flat'][valid]-self.centers[owners[valid]],axis=1)
             np.maximum.at(self.owner_radii,owners[valid],radius)
     def transform_points(self,points,owners,states):
-        points=np.asarray(points);owner=np.asarray(owners);indices=np.maximum(owner,0)
-        center=self.centers[indices];z=states[indices];a=points-center;c=np.cos(z[:,2]);s=np.sin(z[:,2])
-        out=np.column_stack((c*a[:,0]-s*a[:,1],s*a[:,0]+c*a[:,1]))+center+z[:,:2]
-        out[owner<0]=points[owner<0];return out
+        from .acceleration import rigid_points
+        return rigid_points(np.asarray(points),np.asarray(owners),self.centers,np.asarray(states),getattr(self,'acceleration','auto'))
     def transform(self,states,workers=None):
         states=np.asarray(states,float)
         def one(key):
             q=self.cache.layers[key];own=self.vertex_owners[key]
-            if own is None:return key,dict(polygons=q['nominal'],centers=q['centers'])
+            if own is None or not np.any(states[self.moving_owners[key]]):return key,dict(polygons=q['nominal'],centers=q['centers'])
             flat=self.transform_points(q['flat'],own,states)
             arrays=flat.reshape(-1,q['uniform'],2) if q['uniform'] else [flat[a:b] for a,b in zip(q['offsets'][:-1],q['offsets'][1:])]
             return key,dict(polygons=arrays,centers=self.transform_points(q['centers'],self.owners[key],states))
@@ -90,29 +88,36 @@ class BoundGeometry:
         return frames[self.workers]
 
 
-def check_frame(bound,roles,p,result,states,layers,scheme,connections=None,check_interfaces=True):
+def check_frame(bound,roles,p,result,states,layers,scheme,connections=None,check_interfaces=True,include_pairs=True,active_owners=None):
     case=bound.case;tol=max(1e-9,bound.cache.data.dbu_um*1e-6);failures=[]
-    def fail(kind,points):
-        for point in np.asarray(points).reshape(-1,2):failures.append(dict(kind=kind,point=point.tolist()))
-    if np.any(states):
+    def fail(kind,points,owners=None):
+        points=np.asarray(points).reshape(-1,2)
+        if owners is None:owners=[-1]*len(points)
+        failures.extend(dict(kind=kind,point=point.tolist(),owner=int(owner)) for point,owner in zip(points,owners))
+    if include_pairs and np.any(states):
         for key,owners in bound.owners.items():
             if roles.get(key) not in ('运动RDL','运动过孔'):continue
             for index in np.flatnonzero(owners<0):
                 fail(f'运动归属未解析：{key} #{index+1}，保持名义位置，不能判为随动通过',[bound.cache.layers[key]['centers'][index]])
     moved=[Polygon(rigid_transform(np.asarray(d.exterior.coords),c,z)) for d,c,z in zip(case['dies'],bound.centers,states)]
     for i,die in enumerate(moved):
-        if not case['board'].covers(die) or die.distance(case['board'].boundary)<=p.min_package_clearance_um+tol:fail(f'DIE {i+1}触碰封装净距边界',[die.centroid.coords[0]])
-        for j in range(i):
+        if active_owners is not None and i not in active_owners:continue
+        if not case['board'].covers(die) or die.distance(case['board'].boundary)<=p.min_package_clearance_um+tol:fail(f'DIE {i+1}触碰封装净距边界',[die.centroid.coords[0]],[i])
+        for j in range(i if include_pairs else 0):
             if die.distance(moved[j])<=p.min_die_gap_um+tol:fail(f'DIE {j+1}/{i+1}触碰芯片净距边界',[np.mean([die.centroid.coords[0],moved[j].centroid.coords[0]],axis=0)])
     obstacle_keys=[k for k in layers if roles.get(k)=='禁布区']
     if obstacle_keys:
         obstacles=np.concatenate([polygons_from_arrays(layers[k]['polygons']) for k in obstacle_keys]);tree=STRtree(obstacles)
         for key,layer in layers.items():
             if roles.get(key) not in ('运动过孔','固定过孔','运动RDL','固定RDL'):continue
-            polygons=polygons_from_arrays(layer['polygons'])
+            indices=np.arange(len(bound.owners[key]))
+            if active_owners is not None:indices=indices[np.isin(bound.owners[key],list(active_owners))]
+            if not len(indices):continue
+            polygons=polygons_from_arrays([layer['polygons'][i] for i in indices])
             if not np.all(shapely.is_valid(polygons)):raise ValueError(f'图层{key}含无效几何，无法检查禁布区')
             pairs=tree.query(polygons,predicate='intersects')
-            if pairs.size:fail(f'图层{key}触碰禁布区',layer['centers'][np.unique(pairs[0])])
+            if pairs.size:
+                hits=indices[np.unique(pairs[0])];fail(f'图层{key}触碰禁布区',layer['centers'][hits],bound.owners[key][hits])
     if check_interfaces:
         connections=connections or case.get('connections')
         from .contact import ContactModel
@@ -125,21 +130,23 @@ def check_frame(bound,roles,p,result,states,layers,scheme,connections=None,check
 
 class PreviewEngine:
     """One engine per geometry/role/motion generation; called by one UI worker."""
-    def __init__(self,cache,case,roles,motions,p,result,connections,cache_group=None,cache_identity=None):
-        self.bound=cache.bind(case,motions,[k for k in cache.layers if roles.get(k)!='不参与'],p)
+    def __init__(self,cache,case,roles,motions,p,result,connections,cache_group=None,cache_identity=None,contact_model=None):
+        self.bound=cache.bind(case,motions,[k for k in cache.layers if roles.get(k,'不参与')!='不参与'],p)
         self.roles=roles;self.p=p;self.result=result;self.connections=connections;self.cache_group=cache_group
         from .session_cache import SessionCache
         if cache_group is not None and cache_identity is not None:
             with cache_group.lock:
                 if cache_identity not in cache_group.frame_stores:cache_group.frame_stores[cache_identity]=SessionCache(group=cache_group)
                 self.frames=cache_group.frame_stores[cache_identity]
+                self.frames.pose_source=(cache_identity,'预演帧',None)
         else:self.frames=SessionCache(group=cache_group)
         self.deformer=None;self.deformers={}
         from .contact import ContactModel
-        self.contact=ContactModel(cache.data,case,roles,connections,cache,motions,p)
+        self.contact=contact_model if contact_model is not None else ContactModel(cache.data,case,roles,connections,cache,motions,p)
         from .session_cache import EphemeralCache
         self.intermediate=EphemeralCache()
     def configure_deformation(self,enabled,settings):
+        self.bound.acceleration=self.contact.bound.acceleration=settings.acceleration
         key=(bool(enabled and self.result is not None),*settings.deformation_key())
         if getattr(self,'deformation_key',None)==key:return
         if self.deformer is not None:self.deformer.release_workers()
@@ -149,6 +156,7 @@ class PreviewEngine:
         if key[0] and deformer is None:
             deformer=DeformationPreview(self.contact,self.p,self.result,settings,cache_group=self.cache_group)
             self.deformers[key]=deformer
+            deformer.cache.pose_source=(getattr(self,'signature',None),'型变',key)
         self.deformer=deformer;self.deformation_key=key
     def configure_drc(self,enabled,settings):
         key=(bool(enabled),settings.deformation_min_angle_deg,settings.drc_tolerance_um)
@@ -164,6 +172,7 @@ class PreviewEngine:
             if not hasattr(self,'width_analyzers'):self.width_analyzers={}
             if key not in self.width_analyzers:self.width_analyzers[key]=WidthAnalyzer(self.contact,self.p,settings,self.cache_group)
             self.width_analyzer=self.width_analyzers[key]
+            self.width_analyzer.cache.pose_source=(getattr(self,'signature',None),'宽度',key)
         self.width_key=key
     def configure_reconstruction(self,enabled,settings):
         key=settings.reconstruction_key() if enabled else (False,)
@@ -174,6 +183,7 @@ class PreviewEngine:
             if not hasattr(self,'reconstructors'):self.reconstructors={}
             if key not in self.reconstructors:self.reconstructors[key]=Reconstructor(self.contact,self.p,settings,self.cache_group)
             self.reconstructor=self.reconstructors[key]
+            self.reconstructor.cache.pose_source=(getattr(self,'signature',None),'重构',key)
         self.reconstruction_config=key
     def cache_key(self):
         return (getattr(self,'deformation_key',None),getattr(self,'drc_key',None),getattr(self,'width_key',(False,)),
@@ -258,12 +268,13 @@ class PreviewEngine:
         cached=self.frames.get(global_key)
         if cached is not None:return cached
         from .representatives import RepresentativeExtremes
-        catalogue=RepresentativeExtremes(self.bound.case,self.p)
-        poses=[q['states'] for q in catalogue];summaries=[];remaining={};released=set()
-        for i,states in enumerate(poses):
-            progress(round(95*i/max(1,len(poses))),f'全局型变预演 {i+1}/{len(poses)}')
-            f=self.frame(states,lambda n,t:progress(round(95*(i+n/100)/max(1,len(poses))),t))
-            d=f['deformation'];summaries.append(dict(name=catalogue[i]['name'],states=states.tolist(),
+        catalogue=RepresentativeExtremes.from_result(self.bound.case,self.p,self.result)
+        poses=[('名义位置',nominal['states'])]+[(q['name'],q['states']) for q in catalogue]
+        summaries=[];remaining={};released=set()
+        for i,(name,states) in enumerate(poses):
+            progress(round(95*i/len(poses)),f'全局重点型变预演 {i+1}/{len(poses)}')
+            f=nominal if i==0 else self.frame(states,lambda n,t:progress(round(95*(i+n/100)/len(poses)),t))
+            d=f['deformation'];summaries.append(dict(name=name,states=states.tolist(),
                 accepted=d['accepted_count'],best_effort=d.get('best_effort_count',0),initial=d['initial_blocked_count'],remaining=d['blocked_count'],released=d['released_count'],iterations=d['iterations']))
             for q in f['contact']['issues']:
                 identity=(q['source_layer'],q['source_index'],q['scheme'])
@@ -296,7 +307,7 @@ class PreviewEngine:
             issues.append(q)
             if identity not in remaining:released.add(identity[:2])
         out=dict(nominal);out['contact']=dict(nominal['contact'],issues=issues)
-        out['global_deformation']=dict(drc_tolerance_um=settings.drc_tolerance_um,statistics_match_saved_evaluation=current,target_sigma=self.p.target_nsigma,annulus_um=self.p.annulus_um,line_width_um=self.p.line_width_um,line_space_um=self.p.line_space_um,die_bounds=[[(self.p.for_die(i).single_bound_x_um if len(self.bound.centers)==1 else self.p.for_die(i).multi_bound_x_um),(self.p.for_die(i).single_bound_y_um if len(self.bound.centers)==1 else self.p.for_die(i).multi_bound_y_um),self.p.for_die(i).bound_angle_deg] for i in range(len(self.bound.centers))],states=summaries,best_effort_states=sum(bool(q.get('best_effort')) for q in summaries),representative_released=len(released),continuous_probability='待细化；带DRC候选不复用原概率上界；有限代表状态不构成连续概率证书',scope='代表状态最终布局，不是连续概率穷举')
+        out['global_deformation']=dict(discrete_package_states=catalogue.full.total+1,focused_shifted_states=catalogue.total,drc_tolerance_um=settings.drc_tolerance_um,statistics_match_saved_evaluation=current,target_sigma=self.p.target_nsigma,annulus_um=self.p.annulus_um,line_width_um=self.p.line_width_um,line_space_um=self.p.line_space_um,die_bounds=[[(self.p.for_die(i).single_bound_x_um if len(self.bound.centers)==1 else self.p.for_die(i).multi_bound_x_um),(self.p.for_die(i).single_bound_y_um if len(self.bound.centers)==1 else self.p.for_die(i).multi_bound_y_um),self.p.for_die(i).bound_angle_deg] for i in range(len(self.bound.centers))],states=summaries,best_effort_states=sum(bool(q.get('best_effort')) for q in summaries),representative_released=len(released),continuous_probability='待细化；带DRC候选不复用原概率上界；有限代表状态不构成连续概率证书',scope='代表状态最终布局，不是连续概率穷举')
         self.frames.pin(global_key);self.frames[global_key]=out
         progress(100,'全局代表状态型变完成；已标明连续概率未决项')
         return out

@@ -34,7 +34,7 @@ assert not hasattr(w,'verdict') and not hasattr(w,'safe_range_caption')
 chosen=w.result['recommendation']['scheme'];assert chosen is not None
 assert all(w.scheme_table.item(chosen-1,j).background().color().name()=='#fff0d9' for j in range(4))
 for i,status in enumerate(w.result['extreme_validation'],1):
-    assert (w.extreme_table.item(i,0).background().color().name()=='#e3f2e5') == (status['safe'] is True)
+    assert ('通过已检查规则' in w.extreme_table.item(i,0).toolTip()) == (status['safe'] is True)
 # Physics/data unaffected by alpha; no default rectangular envelope artist.
 w.probability_toggle.setChecked(True);w.space_toggle.setChecked(True);wait()
 cmap=w.probability_colormap();alphas=cmap(np.array([0.,.001,.01,.1,1.]))[:,3]
@@ -64,5 +64,5 @@ for key,value in [('annulus_um',.1),('multi_bound_x_um',.01),('multi_bound_y_um'
     w.fields[key].setValue(value)
 wait();w.run_evaluation();wait()
 assert any(q['safe'] is True for q in w.result['extreme_validation'])
-assert any(w.extreme_table.item(i,0).background().color().name()=='#e3f2e5' for i in range(1,w.extreme_table.rowCount()))
+assert any('通过已检查规则' in w.extreme_table.item(i,0).toolTip() for i in range(1,w.extreme_table.rowCount()))
 w.close();app.processEvents();wait();tmp.cleanup();print('GUI_V16_PASS',flush=True)

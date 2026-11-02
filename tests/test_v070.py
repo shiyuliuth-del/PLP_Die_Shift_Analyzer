@@ -57,13 +57,13 @@ class Revision070Tests(unittest.TestCase):
         d,r,c,cache,con,m,p=fixture();cfg=ViewSettings(probability_method='quadrature',probability_cell_um=.25)
         q=probability_maps(cache,m.bound,r,p,masks=m.interface_masks,settings=cfg)['maps'][0]
         self.assertGreater((q['probability']>.99).sum(),1000);self.assertAlmostEqual(q['integrated_area_um2'],100,delta=.01)
-        # Highly non-circular footprint rotated 90 degrees must exchange extents.
+        # Frozen axes ignore bias; an active rotation about 90 degrees exchanges extents.
         d.layers['10/0'][0]=np.asarray(box(-4,-1,4,1).exterior.coords);c=build_case(d,r);m=ContactModel(d,c,r,c['connections'])
         outputs=[]
-        for angle in (0,90):
-            a=probability_maps(m.cache,m.bound,r,replace(p,mean_angle_deg=angle),masks=m.interface_masks,settings=cfg)['maps'][0]['probability']
+        for angle,amplitude in ((0,0),(90,0),(90,.0001)):
+            a=probability_maps(m.cache,m.bound,r,replace(p,mean_angle_deg=angle,bound_angle_deg=amplitude),masks=m.interface_masks,settings=cfg)['maps'][0]['probability']
             yy,xx=np.where(a>.5);outputs.append((np.ptp(xx),np.ptp(yy)))
-        self.assertEqual(outputs[0],outputs[1][::-1]);self.assertGreater(outputs[0][0],outputs[0][1]*3)
+        self.assertEqual(outputs[0],outputs[1]);np.testing.assert_allclose(outputs[0],outputs[2][::-1],atol=1);self.assertGreater(outputs[0][0],outputs[0][1]*3)
     def test_external_vias_every_feature_uses_linked_owner(self):
         project=normalize_project(json.loads((ROOT/'examples/示例D_芯片外扇出.json').read_text()))
         data=read_gds(ROOT/'examples'/project['gds_path']);roles=project['roles'];p=Parameters.from_dict(project['parameters'])

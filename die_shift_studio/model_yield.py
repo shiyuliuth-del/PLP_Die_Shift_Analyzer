@@ -50,7 +50,8 @@ class PhysicalMass:
 
 
 class DieEvent:
-    def __init__(self,model,p,owner):
+    def __init__(self,model,p,owner,backend='auto'):
+        self.backend=backend
         self.center=np.asarray(model.bound.centers[owner]);self.radius=p.annulus_um+p.line_space_um
         self.tol=max(1e-9,model.data.dbu_um*1e-6);self.polys=[];self.obstacles=[];self.levers=[]
         count=len(model.bound.centers);mu,cov,_=statistical_state(p,count);_,b=mean_and_bounds(p,count)
@@ -58,10 +59,10 @@ class DieEvent:
         for r in model.records:
             if r['owner']!=owner or not r['foreign']:continue
             vertices=shapely.get_coordinates(r['poly']);lever=float(np.linalg.norm(vertices-self.center,axis=1).max())
-            others=model.node_geometry[r['foreign']]
             via=self.move(np.array([r['poly']],object),mu)[0]
             reach=np.linalg.norm(b[:2])+2*lever*math.sin(min(math.pi,b[2])/2)
-            others=others[shapely.distance(via,others)<=self.radius+reach+self.tol]
+            from .contact import nearby_foreign
+            others=model.node_geometry[nearby_foreign(model,r,via,self.radius+reach+self.tol)]
             if len(others):
                 # Only this local part can touch anywhere in the full input box.
                 # Huge meandering foreign networks otherwise dominate every
@@ -94,14 +95,11 @@ class DieEvent:
         for poly,obstacle in zip(self.polys,self.obstacles):
             indices=np.flatnonzero(safe)
             if not len(indices):break
-            pose=states[indices];n=int(shapely.get_num_coordinates(poly))
-            co=np.repeat(np.cos(pose[:,2]),n);si=np.repeat(np.sin(pose[:,2]),n)
-            translation=np.repeat(pose[:,:2],n,axis=0)
-            def transform(xy):
-                v=xy-self.center
-                return np.column_stack((co*v[:,0]-si*v[:,1],si*v[:,0]+co*v[:,1]))+self.center+translation
-            moved=shapely.transform(np.full(len(pose),poly,object),transform)
-            safe[indices]=shapely.distance(moved,obstacle)>self.radius+self.tol
+            from .acceleration import rigid_pose_batch
+            pose=states[indices];xy=shapely.get_coordinates(poly)
+            moved=shapely.set_coordinates(np.full(len(pose),poly,object),
+                    rigid_pose_batch(xy,self.center,pose,self.backend).reshape(-1,2))
+            safe[indices]=~shapely.dwithin(moved,obstacle,self.radius+self.tol)
         return safe
 
 
@@ -118,7 +116,7 @@ def sample_die(model,parameters,cfg,owner,progress=lambda *_:None):
     if math.isinf(p.target_nsigma):return integrate_die(model,parameters,cfg,owner,progress)
     base=dict(die=owner+1,interfaces=sum(r['owner']==owner for r in model.records))
     if base['interfaces']==0:return dict(base,lower=0.,upper=1.,estimate=None,status='无可验证接口',samples=0,unknown=1.)
-    event=DieEvent(model,p,owner);mu,b=mean_and_bounds(p,count);kind,_=event.classify(mu-b,mu+b)
+    event=DieEvent(model,p,owner,cfg.acceleration);mu,b=mean_and_bounds(p,count);kind,_=event.classify(mu-b,mu+b)
     if kind:
         value=float(kind==1)
         return dict(base,lower=value,upper=value,estimate=value,status='整个输入盒已判定',samples=0,unknown=0.)
@@ -136,7 +134,7 @@ def integrate_die(model,parameters,cfg,owner,progress=lambda *_:None):
     p=parameters.for_die(owner);count=len(model.bound.centers)
     base=dict(die=owner+1,interfaces=sum(r['owner']==owner for r in model.records))
     if base['interfaces']==0:return dict(base,lower=0.,upper=1.,estimate=None,status='无可验证接口',boxes=0,unknown=1.)
-    event=DieEvent(model,p,owner)
+    event=DieEvent(model,p,owner,cfg.acceleration)
     if math.isinf(p.target_nsigma):
         state=np.zeros(3);kind,_=event.classify(state,state);value=float(kind==1)
         return dict(base,lower=value,upper=value,estimate=value,status='名义状态二值',boxes=1,unknown=0.)

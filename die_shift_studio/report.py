@@ -37,10 +37,12 @@ def report_document(r,motions=None,progress=lambda *_:None):
          f'截断前σx={math.sqrt(cov[0,0]):.8g} μm；σy={math.sqrt(cov[1,1]):.8g} μm；σθ={math.sqrt(cov[2,2]):.8g} rad；Z={Z:.12g}' if math.isfinite(p.target_nsigma) else '∞（无穷大符号）为当前几何二值模式，空白行检查名义位置，不表示无界正态尾部',
          'k可选择0～12或∞。公式中的尺度除数使用κ：非零有限k时κ=k，0时κ沿用最近有限级别（首次6）；0级α=0且不省略有界支持内尾部。B是围绕系统均值μ的最大随机偏移幅度；μ=0时DX/DY绝不超出±B。σ是截断前母正态尺度，截断后的实际标准差通常更小。Σ是母协方差，ρ为母X/Y相关系数，角度与平移独立；fN为母正态密度，H为允许状态盒，Z为盒内母概率，fT为归一化后密度。相关X/Y联合截断，不逐轴裁剪样本。零方差按确定值积分。∞模式不估计随机概率，未勾选覆盖范围时概率图只显示名义实体；勾选后显示按保留尺度计算的0级分布。')
     step('输入单边幅度的极端预演','每颗DIE的最大X/Y/转角幅度与均值',
-         [r'z_j=\mu_j+\varepsilon_jB_j,\quad\varepsilon_j\in\{-1,1\}',
-          r'\mu_j-B_j\leq z_j\leq\mu_j+B_j'],
-         '每颗芯片均包含8种三参数端点叠加；补充各DIE不利方向、芯片对和封装边界方向，合并重复行',
-         'z=(DX,DY,θ)，ε为端点符号。输入35 μm、均值0时平移端点为±35 μm；过孔实际位移包含旋转，可大于35 μm。代表列表不穷举所有多DIE笛卡尔积，连续概率判定独立于代表列表。可选的覆盖范围虚线包含相应连续刚体位置，不是等概率线；默认不绘制外包络。手动输入可超出最大幅度作指定工况检查，但不属于该概率模型支持范围。')
+         [r'B_{ij}=0:\quad S_{ij}=\{0\}','B_{ij}>0:\\quad S_{ij}=\\{0,\\mu_{ij}-B_{ij},\\mu_{ij}+B_{ij}\\}',
+          r'n_i=\prod_{j=1}^{3}|S_{ij}|,\qquad N=\prod_{i=1}^{m}n_i'],
+         f"逐芯片姿态数 {r.get('die_state_counts',[])}；整包含首行共 {r.get('discrete_states',0):,} 种。"
+         + (f"原图校验 {r['extreme_factors']['batches']} 批，另检查 {r['extreme_factors']['pair_states']} 个可能接近的芯片对姿态。重点非零姿态 {r.get('focused_states',0)} 个。离散足迹涉及 {r.get('footprint_vias',0)} 个运动孔，共 {r.get('footprint_poses',0)} 个实体位置。"
+            if (r.get('extreme_factors') or {}).get('checked') else '原图离散校验尚未完成。'),
+         'i 为芯片编号，j 分别取 DX、DY 和转角。μ 是系统偏差，B 是输入单边幅度。每轴集合 S 合并相同实际值。零幅度轴连同系统偏差锁在物理零位。nᵢ 是第 i 颗芯片的独立姿态数，N 是整包离散组合数。空白首行恢复名义全局判定。原图接口、包围、封装和障碍规则按归属合成，芯片间净距独立检查。离散足迹按各孔所属芯片全部姿态取实体并集；连续概率云按输入概率模型积分。多芯片耦合型变仅对重点姿态自动求解，全组合目录可逐行预演。')
     step('逐芯片旋转中心解析','共用或逐DIE旋转中心选项；GDS芯片边框；自定义相对坐标',
          [r'C=C_{\mathrm{die}}+c_{\mathrm{relative}}',r'T_z(P)=C+R(\theta)(P-C)+D'],
          '；'.join(f"DIE {row['die']}：{row.get('rotation_origin_mode','center')}，旋转中心{row.get('rotation_origin_um')} μm" for row in r['dies']),

@@ -9,7 +9,7 @@ def mean_and_bounds(p,count):
     bounds=np.array([p.single_bound_x_um if count==1 else p.multi_bound_x_um,
                      p.single_bound_y_um if count==1 else p.multi_bound_y_um,
                      math.radians(p.bound_angle_deg)])
-    return mu,bounds
+    return np.where(bounds>0,mu,0.),bounds
 
 def statistical_state(p,count):
     mu,bounds=mean_and_bounds(p,count)
@@ -21,44 +21,59 @@ def statistical_state(p,count):
     return mu,cov,k
 
 class ExtremeCatalog:
-    """Full lazy product of per-die mean and 26 signed input-boundary states.
+    """All discrete poses, indexed by mixed radix without allocating the product.
 
-    Counts use arbitrary-precision integers. The nominal all-zero state is
-    represented by the GUI blank row and excluded from numbered combinations.
+    Local digit 0 is always physical zero. Each active axis adds its distinct
+    lower and upper endpoints; a zero-amplitude axis is locked at zero.
     """
     def __init__(self,case,p):
-        self.count=len(case['dies']);self.k=1.;self.locals=[];self.labels=[]
+        self.count=len(case['dies']);self.k=1.;self.locals=[];self.labels=[];self.sign_digits=[]
         for owner in range(self.count):
-            mu,bounds=mean_and_bounds(p.for_die(owner),self.count);local=[mu];labels=['均值']
-            for signs in itertools.product((-1,0,1),repeat=3):
-                if not any(signs):continue
-                z=mu+bounds*np.asarray(signs)
-                if any(np.allclose(z,v,atol=1e-11,rtol=1e-12) for v in local):continue
-                local.append(z);labels.append(self._label(signs))
-            self.locals.append(np.array(local));self.labels.append(labels)
-        self.local_states=self.locals[0];self.local_labels=self.labels[0];self.radix=len(self.local_states)
+            mu,b=mean_and_bounds(p.for_die(owner),self.count)
+            values=[{0:0.,-1:float(mu[j]-b[j]) if b[j] else 0.,1:float(mu[j]+b[j]) if b[j] else 0.} for j in range(3)]
+            digits={};lookup={};local=[];labels=[]
+            for signs in itertools.product((0,-1,1),repeat=3):
+                pose=tuple(axis[sign] for axis,sign in zip(values,signs))
+                if pose not in digits:
+                    digits[pose]=len(local);local.append(pose)
+                    labels.append(self._label(tuple(sign if x!=0 else 0 for sign,x in zip(signs,pose))))
+                lookup[signs]=digits[pose]
+            self.locals.append(np.asarray(local));self.labels.append(labels);self.sign_digits.append(lookup)
         self.radices=[len(v) for v in self.locals]
-        self.skip_nominal=int(all(np.allclose(v[0],0,atol=1e-12,rtol=0) for v in self.locals))
-        self.total=math.prod(self.radices)-self.skip_nominal
+        self.local_states=self.locals[0];self.local_labels=self.labels[0];self.radix=self.radices[0]
+        self.total=math.prod(self.radices)-1
+
     @staticmethod
     def _label(signs):
-        return ' '.join(name+('+' if sign>0 else '−') for name,sign in zip(('X','Y','θ'),signs) if sign) or '均值'
-    def __getitem__(self,index):
+        return ' '.join(name+('+' if sign>0 else '−') for name,sign in zip(('X','Y','θ'),signs) if sign) or '不动'
+
+    def index(self,digits):
+        n=0
+        for radix,d in zip(self.radices,digits):n=n*radix+d
+        return n-1
+
+    def choices(self,index):
         if not isinstance(index,int) or not 0<=index<self.total:raise IndexError(index)
-        digits=[0]*self.count;n=index+self.skip_nominal
+        n=index+1;digits=[0]*self.count
         for die in range(self.count-1,-1,-1):n,digits[die]=divmod(n,self.radices[die])
+        return digits
+
+    def __getitem__(self,index):
+        digits=self.choices(index)
         states=np.array([v[d] for v,d in zip(self.locals,digits)])
-        descriptions=[f'DIE {i+1}: {self.labels[i][digit]}' for i,digit in enumerate(digits)]
-        return dict(name=f'组合 {index+1}',states=states,choices=digits,detail='；'.join(descriptions),
-                    kind='输入幅度边界全组合',k=self.k)
+        labels=[v[d] for v,d in zip(self.labels,digits)]
+        detail='；'.join(f'DIE {i+1}: {labels[i]}' for i in range(self.count) if self.radices[i]>1)
+        return dict(name=(labels[0] if self.count==1 else f'组合 {index+1}'),states=states,choices=digits,
+                    per_die_labels=labels,detail=detail,kind='离散极端组合',k=self.k)
+
     def page(self,page,size=64):
-        if page<0:raise ValueError('页码不可为负')
+        if page<0 or size<1:raise ValueError('页码或每页行数无效')
         start=page*size
         return [(i,self[i]) for i in range(start,min(start+size,self.total))]
-    def __len__(self):
-        # Python's len is limited to Py_ssize_t; large catalogues use .total.
-        return self.total
 
-PREVIEW_SCOPE=('每颗芯片含均值及26个输入幅度一/二/三参数组合，对所有芯片取完整笛卡尔积，按页生成，无组合截断。'
-               '预演不受目标σ放大；窗口判定另覆盖连续置信域；有限预演不等同穷尽连续分布。'
-               '单次几何问题的0/100%表示是否违规，不是随机事件发生概率。')
+    def __len__(self):return self.total
+    def __bool__(self):return self.total!=0
+
+
+PREVIEW_SCOPE=('活动轴取物理零位及均值±输入幅度，零幅度轴锁在零位。空白首行为全包不动，其余组合按页展开。'
+               '原图单芯片规则与可能接近的芯片对分别校验，合成各行的离散判定。连续接触概率与良率独立积分。')

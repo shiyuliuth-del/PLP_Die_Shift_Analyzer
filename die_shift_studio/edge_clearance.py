@@ -4,13 +4,14 @@ import numpy as np
 import shapely
 
 
-def edge_violations(model,states,parameters,settings,replacements=None):
+def edge_violations(model,states,parameters,settings,replacements=None,owners=None):
     replacements=replacements or {}
     board=getattr(model,'case',{}).get('board');out=[]
     if board is None:return out
     for key,role in model.roles.items():
         if role not in ('固定RDL','运动RDL'):
             continue
+        if owners is not None and role=='固定RDL':continue
         rule=(parameters.line_space_um if role=='固定RDL' else parameters.wafer_line_space_um)-getattr(settings,'drc_tolerance_um',0.)
         if rule<=0:
             raise ValueError(f'图层 {key} 的有效线距必须大于零')
@@ -26,6 +27,7 @@ def edge_violations(model,states,parameters,settings,replacements=None):
         for i,poly in enumerate(model.cache.layers[key]['geometry']):
             if i in hidden:continue
             node=model.nodes[model.ids[key,i]]
+            if owners is not None and node['owner'] not in owners:continue
             geo=model.moved(poly,node['owner'],states) if node['owner']>=0 and np.any(states[node['owner']]) else poly
             items.append(((i,),geo,node['net']))
         for q in replacements.get(key,[]):

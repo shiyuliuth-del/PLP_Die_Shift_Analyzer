@@ -86,6 +86,8 @@ class Field:
     def jacobian_bound(self):
         # ||D(T-I)|| < 1 is a global sufficient injectivity condition. It
         # prevents folds between sampled edges, not merely at drawn vertices.
+        if not math.isfinite(self.span) or self.span<=0 or not np.isfinite(self.inner).all():
+            return math.inf
         gradient=1.5 if self.settings.deformation_continuity=='C1' else 1.875
         points=np.array([r['center'] for r in self.records]);radii=self.inner+self.span
         owners=np.array([r['owner'] for r in self.records]);rates=2*np.abs(np.sin(self.states[:,2]/2))
@@ -93,6 +95,8 @@ class Field:
         factor=1. if self.settings.deformation_method=='bezier' else gamma/(2*math.sin(gamma/2))
         travel=np.array([np.linalg.norm(rigid_transform(point[None,:],self.centers[owner],self.states[owner])[0]-point) for point,owner in zip(points,owners)])
         coefficients=factor*gradient/self.span*(travel+rates[owners]*radii)
+        if not np.isfinite(coefficients).all():
+            return math.inf
         distances=np.linalg.norm(points[:,None,:]-points[None,:,:],axis=2)
         overlap=distances<=radii[:,None]+radii[None,:]
         # At any location all active supports intersect each other, so the
@@ -741,7 +745,9 @@ class DeformationPreview:
         travel=max(np.linalg.norm(rigid_transform(np.array([r['center']]),self.model.bound.centers[r['owner']],states[r['owner']])[0]-r['center']) for r in records)
         scale=max(p.line_width_um*2,travel*2,5.);last='未找到满足约束的过渡';best=None
         contour=self.contours.setdefault((c.key,c.indices),{});preferred=self.preferred_span.get((c.key,c.indices),0.)
-        spans=sorted(set([scale*cfg.deformation_growth**i for i in range(cfg.deformation_local_steps)]+([preferred] if preferred else [])))
+        # A material field may move the whole component rigidly (span = inf).
+        # Only a finite support length can be reused for a local transition.
+        spans=sorted(set([scale*cfg.deformation_growth**i for i in range(cfg.deformation_local_steps)]+([preferred] if 0<preferred<math.inf else [])))
         field_key=(c.key,c.indices,tuple((r['key'],r['index']) for r in records))
         def axial_fields():
             # Cross-section plateaus preserve the entire moving pad, and may
@@ -811,7 +817,7 @@ class DeformationPreview:
                 field.obstacles=routing_obstacles
             progress(20,f'型变搜索 · {c.key} · '+('三段追溯' if field.mode=='three_part' else '孔盘调整')+f' {attempt+1}')
             direct_contour=hasattr(field,'candidate_geometry')
-            if not direct_contour and field.jacobian_bound()>=.98 and not (hasattr(field,'injectivity_certificate') and field.injectivity_certificate(source)):
+            if not direct_contour and not (field.jacobian_bound()<.98) and not (hasattr(field,'injectivity_certificate') and field.injectivity_certificate(source)):
                 if hasattr(field,'injectivity_certificate') and field.mode!='axial':
                     field.gentle_profile=True
                     if not field.injectivity_certificate(source):last='无法证明位移场无折叠';continue

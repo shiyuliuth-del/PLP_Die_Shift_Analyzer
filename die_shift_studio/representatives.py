@@ -1,60 +1,64 @@
-"""Compact domain-boundary states; continuous assurance remains analytical."""
-import math
-from itertools import product
+"""Focused joint poses for costly, coupled copper deformation; the full grid is lazy."""
+from itertools import combinations,product
 import numpy as np
-from shapely.ops import nearest_points
-from .statistics import mean_and_bounds
+import shapely
+from .statistics import ExtremeCatalog,PREVIEW_SCOPE
+from .pivots import rotation_centers
+from .preview import rigid_transform
 
-PREVIEW_SCOPE=('预演采用输入均值±单边幅度的有界组合，与目标σ独立。列出8个XYZ角点组合、各芯片不利方向、最危险芯片对与封装边界方向。'
- '平移严格不超输入幅度；孔的实际位移另含绕所选旋转中心转动。代表预演不枚举多芯片全部组合，有界连续概率不能用有限代表状态替代；统计窗口另按目标σ计算。')
+
+def pair_tables(case,p,grid,tol):
+    centers=rotation_centers(case,p);polys=[];envelopes=[]
+    for i,(die,poses) in enumerate(zip(case['dies'],grid.locals)):
+        vertices=np.asarray(die.exterior.coords)
+        shapes=shapely.polygons(np.asarray([rigid_transform(vertices,centers[i],z) for z in poses]))
+        polys.append(shapes);envelopes.append(shapely.box(*shapely.total_bounds(shapes)))
+    candidates=shapely.STRtree(envelopes).query(envelopes,predicate='dwithin',distance=p.min_die_gap_um+tol)
+    tables=[]
+    for i,j in sorted((int(i),int(j)) for i,j in candidates.T if i<j):
+        distances=shapely.distance(polys[i][:,None],polys[j][None,:])
+        low=[int(v) for v in np.unravel_index(distances.argmin(),distances.shape)]
+        high=[int(v) for v in np.unravel_index(distances.argmax(),distances.shape)]
+        tables.append(dict(owners=[i,j],near=low,far=high,hits=(distances<=p.min_die_gap_um+tol).tolist()))
+    return tables
+
 
 class RepresentativeExtremes:
-    def __init__(self,case,p):
-        self.unbounded=False
-        self.items=[];m=len(case['dies']);mu,_=mean_and_bounds(p,m);bounds=np.array([mean_and_bounds(p.for_die(i),m)[1] for i in range(m)]);k=1.;self.k=k
-        nominal=np.tile(mu,(m,1));centers=__import__('die_shift_studio.pivots',fromlist=['rotation_centers']).rotation_centers(case,p)
-        def support(c,i):
-            return mu+bounds[i]*np.sign(c)
-        def add(name,states,detail):
-            if np.allclose(states,0,atol=1e-12,rtol=0):return
-            if any(np.allclose(states,e['states'],atol=1e-11,rtol=1e-12) for e in self.items):return
-            self.items.append(dict(name=name,states=np.asarray(states),kind=detail,detail=detail,per_die_labels=[detail]*m,k=k))
-        def jac(point,i):
-            a=np.asarray(point)-centers[i];c,s=math.cos(mu[2]),math.sin(mu[2]);bx,by=np.array([[c,-s],[s,c]])@a
-            return np.array([[1,0,-by],[0,1,bx]])
-        if np.any(mu):add('均值偏移',nominal,'输入均值')
-        for signs in product((-1,1),repeat=3):
-            label=' / '.join(axis+('+' if sign>0 else '−') for axis,sign in zip(('X','Y','O'),signs))
-            add(label,mu+bounds*np.array(signs),'输入单边幅度的平移与转角叠加组合')
-        vectors=[]
-        for i in range(m):
-            polygons=case['pins'][i]+case['outputs'][i]
-            points=np.array([poly.centroid.coords[0] for poly in polygons]) if polygons else np.asarray(case['dies'][i].exterior.coords)[:-1]
-            relative=points-centers[i];c,s=math.cos(mu[2]),math.sin(mu[2]);rot=relative@np.array([[c,s],[-s,c]])
-            js=np.zeros((len(points),2,3));js[:,0,0]=1;js[:,1,1]=1;js[:,0,2]=-rot[:,1];js[:,1,2]=rot[:,0]
-            vals,vec=np.linalg.eigh(js@np.diag(bounds[i]**2)@np.swapaxes(js,1,2));index=int(np.argmax(vals[:,-1]))
-            vectors.append(js[index].T@vec[index,:,-1])
-        for sign in (-1,1):add('各芯片最不利位移'+('−' if sign<0 else '+'),np.array([support(sign*v,i) for i,v in enumerate(vectors)]),'各芯片最大线性接口位移方向；精确刚体显示')
-        if m>1:
-            # Rank every pair by corner-envelope demand / nominal free gap.
-            corner=[np.linalg.norm(bounds[i,:2])+2*max(np.linalg.norm(np.asarray(d.exterior.coords)-centers[i],axis=1))*math.sin(min(math.pi,bounds[i,2])/2) for i,d in enumerate(case['dies'])]
-            pairs=[]
-            for i in range(m):
-                for j in range(i):
-                    gap=case['dies'][i].distance(case['dies'][j])-p.min_die_gap_um
-                    pairs.append(((corner[i]+corner[j])/gap if gap>0 else math.inf,i,j))
-            _,i,j=max(pairs);a,b=nearest_points(case['dies'][i],case['dies'][j]);a=np.array(a.coords[0]);b=np.array(b.coords[0]);u=b-a
-            if np.linalg.norm(u)<1e-12:u=centers[j]-centers[i]
-            u=u/max(np.linalg.norm(u),1e-12)
-            for sign,label in [(1,'相向'),(-1,'背向')]:
-                states=nominal.copy();states[i]=support(sign*jac(a,i).T@u,i);states[j]=support(-sign*jac(b,j).T@u,j)
-                add(f'DIE {j+1}/{i+1} {label}',states,'全体芯片对中输入幅度间隙比值最高的一对')
-        states=[]
-        for i,die in enumerate(case['dies']):
-            a,b=nearest_points(die,case['board'].boundary);a=np.array(a.coords[0]);u=np.array(b.coords[0])-a;u/=max(np.linalg.norm(u),1e-12)
-            states.append(support(jac(a,i).T@u,i))
-        add('各芯片趋近封装边界',np.array(states),'每颗芯片最近封装边界的支撑方向')
-        self.total=len(self.items)
-    def __getitem__(self,index):return self.items[index]
+    def __init__(self,case,p,full=None,coupled=(),pairs=None):
+        self.full=full if full is not None else ExtremeCatalog(case,p)
+        grid=self.full;n=grid.count;self.indices=[];self.names={};self.unbounded=False;self.k=1.
+        def add(digits,title):
+            index=grid.index(digits)
+            if index>=0 and index not in self.names:
+                self.indices.append(index);self.names[index]=title
+        zero=[0]*n
+        for i,local in enumerate(grid.locals):
+            for digit in range(1,len(local)):
+                d=zero.copy();d[i]=digit;add(d,f'DIE {i+1} · {grid.labels[i][digit]}')
+        for signs in product((0,-1,1),repeat=3):
+            add([lookup[signs] for lookup in grid.sign_digits],'同向 · '+grid._label(signs))
+        pairs=pair_tables(case,p,grid,1e-6) if pairs is None else pairs
+        self.pairs={tuple(info['owners']) for info in pairs}
+        for info in pairs:
+            i,j=info['owners']
+            for label,digits in [('相向',info['near']),('背向',info['far'])]:
+                d=zero.copy();d[i],d[j]=digits;add(d,f'DIE {i+1}/{j+1} {label}边界')
+        for i,j in sorted(self.pairs|{tuple(sorted(q)) for q in coupled}):
+            if len(grid.locals[i])==1 or len(grid.locals[j])==1:continue
+            for signs in product((-1,1),repeat=3):
+                d=zero.copy();d[i]=grid.sign_digits[i][signs];d[j]=grid.sign_digits[j][tuple(-s for s in signs)]
+                add(d,f'DIE {i+1}/{j+1} 反向 · '+grid._label(signs))
+        self.total=len(self.indices)
+
+    @classmethod
+    def from_result(cls,case,p,result,full=None):
+        result=result or {}
+        shared={pair for net in result.get('interdie_networks',()) for pair in combinations([i-1 for i in net['dies']],2)}
+        return cls(case,p,full,shared,(result.get('extreme_factors') or {}).get('pairs'))
+
+    def __getitem__(self,index):
+        if not 0<=index<self.total:raise IndexError(index)
+        key=self.indices[index];return dict(self.full[key],name=self.names[key])
     def __len__(self):return self.total
-    def page(self,page,size=64):return list(enumerate(self.items))[page*size:(page+1)*size]
+    def page(self,page,size=64):
+        return [(i,dict(self.full[i],name=self.names[i])) for i in self.indices[page*size:(page+1)*size]]

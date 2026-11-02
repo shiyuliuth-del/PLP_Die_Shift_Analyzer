@@ -79,8 +79,8 @@ with tempfile.TemporaryDirectory() as tmp:
         chosen=window.result['schemes'][window.result['recommendation']['scheme']-1]
         assert chosen['gamma']<=min(s['gamma'] for s in candidates)+1e-9
     else:assert window.result['recommendation']['scheme'] is None
-    assert 1<window.extreme_table.rowCount()<=16 and window.extremes.total<=15
-    assert all(window.extreme_table.item(0,j) is None for j in range(window.extreme_table.columnCount()))
+    assert window.extreme_table.rowCount()==65 and window.extremes.total==728
+    assert all(window.extreme_table.item(0,j).text()=='' for j in range(window.extreme_table.columnCount()))
     assert not window.detail.toPlainText() # report is lazy
     # Rapid requests must show only the newest selection.
     for row in (1,2,3,7):window.extreme_table.setCurrentCell(row,0)

@@ -31,7 +31,7 @@ def logical_fingerprint(value):
 class ProjectCacheGroup:
     def __init__(self,key,max_entries=2000):
         self.key=key;self.max_entries=max_entries;self.lock=threading.RLock()
-        self.caches={};self.recent=OrderedDict();self.pinned=set();self.bytes=0;self.enabled=True
+        self.caches={};self.recent=OrderedDict();self.pinned=set();self.bytes=0;self.enabled=True;self.revision=0
         self.values=None;self.motions=None;self.replays=OrderedDict();self.engines={};self.frame_stores={};self.last_assessment=None;self.nominal={}
     def register(self,cache):
         with self.lock:self.caches[id(cache)]=cache
@@ -42,11 +42,42 @@ class ProjectCacheGroup:
         if identity in records:records.move_to_end(identity)
     def stored(self,cache,key,delta):
         records=self.entries(cache);identity=(id(cache),key);new=identity not in records
-        self.bytes+=delta;records[identity]=None;records.move_to_end(identity)
+        self.revision+=1;self.bytes+=delta;records[identity]=None;records.move_to_end(identity)
         if key in cache.pinned:self.pinned.add(identity)
         if new:self.trim(records)
     def removed(self,cache,key,size):
-        identity=(id(cache),key);self.bytes-=size;self.entries(cache).pop(identity,None);self.pinned.discard(identity)
+        identity=(id(cache),key);self.revision+=1;self.bytes-=size;self.entries(cache).pop(identity,None);self.pinned.discard(identity)
+    def pose_inventory(self,signature,zero,previous=-1,config=None):
+        """Read key metadata only. Inspecting a row must never load or touch an LRU entry."""
+        if self.revision==previous or not self.lock.acquire(blocking=False):return None
+        try:
+            by_pose={}
+            def add(state,kind,identity):
+                by_pose.setdefault(state,set()).add((kind,identity))
+            for cache in self.caches.values():
+                tag=cache.pose_source
+                if tag and tag[0]==signature:
+                    _,kind,source_config=tag
+                    for key in cache.sizes:
+                        if kind=='预演帧':
+                            if key[0]=='global':state=zero
+                            elif key[2] is False:state=key[1]
+                            else:continue
+                        else:state=key if kind=='宽度' else key[0]
+                        add(state,kind,(source_config,key))
+            for key in self.motions.completed:
+                if key[1]==signature:
+                    for state in {key[3],key[4]}:add(state,'动画',key)
+            for key in self.values.sizes:
+                if isinstance(key,tuple) and len(key)>2 and key[0] in ('repair','package') and key[1]==signature:
+                    add(key[2] if key[2] is not None else zero,'补块' if key[0]=='repair' else '整包间距图',key)
+            result=(self.revision,{state:len(entries) for state,entries in by_pose.items()})
+            if config is None:return result
+            store=self.frame_stores.get(signature)
+            statuses={} if store is None else {key[1]:v for key,v in store.row_status.items() if key[0]==config}
+            return (*result,statuses)
+        finally:self.lock.release()
+
     def trim(self,records):
         pinned=len(self.pinned) if records is self.recent else 0
         while len(records)-pinned>self.max_entries:
@@ -120,7 +151,7 @@ class SessionCache(MutableMapping):
         self.budget=max(0,budget_bytes);self.memory=OrderedDict();self.sizes={};self.paths={};self.used=0
         self.directory=tempfile.TemporaryDirectory(prefix='die_shift_cache_')
         self.root=Path(self.directory.name);self.group=group;self.lock=group.lock if group is not None else threading.RLock();self.pinned=set()
-        self.hits=0;self.misses=0;self.closed=False;self.inflight={}
+        self.hits=0;self.misses=0;self.closed=False;self.inflight={};self.pose_source=None;self.completed=set();self.row_status={}
         if group is not None:group.register(self)
 
     def __getitem__(self,key):
@@ -150,7 +181,15 @@ class SessionCache(MutableMapping):
             filename=self.paths.setdefault(key,fingerprint(key))
             (self.root/filename).write_bytes(blob)
             self.sizes[key]=len(blob);self._remember(key,value)
-            if self.group is not None:self.group.stored(self,key,len(blob)-previous)
+            if self.group is not None:
+                if (self.pose_source and self.pose_source[1]=='预演帧' and key[0]!='global' and key[2] is False
+                        and isinstance(value,dict) and 'checks' in value):
+                    from .extreme_validation import frame_status
+                    q=frame_status(value);self.row_status[key]=dict(safe=q['safe'],checked=q['checked'],width_pending=q.get('width_pending',False))
+                if self is self.group.motions:
+                    if isinstance(value,dict) and value.get('complete'):self.completed.add(key)
+                    else:self.completed.discard(key)
+                self.group.stored(self,key,len(blob)-previous)
 
     def pin(self,key):
         with self.lock:
@@ -165,7 +204,7 @@ class SessionCache(MutableMapping):
             size=self.sizes.pop(key)
             if key in self.memory:self.memory.pop(key);self.used-=size
             (self.root/self.paths.pop(key)).unlink(missing_ok=True)
-            self.pinned.discard(key)
+            self.pinned.discard(key);self.completed.discard(key);self.row_status.pop(key,None)
             if self.group is not None:self.group.removed(self,key,size)
     def move_to_end(self,key):
         if key in self.memory:self.memory.move_to_end(key)

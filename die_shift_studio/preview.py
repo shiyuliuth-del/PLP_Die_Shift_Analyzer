@@ -14,7 +14,9 @@ def extreme_cases(case,p):
     return ExtremeCatalog(case,p)
 
 def rigid_transform(points,center,state):
-    dx,dy,theta=state;c,s=math.cos(theta),math.sin(theta)
+    dx,dy,theta=state
+    if theta==0:return np.asarray(points)+[dx,dy]
+    c,s=math.cos(theta),math.sin(theta)
     rot=np.array([[c,-s],[s,c]])
     return (np.asarray(points)-center)@rot.T+center+[dx,dy]
 
