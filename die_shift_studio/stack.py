@@ -53,7 +53,8 @@ class Connections:
         self.components={};self._component_geometry={}
         for i in range(len(self.nodes)):self.components.setdefault(self.same_plane.find(i),[]).append(i)
         def between(pair):
-            up,down=pair;lower=[(k,i,g) for k in down for i,g in enumerate(self.geometry[k])]
+            up,down=pair
+            lower=[(k,i,g) for k in down for i,g in enumerate(self.geometry[k])]
             if not lower:return []
             lp=np.array([q[2] for q in lower],object);tree=STRtree(lp);found=[]
             for uk in up:
@@ -79,12 +80,58 @@ class Connections:
             self._component_geometry[component]=shapely.union_all([self.nodes[i][2] for i in self.components[component]])
         return self._component_geometry[component]
     def fixed_interfaces(self,key,index):
+        """Copper of the fixed RDL a moving via lands on.
+
+        A 固定过孔 plane may sit between the moving via and the fixed RDL
+        (e.g. 4/0 运动过孔 → 2/0 固定过孔 → 7/0 固定RDL). The moving via still
+        lands on that 固定RDL electrically, so walk through fixed vias instead
+        of requiring the RDL to be directly adjacent.
+        """
         if self.roles.get(key)!='运动过孔':return []
-        out=[]
-        for links,side in [(self.outgoing[key].get(index,[]),'lower'),(self.incoming[key].get(index,[]),'upper')]:
-            for link in links:
-                if self.roles.get(link[side])=='固定RDL':out.append((link[side],link[side+'_index']))
-        return list(dict.fromkeys(out))
+        out=[];seen={(key,index)}
+        def walk(layer,at,depth):
+            if depth>8:return
+            for links,side in [(self.outgoing[layer].get(at,[]),'lower'),(self.incoming[layer].get(at,[]),'upper')]:
+                for link in links:
+                    other=link[side];other_index=link[side+'_index'];role=self.roles.get(other)
+                    if role=='固定RDL':out.append((other,other_index))
+                    elif role=='固定过孔' and (other,other_index) not in seen:
+                        seen.add((other,other_index));walk(other,other_index,depth+1)
+        walk(key,index,0)
+        if out:return list(dict.fromkeys(out))
+        return self._fixed_below(key,index)
+    def _layer_tree(self,key):
+        if not hasattr(self,'_trees'):self._trees={}
+        if key not in self._trees:
+            geometry=self.geometry.get(key)
+            self._trees[key]=STRtree(geometry) if geometry is not None and len(geometry) else None
+        return self._trees[key]
+    def _fixed_below(self,key,index):
+        """Fixed RDL copper directly under a via whose next plane is empty there.
+
+        A via layer such as 固定过孔 exists only where a via is drawn, so a
+        moving via with no fixed via underneath still lands on the fixed RDL
+        below. Stop at the first plane that really carries copper under the
+        via: fixed RDL answers, anything else blocks (an unconnected physical
+        plane is never jumped).
+        """
+        try:start=self.order.index(key)
+        except ValueError:return []
+        geometry=self.geometry[key][index]
+        for other in self.order[start+1:]:
+            role=self.roles.get(other)
+            if role not in PHYSICAL:continue
+            tree=self._layer_tree(other)
+            if tree is None:continue
+            hits=tree.query(geometry,predicate='intersects')
+            if not len(hits):continue
+            eps=max(1e-12,self.data.dbu_um**2*.01)
+            real=[int(i) for i in hits
+                  if shapely.area(shapely.intersection(geometry,self.geometry[other][int(i)]))>eps]
+            if not real:continue
+            if role=='固定RDL':return [(other,i) for i in real]
+            return []
+        return []
     def eligible(self,key):
         return np.array([bool(self.fixed_interfaces(key,i)) for i in range(len(self.geometry[key]))],bool)
     def resolve_ownership(self,case):
@@ -94,6 +141,15 @@ class Connections:
         uf=self.same_plane;sets={uf.find(i):set() for i in range(len(self.nodes))};down={k:set() for k in sets}
         for link in self.links:
             u=uf.find(self.ids[link['upper'],link['upper_index']]);v=uf.find(self.ids[link['lower'],link['lower_index']]);down[u].add(v)
+        # A via with no fixed via underneath still lands on the fixed RDL below
+        # (see fixed_interfaces); ownership must follow the same contact, or the
+        # via would lose its die as soon as the 固定过孔 layer is mapped.
+        for key in self.order:
+            if self.roles.get(key)!='运动过孔':continue
+            for i in range(len(self.geometry[key])):
+                if self.outgoing[key].get(i):continue
+                for layer,index in self._fixed_below(key,i):
+                    down[uf.find(self.ids[key,i])].add(uf.find(self.ids[layer,index]))
         # Different DIEs can end at different metal heights. Seed the deepest
         # actual terminal component for EACH DIE, not the global final plane.
         # A component with downward links is a carrier, never a new chip root:
@@ -124,10 +180,41 @@ class Connections:
             if self.roles[key] not in MOVING:continue
             for i,owners in enumerate(values):
                 if len(owners)!=1:self.ownership_notes.append(dict(layer=key,index=i+1,dies=[n+1 for n in owners],reason='连接多颗芯片，不能作单一刚体' if owners else '未沿相邻下层连接追溯到芯片；请检查该层用途、层序及名义接触'))
+        # Moving metal that reaches no chip through the stack still rides a die:
+        # the nearest one by geometry. Left unowned it would keep its nominal
+        # position while the rest of its die moved away, so every moved die would
+        # read as shorted against copper that should have travelled with it.
+        # Moving metal that reaches no chip - or reaches several - still rides
+        # the nearest die by geometry: a wire tying two chips together cannot be
+        # a single rigid body, but leaving it at its nominal position reads as a
+        # short against every moved die, so it follows its nearest one and the
+        # guess is reported instead of hidden.
+        self.positional_ownership=[]
+        for key,values in self.possible_owners.items():
+            if self.roles.get(key) not in MOVING:continue
+            for i,owners in enumerate(values):
+                if len(owners)==1:continue
+                geometry=self.geometry[key][i]
+                distances=[float(geometry.distance(die)) for die in case['dies']]
+                nearest=int(np.argmin(distances))
+                self.ownership[key][i]=nearest
+                self.positional_ownership.append(dict(layer=key,index=i+1,die=nearest+1,
+                                                      distance_um=round(distances[nearest],6),
+                                                      mode='shared' if owners else 'unconnected',
+                                                      dies=[n+1 for n in owners]))
+        if self.positional_ownership:
+            assigned={(q['layer'],q['index']) for q in self.positional_ownership}
+            self.ownership_notes=[q for q in self.ownership_notes
+                                  if (q['layer'],q['index']) not in assigned]
         return self.ownership
     def filter_case(self,case):return case
     def summary(self):
         return dict(layer_order=self.order,contact_count=len(self.links),
                     connected_by_layer={k:int(self.eligible(k).sum()) for k in self.order if self.roles.get(k)=='运动过孔'},
-                    ownership_notes=self.ownership_notes,chip_terminal_plane=sorted({k for row in getattr(self,'terminal_planes_by_die',[]) for k in row['layers']}),chip_terminal_planes_by_die=getattr(self,'terminal_planes_by_die',[]),ignored_empty_metal_layers=self.empty_metal_layers,
-                    rule='按上→下相邻非空金属连接追溯；各DIE最深的局部末端接触定义根；跨DIE扇出不按坐标就近归属；仅运动过孔—固定RDL界面参与不足和叠加')
+                    ownership_notes=self.ownership_notes,positional_ownership=self.positional_ownership,
+                    positional_ownership_count=len(self.positional_ownership),
+                    positional_shared_count=sum(q.get('mode')=='shared' for q in self.positional_ownership),
+                    positional_ownership_by_layer={k:sum(q['layer']==k for q in self.positional_ownership)
+                                                   for k in self.order if any(q['layer']==k for q in self.positional_ownership)},
+                    chip_terminal_plane=sorted({k for row in getattr(self,'terminal_planes_by_die',[]) for k in row['layers']}),chip_terminal_planes_by_die=getattr(self,'terminal_planes_by_die',[]),ignored_empty_metal_layers=self.empty_metal_layers,
+                    rule='按上→下相邻非空金属连接追溯；各DIE最深的局部末端接触定义根；跨DIE扇出不按坐标就近归属；完全没有连接到芯片、或同时连接多颗DIE的运动层金属按位置归到最近的DIE（记为推定归属）；仅运动过孔—固定RDL界面参与不足和叠加')

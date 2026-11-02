@@ -1,24 +1,54 @@
 {
   "source": "examples/示例N_三线路窄通道宽度.gds",
-  "channels": [
+  "overlap_um": 15.0,
+  "threshold_um": 60.0,
+  "landings": [
     {
-      "gap_um": 110.0,
-      "strands": 3,
-      "capacity": 3,
-      "status": "临界"
+      "status": "临界",
+      "gap_um": 17.5,
+      "land_radius_um": 80.79260732516146,
+      "target": {
+        "layer": "5/0",
+        "index": 2,
+        "net": 1,
+        "kind": "fixed"
+      }
     },
     {
-      "gap_um": 75.0,
-      "strands": 3,
-      "capacity": 2,
-      "status": "不足"
+      "status": "不足",
+      "gap_um": 0.0,
+      "land_radius_um": 80.79260732516146,
+      "target": {
+        "layer": "5/0",
+        "index": 2,
+        "net": 1,
+        "kind": "fixed"
+      }
     },
     {
-      "gap_um": 144.993,
-      "strands": 3,
-      "capacity": 4,
-      "status": "充足"
+      "status": "临界",
+      "gap_um": 52.5,
+      "land_radius_um": 80.79260732516146,
+      "target": {
+        "layer": "5/0",
+        "index": 2,
+        "net": 1,
+        "kind": "fixed"
+      }
     }
   ],
-  "scope": "Local width capacity; no claim of complete DRC or global routability."
+  "reconstruction": {
+    "source": "examples/示例F_逐芯片幅度与迭代窗口.gds",
+    "pieces": 1,
+    "bridges": 1,
+    "shift_um": 34.999999999999986,
+    "seam_um": 34.99999999999996,
+    "seam_length_um": 32.0,
+    "cover_area_um2": 1119.9999999999986,
+    "cut_distance_um": 56.418958354775626,
+    "landing_diameters": 2.5,
+    "movable_area_um2": 4765.40666735282,
+    "scope": "重构预演：软件自动把“运动过孔下方的固定RDL铜”划为可移动区——切分线垂直于该过孔下方那段铜的走向（与走线两侧都成90度）；同一块固定RDL上属于同一DIE、彼此相距不远的多个落盘视为一条串，切口不会落在两个相邻落盘之间，而是从这条串里最远的那一端再向外2.5个落盘直径（可在设置中改成具体距离），网络那一侧保持不动，含落盘的那一段为移动区；移动区按所属DIE的刚体变换移动到过孔新位置，两个切口面的4个端点围成的多边形作为补线盖住裂隙——不论裂隙大小（是否短路）都会补，只有两个切口面完全重合、或缝隙已被铜盖住时才不重复补。同一块固定RDL若跨多个芯片，移动区只取本DIE芯片边框（128/0）以内的铜，边框外的铜留在原位归相邻DIE，边框线本身也是一条切口并按同样的4端点补线；只有落盘允许跨出边框，以免过孔失去落盘。自动划分可能与人工划分不同，移动区面积与补线面积都列在表中供核对；这是重构预演，不代表产线实际做法、整图可布通或量产良率。"
+  },
+  "scope": "Local landing air-gap inside radius R; no claim of complete DRC or global routability."
 }

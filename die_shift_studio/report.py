@@ -25,8 +25,8 @@ def report_document(r,motions=None,progress=lambda *_:None):
     step('连接、芯片归属与跨芯片自动识别','同层接触与用户定义的相邻金属层重叠；逐DIE最深末端接触根',
          [r'E_{ij}=\mathbf{1}\{\operatorname{Area}(A_i\cap B_j)>\epsilon_A\},\quad\epsilon_A=\max(10^{-12},0.01\delta^2)',
           r'\mathcal{D}(A)=\bigcup_{B\in\mathrm{down}(A)}\mathcal{D}(B)'],
-         f"运动归属待确认{len(con.get('ownership_notes',[]))}个；跨芯片几何网络{len(r.get('interdie_networks',[]))}个",
-         'A、B为相邻层图形，δ为GDS网格（μm），εA为面积容差（μm²）。保留用户层序；空金属行不阻断连接。各DIE分别以最深的末端接触定义根，不能强迫不同堆叠共用一个全局底层。相邻参与金属层之间必须有真实面积重叠；即使某颗DIE局部没有中间层图形，也不跨过该参与层补造连接。此为几何推定，无法代替工艺网表。同层相连先合并，再沿下层追溯D(A)芯片集合；唯一根允许随动，多根/无根待确认，偏移时以橙色虚线标明并计入失败。全电连接分量包含两个以上DIE根即跨芯片网络。支持过孔—过孔、过孔—RDL等连接。只评估运动过孔与固定RDL的真实名义接口。芯片外扇出沿连接归属，绝不按最近芯片分配。')
+         f"运动归属待确认{len(con.get('ownership_notes',[]))}个；按位置归属{con.get('positional_ownership_count',0)}个；跨芯片几何网络{len(r.get('interdie_networks',[]))}个",
+         'A、B为相邻层图形，δ为GDS网格（μm），εA为面积容差（μm²）。保留用户层序；空金属行不阻断连接。各DIE分别以最深的末端接触定义根，不能强迫不同堆叠共用一个全局底层。相邻参与金属层之间必须有真实面积重叠；即使某颗DIE局部没有中间层图形，也不跨过该参与层补造连接。此为几何推定，无法代替工艺网表。同层相连先合并，再沿下层追溯D(A)芯片集合；唯一根允许随动，多根/无根待确认，偏移时以橙色虚线标明并计入失败。全电连接分量包含两个以上DIE根即跨芯片网络。支持过孔—过孔、过孔—RDL等连接。只评估运动过孔与固定RDL的真实名义接口。芯片外扇出沿连接归属，绝不按最近芯片分配。完全没有连接到的运动层金属按位置归到最近的DIE（逐个图形算到芯片图形的距离），这类归属会记在附录里。')
     step('最大输入幅度与统一统计模型',f'Bx={bounds[0]:g} μm；By={bounds[1]:g} μm；Bθ={p.bound_angle_deg:g}°；目标={fmt(p.target_nsigma)}',
          [r'\sigma_x=\frac{B_x}{\kappa},\quad\sigma_y=\frac{B_y}{\kappa},\quad\sigma_\theta=\frac{B_\theta\pi}{180\kappa}',
           r'\Sigma_{11}=\sigma_x^2,\quad\Sigma_{22}=\sigma_y^2,\quad\Sigma_{33}=\sigma_\theta^2',
@@ -191,21 +191,87 @@ def report_document(r,motions=None,progress=lambda *_:None):
     if adaptive:
         if not adaptive.get('statistics_match_saved_evaluation',True):blocks.append('<p>本表使用当前预演参数，与上次方案评估快照不同；重新点击方案评估可同步。目标σ='+h(fmt(adaptive['target_sigma']))+'；包围/固定线宽/固定线距（μm）='+h(str([adaptive['annulus_um'],adaptive['line_width_um'],adaptive['line_space_um']]))+'；逐芯片幅度（μm、μm、°）='+h(str(adaptive['die_bounds']))+'</p>')
         blocks.append('<h3>预演分析的迭代结果</h3><p>'+h(adaptive['continuous_probability'])+'</p>'+grid(['代表状态','初始不足','最终不足','释放','迭代轮数'],[[q['name'],q['initial'],q['remaining'],q['released'],len(q['iterations'])] for q in adaptive['states']]))
+    recon=r.get('preview_reconstruction')
+    if recon:
+        detail=recon['summary'];parameters=recon.get('parameters',{})
+        length=parameters.get('length_um',0)
+        where=(f"再往外 {fmt(length)} μm" if length>0
+               else f"{fmt(parameters.get('landing_diameters',0))} 个落盘直径处（自动）")
+        step('当前姿态的固定RDL重构预演',
+             f"软件按运动过孔自动划分固定RDL移动区：同一网络、彼此相距不远的落盘算作一条串，整条串只切一刀"
+             f"（切口垂直于该串的走线，量到串里最远的落盘再往外 {where}）；"
+             f"移动区按所属 DIE 的刚体变换移动（同一块固定RDL跨多个芯片时只取本 DIE 芯片边框 128/0 以内的铜，"
+             f"边框外的铜归相邻 DIE、留在原位）；裂隙用两个切口面的 4 个端点围成的多边形补上"
+             f"（不论是否短路都补，外扩 {fmt(parameters.get('width_um',0))} μm，0 表示正好覆盖切口）；"
+             f"之后用重构后的铜作为固定RDL跑落盘 air-gap",
+             [r'P_{\rm move}=C\cap\{p:(p-o)\cdot n\geq 0\}',
+              r"P'_{\rm move}=R_{\theta}(P_{\rm move}-c)+c+\Delta",
+              r'Q=\mathrm{conv}\{F_{0},F_{1},F^{\prime}_{1},F^{\prime}_{0}\}'],
+             f"移动区{detail['pieces']}段；补线{detail['bridges']}处；整块随动{detail['orphans']}块；"
+             f"贴合（裂隙为0）{detail.get('flush',0)}段；"
+             f"移动面积合计{fmt(detail['movable_area_um2'])} μm²；补线面积合计{fmt(detail.get('cover_area_um2',0))} μm²；"
+             f"最大位移{fmt(detail['max_shift_um'])} μm",
+             '同一块固定RDL上属于同一DIE、同一网络且彼此相距不超过判定距离的多个落盘视为一条串，只切一刀，切口不会落在两个相邻落盘之间。'
+             '切片n垂直于该串的走线（与走线两侧各成90°），o为切口位置（由串里最远的落盘再往外量出），取含过孔的整条串一侧为移动区；'
+             '若该固定RDL跨多个芯片，移动区再与本DIE的芯片边框（128/0）取交集，边框外的铜归相邻DIE留在原位，边框线本身也是一条切口。'
+             'c为该DIE的旋转中心，Δ为该DIE的位移（含转角θ）。'
+             'g_seam为移动区切口线与固定区切口线的间距（裂隙宽度）；补线Q为两个切口面的4个端点（每面两个：F0、F1 与它们随DIE移动后的 F1′、F0′）围成的四边形，'
+             '因此不论裂隙大小（是否短路）都会补，只有两面完全重合或缝隙已被铜盖住时才不重复补。'
+             '整块随动表示该图形整体都成了移动区，没有同网不动铜可以接；'
+             '裂隙为0（贴合）不是缺陷：被切开的这段铜沿DIE的运动方向继续延伸时，移动后必然压到留下的那段铜上，'
+             '换任何切线位置都拉不开，软件把它标成“贴合（由补线覆盖）”，由补线多边形把两者相接的地方盖住。'
+             '自动划分是软件猜测，可能与人工划分不同；本项是重构预演，不代表产线实际做法、整图可布通或量产良率。'
+             +recon.get('scope',''))
+        blocks.append(grid(['DIE','固定RDL层','图形','落盘数','网络','移动区面积 / μm²','位移 / μm','裂隙 / μm','补线面积 / μm²','切口缝长 / μm','状态'],
+            [[f"DIE{q['die']+1}",q['layer'],q['index']+1,len(q.get('vias',(1,))),q['net'],fmt(q['movable_area_um2']),fmt(q['shift_um']),
+              '—' if q['gap_um'] is None else fmt(q['gap_um']),
+              '—' if q.get('bridge_area_um2') is None else fmt(q['bridge_area_um2']),
+              '—' if q['bridge_length_um'] is None else fmt(q['bridge_length_um']),
+              ('整块随动（无不动铜可接）' if q['orphan'] else
+               ('贴合（由补线覆盖）' if (q['gap_um'] is not None and q['gap_um']<=1e-6 and q.get('bridge_area_um2') is not None)
+                else ('贴合（直接相接）' if (q['gap_um'] is not None and q['gap_um']<=1e-6)
+                      else ('无需补线（无切口面）' if q.get('bridge_area_um2') is None else '已补线'))))] for q in recon['pieces'][:100]]))
+        if len(recon['pieces'])>100:blocks.append(f"<p>重构移动区共{len(recon['pieces'])}块，报告列出前100块；“重构预演”表可定位当前全部块。</p>")
     width=r.get('preview_width_analysis')
     if width:
-        step('当前姿态的局部宽度分析','当前RDL（含已接受型变）、Pad包围区、固定图形、封装边缘；工艺线宽/线距及共同DRC容差',
-             [r'w=w_0-\tau,\quad s=s_0-\tau,\quad w>0,\ s>0',
-              r'N=\sum_j\max(n_j^{(0)},n_j^{(t)}),\quad W_{\rm need}=Nw+(N+1)s',
-              r'N_{\rm cap}=\max\left(0,\left\lfloor\frac{g-s}{w+s}\right\rfloor\right),\quad M=g-W_{\rm need}'],
+        parameters=width.get('parameters',{})
+        target_label=width.get('target_label','最近异网固定RDL')
+        tgt_noun=('其他网络的落盘区' if width.get('mode')=='landing' else '其他网络的固定RDL铜')
+        def nearest(q):
+            target=q.get('target')
+            if not target:return '—'
+            kind='固定RDL' if target.get('kind')=='fixed' else '过孔原始落盘'
+            return f"{target['layer']} #{target['index']+1}（{kind}，net {target['net']}）"
+        def owner(q):
+            return '—' if q.get('owner',-1)<0 else f"DIE{q['owner']+1}"
+        step('当前姿态的落盘 air-gap 分析',
+             f"分析对象：{width.get('mode_label','垂直方向固定RDL')}；运动过孔按 overlap {fmt(parameters.get('overlap_um',0))} μm 外扩作为落盘区；"
+             f"只在局部半径 R {fmt(parameters.get('radius_um',0))} μm 内查找{tgt_noun}；工艺线宽/线距及共同DRC容差",
+             [r'r_{\rm land}=r_{\rm via}+x_{\rm overlap}',
+              r'g=\min\{\mathrm{dist}(L,C)\},\qquad \mathrm{dist}(L,C)\leq R',
+              r'g<s_{\rm eff}\Rightarrow\mathrm{FAIL},\qquad g<\tau_{\rm anno}\Rightarrow\mathrm{WARN}'],
              '；'.join(f'{k}{v}处' for k,v in width['counts'].items()),
-             'w₀、s₀为该物理层工艺线宽/线距，τ为共用容差，均以μm计；正τ放宽、负τ收紧。混合规则取较大值。g为连接两侧边界的截面净宽，Pad先外扩最小包围量，再扣除与端点相连的实际铜区；两侧各保留s。nⱼ⁽⁰⁾、nⱼ⁽ᵗ⁾分别是第j个铜连通区在名义/当前截面内的独立穿越段数；同一网络的多次穿越不合并为一根。Pad压住线路时仍保留名义需求。N为需要通过的总根数；Ncap为可容根数；M为宽度余量。Ncap>N为绿色、相等为黄色、小于为红色。第三障碍分割通道时各空隙分别计算容量再相加，分配无法确认显示灰色。逐对检查最短截面，固定图形另检查代表点轴截面；具体姿态重新发现通道，不仅复用名义通道。有限截面检查不能穷尽任意曲线瓶颈，也不证明整图可布通；本项不改变模型良率或三方案评分。')
-        blocks.append('<p>以下为最近一次完成的宽度分析姿态；其计算独立于方案评估快照。</p>'+grid(['DIE','DX / μm','DY / μm','O / °'],[[i+1,fmt(z[0]),fmt(z[1]),fmt(math.degrees(z[2]))] for i,z in enumerate(width['states'])]))
+             'FAIL=不足（air-gap低于有效线距），WARN=临界（低于标注阈值）。'
+             'x为输入的落盘外扩量；r_via取过孔最小外接矩形短边的一半；L为落盘区，C为垂直方向固定RDL层上**其他网络**的铜，'
+             f"同网落盘不是风险、已排除。s_eff为有效线距（工艺线距−共同容差），标注阈值τ_anno默认等于s_eff，可在设置中放宽以提前预警。"
+             f"本次共检查{width.get('examined',0)}个运动过孔，其中{width.get('beyond_radius',0)}个在R内没有异网固定RDL铜。"
+             'air-gap只是R范围内的局部间距：R之外的铜未参与测量，通过不代表整图可布通、完整DRC通过或量产良率。本项不改变模型良率与三方案评分。')
+        blocks.append('<p>以下为最近一次完成的落盘air-gap分析姿态；其计算独立于方案评估快照。</p>'+grid(['DIE','DX / μm','DY / μm','O / °'],[[i+1,fmt(z[0]),fmt(z[1]),fmt(math.degrees(z[2]))] for i,z in enumerate(width['states'])]))
         selected=[q for q in width['rows'] if q['status']!='充足']
-        blocks.append(grid(['物理层','风险','净宽 / μm','需求根数','可容根数','需求宽度 / μm','位置 / μm'],[[q['plane'],q['status'],fmt(q['gap_um']),q['strands'],q['capacity'],fmt(q['required_um']),str([round(x,3) for x in q['point']])] for q in selected[:100]]))
-        if len(selected)>100:blocks.append(f'<p>风险截面共{len(selected)}处，报告列出前100处；图形下方“宽度分析”表可定位当前可见窄口。</p>')
+        blocks.append(grid(['风险','运动过孔','所属','落盘半径 / μm','air-gap / μm','有效线距 / μm',target_label,'位置 / μm'],
+                           [[q['status'],f"{q['key']} #{q['via_index']}",owner(q),fmt(q['land_radius_um']),
+                             '—' if q['gap_um'] is None else fmt(q['gap_um']),fmt(q['rule_space_um']),nearest(q),
+                             str([round(x,3) for x in q['point']])] for q in selected[:100]]))
+        if len(selected)>100:blocks.append(f'<p>风险落盘共{len(selected)}处，报告列出前100处；图形下方“宽度分析”表可定位当前全部风险行，图上最多标注200处尺寸。</p>')
     hidden={'per_die_enabled','die_bounds','die_pivots','input_nsigma','interdie','fixed_via_assignment','residual_budget_um','transition_length_um','max_route_angle_deg','routing_edge_keepout_um'}
     appendix='<h2>附录：输入与几何明细</h2>'+grid(['参数','含义/单位','值'],[[key,PARAMETER_DESCRIPTIONS.get(key,key),fmt(value,8)] for key,value in r['parameters'].items() if key not in hidden])
     appendix+=grid(['图层','图形编号','归属问题','可达DIE'],[[q['layer'],q['index'],q['reason'],q['dies']] for q in con.get('ownership_notes',[])])
+    positional=con.get('positional_ownership',[])
+    if positional:
+        appendix+=grid(['图层','图形编号','按位置归属','到该DIE的距离 / μm','归属依据'],
+                       [[q['layer'],q['index'],f"DIE{q['die']}",fmt(q['distance_um']),
+                         '同时连接多颗DIE，取最近' if q.get('mode')=='shared' else '完全没有连接，取最近'] for q in positional[:100]])
+    if len(positional)>100:appendix+=f"<p>按位置归属的运动图形共{len(positional)}个，报告列出前100个。</p>"
     appendix+=grid(['图层','随动设置'],list((motions or r.get('motions',{})).items()))
     appendix+=grid(['层/类型','原图形编号','忽略原因','名义边界'],[[q['layer'],q['index'],q['reason'],q['bounds']] for q in r.get('ignored_geometry',[])])
     html='<html><head><style>body{font-family:sans-serif;color:#263d52;}td,th{border-color:#cfdae5;}h3{color:#345b7b;}</style></head><body><h2>报告：输入 → 公式 → 输出</h2>'+'<p align="center" style="color:#9bb8cd;font-size:20pt">↓</p>'.join(blocks)+appendix+'</body></html>'

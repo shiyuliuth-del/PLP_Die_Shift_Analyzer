@@ -1,0 +1,38 @@
+{
+  "airgap_current_candidate_index": [
+    {
+      "via": 1,
+      "reported_gap_um": null,
+      "reported_status": "充足",
+      "independent_current_geometry_gap_um": 0.0,
+      "radius_um": 10
+    },
+    {
+      "via": 2,
+      "reported_gap_um": null,
+      "reported_status": "充足",
+      "independent_current_geometry_gap_um": 0.0,
+      "radius_um": 10
+    }
+  ],
+  "custom_pivot_frame_selection": {
+    "rotation_x_um": 3000.0,
+    "owner0_frame_found": false,
+    "areas": [
+      {
+        "die": 1,
+        "outside_own_die_and_landing_um2": 10567.583341910246
+      },
+      {
+        "die": 2,
+        "outside_own_die_and_landing_um2": 10567.583341910246
+      }
+    ]
+  },
+  "repair_preexisting_count": {
+    "post_marker_count": 1,
+    "added_region_count": 2,
+    "reported_preexisting": -1
+  },
+  "status": "KNOWN_FAILURES"
+}

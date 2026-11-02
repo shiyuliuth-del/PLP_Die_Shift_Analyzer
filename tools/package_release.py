@@ -21,7 +21,7 @@ def main():
     name = f'Die_Shift_Analyze_{__version__}_Source'
     target = ROOT / 'dist' / (name + '.zip')
     target.parent.mkdir(exist_ok=True)
-    files = [ROOT / p for p in ['README.md','main.py','die_shift_model.py','requirements.txt','run.sh','RUN.bat','SELECT_PYTHON.bat','BUILD_WINDOWS.bat','TEST_WINDOWS.bat','Die_Shift_Analyze.spec','docs/V21_使用说明.md']]
+    files = [ROOT / p for p in ['README.md','main.py','die_shift_model.py','requirements.txt','run.sh','RUN.bat','SELECT_PYTHON.bat','BUILD_WINDOWS.bat','TEST_WINDOWS.bat','Die_Shift_Analyze.spec',f'docs/{__version__}_使用说明.md','AGENTS.md','Agent.md','CONTRIBUTING.md','.gitignore','.gitattributes','.github/pull_request_template.md','docs/DESIGN_REQUIREMENTS.md','docs/BASELINE_1102.md','docs/KNOWN_ISSUES.md','docs/imports/1102_source_manifest.json','results/1102_edge_audit.json']]
     # Explicit source/data whitelist. No images, screenshots, old archives,
     # generated cache, user jobs or large historical report assets.
     for folder in ('die_shift_studio','examples','tests','tools'):
@@ -46,12 +46,14 @@ def main():
         for p in files:archive.writestr(entry(f'{name}/{p.relative_to(ROOT)}'),p.read_bytes())
         archive.writestr(entry(name+'/SHA256SUMS.json'),json.dumps(manifest,ensure_ascii=False,indent=2))
     commands = [
+        [sys.executable,'tools/check_contribution.py'],
         [sys.executable,'-m','unittest','discover','-s','tests','-p','test_*.py','-v'],
         [sys.executable,'tests/gui_smoke.py'],
         [sys.executable,'tests/gui_v14.py'],
         [sys.executable,'tests/gui_v20.py'],
         [sys.executable,'tests/gui_scheduler_v20.py'],
         [sys.executable,'tests/gui_v21.py'],
+        [sys.executable,'tests/gui_repair.py'],
         [sys.executable,'main.py','--smoke-test','results/package_source_smoke.json'],
         [sys.executable,'-c',"import os,runpy,sys; os.environ['DIE_SHIFT_NATIVE_BACKEND']='desktop'; sys.argv=['main.py','--smoke-test','results/package_desktop_smoke.json']; runpy.run_path('main.py',run_name='__main__')"],
     ]
@@ -66,18 +68,21 @@ def main():
         for rel, expected in manifest.items():
             assert hashlib.sha256((extracted / rel).read_bytes()).hexdigest() == expected, rel
         (extracted/'figures').mkdir(exist_ok=True);(extracted/'results').mkdir(exist_ok=True)
-        env = dict(os.environ, QT_QPA_PLATFORM='offscreen', OPENBLAS_NUM_THREADS='1')
+        env = dict(os.environ, QT_QPA_PLATFORM='offscreen', OPENBLAS_NUM_THREADS='1',PYTHONUTF8='1')
         for command in commands:
-            run = subprocess.run(command, cwd=extracted, env=env, text=True,
+            run = subprocess.run(command, cwd=extracted, env=env, text=True,encoding='utf-8',errors='replace',
                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=600)
             records.append({'command': command, 'returncode': run.returncode, 'output': run.stdout})
             print(run.stdout, end='', flush=True)
             if run.returncode:
                 raise SystemExit('Extracted archive validation failed: '+str(command)+' returncode='+str(run.returncode))
     record = {'version': __version__, 'package_revision':revision,'verified_at_utc': datetime.now(timezone.utc).isoformat(),
-              'method': 'Image-free source ZIP; fresh extraction, file hashes, all core tests, five Qt suites, actual installed KLayout desktop backend, source startup and sample CLI; no frozen build',
+              'method': 'Image-free source ZIP; fresh extraction, file hashes, all core tests, six Qt suites, actual installed KLayout desktop backend, source startup and sample CLI; no frozen build',
               'environment': 'Existing Linux Python environment; not a clean dependency-install or Windows test',
-              'file_count_before_record': len(manifest), 'status': 'PASS', 'runs': records}
+              'file_count_before_record': len(manifest), 'status': 'PASS', 'runs': records,
+              'validation_scope':'Source/archive integrity and the executed checks; not a defect-free model or manufacturing signoff',
+              'known_issues_document':'docs/KNOWN_ISSUES.md',
+              'boundary_audit':json.loads((ROOT/'results/1102_edge_audit.json').read_text(encoding='utf-8'))}
     record_text = json.dumps(record, ensure_ascii=False, indent=2)
     (ROOT / 'docs' / 'package_verification.json').write_text(record_text, encoding='utf-8')
     # Only add the verification record; the verified implementation stays byte-identical.

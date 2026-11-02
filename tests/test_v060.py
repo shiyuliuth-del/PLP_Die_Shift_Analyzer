@@ -65,18 +65,24 @@ class Revision060Tests(unittest.TestCase):
         np.testing.assert_array_equal(c['ownership']['40/0'],[0,1])
         m=ContactModel(d,c,r,c['connections']);self.assertEqual(m.records,[])
         self.assertTrue(c['connections'].links)
-    def test_multiple_roots_or_no_root_never_use_nearest_die(self):
+    def test_multiple_roots_and_no_root_both_fall_back_to_position(self):
+        #连接多颗芯片、或完全没有连接的运动层金属都按位置归到最近的DIE；
+        #这类推定归属单独记录，不再计入“归属待确认”。
         d,r,*_=traced_fixture();d.layers['30/0'].append(np.asarray(box(898,0,902,200).exterior.coords))
-        c=build_case(d,r);self.assertTrue(np.all(c['ownership']['40/0']==-2))
-        self.assertTrue(all(len(q['dies'])==2 for q in c['connections'].ownership_notes))
+        c=build_case(d,r)
+        self.assertTrue(np.all(np.isin(c['ownership']['40/0'],[0,1])))
+        shared=[q for q in c['connections'].summary()['positional_ownership'] if q.get('mode')=='shared']
+        self.assertTrue(shared);self.assertTrue(all(len(q['dies'])==2 for q in shared))
+        self.assertFalse(any('连接多颗芯片' in q['reason'] for q in c['connections'].ownership_notes))
         d,r,*_=traced_fixture();d.layers['10/0']=[]
         # Empty metal rows do not freeze valid local terminal stacks. For the
         # no-root contract, remove actual die contact instead of an empty row.
         d.layers['1/0']=[np.asarray(box(-1600,-2000,1600,2000).exterior.coords)]
         d.layers['2/0']=[a+np.array([0.,1000.]) for a in d.layers['2/0']]
         c=build_case(d,r)
-        self.assertTrue(np.all(c['ownership']['40/0']==-2))
-        self.assertEqual(ContactModel(d,c,r,c['connections']).records,[])
+        self.assertTrue(np.all(np.isin(c['ownership']['40/0'],[0,1])))
+        self.assertTrue(c['connections'].summary()['positional_ownership'])
+        self.assertTrue(all(0<=int(q['owner'])<=1 for q in ContactModel(d,c,r,c['connections']).records))
     def test_space_map_full_die_uniform_translation_and_rotation_gradient(self):
         d,r,c,cache,m,p=traced_fixture()
         flat=space_maps(m,replace(p,bound_angle_deg=0))
