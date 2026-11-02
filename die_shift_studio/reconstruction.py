@@ -369,7 +369,7 @@ class Reconstructor:
         return dict(movable=best['movable'],faces=best['faces'],distance=best['distance'],
                     span=best['span'])
 
-    def frame(self,states,deformation=None,progress=lambda *_:None):
+    def frame(self,states,deformation=None,progress=lambda *_:None,quick=False):
         states=np.asarray(states,float)
         replacements=(deformation or {}).get('replacements',{}) or {}
         fingerprint=tuple((k,tuple(v['indices']),v['geometry'].wkb)
@@ -498,5 +498,6 @@ class Reconstructor:
                                  width_um=self.width_um,length_um=self.length_um,
                                  landing_diameters=AUTO_LANDING_DIAMETERS))
         if not np.any(states) and not fingerprint:self.cache.pin(key)
-        self.cache[key]=result;progress(100,'重构预演完成')
+        if not quick:self.cache[key]=result
+        progress(100,'重构预演完成')
         return result

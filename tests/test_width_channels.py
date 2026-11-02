@@ -59,8 +59,10 @@ class ChannelTests(unittest.TestCase):
         try:
             engine.configure_width(True,ViewSettings())
             f=frame_at(engine,35)
-            self.assertTrue(f['rows'])
-            self.assertTrue(all(r['required']==0 and r['status']==BLOCKED and r['gap_um']<15 for r in f['rows']))
+            # No nominal through-line means no width result even when the
+            # rigid walls touch. Their entities must still remain as obstacles.
+            self.assertEqual(f['rows'],[])
+            self.assertEqual(f['examined'],0)
             for x in (-30,0,30):
                 strip=box(x-7.5,-500,x+7.5,500)
                 self.assertTrue(any(o['kind']=='固定障碍' and o['geometry'].covers(strip) for o in f['retained']))

@@ -210,7 +210,7 @@ class PreviewEngine:
         if getattr(self,'reconstructor',None) is not None:
             # Reconstructed fixed RDL is a hypothesis about an operator's split,
             # so the plot and the piece table share its accepted display geometry.
-            frame['reconstruction']=self.reconstructor.frame(states,deformation,progress)
+            frame['reconstruction']=self.reconstructor.frame(states,deformation,progress,quick=quick)
         if getattr(self,'drc_enabled',False):
             frame['drc']=deformation['violations'] if deformation is not None else self.global_drc.frame(states,settings=self.drc_settings,progress=progress)
         if deformation is not None or getattr(self,'drc_enabled',False):

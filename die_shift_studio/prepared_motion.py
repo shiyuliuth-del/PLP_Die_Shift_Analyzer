@@ -1,4 +1,5 @@
 """Validated geometry keyframes; solver time never consumes playback time."""
+from contextlib import nullcontext
 import numpy as np
 from .animation import motion_timing
 
@@ -18,13 +19,12 @@ def motion_packet(engine,start,end,settings,view_span,cache):
         estimate=max(1024**2,geometry.bytes*8)
         steps=max(2,min(requested_steps,int(budget/estimate)))
     else:steps=requested_steps
-    key=('validated-motion-v20',engine.signature,engine.cache_key(),start.tobytes(),end.tobytes(),steps)
+    a,b=sorted((start.tobytes(),end.tobytes()))
+    key=('validated-motion-v25',engine.signature,engine.cache_key(),a,b,steps)
     packet=cache.get(key)
-    if packet is None:
-        reverse=cache.get(key[:3]+(end.tobytes(),start.tobytes(),steps))
-        if reverse and reverse['complete']:
-            packet=dict(frames=[(1-f,frame) for f,frame in reversed(reverse['frames'])],complete=True)
-            cache[key]=packet
+    if packet is not None and start.tobytes()!=a:
+        packet=dict(indices=[steps-i for i in reversed(packet['indices'])],
+                    frames=[(1-f,frame) for f,frame in reversed(packet['frames'])],complete=packet['complete'])
     return start,end,duration,steps,requested_steps,key,packet
 
 
@@ -35,25 +35,36 @@ def cached_motion(engine,start,end,settings,view_span,cache):
 
 def prepare_motion(engine,start,end,settings,view_span,cache,progress,publish=None,cancelled=None):
     start,end,duration,steps,requested_steps,key,packet=motion_packet(engine,start,end,settings,view_span,cache)
-    saved=[] if packet is None else list(packet['frames']);cached=bool(packet and packet['complete'])
+    by_index={} if packet is None else dict(zip(packet['indices'],packet['frames']))
+    cached=bool(packet and packet['complete']);saved=[];added={}
     fractions=np.arange(1,steps,dtype=float)/steps
     fractions=fractions*fractions*(3-2*fractions)
     if not cached:
         try:
-            for i,fraction in enumerate(fractions):
-                progress(round(95*i/max(1,len(fractions))),f'准备型变动画 {i+1}/{len(fractions)}')
-                if i<len(saved):frame=saved[i][1]
+            for i,fraction in enumerate(fractions,1):
+                progress(round(95*(i-1)/len(fractions)),f'准备动画 {i}/{len(fractions)}')
+                if i in by_index:frame=by_index[i][1]
                 else:
-                    frame=engine.frame(start*(1-fraction)+end*fraction,lambda n,t:progress(round(95*(i+n/100)/max(1,len(fractions))),f'动画帧 {i+1}/{len(fractions)} · '+t),quick=True)
-                    saved.append((float(fraction),frame))
+                    frame=engine.frame(start*(1-fraction)+end*fraction,lambda n,t:progress(round(95*(i-1+n/100)/len(fractions)),f'动画帧 {i}/{len(fractions)} · {t}'),quick=True)
+                    slot=i if start.tobytes()==key[3] else steps-i
+                    added[slot]=(float(fractions[slot-1]),frame)
+                saved.append((float(fraction),frame))
                 if publish is not None:
                     publish(frame)
                     if cancelled is not None:cancelled.wait(duration/steps/1000)
         finally:
-            # Write one bundle, including on cancellation; do not serialize
-            # the growing animation quadratically once per generated frame.
-            if saved:cache[key]=dict(frames=saved,complete=len(saved)==len(fractions))
-    elif publish is not None:
+            # Both directions share one file. Merge interrupted/concurrent work
+            # without replacing a complete packet or registering a read as new.
+            if added:
+                with getattr(cache,'lock',nullcontext()):
+                    previous=cache.get(key)
+                    slots={} if previous is None else dict(zip(previous['indices'],previous['frames']))
+                    if added.keys()-slots.keys():
+                        slots.update(added);indices=sorted(slots)
+                        cache[key]=dict(indices=indices,frames=[slots[i] for i in indices],complete=len(slots)==len(fractions))
+    else:
+        saved=packet['frames']
+    if cached and publish is not None:
         for i,(_,frame) in enumerate(saved):
             progress(round(95*i/max(1,len(saved))),'重用已校验动画缓存')
             publish(frame)

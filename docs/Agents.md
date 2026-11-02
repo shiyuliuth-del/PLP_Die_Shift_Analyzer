@@ -2,6 +2,16 @@
 
 根目录的 `AGENTS.md` 是工具自动读取的入口，本文件记录本地与远端共同维护的变更。开始一轮工作时先同步唯一主线 `main`，依次阅读入口、设计规范和最近一轮记录。完成后更新本文件，将代码、工程兼容验证和关键结果一起提交 GitHub，通过 PR 集成。后续轮次在最上方追加日期、版本、变更、测试、已知限制与 PR 链接。[协作与提交规范](../Agent.md)
 
+## 2026-11-02 · V25 · 手动预演、真实窄口和视图标签
+
+本轮集成见 [GitHub PR #4](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/pull/4)。
+
+- M 和数值输入共用姿态与双向插值缓存。手动接管时清空表格当前索引，点击空白首行要退出手动模式、拒绝过期任务并恢复全局判定。
+- 普通结果与动画各有同值容量上限。回放和反向查找均只读已有文件。快速帧由动画包保存，不得按刷新次数淘汰终态。
+- 宽度只报告有原始线路贯穿的真实相邻窄口。同束同壁的连续取样保留最紧的一处，保留分离通道。GD55 的点位复算使用三颗 DIE、九种姿态、固定 15/15/15 μm 规则。[实图记录](../results/width_V25.json)
+- 工程继续使用 schema 5。可选的 `expanded_settings` 保存设置页已展开的标题，`settings.width_label_font_pt` 保存字号，旧版默认全部折叠和 8 pt。改字号、缩放、平移只应重排文字。
+- Windows 源码入口为 `RUN.vbs` 或 `main.pyw`，EXE 保持窗口子系统。Linux 验证和模拟 Windows 控制台 API 均不能代替 Windows 桌面确认。[使用说明](V25_使用说明.md)
+
 ## 2026-11-02 · V24 · PATH、Q 编辑与相邻开口
 
 本轮集成记录见 [GitHub PR #3](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/pull/3)。

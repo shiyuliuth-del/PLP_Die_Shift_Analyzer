@@ -18,7 +18,7 @@ from .landing_geometry import embedded_pad
 
 ADEQUATE, NARROW, BLOCKED = '宽度足够','需局部收窄','宽度不足'
 COLORS = {BLOCKED:'#c44956', NARROW:'#bd8127', ADEQUATE:'#498d79'}
-SCOPE = '固定 RDL 名义通道的局部容量。每个空隙的两侧各保留一道线距。'
+SCOPE = '名义固定 RDL 有线路穿越的相邻实体局部窄口。矩形沿该对实体的实际最短截面，两侧各保留一道线距。'
 CHUNK = 256
 
 
@@ -44,7 +44,11 @@ def holds_original(slots, widths, space):
 
 
 def gate_rectangle(row, width, space):
-    center = np.asarray(row['point'])
+    if 'witness_um' in row:
+        a,b=np.asarray(row['witness_um'])
+        center=(a+b)/2
+    else:
+        center=np.asarray(row['point'])
     d = np.asarray(row['direction'])
     half = d*max(width*.025,row['gap_um']/2)
     side = np.array([-d[1],d[0]])*(width+space)*.65
@@ -74,6 +78,7 @@ class Gate:
     positions: tuple
     strand_refs: tuple
     nominal_gap: float
+    band: tuple | None = None
 
 
 def _faces(geometry):
@@ -176,22 +181,26 @@ def _crossings(ends, plane, tol):
     ids = np.flatnonzero(through)
     boundaries = plane['boundaries'][ri[ids]]
     widths = 2*shapely.distance(shapely.points(middle[ids]),boundaries)
-    # Copper running along the gate can cover both epsilon probes without
-    # conveying any line across it. For long chords, test a transverse strip
-    # beyond the two sides of the original linewidth. A straight parallel
-    # track stops inside the strip, an oblique through-route reaches both sides.
-    long = (hi[ids]-lo[ids])>widths+2*tol
-    use = np.ones(len(ids),bool)
-    if np.any(long):
-        probe_ids = ids[long]
-        c = ci[probe_ids]
-        first = ends[c,0]+lo[probe_ids,None]*direction[c]
-        last = ends[c,0]+hi[probe_ids,None]*direction[c]
-        shift = (widths[long]/2+2*tol)[:,None]*cross[probe_ids]
-        traces = plane['routes'][ri[probe_ids]]
-        front = shapely.linestrings(np.stack((first+shift,last+shift),axis=1))
-        back = shapely.linestrings(np.stack((first-shift,last-shift),axis=1))
-        use[long] = shapely.intersects(traces,front) & shapely.intersects(traces,back)
+    # Follow the SAME connected piece of copper across the two faces of the
+    # assessment rectangle. A local overlap, dead end, or two disconnected
+    # stubs on opposite sides are not evidence of a through-route.
+    first,last=ends[ci[ids],0],ends[ci[ids],1]
+    depth=np.maximum(.65*(plane['width']+plane.get('space',plane['width'])),widths/2+2*tol)
+    shift=depth[:,None]*cross[ids]
+    # Clip just beyond the two test faces. Overlaying a rounded polygon
+    # edge back onto the same oblique line can yield zero length in GEOS.
+    clip_shift=(depth+4*tol)[:,None]*cross[ids]
+    rects=shapely.polygons(np.stack([first-clip_shift,last-clip_shift,last+clip_shift,first+clip_shift],axis=1))
+    front=shapely.linestrings(np.stack([first+shift,last+shift],axis=1))
+    back=shapely.linestrings(np.stack([first-shift,last-shift],axis=1))
+    clipped,source=shapely.get_parts(shapely.intersection(plane['routes'][ri[ids]],rects),return_index=True)
+    polygon=shapely.get_type_id(clipped)==3
+    clipped,source=clipped[polygon],source[polygon]
+    through=((shapely.length(shapely.intersection(clipped,front[source]))>tol) &
+             (shapely.length(shapely.intersection(clipped,back[source]))>tol) &
+             shapely.covers(clipped,shapely.points(middle[ids[source]])))
+    use=np.zeros(len(ids),bool)
+    use[source[through]]=True
     for idx,width in zip(ids[use],widths[use]):
         sources = plane['route_sources'][int(ri[idx])]
         refs = ((sources[0][0],) if len(sources)==1 else
@@ -345,7 +354,7 @@ class WidthAnalyzer:
             routes = np.asarray([shapely.union_all([g for _,g in src]) for src in route_sources],object)
             shapely.prepare(routes)
             planes[plane] = dict(keys=keys,walls=walls+edges,metal_count=len(walls),routes=routes,
-                                 route_sources=route_sources,tree=STRtree(routes),boundaries=shapely.boundary(routes),width=self.width,gates=None)
+                                 route_sources=route_sources,tree=STRtree(routes),boundaries=shapely.boundary(routes),width=self.width,space=self.space,gates=None)
         return planes
 
     def _catalogue(self, plane, progress):
@@ -358,14 +367,22 @@ class WidthAnalyzer:
         # The opposite sides of a concave island or a hole can carry different
         # routes. Enumerate its local faces rather than keeping only the global
         # nearest point on that island. Convex pads keep a single feature.
-        pieces, parent = [], []
+        pieces, parent, neighbours = [], [], []
         for wi,g in enumerate(geometries):
-            parts = [g]
             if g.geom_type=='Polygon' and (g.interiors or g.convex_hull.area-g.area>max(self.tol*self.tol,self.model.data.dbu_um*g.length)):
-                parts = [LineString([a,b]) for ring in (g.exterior,*g.interiors)
-                         for a,b in zip(ring.coords, list(ring.coords)[1:]) if a!=b]
-            pieces.extend(parts)
-            parent.extend([wi]*len(parts))
+                for ring in (g.exterior,*g.interiors):
+                    xy=np.asarray(ring.coords)[:-1]
+                    xy=xy[np.any(xy!=np.roll(xy,1,axis=0),axis=1)]
+                    for i,p in enumerate(xy):
+                        pieces.append(LineString([p,xy[(i+1)%len(xy)]]))
+                        # Incident vertices on both sides of this facet are
+                        # needed to distinguish a true throat from a random
+                        # vertex on the same curved/concave copper boundary.
+                        neighbours.append(xy[[(i-1)%len(xy),i,(i+1)%len(xy),(i+2)%len(xy)]])
+                        parent.append(wi)
+            else:
+                pieces.append(g);parent.append(wi);neighbours.append(np.full((4,2),np.nan))
+        neighbours=np.asarray(neighbours)
         pieces = np.array(pieces,object)
         parent = np.array(parent,int)
         plane['pieces'],plane['parents'] = pieces,parent
@@ -382,6 +399,16 @@ class WidthAnalyzer:
                 candidates, ends, anchored = [], [], []
                 coordinates = shapely.get_coordinates(lines).reshape(-1,2,2)
                 valid = shapely.length(lines)>self.tol
+                for side,incident in ((0,neighbours[i:i+1]),(1,neighbours[js])):
+                    # At a projected vertex neither adjacent edge may lead
+                    # closer to the opposing wall (one-sided distance minimum).
+                    endpoint=coordinates[:,side]
+                    delta=coordinates[:,1-side]-endpoint
+                    for vertex,adjacent in ((1,0),(2,3)):
+                        touching=np.linalg.norm(endpoint-incident[:,vertex],axis=1)<=self.tol
+                        tangent=incident[:,adjacent]-incident[:,vertex]
+                        closer=np.einsum('ij,ij->i',delta,tangent)>self.tol*np.linalg.norm(tangent,axis=1)
+                        valid &= ~(touching & closer)
                 for j,xy in zip(js[valid],coordinates[valid]):
                     sections = [xy,*_parallel_stations(faces[i],faces[j],xy,events,self.tol)]
                     for k,section in enumerate(sections):
@@ -402,13 +429,24 @@ class WidthAnalyzer:
                 indices = [k for k,ok in enumerate(accessible) if ok and k not in blocked]
                 if not indices:
                     continue
-                counts = _crossings(ends[indices],plane,self.tol)
-                for k,strands in zip(indices,counts):
-                    if not strands:
-                        continue
-                    gap = float(np.linalg.norm(ends[k,1]-ends[k,0]))
-                    gates.append(Gate(tuple(pairs[k]),tuple(feature_pairs[k]),ends[k],anchored[k],tuple(w for _,w,_ in strands),
-                                      tuple(t for t,_,_ in strands),tuple(src for _,_,src in strands),gap))
+                crossing=dict(zip(indices,_crossings(ends[indices],plane,self.tol)))
+                # For tied parallel faces, each station samples an interval
+                # between nominal topology events. A missing or different
+                # passage interrupts the run even on the same two straight walls.
+                stations=defaultdict(list)
+                for k,pair in enumerate(candidates):stations[pair].append(k)
+                for feature,group in stations.items():
+                    d=ends[group[0],1]-ends[group[0],0]
+                    tangent=np.array([-d[1],d[0]])
+                    previous=None;run=0
+                    for ordinal,k in enumerate(sorted(group,key=lambda n:ends[n,0]@tangent)):
+                        strands=crossing.get(k) or []
+                        refs=tuple(src for _,_,src in strands)
+                        if refs!=previous:run+=1;previous=refs
+                        if not strands:continue
+                        gap=float(np.linalg.norm(ends[k,1]-ends[k,0]))
+                        gates.append(Gate(tuple(pairs[k]),feature,ends[k],anchored[k],tuple(w for _,w,_ in strands),
+                                          tuple(t for t,_,_ in strands),refs,gap,(*feature,run,ordinal)))
             progress((i+1)/max(1,metals),'识别名义线路穿越')
         return gates
 
@@ -421,9 +459,8 @@ class WidthAnalyzer:
                                for w in walls],object)
         retained = [dict(plane=name,name=w.name,layers=w.layers or plane['keys'],refs=w.refs,kind=w.kind,geometry=g)
                     for w,g in zip(walls[:plane['metal_count']],geometries)]
-        rigid=self._rigid_clearances(name,plane,geometries)
         if not gates:
-            return rigid,retained
+            return [],retained
         pairs = np.array([g.pair for g in gates])
         orig = np.array([g.ends for g in gates])
         features = np.array([g.features for g in gates])
@@ -440,8 +477,12 @@ class WidthAnalyzer:
             left = shapely.shortest_line(shapely.points(p[:,0]),pieces[features[anchored,1]])
             right = shapely.shortest_line(pieces[features[anchored,0]],shapely.points(p[:,1]))
             # An overlapped pair always has zero clearance, including its tied sections.
-            use = shapely.length(lines[anchored]) > self.tol
-            lines[anchored[use]] = np.where(shapely.length(left[use])<=shapely.length(right[use]),left[use],right[use])
+            actual_gap=shapely.length(lines[anchored])
+            alternate=np.where(shapely.length(left)<=shapely.length(right),left,right)
+            # If the walls tilt, a formerly parallel station is no longer the
+            # throat. Keep its anchor only while it attains the actual minimum.
+            use=(actual_gap>self.tol) & (shapely.length(alternate)<=actual_gap+self.tol)
+            lines[anchored[use]]=alternate[use]
         gaps = shapely.length(lines)
         inside = shapely.covers(self.inside,lines)
         ends = shapely.get_coordinates(lines).reshape(-1,2,2)
@@ -466,24 +507,36 @@ class WidthAnalyzer:
             x,y = ref[common].T
             ref[common] = np.column_stack((np.cos(angle)*x-np.sin(angle)*y,np.sin(angle)*x+np.cos(angle)*y))
         open_order = np.einsum('ij,ij->i',ends[:,1]-ends[:,0],ref)>0
-        rows = []
+        # Split projections retain nominal lane ownership, but are not physical
+        # cross-sections of the new pair. Draw that pair only at its own measured
+        # throat with its own nominal through-routes, never on the parent axis.
+        splits=defaultdict(list)
+        direct=[]
         for k,g in enumerate(gates):
-            gap=float(gaps[k])
-            axis=(ends[k,1]-ends[k,0])/gap if gap>self.tol else ref[k]/np.linalg.norm(ref[k])
             spans=obstacles.get(k,[])
-            openings=(local_openings(g,ends[k],spans,plane['occupied'].get(k,[]),walls,self.tol) if spans else
-                      [dict(pair=g.pair,indices=range(len(g.widths)),nominal_gap=g.nominal_gap,
-                            gap=gap,point=ends[k].mean(axis=0),locked=0,split=False)])
-            for opening in openings:
-                i,j=opening['pair'];a,b=walls[i],walls[j]
-                now=opening['gap'] if inside[k] and open_order[k] else 0.
-                chosen=opening['indices']
-                widths=tuple(g.widths[t] for t in chosen)
-                refs=tuple(sorted({ref for t in chosen for ref in g.strand_refs[t]}))
-                rows.append(self._row(name,plane,a,b,opening['nominal_gap'],now,opening['point'],axis,widths,refs,
-                                      opening['locked'],opening['split'],not nominal and min(a.owner,b.owner)<-1))
-        represented={tuple(sorted(r['pair'])) for r in rows if r['status']==BLOCKED}
-        rows.extend(r for r in rigid if tuple(sorted(r['pair'])) not in represented)
+            if not spans:
+                direct.append(k)
+                continue
+            for sub in local_openings(g,ends[k],spans,plane['occupied'].get(k,[]),walls,self.tol):
+                pair=tuple(sorted(sub['pair']))
+                refs=frozenset(ref for t in sub['indices'] for ref in g.strand_refs[t])
+                if refs:splits[pair].append((sub['point'],refs,sub['locked']))
+        rows=[]
+        for k in direct:
+            g=gates[k];a,b=(walls[i] for i in g.pair)
+            delta=ends[k,1]-ends[k,0];gap=float(gaps[k])
+            axis=delta/gap if gap>self.tol else ref[k]/np.linalg.norm(ref[k])
+            now=gap if inside[k] and open_order[k] else 0.
+            point=ends[k].mean(axis=0)
+            refs=frozenset(ref for lane in g.strand_refs for ref in lane)
+            evidence=[locked for other,lanes,locked in splits.get(tuple(sorted(g.pair)),())
+                      if now>self.tol and lanes==refs and np.linalg.norm(other-point)<=2*half_depth+self.tol]
+            row=self._row(name,plane,a,b,g.nominal_gap,now,point,axis,g.widths,tuple(sorted(refs)),
+                          max(evidence,default=0),any(evidence),not nominal and min(a.owner,b.owner)<-1)
+            row['witness_um']=ends[k].tolist()
+            row['nominal_witness_um']=g.ends.tolist()
+            rows.append((g,row))
+        rows=self._distinct_throats(rows,half_depth)
         progress(1.,'通道容量检查完成')
         return rows,retained
 
@@ -502,25 +555,52 @@ class WidthAnalyzer:
                     locked=locked,split=split,unresolved=unresolved,
                     narrowing_um=max(0.,sum(keep)+(required+1)*self.space-gap) if required else 0.)
 
-    def _rigid_clearances(self,name,plane,geometries):
-        """A neighbour can violate the wall spacing even with no flexible wire."""
-        walls=plane['walls'];rows=[]
-        pairs=STRtree(geometries).query(geometries[:plane['metal_count']],predicate='dwithin',distance=self.space).T
-        pairs=np.array([(i,j) for i,j in pairs if i<j and (walls[i].net!=walls[j].net or walls[j].kind=='边框')],int)
-        if not len(pairs):return rows
-        lines=shapely.shortest_line(geometries[pairs[:,0]],geometries[pairs[:,1]])
-        ends=shapely.get_coordinates(lines).reshape(-1,2,2)
-        spans=occupied(ends,pairs,walls,geometries,.65*(self.width+self.space),self.tol)
-        for index,(i,j) in enumerate(pairs):
-            delta=ends[index,1]-ends[index,0];gap=float(np.linalg.norm(delta))
-            if gap+self.tol>=self.space or spans.get(index):continue
-            if gap>self.tol:axis=delta/gap
-            else:
-                old=shapely.get_coordinates(shapely.shortest_line(walls[i].geometry,walls[j].geometry))
-                v=old[-1]-old[0];norm=np.linalg.norm(v);axis=v/norm if norm>self.tol else np.array([1.,0.])
-            rows.append(self._row(name,plane,walls[i],walls[j],walls[i].geometry.distance(walls[j].geometry),
-                                  gap,ends[index].mean(axis=0),axis,(),(),0,False,False))
-        return rows
+    def _distinct_throats(self,candidates,half_depth):
+        """Collapse tied/overlapping samples of the same physical crossing.
+
+        Keep disconnected local mouths, different ordered strands (including
+        repeated passes of one net), and opposite faces of a concave island.
+        Compare nominal sites so unrelated mouths never merge just because a
+        large displacement makes their screen markers coincide.
+        """
+        groups=defaultdict(list)
+        for gate,row in candidates:
+            groups[(gate.pair,gate.strand_refs)].append((gate,row))
+        result=[]
+        for group in groups.values():
+            if len(group)==1:
+                result.append(group[0][1]);continue
+            points=np.array([g.ends.mean(axis=0) for g,_ in group])
+            normal=np.array([(g.ends[1]-g.ends[0])/g.nominal_gap for g,_ in group])
+            clusters=UnionFind(len(group))
+            ordered={gate.band:i for i,(gate,_) in enumerate(group)}
+            for i,(gate,_) in enumerate(group):
+                previous=ordered.get((*gate.band[:-1],gate.band[-1]-1))
+                if previous is not None:clusters.union(previous,i)
+            for i in range(len(group)):
+                nearby=(np.linalg.norm(points[i+1:]-points[i],axis=1)<=2*half_depth+self.tol)
+                aligned=normal[i+1:]@normal[i]>.995
+                for offset in np.flatnonzero(nearby & aligned):
+                    j=i+1+int(offset)
+                    # On the same faces, only consecutive stations in an
+                    # uninterrupted band may merge. A short dead zone or a
+                    # third landing can split two nearby but distinct mouths.
+                    if group[i][0].features!=group[j][0].features:clusters.union(i,j)
+            mouths=defaultdict(list)
+            for i in range(len(group)):mouths[clusters.find(i)].append(i)
+            for indices in mouths.values():
+                center=points[indices].mean(axis=0)
+                # For tied flat faces prefer the central tested station. Keep
+                # the tightest margin where motion breaks that distance tie.
+                def rank(i):
+                    r=group[i][1]
+                    return (r['current']-r['required'],round((r['gap_um']-r['keep_um'])/self.tol),
+                            np.linalg.norm(points[i]-center),i)
+                row=group[min(indices,key=rank)][1]
+                row['locked']=max(group[i][1]['locked'] for i in indices)
+                row['split']=any(group[i][1]['split'] for i in indices)
+                result.append(row)
+        return result
 
     def frame(self, frame, progress=lambda *_:None, quick=False):
         states = frame['states']
@@ -541,6 +621,7 @@ class WidthAnalyzer:
                       parameters=dict(width_um=self.width,space_um=self.space,enclosure_um=self.annulus))
         if not np.any(states):
             self.cache.pin(key)
-        self.cache[key] = result
+        # Intermediate frames are already retained by the animation packet.
+        if not quick:self.cache[key] = result
         progress(100,'宽度分析完成')
         return result

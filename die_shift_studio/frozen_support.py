@@ -3,11 +3,23 @@ from pathlib import Path
 import json,os,sys,shutil,traceback
 from .jobs import installation_root
 
+def hide_owned_console():
+    """Hide only a private Python launcher console, never the caller's terminal."""
+    if sys.platform!='win32':return
+    import ctypes
+    kernel=ctypes.windll.kernel32
+    members=(ctypes.c_uint32*2)()
+    if kernel.GetConsoleProcessList(members,len(members))==1 and members[0]==os.getpid():
+        kernel.GetConsoleWindow.restype=ctypes.c_void_p
+        window=kernel.GetConsoleWindow()
+        if window:ctypes.windll.user32.ShowWindow(ctypes.c_void_p(window),0)
+
+
 def prepare_runtime():
+    # Both pythonw and the windowed EXE can start without console streams.
+    for name in ('stdout','stderr'):
+        if getattr(sys,name,None) is None:setattr(sys,name,open(os.devnull,'w',encoding='utf-8'))
     if getattr(sys,'frozen',False):
-        # Windowed PyInstaller executables may have no console streams.
-        for name in ('stdout','stderr'):
-            if getattr(sys,name,None) is None:setattr(sys,name,open(os.devnull,'w',encoding='utf-8'))
         root=installation_root();seed=Path(getattr(sys,'_MEIPASS',root))/'seed'
         for folder in ('examples','Jobs'):
             (root/folder).mkdir(exist_ok=True)

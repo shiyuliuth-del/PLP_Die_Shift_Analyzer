@@ -8,6 +8,7 @@ from .qt_compat import QtWidgets as W, QtGui, QtCore, DISPLAY, TOOLTIP, BACKGROU
 from .width_analysis import COLORS, ADEQUATE, NARROW, BLOCKED, gate_rectangle
 from .viewport import overlaps
 from .width_display import tint
+from .width_labels import LabelLayout
 
 HEADERS = ['状态','固定 RDL','通道两侧','原可通','必须通过','现可通','原间距 / μm','现间距 / μm','保宽需 / μm','最小需 / μm','预期收窄 / μm','问题线路','位置 / μm']
 INTRO = '按固定 RDL 原始线路穿越数比较各姿态的孔盘通道容量。勾选后默认低亮显示原始线路，矩形标记相邻孔盘通道。'
@@ -70,6 +71,7 @@ class WidthOverlay:
         self.tree = None
         self.selected = None
         self.stamp = self.table_stamp = None
+        self.label_sides={};self.text_sizes={}
         window.canvas.mpl_connect('motion_notify_event',self.hover)
 
     def draw(self):
@@ -88,7 +90,7 @@ class WidthOverlay:
         visible = frozenset(k for k,check in w.visible_boxes.items() if check.isChecked())
         flags = (id(data),w.width_sufficient_toggle.isChecked())
         modes=w.view_settings.width_display
-        stamp = (flags,visible,tuple(modes.items()),w.view_bounds,self.selected,id(w.current_frame),w.reconstruction_toggle.isChecked(),w.deformation_toggle.isChecked())
+        stamp = (flags,visible,tuple(modes.items()),w.view_settings.width_label_font_pt,tuple(w.ax.bbox.bounds),w.figure.dpi,w.view_bounds,self.selected,id(w.current_frame),w.reconstruction_toggle.isChecked(),w.deformation_toggle.isChecked())
         if self.stamp == stamp and (getattr(w,'_in_animation',False) or self.table_stamp==flags):
             return
         self.stamp = stamp
@@ -179,36 +181,39 @@ class WidthOverlay:
             artist.set_visible(bool(fill_paths[status]))
         self.rows = shown
         self.tree = STRtree(rectangles) if shown else None
-        # Every rectangle stays visible. Thin labels by screen-space overlap only.
-        ordered = [] if modes['标注']=='hide' else sorted(shown,key=lambda r:self.identity(r)!=self.selected)
-        positions = []
-        occupied = set()
-        for r in ordered:
-            px = w.ax.transData.transform(r['point'])
-            cell = (int(px[0]//155),int(px[1]//40))
-            if cell in occupied:
-                continue
-            occupied.add(cell)
-            pos = len(positions)
-            positions.append(px)
-            if pos==len(self.labels):
-                a = w.ax.annotate('',xy=(0,0),xytext=(10,12),textcoords='offset points',fontsize=8,
-                                  zorder=12.6,bbox=dict(facecolor='white',alpha=.94,pad=2.0),
-                                  arrowprops=dict(arrowstyle='->',lw=.9))
+        fontsize=w.view_settings.width_label_font_pt
+        order=[] if modes['标注']=='hide' else sorted(range(len(shown)),key=lambda i:self.identity(shown[i])!=self.selected)
+        layout=LabelLayout(w.ax,rectangles,fontsize,self.text_sizes,modes['截面']!='hide') if order else None
+        texts=[self.label_text(r) for r in shown] if order else []
+        if layout:layout.prescreen(texts)
+        count=0;next_sides={}
+        for i in order:
+            r=shown[i];text=texts[i]
+            source=(r['plane'],r['pair'],tuple(map(tuple,r['nominal_witness_um'])))
+            found=layout.place(i,text,self.label_sides.get(source))
+            if found is None:continue
+            side,tip,offset=found;next_sides[source]=side
+            if count==len(self.labels):
+                a=w.ax.annotate('',xy=(0,0),textcoords='offset points',xytext=(0,0),ha='center',va='center',
+                                multialignment='left',zorder=12.6,bbox=dict(boxstyle='square,pad=0.15',facecolor='white',alpha=.94),
+                                arrowprops=dict(arrowstyle='->',lw=.9,shrinkB=0))
                 self.labels.append(a)
-            a = self.labels[pos]
-            a.xy = tuple(r['point'])
-            amount=f"{r['narrowing_um']:.3f}".rstrip('0').rstrip('.')
-            a.set_text(f"原宽:{r['original']},必过:{r['required']},现宽:{r['current']}\n预期收窄:{amount}微米")
+            a=self.labels[count];count+=1
+            a.xy=tip;a.set_position(offset);a.set_text(text);a.set_fontsize(fontsize)
             a.set_color(tint(dark(COLORS[r['status']]),modes['标注']))
             a.arrow_patch.set_color(tint(COLORS[r['status']],modes['标注']))
             a.get_bbox_patch().set_edgecolor(COLORS[r['status']])
             a.set_visible(True)
-        for a in self.labels[len(positions):]:
-            a.set_visible(False)
+        self.label_sides=next_sides
+        for a in self.labels[count:]:a.set_visible(False)
         if not getattr(w,'_in_animation',False) and self.table_stamp!=flags:
             self.table_stamp = flags
             self.fill_table(rows,data)
+
+    @staticmethod
+    def label_text(r):
+        amount=f"{r['narrowing_um']:.3f}".rstrip('0').rstrip('.')
+        return f"原宽:{r['original']},必过:{r['required']},现宽:{r['current']}\n预期收窄:{amount}微米"
 
     @staticmethod
     def identity(r):
@@ -218,7 +223,6 @@ class WidthOverlay:
     def description(r):
         note = '　按矩形内相邻刚性孔盘或障碍重新分段。' if r['split'] else ''
         if r.get('locked'):note+=f"　{r['locked']} 条落盘连接已按实体占用。"
-        if not r['required']:note+='　刚性壁之间仍须满足一道线距。'
         if r['unresolved']:
             note += '　存在未确定的芯片归属。'
         return (f"{' ↔ '.join(r['pair'])}　{r['status']}\n原可通 {r['original']} 根，必须通过 {r['required']} 根，"
@@ -232,7 +236,7 @@ class WidthOverlay:
         if not data:
             w.width_summary.setText(INTRO)
         elif not data['examined']:
-            w.width_summary.setText('当前没有需穿线的相邻通道，也没有刚性壁净距不足。')
+            w.width_summary.setText('原始布局中没有线路穿越可评估的相邻窄口。')
         else:
             q = data['counts']
             w.width_summary.setText(f"检查 {data['examined']} 个相邻截面。宽度足够 {q[ADEQUATE]} 个，"
