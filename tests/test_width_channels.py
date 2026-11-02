@@ -38,7 +38,7 @@ class ChannelTests(unittest.TestCase):
         try:
             engine.configure_width(True,ViewSettings())
             for dx,gap,current in [(0,110,3),(3,107,3),(35,75,2),(-35,145,4),(80,30,0),(140,0,0),(300,0,0)]:
-                rows=central(frame_at(engine,dx))
+                rows=[r for r in central(frame_at(engine,dx)) if not r['split'] and r['required']]
                 self.assertTrue(rows)
                 for r in rows:
                     self.assertEqual((r['original'],r['required'],r['current']),(3,3,current))
@@ -46,6 +46,7 @@ class ChannelTests(unittest.TestCase):
                     self.assertEqual(r['status'],BLOCKED if current<3 else NARROW if dx==3 else ADEQUATE)
                     self.assertEqual(r['widths_um'],(20.,15.,15.))
                     self.assertEqual((r['minimum_um'],r['keep_um']),(105,110))
+                    self.assertAlmostEqual(r['narrowing_um'],max(0,110-gap))
                     self.assertEqual(len(r['refs']),3)
                     if current<3:self.assertGreater(gate_rectangle(r,15,15).area,0)
             with patch.object(WidthAnalyzer,'_measure',side_effect=AssertionError('cache miss')):
@@ -58,7 +59,8 @@ class ChannelTests(unittest.TestCase):
         try:
             engine.configure_width(True,ViewSettings())
             f=frame_at(engine,35)
-            self.assertFalse(f['rows'])
+            self.assertTrue(f['rows'])
+            self.assertTrue(all(r['required']==0 and r['status']==BLOCKED and r['gap_um']<15 for r in f['rows']))
             for x in (-30,0,30):
                 strip=box(x-7.5,-500,x+7.5,500)
                 self.assertTrue(any(o['kind']=='固定障碍' and o['geometry'].covers(strip) for o in f['retained']))
@@ -73,11 +75,11 @@ class ChannelTests(unittest.TestCase):
             self.assertTrue(any('边框' in r['ends'] for r in nominal['rows']))
             self.assertTrue(any(o['kind']=='固定过孔孔盘' for o in nominal['retained']))
             after=frame_at(engine,35)
-            split=[r for r in after['rows'] if len(r['slots_um'])>1]
+            split=[r for r in after['rows'] if r['split']]
             self.assertTrue(split)
             for r in split:
                 self.assertEqual(r['current'],sum(capacity(g,15,15) for g in r['slots_um']))
-                self.assertTrue(r['split'])
+                self.assertTrue(r['split']);self.assertLessEqual(len(r['slots_um']),1)
                 self.assertEqual(r['status']==BLOCKED,r['current']<r['required'])
         finally:engine.close()
 
@@ -197,7 +199,7 @@ class ChannelTests(unittest.TestCase):
             self.assertEqual(old['overlays'],OVERLAY_DEFAULTS)
             self.assertEqual(old['settings']['reconstruction_overlap_um'],7.)
             self.assertEqual(old['settings']['drc_tolerance_um'],-1.)
-            self.assertFalse(any(k.startswith('width_') for k in old['settings']))
+            self.assertFalse(any(k in old['settings'] for k in ('width_overlap_um','width_mode','width_gap_threshold_um','width_search_radius_um')))
         p=normalize_project(dict(schema_version=5,overlays=dict(width=True),settings={'reconstruction_enabled':True,
                             'reconstruction_overlap_um':9.,'width_overlap_um':4.}))
         self.assertTrue(p['overlays']['width'] and p['overlays']['reconstruction'])

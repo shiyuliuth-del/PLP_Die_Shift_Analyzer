@@ -175,6 +175,15 @@ class GDSData:
     auto_roles: dict = field(default_factory=dict)
     recognition_notes: list = field(default_factory=list)
 
+    shape_info: dict = field(default_factory=dict)
+    import_warnings: list = field(default_factory=list)
+    node_edits: list = field(default_factory=list)
+    edit_digest: str = ''
+
+    @property
+    def geometry_id(self):
+        return (self.sha256,self.edit_digest)
+
     @property
     def count(self):
         return sum(map(len,self.layers.values()))
@@ -187,7 +196,7 @@ def _expanded_count(cell, stack=(), cache=None):
     if cell.name in cache:
         return cache[cell.name]
     count = sum(max(1,p.repetition.size) for p in cell.polygons)
-    count += sum(max(1,p.repetition.size)*p.num_paths for p in cell.paths)
+    count += sum(max(1,p.repetition.size)*p.num_paths for p in cell.paths if np.any(p.widths()))
     for ref in cell.references:
         if not isinstance(ref.cell,gdstk.Cell):
             raise ValueError("GDS存在未解析的引用："+str(ref.cell))
@@ -218,15 +227,13 @@ def read_gds(path, top_name=None, progress: Callable=lambda *_: None):
     cell=next(c for c in tops if c.name==name)
     _expanded_count(cell)
     progress(30,"展开层次、阵列、旋转和镜像")
-    polygons=cell.get_polygons(apply_repetitions=True,include_paths=True,depth=None)
-    if len(polygons)>500_000:
+    from .gds_shapes import import_shapes
+    layers,shape_info,warnings,ignored=import_shapes(cell,precision/1e-6)
+    if sum(map(len,layers.values()))>500_000:
         raise ValueError("展开图形数量超限；请裁出单个封装")
-    layers={}
-    for p in polygons:
-        points=np.asarray(p.points,dtype=float)
-        layers.setdefault(f"{p.layer}/{p.datatype}",[]).append(points)
     progress(80,"并行识别图层与几何")
-    data=GDSData(str(path),digest,name,names,precision/1e-6,layers)
+    data=GDSData(str(path),digest,name,names,precision/1e-6,layers,shape_info=shape_info,import_warnings=warnings)
+    data.ignored_geometry=ignored
     from .geometry_errors import sanitize_data
     sanitize_data(data)
     from .recognition import recognize,TAGS
@@ -286,9 +293,16 @@ def build_case(data,roles,geometry=None,layer_order=None,connections=None):
     if geometry:
         raise ValueError("本版本仅使用GDS边框，不支持手动几何覆盖；请在GDS中提供边框层")
     boards=_polygons(data,roles,"封装边框")
-    if len(boards)!=1:
-        raise ValueError("封装边框层须恰有一个有效多边形")
+    if not boards:
+        raise ValueError("封装边框层须恰有一个有效区域")
     board=boards[0]
+    if len(boards)>1:
+        # GDS cut-lines through holes can be repaired into abutting fragments.
+        # Reassemble one physical package, preserving its internal edges.
+        from shapely import union_all
+        board=union_all(boards)
+        if board.geom_type!='Polygon' or sum(p.area for p in boards)-board.area>max(1.e-8,board.area*1.e-10):
+            raise ValueError("封装边框层须构成一个无重叠的连通区域")
     dies=_polygons(data,roles,"芯片边框")
     if not dies:
         raise ValueError("请指定芯片边框层")
@@ -467,7 +481,7 @@ def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order
         from .settings import ViewSettings
         cfg=settings or ViewSettings();geometric_parameters=asdict(p)
         for key in ('input_nsigma','target_nsigma','reference_nsigma','rho_xy'):geometric_parameters.pop(key,None)
-        range_key=('continuous-safe-box',fingerprint((data.sha256,data.top_name,roles,connections.order,geometric_parameters,
+        range_key=('continuous-safe-box',fingerprint((data.geometry_id,data.top_name,roles,connections.order,geometric_parameters,
                     cfg.safe_box_precision,cfg.safe_box_budget,cfg.safe_box_starts,cfg.safe_box_passes)))
         ranges=safe_range_cache.get_or_compute(range_key,lambda:safe_ranges(contact_model,p,settings,progress))
     from .model_yield import model_yield
@@ -477,12 +491,12 @@ def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order
     compute_yield=lambda:model_yield(contact_model,p,cfg,progress)
     if safe_range_cache is None:whole_yield=compute_yield()
     else:
-        key=('whole-input-yield',fingerprint((data.sha256,data.top_name,roles,connections.order,asdict(p),cfg.yield_method,cfg.yield_sample_exponent,cfg.random_seed,cfg.yield_box_budget,cfg.yield_tolerance)))
+        key=('whole-input-yield',fingerprint((data.geometry_id,data.top_name,roles,connections.order,asdict(p),cfg.yield_method,cfg.yield_sample_exponent,cfg.random_seed,cfg.yield_box_budget,cfg.yield_tolerance)))
         whole_yield=safe_range_cache.get_or_compute(key,compute_yield)
     progress(99,"整理窗口不足位置、安全范围与无接触概率")
     issues=contact['issues']
     progress(100,"评估完成")
-    return dict(version=__version__,units="μm",source_path=data.path,source_sha256=data.sha256,
+    return dict(version=__version__,units="μm",source_path=data.path,source_sha256=data.sha256,node_edit_count=len(data.node_edits),geometry_revision=data.edit_digest,import_warnings=data.import_warnings,
         top_cell=data.top_name,dbu_um=data.dbu_um,parameters=asdict(p),roles=roles,
         die_count=count,target_failure=alpha,input_ellipsoid_radius=statistical_state(p,count)[2],
         distribution='binary' if math.isinf(p.target_nsigma) else 'normal',

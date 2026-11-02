@@ -1,0 +1,384 @@
+{
+  "version": "V24",
+  "hardware": {
+    "cpu": 8,
+    "total_memory_mb": 15708,
+    "available_memory_mb": 7280,
+    "workers": 6,
+    "process_workers": 3,
+    "policy": "预留2逻辑CPU与65%可用内存；原生几何/FFT使用线程；大型独立原图DRC与RDL候选搜索使用spawn进程；小任务串行"
+  },
+  "sample": {
+    "source": "示例O_运动网络三线路通道.gds",
+    "sha256": "bd6ec5d695a985356b89501e6e1e81edf1b042fe314d9fc62f8bb759ed802bc6",
+    "die_count": 2,
+    "states": [
+      {
+        "state": [
+          0,
+          0,
+          0
+        ],
+        "sections": 33,
+        "verified_open_rectangles": 29,
+        "counts": {
+          "宽度不足": 4,
+          "需局部收窄": 0,
+          "宽度足够": 29
+        },
+        "retained": 12,
+        "local_sections": 11,
+        "edge_violations": 0,
+        "first_request_s": 0.1507,
+        "repeat_ms": 0.27,
+        "central_gate": {
+          "nominal_gap_um": 110.0,
+          "gap_um": 110.0,
+          "original": 3,
+          "required": 3,
+          "current": 3,
+          "status": "宽度足够",
+          "widths_um": [
+            20.0,
+            15.0,
+            15.0
+          ],
+          "keep_um": 110.0,
+          "minimum_um": 105.0,
+          "narrowing_um": 0.0
+        }
+      },
+      {
+        "state": [
+          3,
+          0,
+          0
+        ],
+        "sections": 33,
+        "verified_open_rectangles": 29,
+        "counts": {
+          "宽度不足": 4,
+          "需局部收窄": 4,
+          "宽度足够": 25
+        },
+        "retained": 12,
+        "local_sections": 11,
+        "edge_violations": 0,
+        "first_request_s": 0.0334,
+        "repeat_ms": 0.13,
+        "central_gate": {
+          "nominal_gap_um": 110.0,
+          "gap_um": 107.0,
+          "original": 3,
+          "required": 3,
+          "current": 3,
+          "status": "需局部收窄",
+          "widths_um": [
+            20.0,
+            15.0,
+            15.0
+          ],
+          "keep_um": 110.0,
+          "minimum_um": 105.0,
+          "narrowing_um": 3.0
+        }
+      },
+      {
+        "state": [
+          35,
+          0,
+          0
+        ],
+        "sections": 33,
+        "verified_open_rectangles": 29,
+        "counts": {
+          "宽度不足": 8,
+          "需局部收窄": 0,
+          "宽度足够": 25
+        },
+        "retained": 12,
+        "local_sections": 11,
+        "edge_violations": 0,
+        "first_request_s": 0.0334,
+        "repeat_ms": 0.185,
+        "central_gate": {
+          "nominal_gap_um": 110.0,
+          "gap_um": 75.0,
+          "original": 3,
+          "required": 3,
+          "current": 2,
+          "status": "宽度不足",
+          "widths_um": [
+            20.0,
+            15.0,
+            15.0
+          ],
+          "keep_um": 110.0,
+          "minimum_um": 105.0,
+          "narrowing_um": 35.0
+        }
+      },
+      {
+        "state": [
+          -35,
+          0,
+          0
+        ],
+        "sections": 32,
+        "verified_open_rectangles": 28,
+        "counts": {
+          "宽度不足": 4,
+          "需局部收窄": 0,
+          "宽度足够": 28
+        },
+        "retained": 12,
+        "local_sections": 10,
+        "edge_violations": 0,
+        "first_request_s": 0.0308,
+        "repeat_ms": 0.13,
+        "central_gate": {
+          "nominal_gap_um": 110.0,
+          "gap_um": 145.0,
+          "original": 3,
+          "required": 3,
+          "current": 4,
+          "status": "宽度足够",
+          "widths_um": [
+            20.0,
+            15.0,
+            15.0
+          ],
+          "keep_um": 110.0,
+          "minimum_um": 105.0,
+          "narrowing_um": 0.0
+        }
+      }
+    ]
+  },
+  "path_example": {
+    "source": "示例P_单点PATH与相邻孔盘.gds",
+    "sha256": "7c9b03f2dc47783e51165e04873ed4757be019a4046ff40479421ebb25cac7af",
+    "die_count": 1,
+    "states": [
+      {
+        "state": [
+          0,
+          0,
+          0
+        ],
+        "sections": 14,
+        "verified_open_rectangles": 14,
+        "counts": {
+          "宽度不足": 1,
+          "需局部收窄": 1,
+          "宽度足够": 12
+        },
+        "retained": 6,
+        "local_sections": 7,
+        "edge_violations": 1,
+        "first_request_s": 0.2804,
+        "repeat_ms": 0.186
+      },
+      {
+        "state": [
+          3,
+          0,
+          0
+        ],
+        "sections": 14,
+        "verified_open_rectangles": 14,
+        "counts": {
+          "宽度不足": 1,
+          "需局部收窄": 1,
+          "宽度足够": 12
+        },
+        "retained": 6,
+        "local_sections": 7,
+        "edge_violations": 1,
+        "first_request_s": 0.0973,
+        "repeat_ms": 0.245
+      }
+    ],
+    "import_warnings": [
+      "图层 77/0 · 已忽略 1 个零宽 PATH（含实例展开）。"
+    ]
+  },
+  "gd55": {
+    "source": "GD55_9-21.gds",
+    "sha256": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+    "die_count": 3,
+    "states": [
+      {
+        "state": [
+          0,
+          0,
+          0
+        ],
+        "sections": 5267,
+        "verified_open_rectangles": 5267,
+        "counts": {
+          "宽度不足": 4,
+          "需局部收窄": 5,
+          "宽度足够": 5258
+        },
+        "retained": 267,
+        "local_sections": 3062,
+        "edge_violations": 0,
+        "first_request_s": 35.9031,
+        "repeat_ms": 0.192
+      },
+      {
+        "state": [
+          -35,
+          -35,
+          -1
+        ],
+        "sections": 5457,
+        "verified_open_rectangles": 5457,
+        "counts": {
+          "宽度不足": 6,
+          "需局部收窄": 17,
+          "宽度足够": 5434
+        },
+        "retained": 267,
+        "local_sections": 3379,
+        "edge_violations": 0,
+        "first_request_s": 6.9164,
+        "repeat_ms": 0.173
+      },
+      {
+        "state": [
+          -35,
+          -35,
+          1
+        ],
+        "sections": 5439,
+        "verified_open_rectangles": 5438,
+        "counts": {
+          "宽度不足": 18,
+          "需局部收窄": 14,
+          "宽度足够": 5407
+        },
+        "retained": 267,
+        "local_sections": 3372,
+        "edge_violations": 0,
+        "first_request_s": 5.8504,
+        "repeat_ms": 0.181
+      },
+      {
+        "state": [
+          -35,
+          35,
+          -1
+        ],
+        "sections": 5413,
+        "verified_open_rectangles": 5410,
+        "counts": {
+          "宽度不足": 10,
+          "需局部收窄": 9,
+          "宽度足够": 5394
+        },
+        "retained": 267,
+        "local_sections": 3347,
+        "edge_violations": 0,
+        "first_request_s": 3.5647,
+        "repeat_ms": 0.109
+      },
+      {
+        "state": [
+          -35,
+          35,
+          1
+        ],
+        "sections": 5386,
+        "verified_open_rectangles": 5382,
+        "counts": {
+          "宽度不足": 7,
+          "需局部收窄": 6,
+          "宽度足够": 5373
+        },
+        "retained": 267,
+        "local_sections": 3319,
+        "edge_violations": 0,
+        "first_request_s": 3.4515,
+        "repeat_ms": 0.128
+      },
+      {
+        "state": [
+          35,
+          -35,
+          -1
+        ],
+        "sections": 5442,
+        "verified_open_rectangles": 5439,
+        "counts": {
+          "宽度不足": 23,
+          "需局部收窄": 23,
+          "宽度足够": 5396
+        },
+        "retained": 267,
+        "local_sections": 3325,
+        "edge_violations": 0,
+        "first_request_s": 3.1645,
+        "repeat_ms": 0.155
+      },
+      {
+        "state": [
+          35,
+          -35,
+          1
+        ],
+        "sections": 5439,
+        "verified_open_rectangles": 5436,
+        "counts": {
+          "宽度不足": 24,
+          "需局部收窄": 26,
+          "宽度足够": 5389
+        },
+        "retained": 267,
+        "local_sections": 3358,
+        "edge_violations": 0,
+        "first_request_s": 3.3929,
+        "repeat_ms": 0.119
+      },
+      {
+        "state": [
+          35,
+          35,
+          -1
+        ],
+        "sections": 5447,
+        "verified_open_rectangles": 5441,
+        "counts": {
+          "宽度不足": 33,
+          "需局部收窄": 27,
+          "宽度足够": 5387
+        },
+        "retained": 267,
+        "local_sections": 3412,
+        "edge_violations": 0,
+        "first_request_s": 3.1071,
+        "repeat_ms": 0.173
+      },
+      {
+        "state": [
+          35,
+          35,
+          1
+        ],
+        "sections": 5423,
+        "verified_open_rectangles": 5418,
+        "counts": {
+          "宽度不足": 47,
+          "需局部收窄": 27,
+          "宽度足够": 5349
+        },
+        "retained": 267,
+        "local_sections": 3328,
+        "edge_violations": 0,
+        "first_request_s": 3.2537,
+        "repeat_ms": 0.197
+      }
+    ]
+  }
+}

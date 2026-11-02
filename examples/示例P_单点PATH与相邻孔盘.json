@@ -1,0 +1,61 @@
+{
+  "schema_version": 5,
+  "gds_path": "示例P_单点PATH与相邻孔盘.gds",
+  "sha256": "7c9b03f2dc47783e51165e04873ed4757be019a4046ff40479421ebb25cac7af",
+  "top_cell": "PAD_NEIGHBOUR_TEST",
+  "roles": {
+    "127/0": "封装边框",
+    "128/0": "芯片边框",
+    "3/0": "运动RDL",
+    "4/0": "运动过孔",
+    "5/0": "固定RDL"
+  },
+  "layer_order": [
+    "5/0",
+    "4/0",
+    "3/0",
+    "128/0",
+    "127/0"
+  ],
+  "overlays": {
+    "width": true
+  },
+  "parameters": {
+    "panel_layers": 2,
+    "wafer_layers": 1,
+    "line_width_um": 15.0,
+    "line_space_um": 15.0,
+    "wafer_line_width_um": 15.0,
+    "wafer_line_space_um": 15.0,
+    "via_diameter_um": 20.0,
+    "annulus_um": 10,
+    "residual_budget_um": 5.0,
+    "transition_length_um": 200.0,
+    "max_route_angle_deg": 30.0,
+    "routing_edge_keepout_um": 40.0,
+    "min_die_gap_um": 20.0,
+    "min_package_clearance_um": 20.0,
+    "single_bound_x_um": 25.0,
+    "single_bound_y_um": 25.0,
+    "multi_bound_x_um": 35.0,
+    "multi_bound_y_um": 35.0,
+    "bound_angle_deg": 1.0,
+    "per_die_enabled": false,
+    "die_bounds": [],
+    "rotation_center": "center",
+    "rotation_x_um": 0.0,
+    "rotation_y_um": 0.0,
+    "die_pivots": [],
+    "input_nsigma": 6.0,
+    "target_nsigma": 6.0,
+    "reference_nsigma": 6.0,
+    "mean_x_um": 0.0,
+    "mean_y_um": 0.0,
+    "mean_angle_deg": 0.0,
+    "rho_xy": 0.0,
+    "interdie": "unknown",
+    "fixed_via_assignment": "all"
+  },
+  "description": "4/0 来自单个 XY、宽 16 μm 的圆孔。77/0 的零宽 PATH 被忽略。中孔部分进入评估矩形，必须保留完整孔盘。左边界实测 5 μm，小于 15 μm 线距。",
+  "synthetic": true
+}

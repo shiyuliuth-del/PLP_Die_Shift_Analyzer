@@ -1,14 +1,16 @@
 """Draw retained barriers, failed gate rectangles and affected source outlines."""
 import numpy as np
+from matplotlib.colors import to_rgb
 from matplotlib.collections import PatchCollection
 from shapely.geometry import Point
 from shapely.strtree import STRtree
 from .qt_compat import QtWidgets as W, QtGui, QtCore, DISPLAY, TOOLTIP, BACKGROUND, HORIZONTAL
 from .width_analysis import COLORS, ADEQUATE, NARROW, BLOCKED, gate_rectangle
 from .viewport import overlaps
+from .width_display import tint
 
-HEADERS = ['状态','固定 RDL','通道两侧','原可通','必须通过','现可通','原间距 / μm','现间距 / μm','保宽需 / μm','最小需 / μm','问题线路','位置 / μm']
-INTRO = '按固定 RDL 原始线路穿越数比较各姿态的孔盘通道容量。勾选后显示孔盘、固定障碍和风险线路。'
+HEADERS = ['状态','固定 RDL','通道两侧','原可通','必须通过','现可通','原间距 / μm','现间距 / μm','保宽需 / μm','最小需 / μm','预期收窄 / μm','问题线路','位置 / μm']
+INTRO = '按固定 RDL 原始线路穿越数比较各姿态的孔盘通道容量。勾选后默认低亮显示原始线路，矩形标记相邻孔盘通道。'
 
 
 class ChannelRows(QtCore.QAbstractTableModel):
@@ -45,7 +47,7 @@ class ChannelRows(QtCore.QAbstractTableModel):
             return color
         if role==DISPLAY:
             return (r['status'],r['plane'],' ↔ '.join(r['pair']),r['original'],r['required'],r['current'],
-                    f"{r['nominal_gap_um']:.2f}",f"{r['gap_um']:.2f}",f"{r['keep_um']:.2f}",f"{r['minimum_um']:.2f}",
+                    f"{r['nominal_gap_um']:.2f}",f"{r['gap_um']:.2f}",f"{r['keep_um']:.2f}",f"{r['minimum_um']:.2f}",f"{r['narrowing_um']:.3f}",
                     '、'.join(f'{k} #{j+1}' for k,j in r['refs']),f"{r['point'][0]:.1f}, {r['point'][1]:.1f}")[index.column()]
         return None
 
@@ -77,20 +79,24 @@ class WidthOverlay:
             self.labels = []
             self.barriers = PatchCollection([],facecolor='#c3d2d8',edgecolor='#657d8b',linewidths=.6,zorder=4)
             self.boxes = PatchCollection([],linewidths=1.3,zorder=11.9)
-            self.outlines = PatchCollection([],facecolors='none',linewidths=1.55,zorder=12.1)
-            for item in (self.barriers,self.boxes,self.outlines):
+            self.outlines = PatchCollection([],facecolors='none',linewidths=1.15,zorder=11.25)
+            self.edges = PatchCollection([],linewidths=1.,zorder=11.1)
+            self.inset = {s:PatchCollection([],linewidths=.4,hatch='///',zorder=11.6+i*.01) for i,s in enumerate((NARROW,BLOCKED))}
+            for item in (self.barriers,self.boxes,self.outlines,self.edges,*self.inset.values()):
                 w.ax.add_collection(item)
             self.stamp = self.table_stamp = None
         visible = frozenset(k for k,check in w.visible_boxes.items() if check.isChecked())
-        flags = (id(data),visible,w.width_sufficient_toggle.isChecked())
-        stamp = (flags,w.view_bounds,self.selected,id(w.current_frame),w.reconstruction_toggle.isChecked(),w.deformation_toggle.isChecked())
+        flags = (id(data),w.width_sufficient_toggle.isChecked())
+        modes=w.view_settings.width_display
+        stamp = (flags,visible,tuple(modes.items()),w.view_bounds,self.selected,id(w.current_frame),w.reconstruction_toggle.isChecked(),w.deformation_toggle.isChecked())
         if self.stamp == stamp and (getattr(w,'_in_animation',False) or self.table_stamp==flags):
             return
         self.stamp = stamp
-        active = [r for r in (data or {}).get('rows',[]) if (w.width_sufficient_toggle.isChecked() or r['status']!=ADEQUATE) and visible.intersection(r['layers'])
+        rows = [r for r in (data or {}).get('rows',[]) if w.width_sufficient_toggle.isChecked() or r['status']!=ADEQUATE]
+        active = [r for r in rows if visible.intersection(r['layers'])
                   and all(not ks or visible.intersection(ks) for ks in r['boundary_layers'])
                   and all(any(k in visible for k,_ in refs) for refs in r['boundary_refs'])
-                  and any(k in visible for k,_ in r['refs'])]
+                  and (not r['refs'] or any(k in visible for k,_ in r['refs']))]
         rules = (data or {}).get('parameters',{})
         if getattr(self,'geometry_data',None) is not data:
             self.geometry_data = data
@@ -109,16 +115,23 @@ class WidthOverlay:
                 if overlaps(rectangle.bounds,w.view_bounds):
                     shown.append(r)
                     rectangles.append(rectangle)
-        objects = [o['geometry'] for o in (data or {}).get('retained',[]) if visible.intersection(o['layers'])
-                   and any(k in visible for k,_ in o['refs']) and overlaps(o['geometry'].bounds,w.view_bounds)]
-        self.barriers.set_paths([w.geometry_patch(g) for g in objects])
+        objects = [o for o in (data or {}).get('retained',[]) if visible.intersection(o['layers'])
+                   and modes[o['kind']]!='hide' and any(k in visible for k,_ in o['refs']) and overlaps(o['geometry'].bounds,w.view_bounds)]
+        self.barriers.set_paths([w.geometry_patch(o['geometry']) for o in objects])
+        palette={'运动过孔孔盘':('#aacbbd','#588574'),'固定过孔孔盘':('#aec2d7','#6c86a1'),'固定障碍':('#c7c8ce','#81808c')}
+        self.barriers.set_facecolors([tint(palette[o['kind']][0],modes[o['kind']],.77) for o in objects])
+        self.barriers.set_edgecolors([tint(palette[o['kind']][1],modes[o['kind']]) for o in objects])
         self.barriers.set_visible(bool(objects))
         self.boxes.set_paths([w.geometry_patch(g) for g in rectangles])
         colors = [COLORS[r['status']] for r in shown]
-        from matplotlib.colors import to_rgba
-        self.boxes.set_facecolors([to_rgba(c,.14) for c in colors])
-        self.boxes.set_edgecolors(colors)
-        self.boxes.set_visible(bool(shown))
+        self.boxes.set_facecolors([tint(c,modes['截面'],.14) for c in colors])
+        self.boxes.set_edgecolors([tint(c,modes['截面']) for c in colors])
+        self.boxes.set_visible(bool(shown) and modes['截面']!='hide')
+        board_visible=any(k in visible for k,r in w.roles().items() if r=='封装边框')
+        edges=[v['geometry'] for v in (data or {}).get('edge_violations',[]) if v['layer'] in visible and board_visible and overlaps(v['geometry'].bounds,w.view_bounds)]
+        self.edges.set_paths([w.geometry_patch(g) for g in edges])
+        self.edges.set_facecolor(tint('#c44956',modes['边距'],.34));self.edges.set_edgecolor(tint('#c44956',modes['边距']))
+        self.edges.set_visible(bool(edges) and modes['边距']!='hide')
         # Use the displayed replacement geometry when a source wire was deformed.
         changed = {}
         frame = w.current_frame or {}
@@ -129,6 +142,7 @@ class WidthOverlay:
                         changed.update({(k,i):q['geometry'] for i in q['indices']})
         refs = dict.fromkeys(ref for r in active if r['status']!=ADEQUATE for ref in r['refs'] if ref[0] in visible)
         paths, inks = [], []
+        def dark(color):return tuple(.64*v for v in to_rgb(color))
         danger = {ref for r in active if r['status']==BLOCKED for ref in r['refs']}
         for k,i in refs:
             g = changed.get((k,i),w.geometry_cache.layers[k]['geometry'][i])
@@ -136,12 +150,37 @@ class WidthOverlay:
                 paths.append(w.geometry_patch(g))
                 inks.append(COLORS[BLOCKED if (k,i) in danger else NARROW])
         self.outlines.set_paths(paths)
-        self.outlines.set_edgecolors(inks)
-        self.outlines.set_visible(bool(paths))
+        self.outlines.set_edgecolors([tint(dark(c),modes['描边'],.63) for c in inks])
+        self.outlines.set_visible(bool(paths) and modes['描边']!='hide')
+        # Fill only the material belonging to this risk row, clipped to the
+        # actual rectangle. The original copper outside it keeps the dark edge.
+        fill_stamp=(id(data),id(frame),w.deformation_toggle.isChecked(),w.reconstruction_toggle.isChecked())
+        if getattr(self,'fill_stamp',None)!=fill_stamp:
+            self.fill_stamp=fill_stamp;self.clips={}
+        fill_paths={s:[] for s in self.inset}
+        if modes['描边']!='hide' and modes['截面']!='hide':
+            for r,rectangle in reversed(list(zip(shown,rectangles))):
+                if r['status']==ADEQUATE:continue
+                for ref in r['refs']:
+                    k,i=ref
+                    if k not in visible:continue
+                    g=changed.get(ref,w.geometry_cache.layers[k]['geometry'][i])
+                    token=(id(r),id(g))
+                    if token not in self.clips:self.clips[token]=g.intersection(rectangle)
+                    part=self.clips[token]
+                    if part.area>0:
+                        fill_paths[r['status']].append(w.geometry_patch(part))
+        ink_mode='dim' if 'dim' in (modes['描边'],modes['截面']) else 'show'
+        for status,artist in self.inset.items():
+            color=dark(COLORS[status])
+            artist.set_paths(fill_paths[status])
+            artist.set_facecolor(tint(color,ink_mode,.32))
+            artist.set_edgecolor(tint(color,ink_mode,.5))
+            artist.set_visible(bool(fill_paths[status]))
         self.rows = shown
         self.tree = STRtree(rectangles) if shown else None
         # Every rectangle stays visible. Thin labels by screen-space overlap only.
-        ordered = sorted(shown,key=lambda r:self.identity(r)!=self.selected)
+        ordered = [] if modes['标注']=='hide' else sorted(shown,key=lambda r:self.identity(r)!=self.selected)
         positions = []
         occupied = set()
         for r in ordered:
@@ -153,22 +192,23 @@ class WidthOverlay:
             pos = len(positions)
             positions.append(px)
             if pos==len(self.labels):
-                a = w.ax.annotate('',xy=(0,0),xytext=(10,12),textcoords='offset points',fontsize=7,
-                                  zorder=12.6,bbox=dict(facecolor='white',alpha=.9,pad=1.5),
+                a = w.ax.annotate('',xy=(0,0),xytext=(10,12),textcoords='offset points',fontsize=8,
+                                  zorder=12.6,bbox=dict(facecolor='white',alpha=.94,pad=2.0),
                                   arrowprops=dict(arrowstyle='->',lw=.9))
                 self.labels.append(a)
             a = self.labels[pos]
             a.xy = tuple(r['point'])
-            a.set_text(f"原可通 {r['original']}　必须 {r['required']}　现可通 {r['current']}")
-            a.set_color(COLORS[r['status']])
-            a.arrow_patch.set_color(COLORS[r['status']])
+            amount=f"{r['narrowing_um']:.3f}".rstrip('0').rstrip('.')
+            a.set_text(f"原宽:{r['original']},必过:{r['required']},现宽:{r['current']}\n预期收窄:{amount}微米")
+            a.set_color(tint(dark(COLORS[r['status']]),modes['标注']))
+            a.arrow_patch.set_color(tint(COLORS[r['status']],modes['标注']))
             a.get_bbox_patch().set_edgecolor(COLORS[r['status']])
             a.set_visible(True)
         for a in self.labels[len(positions):]:
             a.set_visible(False)
         if not getattr(w,'_in_animation',False) and self.table_stamp!=flags:
             self.table_stamp = flags
-            self.fill_table(active,data)
+            self.fill_table(rows,data)
 
     @staticmethod
     def identity(r):
@@ -176,11 +216,13 @@ class WidthOverlay:
 
     @staticmethod
     def description(r):
-        note = '　新障碍分段，需核对绕行侧别。' if r['split'] else ''
+        note = '　按矩形内相邻刚性孔盘或障碍重新分段。' if r['split'] else ''
+        if r.get('locked'):note+=f"　{r['locked']} 条落盘连接已按实体占用。"
+        if not r['required']:note+='　刚性壁之间仍须满足一道线距。'
         if r['unresolved']:
             note += '　存在未确定的芯片归属。'
         return (f"{' ↔ '.join(r['pair'])}　{r['status']}\n原可通 {r['original']} 根，必须通过 {r['required']} 根，"
-                f"现可通 {r['current']} 根。原线宽 {', '.join(f'{v:.2f}' for v in r['widths_um'])} μm。"
+                f"现可通 {r['current']} 根。预期收窄 {r['narrowing_um']:.3f} μm。原线宽 {', '.join(f'{v:.2f}' for v in r['widths_um'])} μm。"
                 f"各空隙净宽 {', '.join(f'{v:.2f}' for v in r['slots_um']) or '0'} μm。{note}")
 
     def fill_table(self,rows,data):
@@ -190,12 +232,14 @@ class WidthOverlay:
         if not data:
             w.width_summary.setText(INTRO)
         elif not data['examined']:
-            w.width_summary.setText('当前固定 RDL 没有识别到有名义线路穿越的通道。请核对图层用途、层序和连接。')
+            w.width_summary.setText('当前没有需穿线的相邻通道，也没有刚性壁净距不足。')
         else:
             q = data['counts']
-            w.width_summary.setText(f"检查 {data['examined']} 个名义穿越截面。宽度足够 {q[ADEQUATE]} 个，"
-                                    f"需局部收窄 {q[NARROW]} 个，宽度不足 {q[BLOCKED]} 个。当前显示 {len(rows)} 行。")
+            w.width_summary.setText(f"检查 {data['examined']} 个相邻截面。宽度足够 {q[ADEQUATE]} 个，"
+                                    f"需局部收窄 {q[NARROW]} 个，宽度不足 {q[BLOCKED]} 个。表中 {len(rows)} 行。")
 
+        if data and data.get('edge_violations'):
+            w.width_summary.setText(w.width_summary.text()+f" 封装边距不足 {len(data['edge_violations'])} 个图形。")
     def hover(self,event):
         w = self.w
         if self.tree is None or event.inaxes is not w.ax or event.xdata is None:

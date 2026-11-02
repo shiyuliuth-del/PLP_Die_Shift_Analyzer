@@ -103,5 +103,7 @@ class GlobalDRC:
             via=m.moved(r['poly'],r['owner'],states)
             missing=via.buffer(p.annulus_um/math.cos(math.pi/128),quad_segs=32).difference(shapely.union_all(targets))
             if missing.area>dbu*dbu:items.append(dict(layer=r['target_layers'][0],layers=tuple(r['target_layers']),geometry=missing,kind='孔盘包围不足'))
+        from .edge_clearance import edge_violations
+        items.extend(edge_violations(m,states,p,settings,replacements))
         progress(100,f'全局 DRC 完成 · {len(items)} 组标记')
         return items

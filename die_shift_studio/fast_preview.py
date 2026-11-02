@@ -119,6 +119,8 @@ def check_frame(bound,roles,p,result,states,layers,scheme,connections=None,check
         model=ContactModel(bound.cache.data,case,roles,connections,bound.cache,parameters=p)
         for issue in model.current(states,p)['issues']:
             if issue['scheme']==scheme:fail(issue['kind'],[issue['point']])
+        from .edge_clearance import edge_violations
+        for q in edge_violations(model,states,p,None):fail(q['kind'],[q['point']])
     return dict(problem_percent=100 if failures else 0,failures=failures,scope='已导入几何的净距、禁布区和有名义向下连接的接口窗口；不是完整DRC')
 
 class PreviewEngine:
@@ -216,7 +218,27 @@ class PreviewEngine:
             cfg=self.deformer.settings if self.deformer is not None else self.drc_settings
             width,space=effective_rules(self.p,cfg)
             frame['drc_rules']=dict(tolerance_um=cfg.drc_tolerance_um,nominal_width_um=self.p.line_width_um,nominal_space_um=self.p.line_space_um,effective_width_um=width,effective_space_um=space,annulus_um=self.p.annulus_um)
-        if getattr(self,'width_key',(False,))[0]:frame['width_analysis']=self.width_analyzer.frame(frame,progress,quick=quick)
+        from .edge_clearance import edge_violations
+        cfg=getattr(self,'drc_settings',None) or getattr(getattr(self,'width_analyzer',None),'settings',None)
+        overrides=frame.get('deformation',{}).get('replacements',{})
+        edges=([v for v in frame['drc'] if v['kind']=='封装边缘线距不足'] if 'drc' in frame else
+               edge_violations(self.contact,states,self.p,cfg,overrides))
+        frame['edge_clearance']=edges
+        for check in checks.values():
+            check['failures'].extend(dict(kind=q['kind'],layer=q['layer'],point=q['point']) for q in edges)
+            if edges:check['problem_percent']=100
+        if getattr(self,'width_key',(False,))[0]:
+            if frame.get('reconstruction',{}).get('replacements'):
+                by_ref={}
+                for source in (overrides,frame['reconstruction']['replacements']):
+                    for k,items in source.items():
+                        for q in items:
+                            for i in q['indices']:by_ref[k,i]=q
+                changed={}
+                for (k,i),q in by_ref.items():
+                    if i==q['indices'][0]:changed.setdefault(k,[]).append(q)
+                edges=edge_violations(self.contact,states,self.p,cfg,changed)
+            frame['width_analysis']=dict(self.width_analyzer.frame(frame,progress,quick=quick),edge_violations=edges)
         if quick:self.intermediate.put(key,frame)
         else:
             if not np.any(states):self.frames.pin(key)

@@ -24,6 +24,7 @@ def motion_packet(engine,start,end,settings,view_span,cache):
         reverse=cache.get(key[:3]+(end.tobytes(),start.tobytes(),steps))
         if reverse and reverse['complete']:
             packet=dict(frames=[(1-f,frame) for f,frame in reversed(reverse['frames'])],complete=True)
+            cache[key]=packet
     return start,end,duration,steps,requested_steps,key,packet
 
 

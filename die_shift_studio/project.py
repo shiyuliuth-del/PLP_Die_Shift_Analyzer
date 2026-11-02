@@ -37,6 +37,9 @@ def normalize_project(project):
     p.setdefault('stage_hints',{k:r for k,r in p['roles'].items() if r in ('运动过孔','晶圆段输出接口')} if p.get('schema_version',1)<3 else {})
     from .settings import ViewSettings
     from dataclasses import asdict
+    edits=p.setdefault('node_edits',[])
+    if not isinstance(edits,list) or any(not isinstance(q,dict) or not {'layer','index','original','nodes'}<=q.keys() for q in edits):
+        raise ValueError('工程节点编辑必须为含图层、图形编号、源指纹与坐标的列表')
     p['overlays']=project_overlays(p)
     p['settings']=asdict(ViewSettings.from_dict(p.get('settings')))
     p['schema_version']=5;p.pop('geometry',None)

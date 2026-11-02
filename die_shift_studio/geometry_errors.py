@@ -50,7 +50,8 @@ def sanitize_data(data):
     if not hasattr(data,'ignored_geometry'):data.ignored_geometry=[]
     if not hasattr(data,'repaired_geometry'):data.repaired_geometry=[]
     for key,arrays in list(data.layers.items()):
-        valid=[]
+        valid=[];metadata=[]
+        source=getattr(data,'shape_info',{}).get(key,[])
         for index,array in enumerate(arrays):
             points=np.asarray(array,dtype=float);reason=''
             try:
@@ -58,10 +59,11 @@ def sanitize_data(data):
                 if not np.isfinite(points).all():raise ValueError('含非有限坐标')
                 if np.max(np.abs(points))>1e9:raise ValueError('坐标超出支持范围 ±1e9 μm')
                 poly=Polygon(points)
-                if poly.is_valid and poly.area>0:valid.append(array);continue
+                if poly.is_valid and poly.area>0:
+                    valid.append(array);metadata.append(source[index] if index<len(source) else None);continue
                 reason=shapely.is_valid_reason(poly)
                 repaired,info=repair_gds_polygon(points,data.dbu_um)
-                valid.extend(repaired)
+                valid.extend(repaired);metadata.extend([None]*len(repaired))
                 data.repaired_geometry.append(dict(layer=key,index=index+1,reason=reason,bounds=list(poly.bounds),**info))
                 continue
             except (ValueError,RuntimeError,shapely.errors.GEOSException) as error:reason+='；'+str(error)
@@ -70,5 +72,6 @@ def sanitize_data(data):
             else:bounds=[0.,0.,0.,0.];reason+='；无可定位有限坐标，原点提示框'
             data.ignored_geometry.append(dict(layer=key,index=index+1,reason=reason,bounds=list(map(float,bounds)),points=points.copy()))
         data.layers[key]=valid
+        if source:data.shape_info[key]=metadata
     data._sanitized_token=tuple((k,id(v),len(v)) for k,v in data.layers.items())
     return data

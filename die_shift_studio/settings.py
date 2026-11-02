@@ -1,9 +1,24 @@
 """Saved numerical/display settings, independent of process acceptance parameters."""
-from dataclasses import dataclass,asdict,fields
+from dataclasses import dataclass,asdict,fields,field
 import math
+
+ELEMENTS={'固定RDL':'原始固定 RDL 线路','运动RDL':'原始运动 RDL 线路','固定过孔':'固定过孔实体','运动过孔':'运动过孔实体',
+          '封装边框':'封装边框','芯片边框':'芯片边框','其他':'其他 GDS 图形','运动过孔孔盘':'运动孔盘',
+          '固定过孔孔盘':'固定孔盘','固定障碍':'整块固定障碍','截面':'通道矩形','描边':'风险线路描边',
+          '标注':'文字和箭头','边距':'封装边缘违规'}
+DEFAULTS={k:'dim' if k in ('固定RDL','运动RDL') else 'show' for k in ELEMENTS}
+
+
+def normalize_display(values):
+    if not isinstance(values,dict):raise ValueError('宽度分析显示设置必须是对象')
+    result={k:values.get(k,v) for k,v in DEFAULTS.items()}
+    if any(v not in ('show','dim','hide') for v in result.values()):raise ValueError('宽度分析元素仅支持显示、低亮或隐藏')
+    return result
+
 
 @dataclass(frozen=True)
 class ViewSettings:
+    width_display:dict=field(default_factory=lambda:dict(DEFAULTS),hash=False)
     cache_max_entries:int=2000
     acceleration:str='auto'
     deformation_min_angle_deg:float=90.
@@ -36,6 +51,7 @@ class ViewSettings:
     probability_interpolation:str='nearest'
     space_scope:str='moving'
     animation_enabled:bool=True
+    animation_return_zero:bool=True
     animation_strategy:str='prepared'
     animation_duration_ms:int=1000
     animation_steps:int=12  # legacy project field, ignored by V9 animation
@@ -75,6 +91,7 @@ class ViewSettings:
     @classmethod
     def from_dict(cls,values=None):
         values=dict(values or {})
+        values['width_display']=normalize_display(values.get('width_display',{}))
         if 'reconstruction_overlap_um' not in values and 'width_overlap_um' in values:
             values['reconstruction_overlap_um']=values['width_overlap_um']
         known={f.name for f in fields(cls)};q=cls(**{k:v for k,v in (values or {}).items() if k in known})
@@ -104,7 +121,7 @@ class ViewSettings:
             v=getattr(q,key)
             if not isinstance(v,(int,float)) or not math.isfinite(v) or not lo<=v<=hi or (key in integers and int(v)!=v):
                 raise ValueError(f'设置 {key} 超出范围 {lo}—{hi}')
-        for key in ('animation_enabled','probability_show_ranges','contact_marker_absolute','unadapted_marker_absolute','deformation_route_enabled','deformation_general_bands','repair_landing_pad'):
+        for key in ('animation_enabled','animation_return_zero','probability_show_ranges','contact_marker_absolute','unadapted_marker_absolute','deformation_route_enabled','deformation_general_bands','repair_landing_pad'):
             if not isinstance(getattr(q,key),bool):raise ValueError(key+'必须为布尔值')
         import re
         color=lambda v:isinstance(v,str) and re.fullmatch(r'#[0-9a-fA-F]{6}',v)
@@ -117,7 +134,7 @@ class ViewSettings:
         return cls(**data)
 
     def width_key(self):
-        return (True,'pad-channels-v23',self.drc_tolerance_um)
+        return (True,'neighbor-pads-v24',self.drc_tolerance_um)
 
     def numeric_key(self):
         return tuple(getattr(self,k) for k in ('acceleration','probability_method','sample_exponent','random_seed',
