@@ -3,12 +3,15 @@ import argparse
 import itertools
 import json
 import math
+import sys
 import time
 from pathlib import Path
 from unittest.mock import patch
 import numpy as np
 import shapely
-from validate_width_v24 import ROOT,audit_neighbours
+ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT))
+from tools.validate_width_v24 import audit_neighbours
 from die_shift_studio.core import read_gds,build_case,Parameters
 from die_shift_studio.fast_preview import GeometryCache,PreviewEngine
 from die_shift_studio.settings import ViewSettings
