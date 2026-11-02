@@ -12,7 +12,7 @@ from die_shift_studio.prepared_motion import prepare_motion
 from die_shift_studio.project import normalize_project
 from die_shift_studio.session_cache import ProjectCacheRegistry
 from die_shift_studio.settings import ViewSettings
-from die_shift_studio.width_analysis import _crossings,gate_rectangle
+from die_shift_studio.width_analysis import _crossings,gate_rectangle,Gate,WidthAnalyzer
 from tests.test_v21 import example
 from tests.test_width_channels import frame_at
 
@@ -47,6 +47,17 @@ class V25Tests(unittest.TestCase):
                 self.assertEqual(r['locked'],1)
                 np.testing.assert_allclose(gate_rectangle(r,15,15).centroid.coords[0],ends.mean(axis=0),atol=1e-8)
         finally:e.close()
+
+    def test_disjoint_intervals_on_same_parallel_walls_stay_separate(self):
+        # Each y is a sampled valid witness; an intervening y had no original
+        # through-line. Both sections carry the same net on a later return.
+        group=[]
+        for run,y in [(0,0.),(1,10.)]:
+            ends=np.array([[0.,y],[40.,y]])
+            gate=Gate((0,1),(0,1),ends,True,(5.,),(20.,),((('5/0',3),),),40.,(0,1,run,0))
+            row=dict(current=1,required=1,gap_um=40.,keep_um=30.,locked=0,split=False)
+            group.append((gate,row))
+        self.assertEqual(len(WidthAnalyzer._distinct_throats(SimpleNamespace(tol=1e-8),group,20.)),2)
 
     def test_owned_replay_and_disk_hits_do_not_consume_result_slots(self):
         reg=ProjectCacheRegistry();group=reg.get('low',2)
@@ -120,6 +131,22 @@ class V25Tests(unittest.TestCase):
         ax.set_ylim((30,70));layout=LabelLayout(ax,[gate],10,{})
         self.assertIsNotNone(layout.place(0,text,found[0]))
         self.assertGreater(layout.labels[0][0][1],ax.bbox.y0/layout.scale)
+
+    def test_dense_label_prescreen_matches_exact_rectangle_queries(self):
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from die_shift_studio.width_labels import LabelLayout
+        figure=Figure(figsize=(8,4),dpi=100);canvas=FigureCanvasAgg(figure)
+        ax=figure.add_axes([.03,.03,.95,.93]);ax.set(xlim=(0,100),ylim=(0,65));canvas.draw()
+        gates=[box(x-1,y-1,x+1,y+1) for x in range(4,65,3) for y in range(2,64,2)]
+        gates+=[box(80,10,85,12),box(79,55,87,56)]
+        texts=['A:6 B:4 C:3\nwidth:10']*len(gates)
+        exact=LabelLayout(ax,gates,8,{})
+        fast=LabelLayout(ax,gates,8,{});fast.prescreen(texts)
+        self.assertTrue(any(not x for x in fast.viable))
+        self.assertEqual([exact.place(i,t) for i,t in enumerate(texts)],
+                         [fast.place(i,t) for i,t in enumerate(texts)])
+        self.assertGreater(len(exact.labels),0)
 
     def test_display_settings_restore_independently_of_calculation(self):
         old=normalize_project({'schema_version':1})

@@ -580,8 +580,12 @@ class WidthAnalyzer:
             for i in range(len(group)):
                 nearby=(np.linalg.norm(points[i+1:]-points[i],axis=1)<=2*half_depth+self.tol)
                 aligned=normal[i+1:]@normal[i]>.995
-                for j in np.flatnonzero(nearby & aligned):
-                    clusters.union(i,i+1+int(j))
+                for offset in np.flatnonzero(nearby & aligned):
+                    j=i+1+int(offset)
+                    # On the same faces, only consecutive stations in an
+                    # uninterrupted band may merge. A short dead zone or a
+                    # third landing can split two nearby but distinct mouths.
+                    if group[i][0].features!=group[j][0].features:clusters.union(i,j)
             mouths=defaultdict(list)
             for i in range(len(group)):mouths[clusters.find(i)].append(i)
             for indices in mouths.values():

@@ -5,7 +5,7 @@
   "hardware": {
     "cpu": 8,
     "total_memory_mb": 15708,
-    "available_memory_mb": 7208,
+    "available_memory_mb": 7874,
     "workers": 6,
     "process_workers": 3,
     "policy": "预留2逻辑CPU与65%可用内存；原生几何/FFT使用线程；大型独立原图DRC与RDL候选搜索使用spawn进程；小任务串行"
@@ -38,8 +38,8 @@
       "endpoint_error_um": 3.0370047332208526e-13,
       "axis_cross_error_um": 2.2737367544323206e-13,
       "focus_risks": [],
-      "first_request_s": 18.655,
-      "repeat_ms": 0.089
+      "first_request_s": 28.29,
+      "repeat_ms": 0.155
     },
     {
       "state": [
@@ -91,8 +91,8 @@
           "gap_um": 145.35000947554738
         }
       ],
-      "first_request_s": 1.833,
-      "repeat_ms": 0.069
+      "first_request_s": 4.597,
+      "repeat_ms": 0.215
     },
     {
       "state": [
@@ -110,8 +110,8 @@
       "endpoint_error_um": 3.7957919553281517e-13,
       "axis_cross_error_um": 1.1368683772161603e-13,
       "focus_risks": [],
-      "first_request_s": 2.152,
-      "repeat_ms": 0.122
+      "first_request_s": 4.385,
+      "repeat_ms": 0.143
     },
     {
       "state": [
@@ -129,8 +129,8 @@
       "endpoint_error_um": 5.204128541853093e-13,
       "axis_cross_error_um": 2.2737367544323206e-13,
       "focus_risks": [],
-      "first_request_s": 2.911,
-      "repeat_ms": 0.114
+      "first_request_s": 5.071,
+      "repeat_ms": 0.155
     },
     {
       "state": [
@@ -148,8 +148,8 @@
       "endpoint_error_um": 3.7957919553281517e-13,
       "axis_cross_error_um": 2.2737367544323206e-13,
       "focus_risks": [],
-      "first_request_s": 2.646,
-      "repeat_ms": 0.091
+      "first_request_s": 4.398,
+      "repeat_ms": 0.124
     },
     {
       "state": [
@@ -167,8 +167,8 @@
       "endpoint_error_um": 5.226183528338317e-13,
       "axis_cross_error_um": 2.2737367544323206e-13,
       "focus_risks": [],
-      "first_request_s": 1.84,
-      "repeat_ms": 0.144
+      "first_request_s": 4.282,
+      "repeat_ms": 0.228
     },
     {
       "state": [
@@ -186,8 +186,8 @@
       "endpoint_error_um": 3.7957919553281517e-13,
       "axis_cross_error_um": 1.1368683772161603e-13,
       "focus_risks": [],
-      "first_request_s": 4.425,
-      "repeat_ms": 0.195
+      "first_request_s": 4.58,
+      "repeat_ms": 0.144
     },
     {
       "state": [
@@ -205,8 +205,8 @@
       "endpoint_error_um": 5.204128541853093e-13,
       "axis_cross_error_um": 1.1368683772161603e-13,
       "focus_risks": [],
-      "first_request_s": 4.709,
-      "repeat_ms": 0.1
+      "first_request_s": 5.163,
+      "repeat_ms": 0.267
     },
     {
       "state": [
@@ -224,8 +224,8 @@
       "endpoint_error_um": 3.7957919553281517e-13,
       "axis_cross_error_um": 2.2737367544323206e-13,
       "focus_risks": [],
-      "first_request_s": 6.195,
-      "repeat_ms": 0.12
+      "first_request_s": 5.134,
+      "repeat_ms": 0.115
     }
   ]
 }

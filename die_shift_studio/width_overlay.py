@@ -184,11 +184,11 @@ class WidthOverlay:
         fontsize=w.view_settings.width_label_font_pt
         order=[] if modes['标注']=='hide' else sorted(range(len(shown)),key=lambda i:self.identity(shown[i])!=self.selected)
         layout=LabelLayout(w.ax,rectangles,fontsize,self.text_sizes,modes['截面']!='hide') if order else None
+        texts=[self.label_text(r) for r in shown] if order else []
+        if layout:layout.prescreen(texts)
         count=0;next_sides={}
         for i in order:
-            r=shown[i]
-            amount=f"{r['narrowing_um']:.3f}".rstrip('0').rstrip('.')
-            text=f"原宽:{r['original']},必过:{r['required']},现宽:{r['current']}\n预期收窄:{amount}微米"
+            r=shown[i];text=texts[i]
             source=(r['plane'],r['pair'],tuple(map(tuple,r['nominal_witness_um'])))
             found=layout.place(i,text,self.label_sides.get(source))
             if found is None:continue
@@ -209,6 +209,11 @@ class WidthOverlay:
         if not getattr(w,'_in_animation',False) and self.table_stamp!=flags:
             self.table_stamp = flags
             self.fill_table(rows,data)
+
+    @staticmethod
+    def label_text(r):
+        amount=f"{r['narrowing_um']:.3f}".rstrip('0').rstrip('.')
+        return f"原宽:{r['original']},必过:{r['required']},现宽:{r['current']}\n预期收窄:{amount}微米"
 
     @staticmethod
     def identity(r):
