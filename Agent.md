@@ -1,6 +1,6 @@
 # 多 Agent 协作与 GitHub 提交规范
 
-适用范围：本仓库全部源码、文档、示例和发布物。维护日期：2026-11-02。本文以 **V25（实际窄口与手动预演）**编制；当前软件版本以`__init__.py`和README为准。原附件自身仍标记为V21，不能把它与此前已发布的V21标签混为一谈。
+适用范围：本仓库全部源码、文档、示例和发布物。维护日期：2026-11-02。本文以 **V26（离散极端组合与缓存状态）**编制；当前软件版本以`__init__.py`和README为准。原附件自身仍标记为V21，不能把它与此前已发布的V21标签混为一谈。
 
 ## 1. 唯一可信主线与需求优先级
 
@@ -49,13 +49,13 @@ QT_QPA_PLATFORM=offscreen python3 tests/gui_repair.py
 
 | 改动 | 必查内容 |
 |---|---|
-| 归属/层序/旋转 | `test_v060.py`、`test_v21.py`、极端状态与M键；多芯片、外部扇出、推定归属 |
+| 归属/层序/旋转 | `test_v060.py`、`test_v21.py`、`test_v26.py`、`gui_v26.py`、极端状态与M键；多芯片、外部扇出、推定归属 |
 | 固定 RDL 通道 | `test_width_channels.py`、示例 O、P、Q 属性与 gui_v25.py 的真实界面回归。验证三档、原宽、名义根数、固定障碍、工程恢复和动画 |
 | 直线补块 | `test_repair_patch.py`、`gui_repair.py`；仍接触时不补、新旧DRC分开、直径与定位 |
 | 切分重构 | `test_reconstruction.py`、`gui_v21.py`；斜线、串联落盘、共享铜、旋转、零裂隙 |
 | 几何型变/DRC | V12–V20相关核心测试；失败保留源铜、原材料随动、固定端、连通、最终全局复核 |
 | 概率/安全盒/良率 | 解析或独立积分对照；0/有限k/∞、最大幅度、共同DIE状态与误差范围 |
-| GUI/缓存/调度 | `gui_smoke.py`、`gui_v14.py`、`gui_v20.py`、`gui_scheduler_v20.py`，再测当前界面、低容量缓存正反向复用、设置折叠与标签避让 |
+| GUI/缓存/调度 | `gui_smoke.py`、`gui_v14.py`、`gui_v20.py`、`gui_scheduler_v20.py`，再测当前界面、低容量缓存正反向复用、设置折叠、标签避让与极端表缓存色 |
 | 依赖/打包/后端 | `main.py --smoke-test`、安装的KLayout桌面后端、`TEST_WINDOWS.bat`（有Windows时） |
 
 完整发布使用 `python3 tools/package_release.py`，它会在全新解压目录中再次执行规定的检查。实际GUI、KLayout、Windows、GPU或真实GD55未验证时，必须写明未验证/跳过原因。不得把“没有数据”“没有标记”“样本未命中”写成通过。
@@ -82,7 +82,7 @@ QT_QPA_PLATFORM=offscreen python3 tests/gui_repair.py
 
 ## 7. 版本、源码ZIP与发布
 
-- 1102 接入标签为 V22，本轮为 V25，后续每轮依次递增。由集成者统一分配发布号；并行Agent不要各自占用同一个号。
+- 1102 接入标签为 V22，本轮为 V26，后续每轮依次递增。由集成者统一分配发布号；并行Agent不要各自占用同一个号。
 - 更新 `die_shift_studio/__init__.py`、README、当前使用说明、`AGENTS.md`入口链接及发布记录；旧tag及历史证据不改写。
 - 源码ZIP只包含运行源码、必要示例、规范/使用文档和验证记录，**不含图片（含SVG/PDF/图标）、日志、缓存、旧ZIP、exe**。图文报告保留在线，`.gitattributes`须令GitHub自动源代码归档同样排除图片。
 - 不能沿用输入附件内的旧 `SHA256SUMS.json` 或旧 `package_verification.json`。新包生成自己的清单，在独立解压目录运行测试，再做CRC、哈希和7-Zip检查。

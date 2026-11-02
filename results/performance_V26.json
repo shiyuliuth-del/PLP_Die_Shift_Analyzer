@@ -1,0 +1,527 @@
+{
+  "versions": [
+    "V25",
+    "V26"
+  ],
+  "date_utc": "2026-11-02T09:04:03.013720+00:00",
+  "medians": {
+    "import": {
+      "v25_s": 0.140326,
+      "v26_s": 0.16703,
+      "ratio": 0.84
+    },
+    "width_cold_nominal": {
+      "v25_s": 14.551426,
+      "v26_s": 14.020347,
+      "ratio": 1.038
+    },
+    "width_first_shift": {
+      "v25_s": 2.04465,
+      "v26_s": 1.150125,
+      "ratio": 1.778
+    },
+    "width_repeat": {
+      "v25_s": 0.000133,
+      "v26_s": 0.000188,
+      "ratio": 0.707
+    },
+    "width_animation_cold": {
+      "v25_s": 10.145909,
+      "v26_s": 4.875173,
+      "ratio": 2.081
+    },
+    "width_animation_replay": {
+      "v25_s": 0.00023,
+      "v26_s": 0.000208,
+      "ratio": 1.106
+    },
+    "agg_full_draw": {
+      "v25_s": 0.030353,
+      "v26_s": 0.024352,
+      "ratio": 1.246
+    },
+    "scheme_core": {
+      "v25_s": 24.649584,
+      "v26_s": 21.911112,
+      "ratio": 1.125
+    },
+    "extreme_checks": {
+      "v25_s": 3.311279,
+      "v26_s": 1.435269,
+      "ratio": 2.307
+    },
+    "scheme_core_plus_discrete": {
+      "v25_s": 28.106087,
+      "v26_s": 23.51781,
+      "ratio": 1.195
+    }
+  },
+  "v25_trials": [
+    {
+      "version": "V25",
+      "source_sha256": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+      "shape_count": 1225,
+      "dies": 3,
+      "platform": "Linux",
+      "python": "3.12.3",
+      "hardware": {
+        "cpu": 8,
+        "total_memory_mb": 15708,
+        "available_memory_mb": 8015,
+        "workers": 6,
+        "process_workers": 3,
+        "policy": "预留2逻辑CPU与65%可用内存；原生几何/FFT使用线程；大型独立原图DRC与RDL候选搜索使用spawn进程；小任务串行"
+      },
+      "cuda": {
+        "backend": "cpu",
+        "devices": [],
+        "reason": "CPU 回退：ModuleNotFoundError: No module named 'cupy'"
+      },
+      "openblas_threads": "1",
+      "pose": [
+        -35,
+        -35,
+        -1
+      ],
+      "rules_um": [
+        15,
+        15,
+        15
+      ],
+      "fps": 30,
+      "duration_limit_ms": 180,
+      "intermediate_frames": 5,
+      "reverse_cached": true,
+      "timings_s": {
+        "import": 0.076196,
+        "width_cold_nominal": 19.779101,
+        "width_first_shift": 2.668185,
+        "width_repeat": 8.8e-05,
+        "width_animation_cold": 11.391943,
+        "width_animation_replay": 0.000283,
+        "agg_full_draw": 0.033644,
+        "scheme_core": 24.794808,
+        "extreme_checks": 3.311279
+      },
+      "width_counts": [
+        {
+          "宽度不足": 0,
+          "需局部收窄": 0,
+          "宽度足够": 1900
+        },
+        {
+          "宽度不足": 0,
+          "需局部收窄": 1,
+          "宽度足够": 1763
+        }
+      ],
+      "scheme_scores": [
+        0.37973389870791757,
+        6.783486495062843,
+        0.37973389870791757
+      ],
+      "recommendation": 1,
+      "yield_estimate": 0.813472016074229,
+      "focused_shifted_rows": 13,
+      "grid_summary": {
+        "checked_shifted_rows": 13
+      },
+      "direct_comparisons": 0
+    },
+    {
+      "version": "V25",
+      "source_sha256": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+      "shape_count": 1225,
+      "dies": 3,
+      "platform": "Linux",
+      "python": "3.12.3",
+      "hardware": {
+        "cpu": 8,
+        "total_memory_mb": 15708,
+        "available_memory_mb": 7975,
+        "workers": 6,
+        "process_workers": 3,
+        "policy": "预留2逻辑CPU与65%可用内存；原生几何/FFT使用线程；大型独立原图DRC与RDL候选搜索使用spawn进程；小任务串行"
+      },
+      "cuda": {
+        "backend": "cpu",
+        "devices": [],
+        "reason": "CPU 回退：ModuleNotFoundError: No module named 'cupy'"
+      },
+      "openblas_threads": "1",
+      "pose": [
+        -35,
+        -35,
+        -1
+      ],
+      "rules_um": [
+        15,
+        15,
+        15
+      ],
+      "fps": 30,
+      "duration_limit_ms": 180,
+      "intermediate_frames": 5,
+      "reverse_cached": true,
+      "timings_s": {
+        "import": 0.140326,
+        "width_cold_nominal": 14.551426,
+        "width_first_shift": 2.04465,
+        "width_repeat": 0.000155,
+        "width_animation_cold": 10.145909,
+        "width_animation_replay": 0.000199,
+        "agg_full_draw": 0.030353,
+        "scheme_core": 21.011925,
+        "extreme_checks": 2.634767
+      },
+      "width_counts": [
+        {
+          "宽度不足": 0,
+          "需局部收窄": 0,
+          "宽度足够": 1900
+        },
+        {
+          "宽度不足": 0,
+          "需局部收窄": 1,
+          "宽度足够": 1763
+        }
+      ],
+      "scheme_scores": [
+        0.37973389870791757,
+        6.783486495062843,
+        0.37973389870791757
+      ],
+      "recommendation": 1,
+      "yield_estimate": 0.813472016074229,
+      "focused_shifted_rows": 13,
+      "grid_summary": {
+        "checked_shifted_rows": 13
+      },
+      "direct_comparisons": 0
+    },
+    {
+      "version": "V25",
+      "source_sha256": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+      "shape_count": 1225,
+      "dies": 3,
+      "platform": "Linux",
+      "python": "3.12.3",
+      "hardware": {
+        "cpu": 8,
+        "total_memory_mb": 15708,
+        "available_memory_mb": 7710,
+        "workers": 6,
+        "process_workers": 3,
+        "policy": "预留2逻辑CPU与65%可用内存；原生几何/FFT使用线程；大型独立原图DRC与RDL候选搜索使用spawn进程；小任务串行"
+      },
+      "cuda": {
+        "backend": "cpu",
+        "devices": [],
+        "reason": "CPU 回退：ModuleNotFoundError: No module named 'cupy'"
+      },
+      "openblas_threads": "1",
+      "pose": [
+        -35,
+        -35,
+        -1
+      ],
+      "rules_um": [
+        15,
+        15,
+        15
+      ],
+      "fps": 30,
+      "duration_limit_ms": 180,
+      "intermediate_frames": 5,
+      "reverse_cached": true,
+      "timings_s": {
+        "import": 0.176165,
+        "width_cold_nominal": 13.614662,
+        "width_first_shift": 2.010997,
+        "width_repeat": 0.000133,
+        "width_animation_cold": 9.783563,
+        "width_animation_replay": 0.00023,
+        "agg_full_draw": 0.026934,
+        "scheme_core": 24.649584,
+        "extreme_checks": 5.509679
+      },
+      "width_counts": [
+        {
+          "宽度不足": 0,
+          "需局部收窄": 0,
+          "宽度足够": 1900
+        },
+        {
+          "宽度不足": 0,
+          "需局部收窄": 1,
+          "宽度足够": 1763
+        }
+      ],
+      "scheme_scores": [
+        0.37973389870791757,
+        6.783486495062843,
+        0.37973389870791757
+      ],
+      "recommendation": 1,
+      "yield_estimate": 0.813472016074229,
+      "focused_shifted_rows": 13,
+      "grid_summary": {
+        "checked_shifted_rows": 13
+      },
+      "direct_comparisons": 0
+    }
+  ],
+  "v26_trials": [
+    {
+      "version": "V26",
+      "source_sha256": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+      "shape_count": 1225,
+      "dies": 3,
+      "platform": "Linux",
+      "python": "3.12.3",
+      "hardware": {
+        "cpu": 8,
+        "total_memory_mb": 15708,
+        "available_memory_mb": 7939,
+        "workers": 6,
+        "worker_capacity": 6,
+        "process_workers": 3,
+        "policy": "预留至少2个逻辑CPU（大机器约10%）与65%可用内存；原生几何/FFT使用线程；大型独立原图DRC与RDL候选搜索使用spawn进程；小任务串行"
+      },
+      "cuda": {
+        "backend": "cpu",
+        "devices": [],
+        "reason": "CPU 回退：ModuleNotFoundError: No module named 'cupy'"
+      },
+      "openblas_threads": "1",
+      "pose": [
+        -35,
+        -35,
+        -1
+      ],
+      "rules_um": [
+        15,
+        15,
+        15
+      ],
+      "fps": 30,
+      "duration_limit_ms": 180,
+      "intermediate_frames": 5,
+      "reverse_cached": true,
+      "timings_s": {
+        "import": 0.170731,
+        "width_cold_nominal": 14.441625,
+        "width_first_shift": 1.526193,
+        "width_repeat": 0.000238,
+        "width_animation_cold": 6.949141,
+        "width_animation_replay": 0.000394,
+        "agg_full_draw": 0.037774,
+        "scheme_core": 24.95831,
+        "extreme_checks": 1.15574
+      },
+      "width_counts": [
+        {
+          "宽度不足": 0,
+          "需局部收窄": 0,
+          "宽度足够": 1900
+        },
+        {
+          "宽度不足": 0,
+          "需局部收窄": 1,
+          "宽度足够": 1763
+        }
+      ],
+      "scheme_scores": [
+        0.37973389870791757,
+        6.783486495062843,
+        0.37973389870791757
+      ],
+      "recommendation": 1,
+      "yield_estimate": 0.813472016074229,
+      "focused_shifted_rows": 120,
+      "grid_summary": {
+        "local_states": 81,
+        "batches": 27,
+        "pair_states": 0,
+        "package_states": 19683
+      },
+      "direct_comparisons": 16
+    },
+    {
+      "version": "V26",
+      "source_sha256": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+      "shape_count": 1225,
+      "dies": 3,
+      "platform": "Linux",
+      "python": "3.12.3",
+      "hardware": {
+        "cpu": 8,
+        "total_memory_mb": 15708,
+        "available_memory_mb": 8000,
+        "workers": 6,
+        "worker_capacity": 6,
+        "process_workers": 3,
+        "policy": "预留至少2个逻辑CPU（大机器约10%）与65%可用内存；原生几何/FFT使用线程；大型独立原图DRC与RDL候选搜索使用spawn进程；小任务串行"
+      },
+      "cuda": {
+        "backend": "cpu",
+        "devices": [],
+        "reason": "CPU 回退：ModuleNotFoundError: No module named 'cupy'"
+      },
+      "openblas_threads": "1",
+      "pose": [
+        -35,
+        -35,
+        -1
+      ],
+      "rules_um": [
+        15,
+        15,
+        15
+      ],
+      "fps": 30,
+      "duration_limit_ms": 180,
+      "intermediate_frames": 5,
+      "reverse_cached": true,
+      "timings_s": {
+        "import": 0.131002,
+        "width_cold_nominal": 12.500974,
+        "width_first_shift": 0.756929,
+        "width_repeat": 7.6e-05,
+        "width_animation_cold": 3.878516,
+        "width_animation_replay": 0.000196,
+        "agg_full_draw": 0.022401,
+        "scheme_core": 21.911112,
+        "extreme_checks": 1.606698
+      },
+      "width_counts": [
+        {
+          "宽度不足": 0,
+          "需局部收窄": 0,
+          "宽度足够": 1900
+        },
+        {
+          "宽度不足": 0,
+          "需局部收窄": 1,
+          "宽度足够": 1763
+        }
+      ],
+      "scheme_scores": [
+        0.37973389870791757,
+        6.783486495062843,
+        0.37973389870791757
+      ],
+      "recommendation": 1,
+      "yield_estimate": 0.813472016074229,
+      "focused_shifted_rows": 120,
+      "grid_summary": {
+        "local_states": 81,
+        "batches": 27,
+        "pair_states": 0,
+        "package_states": 19683
+      },
+      "direct_comparisons": 16
+    },
+    {
+      "version": "V26",
+      "source_sha256": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+      "shape_count": 1225,
+      "dies": 3,
+      "platform": "Linux",
+      "python": "3.12.3",
+      "hardware": {
+        "cpu": 8,
+        "total_memory_mb": 15708,
+        "available_memory_mb": 7857,
+        "workers": 6,
+        "worker_capacity": 6,
+        "process_workers": 3,
+        "policy": "预留至少2个逻辑CPU（大机器约10%）与65%可用内存；原生几何/FFT使用线程；大型独立原图DRC与RDL候选搜索使用spawn进程；小任务串行"
+      },
+      "cuda": {
+        "backend": "cpu",
+        "devices": [],
+        "reason": "CPU 回退：ModuleNotFoundError: No module named 'cupy'"
+      },
+      "openblas_threads": "1",
+      "pose": [
+        -35,
+        -35,
+        -1
+      ],
+      "rules_um": [
+        15,
+        15,
+        15
+      ],
+      "fps": 30,
+      "duration_limit_ms": 180,
+      "intermediate_frames": 5,
+      "reverse_cached": true,
+      "timings_s": {
+        "import": 0.16703,
+        "width_cold_nominal": 14.020347,
+        "width_first_shift": 1.150125,
+        "width_repeat": 0.000188,
+        "width_animation_cold": 4.875173,
+        "width_animation_replay": 0.000208,
+        "agg_full_draw": 0.024352,
+        "scheme_core": 17.854629,
+        "extreme_checks": 1.435269
+      },
+      "width_counts": [
+        {
+          "宽度不足": 0,
+          "需局部收窄": 0,
+          "宽度足够": 1900
+        },
+        {
+          "宽度不足": 0,
+          "需局部收窄": 1,
+          "宽度足够": 1763
+        }
+      ],
+      "scheme_scores": [
+        0.37973389870791757,
+        6.783486495062843,
+        0.37973389870791757
+      ],
+      "recommendation": 1,
+      "yield_estimate": 0.813472016074229,
+      "focused_shifted_rows": 120,
+      "grid_summary": {
+        "local_states": 81,
+        "batches": 27,
+        "pair_states": 0,
+        "package_states": 19683
+      },
+      "direct_comparisons": 16
+    }
+  ],
+  "width_gd55_regression": {
+    "poses": 9,
+    "verified_positive_width_rectangles": 16022,
+    "matching_v25_counts": true
+  },
+  "independent_checks": {
+    "two_die_all_discrete_poses": 729,
+    "gd55_full_frame_spot_checks": 16,
+    "fields": [
+      "safe",
+      "checked",
+      "contact",
+      "failures",
+      "drc"
+    ]
+  },
+  "scope": "GD55 local Linux CPU. Whole Agg layout draw at 900x500; no Qt FPS estimate. Cold means first request in a new process. Scheme core and discrete validation timed separately. V25 validates a smaller representative catalogue.",
+  "run_order": [
+    "V25",
+    "V26",
+    "V26",
+    "V25",
+    "V25",
+    "V26"
+  ],
+  "benchmark_order_note": "Three fresh processes per release, order V25 V26 V26 V25 V25 V26. Wall time varies with host load. No runtime dependency installation or GPU benchmark."
+}
