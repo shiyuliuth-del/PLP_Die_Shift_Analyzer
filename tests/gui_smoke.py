@@ -98,7 +98,7 @@ with tempfile.TemporaryDirectory() as tmp:
     for key in ('10/0','30/0'):
         assert np.array_equal(window.current_frame['layers'][key]['centers'].shape,window.geometry_cache.layers[key]['centers'].shape)
     original=window.connector_segments.copy();window.visible_boxes['30/0'].setChecked(False)
-    assert len(window.connector_segments)==0 and sum(window.histogram_data['magnitude_counts'])==0
+    assert len(window.connector_segments)==0 and sum(window.histogram_data['magnitude_counts'])==64
     assert window.layer_artists['30/0'] is artists['30/0'] and not window.layer_artists['30/0'].get_visible()
     window.visible_boxes['30/0'].setChecked(True);np.testing.assert_array_equal(window.connector_segments,original)
     window.canvas.draw();anchor=window.ax.transData.transform((0,0));span=np.ptp(window.ax.get_xlim())

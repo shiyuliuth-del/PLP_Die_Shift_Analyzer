@@ -30,7 +30,10 @@ def check_state(data,case,roles,p,result,states,layers,scheme):
     from .contact import ContactModel
     from .stack import Connections
     connections=case.get('connections') or Connections(data,roles)
-    for issue in ContactModel(data,case,roles,connections,parameters=p).current(states,p)['issues']:
+    model=ContactModel(data,case,roles,connections,parameters=p)
+    from .edge_clearance import edge_violations
+    for q in edge_violations(model,states,p,None):fail(q['kind'],q['point'])
+    for issue in model.current(states,p)['issues']:
         if issue['scheme']==scheme:fail(issue['kind'],issue['point'])
     return dict(problem_percent=100 if failures else 0,failures=failures,
                 scope='实际动孔—固定RDL接口的其他网络接触，以及机械净距、禁布区')

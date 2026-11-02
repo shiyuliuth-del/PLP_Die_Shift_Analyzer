@@ -45,15 +45,14 @@ class GeometrySelection:
     def hits(self,shape,contained=False,point=False):
         self.indexed();w=self.w;found=[];replacements=self.replacements();hidden={(k,i) for k,items in replacements.items() for q in items for i in q['indices']}
         for key,owner,ids,tree in self.groups:
-            if not w.visible_boxes[key].isChecked() or w.roles().get(key) in ('芯片边框','封装边框'):continue
+            if not w.visible_boxes[key].isChecked() or key in getattr(w,'width_hidden_sources',()) or w.roles().get(key) in ('芯片边框','封装边框'):continue
             local=shape
             if owner>=0 and w.shown_states is not None:
                 local=inverse_geometry(shape,w.rotation_centers()[owner],w.shown_states[owner])
             candidates=tree.query(local,predicate='intersects')
             for j in candidates:
                 ref=(key,int(ids[j]))
-                keep=getattr(w,'width_source_refs',None)
-                if ref in hidden or (keep is not None and w.roles().get(key)=='固定RDL' and ref not in keep):continue
+                if ref in hidden:continue
                 poly=tree.geometries[j]
                 if contained and not local.covers(poly):continue
                 # Unfilled outlines are selectable at the outline, never across their interior.
@@ -63,10 +62,8 @@ class GeometrySelection:
                     elif not local.intersects(poly.boundary):continue
                 found.append((key,int(ids[j])))
         for key,items in replacements.items():
-            if not w.visible_boxes[key].isChecked():continue
+            if not w.visible_boxes[key].isChecked() or key in getattr(w,'width_hidden_sources',()):continue
             for q in items:
-                keep=getattr(w,'width_source_refs',None)
-                if keep is not None and not any((key,i) in keep for i in q['indices']):continue
                 poly=q['geometry']
                 hit=poly.covers(shape.centroid) if point else shape.covers(poly) if contained else shape.intersects(poly)
                 if hit:found.append((key,q['indices'][0]))
@@ -99,13 +96,13 @@ class GeometrySelection:
         else:self.rectangle(start,end)
     def draw(self,redraw=True):
         w=self.w;replacements=self.replacements();hidden={(k,i) for k,items in replacements.items() for q in items for i in q['indices']}
-        polys=[w.rendered_layers[k][i] for k,i in self.selected if (k,i) not in hidden and (getattr(w,'width_source_refs',None) is None or w.roles().get(k)!='固定RDL' or (k,i) in w.width_source_refs) and k in w.rendered_layers and i<len(w.rendered_layers[k]) and w.roles().get(k) not in ('芯片边框','封装边框')]
+        polys=[w.rendered_layers[k][i] for k,i in self.selected if (k,i) not in hidden and k in w.rendered_layers and i<len(w.rendered_layers[k]) and w.roles().get(k) not in ('芯片边框','封装边框')]
         if self.artist is None:
             self.artist=PolyCollection([],facecolors=(.13,.60,.88,.18),edgecolors='#1769ac',linewidths=1.5,zorder=14);w.ax.add_collection(self.artist)
         self.artist.set_verts(polys)
         if self.deformed_artist is None:
             self.deformed_artist=PatchCollection([],facecolors=(.13,.60,.88,.18),edgecolors='#1769ac',linewidths=1.5,zorder=14);w.ax.add_collection(self.deformed_artist)
-        self.deformed_artist.set_paths([PathPatch(geometry_path(q['geometry'])) for k,items in replacements.items() if w.visible_boxes[k].isChecked() for q in items if any((k,i) in self.selected and (getattr(w,'width_source_refs',None) is None or (k,i) in w.width_source_refs) for i in q['indices'])])
+        self.deformed_artist.set_paths([PathPatch(geometry_path(q['geometry'])) for k,items in replacements.items() if w.visible_boxes[k].isChecked() and k not in getattr(w,'width_hidden_sources',()) for q in items if any((k,i) in self.selected for i in q['indices'])])
         if redraw:
             if self.selected:w.statusBar().showMessage(f'选中 {len(self.selected)} 个图形；'+', '.join(f'{k} #{i+1}' for k,i in self.selected[:6]))
             else:w.statusBar().showMessage('已取消图形选择')

@@ -1,5 +1,5 @@
 """Reproduce a GDS project; print the recommendation or write numeric JSON."""
-import argparse,json
+import argparse,json,sys
 from pathlib import Path
 from dataclasses import asdict
 from .core import Parameters,read_gds,evaluate,clean_json
@@ -15,6 +15,10 @@ if not source.is_absolute():source=path.parent/source
 data=read_gds(source,project.get('top_cell'))
 if isinstance(data,dict):parser.error('工程须选择顶层Cell')
 if project.get('sha256') and data.sha256!=project['sha256']:parser.error('源GDS已改变，请重新核对工程')
+from .gds_shapes import edited_snapshot
+data=edited_snapshot(data,project.get('node_edits',[]))
+for warning in data.import_warnings:
+    print('警告 · '+warning,file=sys.stderr)
 roles=project.get('roles',data.auto_roles)
 order=stack_order(data,roles,project.get('layer_order'))
 roles=resolve_stages(data,roles,order,project.get('stage_hints'))

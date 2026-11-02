@@ -47,7 +47,7 @@ class V8Tests(unittest.TestCase):
         self.assertTrue(q['active']);self.assertAlmostEqual(q['spacing'][0,0],p.line_space_um)
         self.assertGreater(q['spacing'][50,50],p.line_space_um)
         off=package_map(field,board,m.bound.centers,states,set(),101)
-        self.assertFalse(off['active']);self.assertTrue(np.all(off['spacing']==p.line_space_um))
+        self.assertFalse(off['active']);np.testing.assert_array_equal(off['spacing'],q['spacing']);self.assertTrue(np.all(off['display_spacing']==p.line_space_um))
         # Two overlapping moving domains use the max, never alpha-weighted numerical averaging.
         field['maps'].append(dict(field['maps'][0],owner=1,spacing=field['maps'][0]['spacing']+100))
         q=package_map(field,board,np.zeros((2,2)),np.zeros((2,3)),{'10/0'})

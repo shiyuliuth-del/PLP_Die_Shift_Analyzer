@@ -1,12 +1,12 @@
-# Die Shift Analyze V23
+# Die Shift Analyze V24
 
-当前唯一长期主线为 **main**，规范仓库为 [shiyuliuth-del/PLP_Die_Shift_Analyzer](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer)（末尾有r）。V22接入用户2026-11-02提供的 `1102.zip`；V23 根据用户确认的孤立网络和三档通道规则更新宽度分析，历史标签可复现。
+当前唯一长期主线为 **main**，规范仓库为 [shiyuliuth-del/PLP_Die_Shift_Analyzer](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer)（末尾有r）。V22接入用户2026-11-02提供的 `1102.zip`；V24 支持单点 PATH 圆、Q 属性编辑、封装边距与相邻孔盘三档分析，历史标签可复现。
 
 **参与开发前必读：** [AGENTS.md](AGENTS.md) → [Agent.md](Agent.md) → [设计要求](docs/DESIGN_REQUIREMENTS.md) → [1102交接记录](docs/BASELINE_1102.md) → [已知问题](docs/KNOWN_ISSUES.md)。提交使用[PR模板](.github/pull_request_template.md)，合并后清理自己的任务分支。
 
 GDS芯片偏移分析，长度单位为μm。当前包含运动归属、概率/Space Map、原材料型变、固定 RDL 通道容量、直线修复补块与切分重构预演；各功能按自己的几何来源和验证范围解释。
 
-- [本版使用说明（随源码提供）](docs/V23_使用说明.md)
+- [本版使用说明（随源码提供）](docs/V24_使用说明.md)
 - [研究报告](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/blob/main/DIE_SHIFT评估报告.md)
 - [1102接入与验证记录](docs/BASELINE_1102.md)
 - [首次V21历史图文验证（旧宽度口径）](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/blob/V21/docs/V21_操作与验证说明.md)
@@ -76,11 +76,11 @@ QT_QPA_PLATFORM=offscreen python3 tests/gui_scheduler_v20.py
 python3 -m die_shift_studio --project examples/示例C_多芯片晶圆接口.json --json results/复算.json
 python3 tools/validate_gd55_v20.py --gds /path/to/GD55_9-21.gds --out results/gd55_material_V20.json
 QT_QPA_PLATFORM=offscreen python3 tests/gui_v21.py
-python3 tools/validate_width_v23.py --gds /path/to/GD55_9-21.gds
+python3 tools/validate_width_v24.py --gds /path/to/GD55_9-21.gds
 python3 tools/package_release.py
 ```
 
-本地Git首个提交保留v0.4.0基线`fef0933`，本版标签`V23`；本版源码快照发布到用户指定的GitHub仓库，历史大型分析数据不上传。发布ZIP包含文件哈希与独立解压后的验证记录。附件图纸本身不打入通用包。
+本地Git首个提交保留v0.4.0基线`fef0933`，本版标签`V24`；本版源码快照发布到用户指定的GitHub仓库，历史大型分析数据不上传。发布ZIP包含文件哈希与独立解压后的验证记录。附件图纸本身不打入通用包。
 
 全输入模型良率统计全部真实运动孔接口同时无异网接触的概率，包含安全内盒外状态；默认蒙特卡洛与99%联合置信区间，也可选不随机采样的状态盒积分。各DIE独立、同DIE各孔共用姿态。仅针对原始固定RDL接口，不代表含其他缺陷的实际生产良率。设置中可调整样本量或确定性预算。
 
@@ -92,4 +92,6 @@ V19新增示例L：同一固定铜区两个接口中，一个接触、一个可�
 
 V20：不再采用新增孔盘包络或拼接新铜作为适配成功依据；实际铜轮廓由原材料位移产生，并核验原孔盘和连接弧的随动误差。反向路径复用验证帧；新路径仍需首算。完成状态与无位移结果保持缓存，高负载排队、资源允许时最多两项预演并行。
 
-V23 的宽度分析按固定 RDL 原始线路需求分别核对原宽和最小线宽。工程 O 可直接复现三档颜色。工程保存显示开关，旧工程采用默认值。[V23 操作与手算示例](docs/V23_使用说明.md) · [历轮协作记录](docs/Agents.md)
+V24 的宽度分析按完整孔盘的投影划分相邻开口，线路默认低亮。示例 P 演示单点 PATH 圆、Q 编辑、刚性孔盘与边距违规，工程 O 可复现三档颜色。工程保存显示开关，旧工程采用默认值。[V24 操作与手算示例](docs/V24_使用说明.md) · [历轮协作记录](docs/Agents.md)
+
+普通右键单击居中、拖框缩放。零位渐变可独立开关并复用缓存。窄口矩形上方显示两行标注，其中“预期收窄”以 μm 给出线路合计需减少的宽度。

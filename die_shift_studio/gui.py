@@ -100,7 +100,9 @@ def table(headers):
     return x
 
 
+from .gds_shapes import edited_snapshot
 from .project import normalize_project, project_overlays, OVERLAY_DEFAULTS
+from .width_display import WidthDisplayEditor,tint
 from .width_overlay import ChannelTable, INTRO as WIDTH_INTRO
 from .preview import default_motion,extreme_cases,layer_owners,transformed_layers,PREVIEW_SCOPE
 from .navigation import Navigation
@@ -136,6 +138,7 @@ class NoWheelValues(QtCore.QObject):
 class MainWindow(W.QMainWindow):
     def __init__(self,jobs_dir=None):
         super().__init__();self.setWindowTitle(f'Die Shift Analyze {__version__}')
+        self.setAttribute(getattr(Qt,'WidgetAttribute',Qt).WA_DeleteOnClose)
         self.jobs_dir=Path(jobs_dir) if jobs_dir is not None else installation_root()/'Jobs'
         self.jobs_dir.mkdir(parents=True,exist_ok=True)
         self.wheel_filter=NoWheelValues(self);W.QApplication.instance().installEventFilter(self.wheel_filter)
@@ -161,7 +164,12 @@ class MainWindow(W.QMainWindow):
         self.issue_navigation=QtCore.QTimer(self);self.issue_navigation.setSingleShot(True);self.issue_navigation.setInterval(0);self.issue_navigation.timeout.connect(lambda:self.locate_issue(self.issue_table.currentRow(),0))
         self.viewport_timer=QtCore.QTimer(self);self.viewport_timer.setSingleShot(True);self.viewport_timer.setInterval(16);self.viewport_timer.timeout.connect(self.viewport_changed)
         self.transition=Transition(self);self._animation_cleanup=None;self._legend_stamp=None
-        self._build();self.selection=GeometrySelection(self);self.escape_shortcut=(QtGui.QShortcut if hasattr(QtGui,'QShortcut') else W.QShortcut)(QtGui.QKeySequence('Escape'),self);self.escape_shortcut.activated.connect(self.escape_action);self.scene_renderer=SceneRenderer(self.canvas,self.ax);self.refresh_jobs()
+        self._build()
+        shortcut=QtGui.QShortcut if hasattr(QtGui,'QShortcut') else W.QShortcut
+        self.properties_shortcut=shortcut(QtGui.QKeySequence('Q'),self.canvas)
+        self.properties_shortcut.setContext(getattr(Qt,'ShortcutContext',Qt).WidgetWithChildrenShortcut)
+        self.properties_shortcut.activated.connect(self.show_properties)
+        self.selection=GeometrySelection(self);self.escape_shortcut=(QtGui.QShortcut if hasattr(QtGui,'QShortcut') else W.QShortcut)(QtGui.QKeySequence('Escape'),self);self.escape_shortcut.activated.connect(self.escape_action);self.scene_renderer=SceneRenderer(self.canvas,self.ax);self.refresh_jobs()
         for name in ('button_press_event','scroll_event'):self.canvas.mpl_connect(name,lambda e:self.stop_animation())
         from .mouse_die import MouseDieMode
         self.mouse_die=MouseDieMode(self)
@@ -209,7 +217,7 @@ class MainWindow(W.QMainWindow):
         self.controls=W.QTabWidget();lay.addWidget(self.controls,1)
         page=self._page('偏移')
         summary=label('方案1：动静区之间局部重构RDL。\n方案2：RDL整体随动，固定RDL窗口捕获。\n方案3：预制运动RDL，动静接口适配。');summary.setObjectName('Notice');page.addWidget(summary)
-        self.shortcut_label=label('快捷键（鼠标位于图中）：F 恢复视图；M 选择芯片手动偏移；ESC 退出/取消选择。\n普通模式：滚轮缩放，中键拖动画面。\n手动偏移：右键拖动芯片，滚轮旋转，Ctrl＋滚轮缩放。');page.addWidget(self.shortcut_label)
+        self.shortcut_label=label('快捷键（鼠标位于图中）：F 恢复视图，M 手动偏移，Q 查看或编辑选中图形节点，ESC 退出/取消选择。\n普通模式：滚轮缩放，中键平移，右键单击居中、拖框缩放。\n手动偏移：右键拖动芯片，滚轮旋转，Ctrl＋滚轮缩放。');page.addWidget(self.shortcut_label)
         self.gds_label=label('尚未打开GDS');self.gds_label.setTextInteractionFlags(getattr(Qt,'TextInteractionFlag',Qt).TextSelectableByMouse);page.addWidget(self.gds_label)
         row=W.QHBoxLayout();row.addWidget(W.QLabel('顶层Cell'));self.top=W.QComboBox();self.top.currentTextChanged.connect(self.top_changed);row.addWidget(self.top,1);page.addLayout(row)
         self.open_gds_button=W.QPushButton('打开GDS');self.open_gds_button.setObjectName('Primary');self.open_gds_button.clicked.connect(self.open_gds);page.addWidget(self.open_gds_button)
@@ -322,7 +330,7 @@ class MainWindow(W.QMainWindow):
         self.safe_range_canvas.setMinimumHeight(240);self.safe_range_plot_data=draw_safe_ranges(self.safe_range_figure,{})
         self.safe_range_scroll=W.QScrollArea();self.safe_range_scroll.setWidgetResizable(True);self.safe_range_scroll.setWidget(self.safe_range_canvas)
         self.safe_range_scroll.setMinimumHeight(90);sv.addWidget(self.safe_range_scroll,1);self.analysis_split.addWidget(safe_page)
-        chart_page=W.QWidget();cv=W.QVBoxLayout(chart_page);self.chart_status=label('选择极端情况后显示可见运动过孔的位移统计。');cv.addWidget(self.chart_status)
+        chart_page=W.QWidget();cv=W.QVBoxLayout(chart_page);self.chart_status=label('选择极端情况后显示参与计算的运动过孔的位移统计。');cv.addWidget(self.chart_status)
         self.distribution_figure=Figure(figsize=(9,6));self.distribution_figure.subplots_adjust(left=.07,right=.98,bottom=.26,top=.83,wspace=.25);self.distribution_canvas=FigureCanvasQTAgg(self.distribution_figure);self.distribution_canvas.setMinimumHeight(80);cv.addWidget(self.distribution_canvas,1)
         self.analysis_split.addWidget(chart_page);self.analysis_split.setSizes([330,400,0]);self.histogram_data=None;self._histogram_revealed=False
         self.detail=W.QTextBrowser();self.tabs.addTab(self.detail,'报告');self.tabs.currentChanged.connect(self.tab_changed)
@@ -383,6 +391,7 @@ class MainWindow(W.QMainWindow):
         spin(space,'space_alpha','叠加不透明度',.05,.95,2)
         animation=group('视图与预演运动')
         enabled=W.QCheckBox('启用渐变插值运动');self.setting_fields['animation_enabled']=enabled;animation.addRow(enabled);enabled.toggled.connect(self.settings_changed)
+        back=W.QCheckBox('返回无偏移时播放渐变');self.setting_fields['animation_return_zero']=back;animation.addRow(back);back.toggled.connect(self.settings_changed)
         choices['animation_strategy']=[('算完连续播放','prepared'),('边算边显示','stream')]
         choice(animation,'animation_strategy','型变动画播放方式')
         spin(animation,'animation_duration_ms','时长上限 / ms',80,3000)
@@ -423,6 +432,9 @@ class MainWindow(W.QMainWindow):
         spin(yield_group,'yield_box_budget','全输入良率积分预算 / DIE',64,65536)
         spin(yield_group,'yield_tolerance','良率区间宽度目标（概率）',.000001,.1,6)
         self.setting_fields['safe_box_precision'].setToolTip('返回包含输入均值的安全内盒；多个端点顺序比较体积。未定候选拒绝，精度不代表全局最优误差。')
+        channel=group('宽度分析 · 元素显示')
+        drawing_modes=WidthDisplayEditor();self.setting_fields['width_display']=drawing_modes
+        channel.addRow(drawing_modes);drawing_modes.valueChanged.connect(self.settings_changed)
         drc_group=group('DRC检查')
         spin(drc_group,'drc_tolerance_um','线宽/线距容差 ± / μm',-10000,10000,3)
         self.setting_fields['drc_tolerance_um'].setToolTip('有效最小值 = 工艺值 − 容差。正值放宽，负值收紧；默认0。只影响DRC与型变验收，不改变包围量或概率。')
@@ -481,8 +493,11 @@ class MainWindow(W.QMainWindow):
         if self.loading:return
         values={k:(w.currentData() if isinstance(w,W.QComboBox) else w.isChecked() if isinstance(w,W.QCheckBox) else w.value()) for k,w in self.setting_fields.items()}
         updated=ViewSettings.from_dict(values)
-        if all(getattr(updated,k)==getattr(self.view_settings,k) for k in values if k!='cache_max_entries'):
-            self.view_settings=updated;self.cache_group.limit(updated.cache_max_entries);self.refresh_cache_status();return
+        if all(getattr(updated,k)==getattr(self.view_settings,k) for k in values if k not in ('cache_max_entries','width_display')):
+            display_change=updated.width_display!=self.view_settings.width_display
+            self.view_settings=updated;self.cache_group.limit(updated.cache_max_entries);self.refresh_cache_status()
+            if display_change and self.data:self._legend_stamp=None;self.plot_layout(preserve=True)
+            return
         intent=self._motion_intent if self.transition.timer.isActive() else None
         self.stop_animation()
         old_settings=self.view_settings;updated=ViewSettings.from_dict(values)
@@ -490,7 +505,7 @@ class MainWindow(W.QMainWindow):
         try:effective_rules(self.params(),updated)
         except ValueError as exc:self.load_view_settings();self.error(str(exc));return
         deform=updated.deformation_key()!=old_settings.deformation_key();numeric=(updated.numeric_key()!=self.view_settings.numeric_key() or (updated.probability_show_ranges!=old_settings.probability_show_ranges and self.target_sigma.currentText()=='∞'));self.view_settings=updated;self.enable_settings();self.refresh_extreme_colors();self.cache_group.limit(updated.cache_max_entries);self.refresh_cache_status()
-        live_motion=any(getattr(updated,k)!=getattr(old_settings,k) for k in ('animation_enabled','animation_duration_ms','animation_fps','animation_speed','animation_strategy'))
+        live_motion=any(getattr(updated,k)!=getattr(old_settings,k) for k in ('animation_enabled','animation_return_zero','animation_duration_ms','animation_fps','animation_speed','animation_strategy'))
         repair_shape=(updated.repair_landing_pad!=old_settings.repair_landing_pad or updated.repair_patch_width_um!=old_settings.repair_patch_width_um)
         reconstruction_shape=any(getattr(updated,k)!=getattr(old_settings,k) for k in ('reconstruction_length_um','reconstruction_width_um','reconstruction_overlap_um'))
         if numeric:
@@ -498,7 +513,8 @@ class MainWindow(W.QMainWindow):
             self.revision+=1;self.probability_data=None;self.space_data=None;self.repair_data=None
             if self.worker and self._evaluation_requested:self._coverage_pending=True;self.coverage_timer.start()
             if self.data:self.request_preview()
-        elif (deform or live_motion or repair_shape or reconstruction_shape) and (self.deformation_toggle.isChecked() or self.drc_toggle.isChecked() or self.width_toggle.isChecked() or self.repair_toggle.isChecked() or self.reconstruction_toggle.isChecked()):self.request_preview()
+        elif live_motion and self.data and (self.preview_workers or intent or self.current_frame is not None):self.request_preview()
+        elif (deform or repair_shape or reconstruction_shape) and (self.deformation_toggle.isChecked() or self.drc_toggle.isChecked() or self.width_toggle.isChecked() or self.repair_toggle.isChecked() or self.reconstruction_toggle.isChecked()):self.request_preview()
         elif intent:
             if intent[0]=='frame':self.present_frame(intent[1])
             else:self.animate_view(*intent[1:])
@@ -649,10 +665,10 @@ class MainWindow(W.QMainWindow):
         self.parked_groups.clear()
     def assessment_identity(self,data,roles,order,p,settings):
         from .session_cache import logical_fingerprint
-        return ('assessment',logical_fingerprint((data.sha256,data.top_name,roles,order,asdict(p),settings.numeric_key(),settings.drc_tolerance_um)))
+        return ('assessment',logical_fingerprint((data.geometry_id,data.top_name,roles,order,asdict(p),settings.numeric_key(),settings.drc_tolerance_um)))
     def preview_identity(self,data,roles,order,motions,params,result):
         from .session_cache import logical_fingerprint
-        return logical_fingerprint((data.sha256,data.top_name,roles,order,motions,asdict(params),result is not None,(result or {}).get('parameters'),(result or {}).get('contact_analysis'),(result or {}).get('issues')))
+        return logical_fingerprint((data.geometry_id,data.top_name,roles,order,motions,asdict(params),result is not None,(result or {}).get('parameters'),(result or {}).get('contact_analysis'),(result or {}).get('issues')))
     def clear_preview(self):
         self.extremes=None;self.active_preview=None;self.owner_cache=None;self.page_items=[];self.preview_page=0;self.state_result=None
         self.preview_ticket+=1;self.preview_pending=None;self._prepared_motion=None;self.engine=None;self.current_frame=None;self.shown_states=None;self.report_dirty=True;self.repair_data=None
@@ -696,6 +712,12 @@ class MainWindow(W.QMainWindow):
         self.controls.setEnabled(True);self.job_combo.setEnabled(True);self.save_button.setEnabled(True);self.run_button.setEnabled(True)
         if self.worker is worker:self.worker=None
         worker.deleteLater()
+        pending=getattr(self,'_queued_node_edit',None)
+        if pending:
+            self._queued_node_edit=None
+            if pending[0] is self.data and not getattr(self,'_closing',False):
+                QtCore.QTimer.singleShot(0,lambda:self.apply_node_edits(pending[1]) if self.data is pending[0] else None)
+            else:self.log_bus.emit('图纸已切换，旧图纸的排队节点编辑已取消。')
         if self._coverage_pending:self.coverage_timer.start()
     def open_gds(self):
         path,_=W.QFileDialog.getOpenFileName(self,'输入GDS','','GDSII (*.gds *.gdsii *.GDS)')
@@ -705,6 +727,7 @@ class MainWindow(W.QMainWindow):
             data=read_gds(path,top,progress)
             if isinstance(data,dict):return data
             settings=project if project and (not project.get('sha256') or project['sha256']==data.sha256) else {}
+            data=edited_snapshot(data,settings.get('node_edits',[]))
             roles=settings.get('roles',data.auto_roles)
             progress(35,'构建几何索引与图层缓存');data.geometry_cache=GeometryCache(data)
             data.prepared_roles=roles;data.prepared_auto=automatic_parameters(data,roles)
@@ -726,6 +749,9 @@ class MainWindow(W.QMainWindow):
     def set_data(self,data,project=None,project_path=None):
         from .session_cache import logical_fingerprint
         project=normalize_project(project) if project else {}
+        if data.node_edits!=project.get('node_edits',[]):
+            data=edited_snapshot(data,project.get('node_edits',[]))
+        for message in data.import_warnings:self.log_bus.emit(message,'WARNING')
         cache_settings=ViewSettings.from_dict(project.get('settings'))
         cache_id=logical_fingerprint((str(Path(project_path or data.path).resolve()),data.sha256,data.top_name))
         self.switch_project_cache(cache_id,cache_settings.cache_max_entries)
@@ -767,7 +793,7 @@ class MainWindow(W.QMainWindow):
                 except ValueError:pass
             self.apply_automatic();self.per_die_changed();self.refresh_motion_table(project.get('motions',{}))
         finally:self.loading=False
-        self.clear_preview();self.invalidate();self.plot_layout()
+        self.drop_result();self.invalidate();self.plot_layout()
         remembered=self.cache_group.last_assessment
         if remembered is not None:
             key=self.assessment_identity(data,self.roles(),self.ordered_layers(),self.params(),self.view_settings)
@@ -829,7 +855,7 @@ class MainWindow(W.QMainWindow):
         if not self.loading and self.active_preview is None and self.manual_states is None:self.plot_layout(preserve=True)
     def visibility_changed(self,key):
         if self.loading:return
-        self.plot_layout(preserve=True);self.update_histograms()
+        self.plot_layout(preserve=True)
     def top_changed(self,name):
         if not self.loading and self.data and name!=self.data.top_name:self.load_gds(self.data.path,name)
     def validate_geometry(self):
@@ -839,6 +865,7 @@ class MainWindow(W.QMainWindow):
             self.statusBar().showMessage(f"几何有效：{len(self.case['dies'])}颗芯片；运动过孔{sum(map(len,self.case['pins']))}个；固定过孔{len(self.case['fixed_via'])}个")
         except Exception as e:self.error(e)
     def reset_plot(self):
+        if hasattr(self,'navigation'):self.navigation.cancel_zoom()
         self.stop_animation()
         if hasattr(self,'mouse_die'):self.mouse_die.exit();self.mouse_die.pending=False;self.mouse_die.full_pending=False;self.mouse_die.timer.stop();self.mouse_die.idle.stop()
         if hasattr(self,'selection'):self.selection.reset()
@@ -912,8 +939,9 @@ class MainWindow(W.QMainWindow):
                 cleanup=self._animation_cleanup;self._animation_cleanup=None;cleanup()
             self._interpolated_states=None;self.current_frame=frame;self.plot_layout(preserve=True);self.update_histograms()
             if frame is not None:self.update_state_table(frame['states'])
+            elif self.case:self.update_state_table(np.zeros((len(self.case['dies']),3)))
             self.show_frame_status(frame)
-        if not self.view_settings.animation_enabled or self.engine is None or self.case is None or (self.deformation_toggle.isChecked() and frame is not None):
+        if (not self.view_settings.animation_return_zero and (frame is None or not np.any(frame['states']))) or not self.view_settings.animation_enabled or self.engine is None or self.case is None or (self.deformation_toggle.isChecked() and frame is not None):
             complete();return
         count=len(self.case['dies']);start=np.zeros((count,3)) if self.shown_states is None else self.shown_states.copy()
         end=np.zeros((count,3)) if frame is None else frame['states']
@@ -941,8 +969,11 @@ class MainWindow(W.QMainWindow):
             self._motion_intent=None;self._interpolated_states=None;self.current_frame=frame
             self.plot_layout(preserve=True);self.update_histograms();self.show_frame_status(frame)
             if frame is not None:self.update_state_table(frame['states'])
-        if not self.view_settings.animation_enabled:complete();return
+            elif self.case:self.update_state_table(np.zeros((len(self.case['dies']),3)))
+        if not self.view_settings.animation_enabled or (not self.view_settings.animation_return_zero and (frame is None or not np.any(frame['states']))):complete();return
         self.statusBar().showMessage(('播放缓存型变动画' if motion['cached'] else '播放已校验型变动画')+f" · {len(replay)} 个中间帧")
+        if replay and (frame is None or not np.any(frame['states'])):
+            self.show_motion_frame(replay[0][1]);last[0]=0
         self.transition.start(motion['duration'],motion['steps'],update,complete)
 
     def show_motion_frame(self,frame):
@@ -973,9 +1004,9 @@ class MainWindow(W.QMainWindow):
         if self.result is None or not data or not self.width_toggle.isChecked():return
         show=self.width_sufficient_toggle.isChecked()
         visible=[r for r in data['rows'] if show or r['status']!='宽度足够']
-        keys=('status','pair','refs','original','required','current','point','plane','gap_um','nominal_gap_um','slots_um','widths_um','minimum_um','keep_um','split','unresolved')
+        keys=('status','pair','refs','original','required','current','point','plane','gap_um','nominal_gap_um','slots_um','widths_um','minimum_um','keep_um','split','locked','unresolved','narrowing_um')
         self.result['preview_width_analysis']=dict(states=frame['states'].tolist(),counts=data['counts'],scope=data['scope'],parameters=data['parameters'],examined=data['examined'],
-                                                   displayed=len(visible),rows=[{k:r[k] for k in keys} for r in visible[:100]])
+                                                   displayed=len(visible),edge_violations=[{k:e[k] for k in ('layer','indices','point','gap_um','required_um')} for e in data.get('edge_violations',[])],rows=[{k:r[k] for k in keys} for r in visible[:100]])
         self.report_dirty=True
 
     def width_filter_changed(self,*_):
@@ -1008,6 +1039,7 @@ class MainWindow(W.QMainWindow):
             self.statusBar().showMessage('预演分析已启用；先运行方案评估，再选择极端情况。');return
         self.request_preview()
     def escape_action(self):
+        if hasattr(self,'navigation'):self.navigation.cancel_zoom()
         if hasattr(self,'mouse_die') and self.mouse_die.exit():return
         self.selection.clear()
     def drc_changed(self,*_):
@@ -1059,17 +1091,19 @@ class MainWindow(W.QMainWindow):
         finally:self._plotting=False
     def update_connector_segments(self):
         frame=self.current_frame
-        roles=self.roles();motions=self.motions();segments=[]
+        roles=self.roles();motions=self.motions();segments=[];display=[]
         if frame:
             for key in self.ordered_layers():
-                if roles[key]!='运动过孔' or not self.visible_boxes[key].isChecked():continue
+                if roles[key]!='运动过孔':continue
                 q=self.geometry_cache.layers[key]
                 if motions.get(key)=='fixed':continue
                 mask=np.zeros(len(q['centers']),bool)
                 for region in frame['contact']['regions']:
                     if region['key']==key:mask[region['index']]=True
                 segments.append(np.stack((q['centers'][mask],frame['layers'][key]['centers'][mask]),axis=1))
-        self.connector_segments=np.concatenate(segments) if segments else np.empty((0,2,2))
+                if self.visible_boxes[key].isChecked():display.append(segments[-1])
+        self.all_connector_segments=np.concatenate(segments) if segments else np.empty((0,2,2))
+        self.connector_segments=np.concatenate(display) if display else np.empty((0,2,2))
 
     def geometry_patch(self,geometry):
         if not hasattr(self,'_path_cache'):self._path_cache={}
@@ -1099,9 +1133,8 @@ class MainWindow(W.QMainWindow):
         stamp=(id(self.data),id(frame),self.view_bounds);changed=stamp!=self._artist_frame;self.rendered_layers={}
         self.preview_applied=frame is not None;self.shown_states=frame['states'] if frame else None
         analysis=frame.get('width_analysis') if frame and self.width_toggle.isChecked() else None
-        if not hasattr(self,'width_source_refs') or getattr(self,'_width_source_data',None) is not analysis:
-            self._width_source_data=analysis
-            self.width_source_refs=None if analysis is None else {ref for o in analysis['retained'] for ref in o['refs']} | {ref for r in analysis['rows'] if r['status']!='宽度足够' for ref in r['refs']}
+        modes=self.view_settings.width_display if analysis is not None else {}
+        self.width_hidden_sources={k for k,r in roles.items() if modes.get(r if r in modes else '其他')=='hide'}
         for rank,key in enumerate(order):
             values=frame['layers'][key]['polygons'] if frame and key in frame['layers'] else self.data.layers[key]
             role=roles[key];sty=self.style_for(key);visible=self.visible_boxes[key].isChecked()
@@ -1109,14 +1142,17 @@ class MainWindow(W.QMainWindow):
             ids=self.viewport_index.query(key,self.view_bounds,states) if visible else np.empty(0,int)
             deformation=frame.get('deformation',{}) if frame and self.deformation_toggle.isChecked() else {}
             replacements=deformation.get('replacements',{}).get(key,[])
-            hidden={i for q in replacements for i in q['indices']}
+            hidden=set() if analysis is not None else {i for q in replacements for i in q['indices']}
             ids=np.array([i for i in ids if i not in hidden],int)
-            analysis_layer=analysis is not None and role=='固定RDL'
-            drawn=[] if analysis_layer else [polys[i] for i in ids]
+            mode=modes.get(role,modes.get('其他','show'))
+            if mode!='show':
+                rgb=tint(sty['color'],mode,sty['alpha']);sty=dict(sty,color=rgb[:3],alpha=rgb[3])
+            visible=visible and mode!='hide'
+            drawn=[polys[i] for i in ids] if visible else []
             if key not in self.layer_artists:
                 self.layer_artists[key]=PolyCollection([]);self.ax.add_collection(self.layer_artists[key])
             artist=self.layer_artists[key]
-            geometry_stamp=(id(values),ids.tobytes(),analysis_layer)
+            geometry_stamp=(id(values),ids.tobytes(),visible)
             if getattr(artist,'_geometry_stamp',None)!=geometry_stamp:artist.set_verts(drawn);artist._visible_ids=ids.tobytes();artist._geometry_stamp=geometry_stamp
             artist.set_facecolor(sty['color'] if sty['fill'] else 'none');artist.set_edgecolor(sty['color'] if not sty['fill'] else 'none')
             artist.set_alpha(sty['alpha']);artist.set_linewidth(sty['width']);artist.set_linestyle(sty.get('linestyle','-'));artist.set_visible(visible)
@@ -1128,7 +1164,7 @@ class MainWindow(W.QMainWindow):
                 base=PatchCollection([],linewidth=0);dark=PatchCollection([],linewidth=0);adapt=PatchCollection([],facecolor='none',edgecolor='#38536f',linestyle=(0,(4,3)),linewidth=.9)
                 self.ax.add_collection(base);self.ax.add_collection(dark);self.ax.add_collection(adapt);self.deformation_artists[key]=(base,dark,adapt)
             base,dark,adapt=self.deformation_artists[key]
-            visible_replacements=[] if analysis_layer else [q for q in replacements if overlaps(q['geometry'].bounds,self.view_bounds)]
+            visible_replacements=[q for q in replacements if overlaps(q['geometry'].bounds,self.view_bounds)]
             for overlay,part in ((base,'geometry'),(dark,'dark')):
 
                 path_stamp=tuple(id(q[part]) for q in visible_replacements)
@@ -1234,7 +1270,7 @@ class MainWindow(W.QMainWindow):
     def update_die_label_visibility(self,*_):
         if not self._default_view:return
         zoom=min(np.ptp(self.ax.get_xlim())/np.ptp(self._default_view[0]),np.ptp(self.ax.get_ylim())/np.ptp(self._default_view[1]))
-        visible=zoom>=.995 and any(self.visible_boxes[k].isChecked() for k,r in self.roles().items() if r=='芯片边框')
+        visible=zoom>=.995 and any(self.visible_boxes[k].isChecked() and k not in getattr(self,'width_hidden_sources',()) for k,r in self.roles().items() if r=='芯片边框')
         for label_ in self.die_labels:label_.set_visible(visible)
         if self.legend is not None:self.legend.set_visible(visible)
     def issue_origin(self,issue):
@@ -1252,7 +1288,7 @@ class MainWindow(W.QMainWindow):
         if self.legend is not None:self.legend.remove()
         entries={}
         for key,role in self.roles().items():
-            if not self.visible_boxes[key].isChecked():continue
+            if not self.visible_boxes[key].isChecked() or key in getattr(self,'width_hidden_sources',()):continue
             sty=self.style_for(key)
             name=(key+' '+sty['label']) if key in self.layer_styles else sty['label']
             entries[name]=Patch(facecolor=sty['color'] if sty['fill'] else 'none',edgecolor=sty['color'],alpha=sty['alpha'],label=name)
@@ -1262,10 +1298,13 @@ class MainWindow(W.QMainWindow):
             handles += [Patch(facecolor='#d98a2b',edgecolor='#8a5a14',alpha=.45,label='固定RDL直线补块'),
                         Patch(facecolor='#c0392b',edgecolor='#8e2b21',alpha=.5,hatch='///',label='补块新增违规')]
         if self.width_toggle.isChecked():
-            handles += [Patch(facecolor='#c3d2d8',edgecolor='#657d8b',label='孔盘及固定障碍'),
-                        Patch(facecolor='none',edgecolor='#c44956',label='通道容量不足'),
-                        Patch(facecolor='none',edgecolor='#bd8127',label='需局部收窄')]
-            if self.width_sufficient_toggle.isChecked():handles += [Patch(facecolor='none',edgecolor='#498d79',label='宽度足够')]
+            modes=self.view_settings.width_display
+            for key,label,color in [('运动过孔孔盘','运动孔盘','#589881'),('固定过孔孔盘','固定孔盘','#6985a5'),('固定障碍','固定障碍','#85848e'),('边距','封装边距不足','#c44956')]:
+                if modes[key]!='hide':handles.append(Patch(facecolor=tint(color,modes[key],.65),label=label))
+            if modes['截面']!='hide':
+                for title,color in [('宽度不足','#c44956'),('需局部收窄','#bd8127'),('宽度足够','#498d79')]:
+                    if title!='宽度足够' or self.width_sufficient_toggle.isChecked():
+                        handles.append(Patch(facecolor='none',edgecolor=tint(color,modes['截面']),label=title))
         if self.reconstruction_toggle.isChecked():
             handles += [Patch(facecolor='#9fb3c8',edgecolor='#5d7894',alpha=.20,hatch='//',label='重构：移动区原位（冷色，移走后空出）'),
                         Patch(facecolor='#e07a2f',edgecolor='#8f4712',alpha=.78,label='重构：重构后的铜（暖色）'),
@@ -1368,15 +1407,17 @@ class MainWindow(W.QMainWindow):
                 self.space_colorbar.ax.text(-.04,.5,'Space Map · 所需线距 / μm',transform=self.space_colorbar.ax.transAxes,ha='right',va='center',fontsize=7,clip_on=False)
         for artist in self.space_artists:
             if artist._owner<0:
-                from .space_map import package_map
+                from .space_map import package_map,package_display
                 visible={k for k,b in self.visible_boxes.items() if b.isChecked()}
                 resolution=min(31,cfg.space_resolution) if getattr(self,'_in_animation',False) else cfg.space_resolution
                 key=(id(self.space_data),None if self.shown_states is None else self.shown_states.tobytes(),tuple(sorted(visible)),resolution)
                 if getattr(self,'_package_field_key',None)!=key:
                     centers=self.rotation_centers()
                     prepared=getattr(self,'_prepared_package',None)
-                    cache_key=('package',getattr(self.engine,'signature',id(self.space_data)),key[1],key[2],resolution)
-                    self._package_field=prepared[1] if prepared is not None and prepared[0]==key else self.session_values.get_or_compute(cache_key,lambda:package_map(self.space_data,self.case['board'],centers,self.shown_states,visible,resolution));self._package_field_key=key
+                    full_key=(key[0],key[1],resolution)
+                    cache_key=('package',getattr(self.engine,'signature',id(self.space_data)),key[1],resolution)
+                    full=prepared[1] if prepared is not None and prepared[0]==full_key else self.session_values.get_or_compute(cache_key,lambda:package_map(self.space_data,self.case['board'],centers,self.shown_states,None,resolution))
+                    self._package_field=package_display(full,visible);self._package_field_key=key
                 q=self._package_field
                 if getattr(artist,'_field_key',None)!=key:
                     values=np.full((2,2),self.space_data['base_spacing_um']) if artist._owner==-1 else np.where(np.isinf(q['display_spacing']),artist.norm.vmax,q['display_spacing'])
@@ -1443,63 +1484,62 @@ class MainWindow(W.QMainWindow):
         for running in self.preview_workers:
             if getattr(running,'transient',False):running.cancelled.set()
         state=self.manual_states if self.manual_states is not None else (self.extremes[self.active_preview]['states'].copy() if self.active_preview is not None and self.extremes else None)
-        if state is None and not self.probability_toggle.isChecked() and not self.space_toggle.isChecked() and not self.drc_toggle.isChecked() and not self.width_toggle.isChecked() and not self.repair_toggle.isChecked() and not self.reconstruction_toggle.isChecked() and not (self.deformation_toggle.isChecked() and self.result):
+        overlays=(self.probability_toggle.isChecked() or self.space_toggle.isChecked() or self.drc_toggle.isChecked() or self.width_toggle.isChecked()
+                  or self.repair_toggle.isChecked() or self.reconstruction_toggle.isChecked() or (self.deformation_toggle.isChecked() and self.result is not None))
+        shifted=self.shown_states is not None and np.any(self.shown_states)
+        animate_back=bool(shifted and not direct and self.view_settings.animation_enabled and self.view_settings.animation_return_zero)
+        if state is None and not overlays and not animate_back:
             self.preview_pending=None;self.present_frame(None);return
         try:p=self.params();roles=self.roles();case=self.case or build_case(self.data,roles,layer_order=self.ordered_layers())
         except ValueError as exc:self.error(exc);return
         origin=self.shown_states.copy() if self.shown_states is not None else np.zeros((len(case['dies']),3))
         show_frame=state is not None
-        if state is None:
-            state=np.zeros((len(case['dies']),3))
-            signature=self.preview_identity(self.data,roles,self.ordered_layers(),self.motions(),p,self.result)
-            nominal_key=(signature,self.deformation_toggle.isChecked(),self.view_settings.deformation_key(),self.drc_toggle.isChecked(),self.view_settings.numeric_key(),self.view_settings.width_key() if self.width_toggle.isChecked() else (False,),self.view_settings.reconstruction_key() if self.reconstruction_toggle.isChecked() else (False,))
-            cached=self.cache_group.nominal.get(nominal_key)
-            self._interpolated_states=None;self.current_frame=cached;self.plot_layout(preserve=True)
-            self.update_state_table(state);self.update_histograms();self.show_frame_status(cached)
-            overlays_ready=(not self.probability_toggle.isChecked() or self.probability_data is not None) and (not self.space_toggle.isChecked() or self.space_data is not None)
-            global_ready=not (self.deformation_toggle.isChecked() and self.result and math.isfinite(p.target_nsigma)) or bool(cached and cached.get('global_deformation'))
-            repair_ready=self.repair_lookup(signature,state,self.deformation_toggle.isChecked())
-            if cached is not None and overlays_ready and global_ready and repair_ready:
-                self.preview_pending=None;self.statusBar().showMessage('已恢复固定保留的无位移缓存');return
-        state=np.array(state,float,copy=True);state[state==0]=0.
+        state=np.zeros_like(origin) if state is None else np.array(state,float,copy=True)
+        state[state==0]=0.
+        settings=self.view_settings
+        signature=self.preview_identity(self.data,roles,self.ordered_layers(),self.motions(),p,self.result)
+        deform=self.deformation_toggle.isChecked();drc=self.drc_toggle.isChecked()
+        width=settings.width_key() if self.width_toggle.isChecked() else (False,)
+        recon=settings.reconstruction_key() if self.reconstruction_toggle.isChecked() else (False,)
+        expected=((bool(deform and self.result is not None),*settings.deformation_key()),(drc,settings.deformation_min_angle_deg,settings.drc_tolerance_um),width,recon)
         if show_frame:
-            signature=self.preview_identity(self.data,roles,self.ordered_layers(),self.motions(),p,self.result)
             store=self.cache_group.frame_stores.get(signature)
-            expected=((bool(self.deformation_toggle.isChecked() and self.result is not None),*self.view_settings.deformation_key()),(self.drc_toggle.isChecked(),self.view_settings.deformation_min_angle_deg,self.view_settings.drc_tolerance_um),self.view_settings.width_key() if self.width_toggle.isChecked() else (False,),self.view_settings.reconstruction_key() if self.reconstruction_toggle.isChecked() else (False,))
-            cached=store.get((expected,np.asarray(state,float).tobytes(),False)) if store is not None else None
-            matches=[e for e in list(self.session_engines.values()) if getattr(e,'signature',None)==signature]
-            actual=next((e for e in matches if not getattr(e,'busy',False) and e.cache_key()==expected),next(iter(matches),None))
-            overlays_ready=(not self.probability_toggle.isChecked() or self.probability_data is not None) and (not self.space_toggle.isChecked() or self.space_data is not None)
-            repair_ready=self.repair_lookup(signature,state,self.deformation_toggle.isChecked())
-            if cached is not None and actual is not None and overlays_ready and repair_ready:
-                self.engine=actual
-                if (self.deformation_toggle.isChecked() or self.width_toggle.isChecked() or self.reconstruction_toggle.isChecked()) and self.view_settings.animation_enabled and not direct and not np.array_equal(origin,state):
-                    from .prepared_motion import motion_packet
-                    from types import SimpleNamespace
-                    view=SimpleNamespace(signature=signature,cache_key=lambda:expected,bound=actual.bound)
-                    _,_,duration,steps,requested,_,packet=motion_packet(view,origin,state,self.view_settings,max(np.ptp(self.ax.get_xlim()),np.ptp(self.ax.get_ylim())),self.session_values)
-                    if packet and packet['complete']:
-                        motion=dict(prepared=True,streamed=False,frames=packet['frames'],duration=duration,steps=steps,requested_steps=requested,cached=True,count=len(packet['frames']))
-                        self._prepared_motion=motion;self.preview_pending=None;self.play_prepared_motion(cached,motion);return
-                    # A new transition needs its own verified intermediate
-                    # states. Cached paths below play without any worker.
-                    self.statusBar().showMessage('目标状态已缓存；准备首次过渡动画')
-                else:
-                    self.preview_pending=None
-                    if getattr(actual,'busy',False) or actual.cache_key()!=expected:
-                        # Never run a legacy interpolation callback on a leased
-                        # solver or on a differently configured engine.
-                        self._interpolated_states=None;self.current_frame=cached
-                        self.plot_layout(preserve=True);self.update_state_table(state);self.update_histograms();self.show_frame_status(cached)
-                    else:self.present_frame(cached)
-                    return
+            cached=store.get((expected,state.tobytes(),False)) if store is not None else None
+        else:
+            key=(signature,deform,settings.deformation_key(),drc,settings.numeric_key(),width,recon)
+            cached=self.cache_group.nominal.get(key)
+        ready=(not self.probability_toggle.isChecked() or self.probability_data is not None) and (not self.space_toggle.isChecked() or self.space_data is not None)
+        global_ready=show_frame or not (deform and self.result and math.isfinite(p.target_nsigma)) or bool(cached and cached.get('global_deformation'))
+        matches=[e for e in self.session_engines.values() if getattr(e,'signature',None)==signature]
+        actual=next((e for e in matches if not getattr(e,'busy',False) and e.cache_key()==expected),next(iter(matches),None))
+        if cached is not None and actual is not None and ready and global_ready and self.repair_lookup(signature,state,deform):
+            self.engine=actual
+            animate=settings.animation_enabled and not direct and not np.array_equal(origin,state)
+            prepared=animate and ((not np.any(state) and animate_back) or (np.any(state) and (deform or width[0] or recon[0])))
+            target=cached if show_frame or overlays else None
+            if prepared:
+                from .prepared_motion import motion_packet
+                from types import SimpleNamespace
+                view=SimpleNamespace(signature=signature,cache_key=lambda:expected,bound=actual.bound)
+                _,_,duration,steps,requested,_,packet=motion_packet(view,origin,state,settings,max(np.ptp(self.ax.get_xlim()),np.ptp(self.ax.get_ylim())),self.session_values)
+                if packet and packet['complete']:
+                    motion=dict(prepared=True,streamed=False,frames=packet['frames'],duration=duration,steps=steps,requested_steps=requested,cached=True,count=len(packet['frames']))
+                    self._prepared_motion=motion;self.preview_pending=None;self.play_prepared_motion(target,motion);return
+                self.statusBar().showMessage('目标状态已缓存，正在准备首次过渡动画。')
+            else:
+                self.preview_pending=None
+                if not show_frame or getattr(actual,'busy',False) or actual.cache_key()!=expected:
+                    self._interpolated_states=None;self.current_frame=target;self.plot_layout(preserve=True)
+                    self.update_state_table(state);self.update_histograms();self.show_frame_status(target)
+                else:self.present_frame(target)
+                return
         self.preview_pending=(self.revision,self.view_settings,ticket,state.copy(),self.motions(),roles,p,self.result,case,self.geometry_cache,self.connections,self.ordered_layers(),show_frame,self.probability_toggle.isChecked(),self.space_toggle.isChecked())
         self.preview_pending+=(self.deformation_toggle.isChecked(),self.drc_toggle.isChecked(),direct,settle,origin,self.width_toggle.isChecked(),self.repair_toggle.isChecked(),self.reconstruction_toggle.isChecked())
         self.statusBar().showMessage('正在后台生成预演…保留已显示状态。');self.launch_preview()
     def launch_preview(self):
         if self._closing or self.motion_worker is not None or self.preview_pending is None:return
         request=self.preview_pending
-        request_key=(self.preview_identity(self.data,request[5],request[11],request[4],request[6],request[7]),request[1].deformation_key(),request[1].numeric_key(),request[3].tobytes(),request[12:19],request[-2:])
+        request_key=(self.preview_identity(self.data,request[5],request[11],request[4],request[6],request[7]),request[1].deformation_key(),request[1].numeric_key(),request[3].tobytes(),request[12:19],request[19].tobytes(),request[20:],request[1].animation_enabled,request[1].animation_return_zero,request[1].animation_strategy,request[1].animation_speed,request[1].animation_fps,request[1].animation_duration_ms)
         if any(getattr(w,'request_key',None)==request_key and not w.cancelled.is_set() for w in self.preview_workers):return
         from .scheduling import admission
         estimate=max(256,getattr(self.geometry_cache,'bytes',0)/1024**2*16)
@@ -1512,7 +1552,6 @@ class MainWindow(W.QMainWindow):
                 QtCore.QTimer.singleShot(400,retry)
             return
         revision,settings,ticket,states,motions,roles,params,result,case,cache,connections,order,show_frame,heat,space,deform,drc,direct,settle,origin,width_analysis,repair_view,reconstruction_view=self.preview_pending;self.preview_pending=None;data=self.data
-        visible=tuple(sorted(k for k,b in self.visible_boxes.items() if b.isChecked()))
         session_values=self.session_values;engines=self.session_engines;cache_group=self.cache_group
         start_states=origin.copy()
         view_span=max(np.ptp(self.ax.get_xlim()),np.ptp(self.ax.get_ylim()))
@@ -1538,16 +1577,16 @@ class MainWindow(W.QMainWindow):
             prepared=None
             if space and field is not None and settings.space_scope=='package':
                 from .space_map import package_map
-                key=(id(field),states.tobytes() if show_frame else None,visible,settings.space_resolution)
-                prepared=(key,session_values.get_or_compute(('package',signature,states.tobytes(),visible,settings.space_resolution),lambda:package_map(field,case['board'],actual.bound.centers,states,visible,settings.space_resolution)))
+                key=(id(field),states.tobytes() if show_frame else None,settings.space_resolution)
+                prepared=(key,session_values.get_or_compute(('package',signature,key[1],settings.space_resolution),lambda:package_map(field,case['board'],actual.bound.centers,states,None,settings.space_resolution)))
             motion=None
-            frame=actual.frame(states,progress,quick=direct and not settle) if show_frame or drc or width_analysis or reconstruction_view or repair_view or (deform and result is not None) else None
-            if frame is not None and not show_frame:
+            back=bool(not direct and settings.animation_enabled and settings.animation_return_zero and not np.any(states) and np.any(start_states))
+            nominal_key=(signature,deform,settings.deformation_key(),drc,settings.numeric_key(),settings.width_key() if width_analysis else (False,),settings.reconstruction_key() if reconstruction_view else (False,))
+            frame=None if show_frame else cache_group.nominal.get(nominal_key)
+            if frame is None and (show_frame or drc or width_analysis or reconstruction_view or repair_view or back or (deform and result is not None)):
+                frame=actual.frame(states,progress,quick=direct and not settle)
+            if frame is not None and not show_frame and not frame.get('nominal_global'):
                 frame=dict(frame,nominal_global=True)
-                nominal_key=(signature,deform,settings.deformation_key(),drc,settings.numeric_key(),settings.width_key() if width_analysis else (False,),settings.reconstruction_key() if reconstruction_view else (False,))
-                base=dict(frame,contact=dict(frame['contact'],issues=(result or {}).get('issues',frame['contact']['issues']),intrusions=[])) if math.isfinite(params.target_nsigma) else frame
-                cache_group.nominal.setdefault(nominal_key,base)
-                worker.publish((actual,cache_group.nominal[nominal_key],distribution,con,actual_cache,field))
                 if deform and result is not None and math.isfinite(params.target_nsigma):
                     frame=actual.global_frame(frame,settings,progress)
                 elif math.isfinite(params.target_nsigma):
@@ -1564,11 +1603,12 @@ class MainWindow(W.QMainWindow):
                             float(settings.repair_patch_width_um))
                 repair=session_values.get_or_compute(repair_key,lambda:repair_frame(
                     actual.contact,states,settings,params,replacements=deform_replacements,progress=progress))
-            if (width_analysis or (deform and result is not None)) and settings.animation_enabled and not direct and np.any(states) and not np.array_equal(start_states,states):
+            if back or ((width_analysis or reconstruction_view or (deform and result is not None)) and settings.animation_enabled and not direct and np.any(states) and not np.array_equal(start_states,states)):
                 from .prepared_motion import prepare_motion
                 publish=(lambda intermediate:worker.publish((actual,intermediate,distribution,con,actual_cache,field))) if settings.animation_strategy=='stream' else None
                 motion=prepare_motion(actual,start_states,states,settings,view_span,session_values,progress,publish,worker.cancelled)
             if direct:motion=dict(direct=True,settled=settle)
+            if not show_frame and not (drc or width_analysis or repair_view or heat or space or reconstruction_view or (deform and result is not None)):frame=None
             return actual,frame,distribution,con,actual_cache,field,prepared,motion,repair
         def work(progress):
             from .scheduling import job_budget
@@ -1612,14 +1652,14 @@ class MainWindow(W.QMainWindow):
         if not hasattr(self,'distribution_figure'):return
         self.histogram_data=None
         if clear or self.current_frame is None:
-            self.chart_status.setText('选择极端情况后显示当前可见橙色连线的位移统计。');self.distribution_figure.clear();self.distribution_canvas.draw_idle();return
-        seg=self.connector_segments;delta=seg[:,1]-seg[:,0];magnitude=np.linalg.norm(delta,axis=1);nonzero=magnitude>1e-9
+            self.chart_status.setText('选择极端情况后显示全部参与运动过孔的位移统计。');self.distribution_figure.clear();self.distribution_canvas.draw_idle();return
+        seg=self.all_connector_segments;delta=seg[:,1]-seg[:,0];magnitude=np.linalg.norm(delta,axis=1);nonzero=magnitude>1e-9
         directions=(np.degrees(np.arctan2(delta[nonzero,1],delta[nonzero,0]))+360)%360
         bins=min(24,max(5,int(np.sqrt(len(magnitude)))))
         mag_counts,mag_edges=np.histogram(magnitude,bins=bins,range=(0,max(1e-6,float(magnitude.max())*1.001))) if len(magnitude) else (np.zeros(5,int),np.linspace(0,1,6))
         dir_counts,dir_edges=np.histogram(directions,bins=np.linspace(0,360,13))
         self.histogram_data=dict(magnitude=magnitude,direction=directions,magnitude_counts=mag_counts,direction_counts=dir_counts,magnitude_edges=mag_edges,direction_edges=dir_edges,zero_count=int((~nonzero).sum()))
-        self.chart_status.setText(f'可见运动过孔 {len(seg):,} 个；零位移 {(~nonzero).sum():,} 个（无方向）。方向：+X为0°，逆时针增加。')
+        self.chart_status.setText(f'参与计算的运动过孔 {len(seg):,} 个；零位移 {(~nonzero).sum():,} 个（无方向）。方向：+X为0°，逆时针增加。')
         self.histogram_dirty=True
         if self.tabs.currentWidget() is self.analysis_page:self.render_histograms()
     def render_histograms(self):
@@ -1859,13 +1899,57 @@ class MainWindow(W.QMainWindow):
             except ValueError as exc:self.error(exc);return
         try:self.write_project(path);self.refresh_jobs();self.statusBar().showMessage('工程已保存：'+Path(path).stem)
         except Exception as exc:self.error(exc)
+    def project_settings(self):
+        return dict(schema_version=5,app_version=__version__,sha256=self.data.sha256,top_cell=self.data.top_name,
+                    roles=self.roles(),parameters=asdict(self.params()),settings=asdict(self.view_settings),node_edits=list(self.data.node_edits),
+                    overlays={name:getattr(self,name+'_toggle').isChecked() for name in OVERLAY_DEFAULTS},layer_styles=self.layer_styles,
+                    visibility={k:w.isChecked() for k,w in self.visible_boxes.items()},motions=self.motions(),layer_order=self.ordered_layers())
+
+    def show_properties(self):
+        if not self.data:return
+        if getattr(self,'_queued_node_edit',None):
+            self.statusBar().showMessage('节点编辑已排队，将在当前计算结束后应用。');return
+        from .shape_properties import ShapeProperties
+        from .qt_compat import run_dialog,ACCEPTED
+        self.stop_animation()
+        dialog=ShapeProperties(self)
+        if run_dialog(dialog)==ACCEPTED and dialog.data is self.data and dialog.changes!=self.data.node_edits:
+            self.apply_node_edits(dialog.changes)
+
+    def apply_node_edits(self,edits):
+        if self.worker is not None:
+            self._queued_node_edit=(self.data,edits);self.log_bus.emit('节点编辑已排队，当前任务完成后重建几何。');return
+        original=self.data;project=self.project_settings();project['node_edits']=edits
+        pose=self.shown_states.copy() if self.shown_states is not None and np.any(self.shown_states) else None
+        was_assessed=self.result is not None;valid_case=self.case is not None;view=(self.ax.get_xlim(),self.ax.get_ylim())
+        selected=list(self.selection.selected)
+        def prepare(progress):
+            progress(5,'校验工程节点');updated=edited_snapshot(original,edits)
+            progress(35,'重建几何和金属连接');cache=GeometryCache(updated)
+            try:case=build_case(updated,project['roles'],layer_order=project['layer_order'])
+            except ValueError:
+                if valid_case:raise
+                case=None
+            return updated,cache,case
+        def accepted(product):
+            if self.data is not original:return
+            updated,cache,case=product
+            updated.geometry_cache=cache;updated.prepared_case=case;updated.prepared_roles=project['roles'];updated.prepared_auto=automatic_parameters(updated,project['roles'])
+            self.set_data(updated,project,project_path=self.project_path)
+            self.ax.set_xlim(view[0]);self.ax.set_ylim(view[1])
+            self.manual_states=pose;self.selection.selected=selected
+            self.plot_layout(preserve=True)
+            if pose is not None:self.request_preview()
+            if was_assessed:
+                self._evaluation_requested=True;self._coverage_pending=True;self.coverage_timer.start()
+            self.log_bus.emit('工程节点已更新。几何、连接和缓存按新版本计算；保存工程可保留本次编辑。')
+        self.start_worker(prepare,accepted)
+
     def write_project(self,path):
         import os
         path=Path(path).resolve();gds=Path(self.data.path).resolve()
         source=os.path.relpath(gds,path.parent) if gds.is_relative_to(installation_root()) else str(gds)
-        project=dict(schema_version=5,app_version=__version__,gds_path=source,sha256=self.data.sha256,top_cell=self.data.top_name,
-                     roles=self.roles(),parameters=asdict(self.params()),settings=asdict(self.view_settings),
-                     overlays={name:getattr(self,name+'_toggle').isChecked() for name in OVERLAY_DEFAULTS},layer_styles=self.layer_styles,visibility={k:w.isChecked() for k,w in self.visible_boxes.items()},motions=self.motions(),layer_order=self.ordered_layers())
+        project=dict(self.project_settings(),gds_path=source)
         from .core import clean_json
         atomic_save(path,clean_json(project));self.project_path=path
         from .session_cache import logical_fingerprint
@@ -1891,12 +1975,19 @@ class MainWindow(W.QMainWindow):
             self.preview_pending=None;self.preview_ticket+=1;self.motion_pending=None;self.motion_generation+=1;self.coverage_timer.stop();self._coverage_pending=False
             for w in running:w.cancelled.set()
             event.ignore();return
-        self.cache_status_timer.stop();self.cache_registry.close()
-        self.cleanup_retired_sessions();self.runtime_capture.close();event.accept()
+        self._closing=True;self._queued_node_edit=None
+        for timer in (self.cache_status_timer,self.viewport_timer,self.coverage_timer,self.issue_navigation):timer.stop()
+        W.QApplication.instance().removeEventFilter(self.wheel_filter)
+        paths=self.job_watcher.directories()+self.job_watcher.files()
+        if paths:self.job_watcher.removePaths(paths)
+        self.cache_registry.close();self.cleanup_retired_sessions()
+        self.runtime_capture.close();event.accept()
 
 
 def launch(project=None):
     app=W.QApplication.instance() or W.QApplication([]);app.setApplicationName('Die Shift Analyze')
     window=MainWindow();window.show()
     if project:QtCore.QTimer.singleShot(0,lambda:window.load_project(project))
-    return app.exec() if hasattr(app,'exec') else app.exec_()
+    code=app.exec() if hasattr(app,'exec') else app.exec_()
+    QtCore.QCoreApplication.sendPostedEvents(None,getattr(QtCore.QEvent,'Type',QtCore.QEvent).DeferredDelete)
+    return code

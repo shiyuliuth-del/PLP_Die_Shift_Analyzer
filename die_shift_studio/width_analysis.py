@@ -13,6 +13,8 @@ from shapely.strtree import STRtree
 from .drc_rules import effective_rules
 from .session_cache import SessionCache
 from .stack import UnionFind
+from .neighbor_channels import occupied, local_openings
+from .landing_geometry import embedded_pad
 
 ADEQUATE, NARROW, BLOCKED = '宽度足够','需局部收窄','宽度不足'
 COLORS = {BLOCKED:'#c44956', NARROW:'#bd8127', ADEQUATE:'#498d79'}
@@ -44,7 +46,7 @@ def holds_original(slots, widths, space):
 def gate_rectangle(row, width, space):
     center = np.asarray(row['point'])
     d = np.asarray(row['direction'])
-    half = d*max(width,row['gap_um']/2)
+    half = d*max(width*.025,row['gap_um']/2)
     side = np.array([-d[1],d[0]])*(width+space)*.65
     return Polygon([center-half-side,center+half-side,center+half+side,center-half+side])
 
@@ -57,6 +59,9 @@ class Wall:
     refs: tuple
     owner: int = -1
     layers: tuple = ()
+    net: int | None = None
+    contacts: frozenset = frozenset()
+    pads: tuple = ()
 
 
 @dataclass
@@ -66,9 +71,9 @@ class Gate:
     ends: np.ndarray
     anchored: bool
     widths: tuple
-    refs: tuple
+    positions: tuple
+    strand_refs: tuple
     nominal_gap: float
-    nominal_capacity: int
 
 
 def _faces(geometry):
@@ -241,6 +246,7 @@ def _intruders(lines, pairs, walls, tree, tol):
 class WidthAnalyzer:
     def __init__(self, model, parameters, settings, cache_group=None):
         self.model = model
+        self.settings = settings
         self.width, self.space = effective_rules(parameters,settings)
         self.annulus = parameters.annulus_um
         self.tol = max(1e-9,model.data.dbu_um*1e-5)
@@ -292,6 +298,7 @@ class WidthAnalyzer:
                 continue
             keys = tuple(sorted({m.nodes[i]['key'] for i in fixed}))
             sources, static, walls = defaultdict(list), defaultdict(list), []
+            fixed_pads = {}
             for i in fixed:
                 n = m.nodes[i]
                 ref = (n['key'],n['index'])
@@ -318,16 +325,22 @@ class WidthAnalyzer:
                             and g.covers(via) and g.equals(g.convex_hull)
                             and (g.equals(g.envelope) or g.hausdorff_distance(via.buffer(float(min(margins)),quad_segs=24))<=m.data.dbu_um)):
                         pad = pad.union(g)
+                    elif g.geom_type=='Polygon':
+                        pad=embedded_pad(via,g,pad,m.data.dbu_um)
                 if nets.find(i) not in moving:
                     static[nets.find(i)].append((ref,pad))
+                    fixed_pads[ref]=pad
                 else:
                     kind = m.roles[n['key']]+'孔盘'
-                    walls.append(Wall(f'{kind} {ref[0]} #{ref[1]+1}',kind,pad,(ref,),n['owner'],tuple(sorted({q['key'] for q in targets}))))
-            for members in static.values():
+                    contacts=frozenset(ref for q in targets for ref,_ in sources.get(con.component(q['key'],q['index']),()))
+                    walls.append(Wall(f'{kind} {ref[0]} #{ref[1]+1}',kind,pad,(ref,),n['owner'],
+                                      tuple(sorted({q['key'] for q in targets})),nets.find(i),contacts))
+            for net,members in static.items():
                 for g in shapely.get_parts(shapely.union_all([g for _,g in members])):
                     refs = tuple(sorted(ref for ref,h in members if h.intersects(g)))
                     name = f'固定障碍 {refs[0][0]} #{refs[0][1]+1}'
-                    walls.append(Wall(name,'固定障碍',g,refs,layers=tuple(sorted({k for k,_ in refs if k in keys}))))
+                    walls.append(Wall(name,'固定障碍',g,refs,layers=tuple(sorted({k for k,_ in refs if k in keys})),net=net,
+                                      pads=tuple(fixed_pads[r] for r in refs if r in fixed_pads)))
             route_sources = list(sources.values())
             routes = np.asarray([shapely.union_all([g for _,g in src]) for src in route_sources],object)
             shapely.prepare(routes)
@@ -348,7 +361,7 @@ class WidthAnalyzer:
         pieces, parent = [], []
         for wi,g in enumerate(geometries):
             parts = [g]
-            if g.geom_type=='Polygon' and not g.equals(g.convex_hull):
+            if g.geom_type=='Polygon' and (g.interiors or g.convex_hull.area-g.area>max(self.tol*self.tol,self.model.data.dbu_um*g.length)):
                 parts = [LineString([a,b]) for ring in (g.exterior,*g.interiors)
                          for a,b in zip(ring.coords, list(ring.coords)[1:]) if a!=b]
             pieces.extend(parts)
@@ -394,9 +407,8 @@ class WidthAnalyzer:
                     if not strands:
                         continue
                     gap = float(np.linalg.norm(ends[k,1]-ends[k,0]))
-                    refs = tuple(sorted({ref for _,_,source in strands for ref in source}))
                     gates.append(Gate(tuple(pairs[k]),tuple(feature_pairs[k]),ends[k],anchored[k],tuple(w for _,w,_ in strands),
-                                      refs,gap,capacity(gap,self.width,self.space)))
+                                      tuple(t for t,_,_ in strands),tuple(src for _,_,src in strands),gap))
             progress((i+1)/max(1,metals),'识别名义线路穿越')
         return gates
 
@@ -407,10 +419,11 @@ class WidthAnalyzer:
         nominal = not np.any(states)
         geometries = np.array([w.geometry if nominal or w.owner<0 else self.model.moved(w.geometry,w.owner,states)
                                for w in walls],object)
-        retained = [dict(plane=name,layers=w.layers or plane['keys'],refs=w.refs,kind=w.kind,geometry=g)
+        retained = [dict(plane=name,name=w.name,layers=w.layers or plane['keys'],refs=w.refs,kind=w.kind,geometry=g)
                     for w,g in zip(walls[:plane['metal_count']],geometries)]
+        rigid=self._rigid_clearances(name,plane,geometries)
         if not gates:
-            return [],retained
+            return rigid,retained
         pairs = np.array([g.pair for g in gates])
         orig = np.array([g.ends for g in gates])
         features = np.array([g.features for g in gates])
@@ -437,9 +450,11 @@ class WidthAnalyzer:
                 mask = plane['local'][features[:,side]]
                 if np.any(mask):
                     inside[mask] &= ~shapely.relate_pattern(lines[mask],geometries[pairs[mask,side]],'T********')
-        if not nominal:
-            shapely.prepare(geometries)
-        intruding = {} if nominal else _intruders(lines,pairs,geometries,STRtree(geometries),self.tol)
+        half_depth=.65*(self.width+self.space)
+        if 'occupied' not in plane:
+            original=np.asarray([w.geometry for w in walls],object)
+            plane['occupied']=occupied(orig,pairs,walls,original,half_depth,self.tol)
+        obstacles=plane['occupied'] if nominal else occupied(ends,pairs,walls,geometries,half_depth,self.tol)
         # A pad that has travelled through the opposite wall cannot reopen the
         # original routing order on the far side. Rotate the reference with a
         # common rigid owner, so a rigid board rotation preserves the channel.
@@ -453,31 +468,59 @@ class WidthAnalyzer:
         open_order = np.einsum('ij,ij->i',ends[:,1]-ends[:,0],ref)>0
         rows = []
         for k,g in enumerate(gates):
-            i,j = g.pair
-            a,b = walls[i],walls[j]
-            gap = float(gaps[k])
-            slots = [gap] if inside[k] and open_order[k] else []
-            others = intruding.get(k,[])
-            if others and slots:
-                free = lines[k].difference(shapely.union_all(geometries[others]))
-                pieces = [p for p in shapely.get_parts(free) if p.geom_type=='LineString']
-                pieces.sort(key=lambda p:lines[k].project(p.interpolate(.5,normalized=True)))
-                slots = [p.length for p in pieces]
-            available = sum(capacity(v,self.width,self.space) for v in slots)
-            required = len(g.widths)
-            widths = tuple(max(self.width,w) for w in g.widths)
-            status = (BLOCKED if available<required else ADEQUATE if holds_original(slots,widths,self.space) else NARROW)
-            d = ends[k,1]-ends[k,0] if gap>self.tol else g.ends[1]-g.ends[0]
-            row = dict(plane=name,layers=plane['keys'],pair=(a.name,b.name),ends=(a.kind,b.kind),
-                       boundary_refs=(a.refs,b.refs),boundary_layers=(a.layers,b.layers),refs=g.refs,point=ends[k].mean(axis=0).tolist(),
-                       direction=(d/np.linalg.norm(d)).tolist(),gap_um=gap if inside[k] and open_order[k] else 0.,
-                       nominal_gap_um=g.nominal_gap,original=g.nominal_capacity,required=required,current=available,
-                       widths_um=g.widths,keep_um=sum(widths)+(required+1)*self.space,
-                       minimum_um=required*self.width+(required+1)*self.space,status=status,slots_um=slots,
-                       split=bool(others),unresolved=not nominal and any(walls[t].owner < -1 for t in (i,j,*others)))
-            rows.append(row)
+            gap=float(gaps[k])
+            axis=(ends[k,1]-ends[k,0])/gap if gap>self.tol else ref[k]/np.linalg.norm(ref[k])
+            spans=obstacles.get(k,[])
+            openings=(local_openings(g,ends[k],spans,plane['occupied'].get(k,[]),walls,self.tol) if spans else
+                      [dict(pair=g.pair,indices=range(len(g.widths)),nominal_gap=g.nominal_gap,
+                            gap=gap,point=ends[k].mean(axis=0),locked=0,split=False)])
+            for opening in openings:
+                i,j=opening['pair'];a,b=walls[i],walls[j]
+                now=opening['gap'] if inside[k] and open_order[k] else 0.
+                chosen=opening['indices']
+                widths=tuple(g.widths[t] for t in chosen)
+                refs=tuple(sorted({ref for t in chosen for ref in g.strand_refs[t]}))
+                rows.append(self._row(name,plane,a,b,opening['nominal_gap'],now,opening['point'],axis,widths,refs,
+                                      opening['locked'],opening['split'],not nominal and min(a.owner,b.owner)<-1))
+        represented={tuple(sorted(r['pair'])) for r in rows if r['status']==BLOCKED}
+        rows.extend(r for r in rigid if tuple(sorted(r['pair'])) not in represented)
         progress(1.,'通道容量检查完成')
         return rows,retained
+
+    def _row(self,name,plane,a,b,original,gap,point,axis,widths,refs,locked,split,unresolved):
+        required=len(widths)
+        current=capacity(gap,self.width,self.space)
+        keep=tuple(max(self.width,v) for v in widths)
+        fits=(gap+self.tol>=self.space if not widths else current>=required)
+        status=BLOCKED if not fits else ADEQUATE if holds_original([gap],keep,self.space) else NARROW
+        return dict(plane=name,layers=plane['keys'],pair=(a.name,b.name),ends=(a.kind,b.kind),
+                    boundary_refs=(a.refs,b.refs),boundary_layers=(a.layers,b.layers),refs=refs,
+                    point=point.tolist(),direction=axis.tolist(),gap_um=gap,nominal_gap_um=original,
+                    original=capacity(original,self.width,self.space),required=required,current=current,
+                    widths_um=widths,keep_um=sum(keep)+(required+1)*self.space,
+                    minimum_um=required*self.width+(required+1)*self.space,status=status,slots_um=[gap] if gap else [],
+                    locked=locked,split=split,unresolved=unresolved,
+                    narrowing_um=max(0.,sum(keep)+(required+1)*self.space-gap) if required else 0.)
+
+    def _rigid_clearances(self,name,plane,geometries):
+        """A neighbour can violate the wall spacing even with no flexible wire."""
+        walls=plane['walls'];rows=[]
+        pairs=STRtree(geometries).query(geometries[:plane['metal_count']],predicate='dwithin',distance=self.space).T
+        pairs=np.array([(i,j) for i,j in pairs if i<j and (walls[i].net!=walls[j].net or walls[j].kind=='边框')],int)
+        if not len(pairs):return rows
+        lines=shapely.shortest_line(geometries[pairs[:,0]],geometries[pairs[:,1]])
+        ends=shapely.get_coordinates(lines).reshape(-1,2,2)
+        spans=occupied(ends,pairs,walls,geometries,.65*(self.width+self.space),self.tol)
+        for index,(i,j) in enumerate(pairs):
+            delta=ends[index,1]-ends[index,0];gap=float(np.linalg.norm(delta))
+            if gap+self.tol>=self.space or spans.get(index):continue
+            if gap>self.tol:axis=delta/gap
+            else:
+                old=shapely.get_coordinates(shapely.shortest_line(walls[i].geometry,walls[j].geometry))
+                v=old[-1]-old[0];norm=np.linalg.norm(v);axis=v/norm if norm>self.tol else np.array([1.,0.])
+            rows.append(self._row(name,plane,walls[i],walls[j],walls[i].geometry.distance(walls[j].geometry),
+                                  gap,ends[index].mean(axis=0),axis,(),(),0,False,False))
+        return rows
 
     def frame(self, frame, progress=lambda *_:None, quick=False):
         states = frame['states']

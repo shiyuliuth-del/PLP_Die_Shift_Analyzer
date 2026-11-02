@@ -21,6 +21,7 @@ def report_document(r,motions=None,progress=lambda *_:None):
     con=r['connections'];analysis=r.get('contact_analysis',{});_,bounds=mean_and_bounds(p.for_die(0),count);Z,Zerr=normalizer(p.for_die(0),count)
     step('GDS、金属层序与几何修复',r['top_cell']+'；上→下：'+' → '.join(con['layer_order']),[],
          f"{count}颗芯片；{con['contact_count']}对相邻层连接；{analysis.get('network_count',0)}个几何网络；修复{len(r.get('repaired_geometry',[]))}个，忽略{len(r.get('ignored_geometry',[]))}个图形",
+         f"工程节点已修改 {r.get('node_edit_count',0)} 个图形。几何版本 {h(r.get('geometry_revision','')[:16] or '源 GDS')}。零宽 PATH 警告 {len(r.get('import_warnings',[]))} 项。 "
          '长度统一为μm。边框、不参与和禁布层不建立电连接；同物理层号的datatype共用一个金属平面。Merge修复保留孔洞，失败图形用玫红细虚线框出并忽略，不改源GDS。')
     step('连接、芯片归属与跨芯片自动识别','同层接触与用户定义的相邻金属层重叠；逐DIE最深末端接触根',
          [r'E_{ij}=\mathbf{1}\{\operatorname{Area}(A_i\cap B_j)>\epsilon_A\},\quad\epsilon_A=\max(10^{-12},0.01\delta^2)',
@@ -238,19 +239,28 @@ def report_document(r,motions=None,progress=lambda *_:None):
         step('当前姿态的固定 RDL 通道容量',
              f"名义图纸的穿越线路，有效线宽 {fmt(parameters['width_um'])} μm，有效线距 {fmt(parameters['space_um'])} μm，最小包围量 {fmt(parameters['enclosure_um'])} μm。",
              [r'W(n)=nw+(n+1)s',r'C(g)=\max\left(0,\left\lfloor\frac{g-s}{w+s}\right\rfloor\right)',
-              r'C_0=C(g_0),\quad C_t=\sum_j C(g_{t,j})',r'u_i=2\,\mathrm{dist}(m_i,\partial R_i),\quad W_{\rm keep}=\sum_{i=1}^{N}\max(u_i,w)+(N+1)s'],
-             f"有名义线路穿越的截面 {width['examined']} 个，宽度足够 {width['counts']['宽度足够']} 个，需局部收窄 {width['counts']['需局部收窄']} 个，宽度不足 {width['counts']['宽度不足']} 个。",
+              r'C_{0,j}=C(g_{0,j}),\quad C_{t,j}=C(g_{t,j})',r'u_i=2\,\mathrm{dist}(m_i,\partial R_i),\quad W_{\rm keep}=\sum_{i=1}^{N}\max(u_i,w)+(N+1)s',r'\Delta W=\max(0,W_{\rm keep}-g_t)\quad(N>0)'],
+             f"相邻通道截面 {width['examined']} 个，宽度足够 {width['counts']['宽度足够']} 个，需局部收窄 {width['counts']['需局部收窄']} 个，宽度不足 {width['counts']['宽度不足']} 个。",
              'w、s 为工艺固定线宽、线距分别减去共用 DRC 容差。n 根线所需宽度 W(n) 包含两侧线距。'
              'N 为原图确实穿越截面的线路根数。g₀ 为原净宽，gₜ,ⱼ 为运动后第 j 段可用净宽。C₀ 和 Cₜ 分别为原可通与现可通根数。'
-             '孔盘以实际过孔和最小包围量为基础。有独立可识别的同心孔盘时保留较大外形。无运动过孔的固定 RDL 网络整块占用。'
+             '孔和孔盘构成定宽的实体壁。另一孔盘进入评估矩形时，将整块投影区间作为占用，由相邻两壁分别计算。有独立可识别的同心孔盘时保留较大外形。无运动过孔的固定 RDL 网络整块占用。'
              'mᵢ 是第 i 条线路与截面相交区间的中点，∂Rᵢ 是其名义铜边界。uᵢ 是局部铜厚度的平面量测值，对直线斜穿同样给出横向原宽。'
-             'W_keep 是原宽和工艺下限取大后所需的总宽。按穿越次序分配到各段，原宽可放入时为绿色。原宽放不下而 Cₜ ≥ N 时为琥珀色。Cₜ < N 时为红色。'
-             '遇分段还须复核实际线路的绕行侧别，整图连通与良率另行评估。')
+             'W_keep 是原宽和工艺下限取大后所需的总宽。只计该对相邻壁间原有的自由线路，连接本地孔盘的部分已经由实体占用。原宽可放入时为绿色。原宽放不下而 Cₜ ≥ N 时为琥珀色。Cₜ < N 时为红色。'
+             '每对相邻壁单独报告。ΔW 是线路合计需要收窄的宽度，无自由线路时记为零。红色表示即使全部达到工艺下限仍不能通过。整体布通仍需复核绕行侧别。封装外缘和内孔对线路均预留本层的一道有效线距。')
         blocks.append(grid(['DIE','DX / μm','DY / μm','O / °'],[[i+1,fmt(z[0]),fmt(z[1]),fmt(math.degrees(z[2]))] for i,z in enumerate(width['states'])]))
-        blocks.append(grid(['固定 RDL','状态','通道','原可通','必须通过','现可通','位置 / μm'],
-                           [[q['plane'],q['status'],' ↔ '.join(q['pair']),q['original'],q['required'],q['current'],
+        blocks.append(grid(['固定 RDL','状态','通道','原可通','必须通过','现可通','预期收窄 / μm','位置 / μm'],
+                           [[q['plane'],q['status'],' ↔ '.join(q['pair']),q['original'],q['required'],q['current'],fmt(q.get('narrowing_um',0)),
                              str([round(x,3) for x in q['point']])] for q in width['rows'][:100]]))
         if width.get('displayed',len(width['rows']))>100:blocks.append('<p>报告列出前 100 个选定类别的截面。完整清单见图形下方的宽度分析表。</p>')
+        edge=width.get('edge_violations',[])
+        step('线路到封装边框的实际净距',f'当前姿态下的运动和固定 RDL 以及封装边框，共 {len(edge)} 个不足图形。',
+             [r'A_{\rm allowed}=B\ominus D_{s_k},\qquad E_i=P_i\cap A_{\rm allowed}^{\rm c}'],
+             f'封装边距不足 {len(edge)} 个图形',
+             'B 是封装有效区域，含内孔。D 是半径等于本层有效线距 sₖ 的圆盘，Pᵢ 是当前实际铜轮廓。Eᵢ 为落在允许区域以外的铜。恰好达标允许。')
+        if edge:
+            blocks.append(grid(['层','图形编号','实测净距 / μm','要求 / μm','位置 / μm'],
+                               [[q['layer'],[i+1 for i in q['indices']],fmt(q['gap_um']),fmt(q['required_um']),q['point']] for q in edge[:100]]))
+
     hidden={'per_die_enabled','die_bounds','die_pivots','input_nsigma','interdie','fixed_via_assignment','residual_budget_um','transition_length_um','max_route_angle_deg','routing_edge_keepout_um'}
     appendix='<h2>附录：输入与几何明细</h2>'+grid(['参数','含义/单位','值'],[[key,PARAMETER_DESCRIPTIONS.get(key,key),fmt(value,8)] for key,value in r['parameters'].items() if key not in hidden])
     appendix+=grid(['图层','图形编号','归属问题','可达DIE'],[[q['layer'],q['index'],q['reason'],q['dies']] for q in con.get('ownership_notes',[])])

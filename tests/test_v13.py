@@ -66,10 +66,10 @@ class V13Tests(unittest.TestCase):
 
     def test_drc_checks_all_fixed_net_pairs_not_only_cross_owner(self):
         shapes=[box(0,0,100,20),box(0,25,100,45),box(0,50,100,70),box(0,75,100,95)]
-        nodes=[dict(net=i) for i in range(4)]
+        nodes=[dict(net=i,owner=-1) for i in range(5)]
         m=SimpleNamespace(data=SimpleNamespace(dbu_um=.001),roles={'5/0':'固定RDL','3/0':'运动RDL'},
             cache=SimpleNamespace(layers={'5/0':dict(geometry=shapes),'3/0':dict(geometry=[box(0,0,100,1)])}),
-            nodes=nodes,ids={('5/0',i):i for i in range(4)},records=[])
+            case={'board':box(-100,-100,250,250)},nodes=nodes,ids={**{('5/0',i):i for i in range(4)},('3/0',0):4},records=[])
         *_,p,_=fixture();p=replace(p,line_width_um=10,line_space_um=10)
         drc=GlobalDRC(m,p);out=drc.frame(np.zeros((2,3)))
         self.assertEqual(sum(q['kind']=='异网短接 / 线距不足' for q in out),3)

@@ -7,6 +7,7 @@ from unittest.mock import patch
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen');ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 import numpy as np
 from die_shift_studio.gui import MainWindow,W
+from die_shift_studio.qt_compat import QtCore
 from die_shift_studio.width_analysis import WidthAnalyzer
 from die_shift_studio.preview import rigid_transform
 app=W.QApplication([]);tmp=tempfile.TemporaryDirectory();w=MainWindow(jobs_dir=Path(tmp.name)/'Jobs');w.resize(1500,1000);w.show();errors=[];w.error=lambda e:errors.append(str(e))
@@ -48,7 +49,7 @@ for z in poses:w.manual_states=z;w.request_preview();wait()
 for z in poses:w.manual_states=z;w.request_preview();wait()
 with patch.object(WidthAnalyzer,'_measure',side_effect=AssertionError('Completed channel pose recalculated')):
  for z in poses:w.manual_states=z;w.request_preview();wait()
-assert len(seen)>1 and w._prepared_motion['cached'] and any('原可通' in t and '必须' in t and '现可通' in t for t in labels)
+assert len(seen)>1 and w._prepared_motion['cached'] and any('原宽:' in t and ',必过:' in t and ',现宽:' in t and '\n预期收窄:' in t for t in labels)
 w.show_motion_frame=original
 w.manual_states=poses[0];w.request_preview();wait()
 def central(r):return r['pair']==('运动过孔孔盘 4/0 #1','运动过孔孔盘 4/0 #2')
@@ -86,7 +87,7 @@ summary=w.reconstruction_summary.text()
 assert '自动划分' in summary and '不代表产线' in summary and '整块随动' in summary,summary
 assert '贴合' in summary and '任何切线位置' in summary,summary
 assert '2.5 个落盘直径' in summary and '90°' in summary,summary
-assert not w.width_sufficient_toggle.isChecked() and w.current_frame['width_analysis']['examined']==0
+assert not w.width_sufficient_toggle.isChecked() and all(r['required']==0 for r in w.current_frame['width_analysis']['rows'])
 w.preview_tabs.setCurrentWidget(w.reconstruction_page)
 w.reconstruction_table.setCurrentCell(0,0);wait()
 assert w.reconstruction_overlay.movable.get_visible() and w.reconstruction_overlay.moved.get_visible()
@@ -122,10 +123,10 @@ w.width_toggle.setChecked(False);wait()
 result=dict(status='PASS',extreme_and_m_key_pad_motion=True,independent_die_stacks=True,channel_counts=[3,3,2],three_risk_classes=True,
             project_roundtrip=True,legacy_defaults=True,reconstruction_gap_um=35.,reconstruction_seam_um=32.,
             reconstruction_cover_area_um2=1120.,animation_frames_seen=len(seen),cached_replay=True,layer_visibility=True,table_focus=True,report_formulas=True)
-w.close();app.processEvents()
+w.close();app.processEvents();QtCore.QCoreApplication.sendPostedEvents(None,getattr(QtCore.QEvent,'Type',QtCore.QEvent).DeferredDelete)
 w=MainWindow(jobs_dir=Path(tmp.name)/'Jobs');w.error=lambda msg:errors.append(str(msg));w.show()
 w.load_project(path);wait()
 assert w.width_toggle.isChecked() and w.width_sufficient_toggle.isChecked() and w.width_table.model().rowCount()>0
 w.load_project(ROOT/'Jobs/示例N_三线路窄通道宽度.dshift.json');wait()
 assert not any((w.width_toggle.isChecked(),w.width_sufficient_toggle.isChecked(),w.reconstruction_toggle.isChecked()))
-w.close();app.processEvents();tmp.cleanup();print('GUI_V23_CHANNEL_PASS',result)
+w.close();app.processEvents();QtCore.QCoreApplication.sendPostedEvents(None,getattr(QtCore.QEvent,'Type',QtCore.QEvent).DeferredDelete);tmp.cleanup();print('GUI_V23_CHANNEL_PASS',result)
