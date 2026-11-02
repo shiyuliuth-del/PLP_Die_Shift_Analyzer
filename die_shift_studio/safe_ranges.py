@@ -25,9 +25,9 @@ class BoxCertificate:
             if r['owner']!=owner or not r['foreign']:continue
             vertices=np.asarray(r['poly'].exterior.coords);lever=float(np.linalg.norm(vertices-self.center,axis=1).max())
             reach=np.linalg.norm(b[:2])+2*lever*math.sin(min(math.pi,b[2])/2)
-            others=model.node_geometry[r['foreign']]
             mean=Polygon(rigid_transform(vertices,self.center,mu))
-            others=others[shapely.distance(mean,others)<=self.radius+reach+self.tol]
+            from .contact import nearby_foreign
+            others=model.node_geometry[nearby_foreign(model,r,mean,self.radius+reach+self.tol)]
             if len(others):self.items.append((vertices,lever,others,STRtree(others)))
         self.items.sort(key=lambda item:(Polygon(rigid_transform(item[0],self.center,mu)).distance(item[2][item[3].nearest(Polygon(rigid_transform(item[0],self.center,mu)))])-self.radius)/max(np.linalg.norm(b[:2])+item[1]*b[2],1e-12))
 
@@ -64,7 +64,9 @@ class BoxCertificate:
             queue=[(lo,hi)]
             while queue:
                 a,b=queue.pop();mid=(a+b)/2;half=(b-a)/2
-                via=Polygon(rigid_transform(vertices,self.center,mid));near=int(tree.nearest(via));distance=via.distance(others[near]);tested+=1;self.boxes+=1
+                via=Polygon(rigid_transform(vertices,self.center,mid))
+                distance=(via.distance(others[0]) if len(others)==1 else tree.query_nearest(via,all_matches=False,return_distance=True)[1][0])
+                tested+=1;self.boxes+=1
                 if distance<=self.radius+self.tol:
                     self.witnesses.append(mid);self.memo[key]='contact';return 'contact'
                 delta=np.linalg.norm(half[:2])+2*lever*math.sin(min(math.pi,half[2])/2)

@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor,ProcessPoolExecutor,as_complet
 import multiprocessing
 
 _local=threading.local()
-_limit_lock=threading.Lock();_shared_limit=None
+_slots=threading.Condition();_active_threads=0
 
 def resource_profile():
     cpu=os.cpu_count() or 1
@@ -26,10 +26,10 @@ def resource_profile():
         limit=Path('/sys/fs/cgroup/memory.max').read_text().strip()
         if limit!='max':total=min(total,int(limit));available=min(available,max(0,int(limit)-int(Path('/sys/fs/cgroup/memory.current').read_text())))
     except (OSError,ValueError):pass
-    workers=max(1,min(12,max(1,cpu-2),int(available*.35)//(384*1024**2)))
-    profile=dict(cpu=cpu,total_memory_mb=round(total/1024**2),available_memory_mb=round(available/1024**2),workers=workers,
+    workers=max(1,min(max(1,cpu-max(2,(cpu+9)//10)),int(available*.35)//(384*1024**2)))
+    profile=dict(cpu=cpu,total_memory_mb=round(total/1024**2),available_memory_mb=round(available/1024**2),workers=workers,worker_capacity=workers,
                 process_workers=max(1,min(4,workers,int(available*.35)//(768*1024**2))),
-                policy='预留2逻辑CPU与65%可用内存；原生几何/FFT使用线程；大型独立原图DRC与RDL候选搜索使用spawn进程；小任务串行')
+                policy='预留至少2个逻辑CPU（大机器约10%）与65%可用内存；原生几何/FFT使用线程；大型独立原图DRC与RDL候选搜索使用spawn进程；小任务串行')
     from .scheduling import constrain
     return constrain(profile)
 
@@ -43,14 +43,20 @@ def parallel_map(fn,items,profile=None,progress=None,process=False):
             result.append(fn(item))
             if progress:progress(len(result),len(items))
         return result
-    global _shared_limit
-    with _limit_lock:
-        if _shared_limit is None:_shared_limit=threading.BoundedSemaphore(profile['workers'])
+    capacity=profile.get('worker_capacity',profile['workers'])
     def wrapped(item):
-        with _shared_limit:
-            _local.nested=True
-            try:return fn(item)
-            finally:_local.nested=False
+        # A small first job must not permanently cap a later large machine.
+        # Nested native work stays serial within its parent's slot.
+        global _active_threads
+        with _slots:
+            _slots.wait_for(lambda:_active_threads<capacity)
+            _active_threads+=1
+        _local.nested=True
+        try:return fn(item)
+        finally:
+            _local.nested=False
+            with _slots:
+                _active_threads-=1;_slots.notify_all()
     options=dict(max_workers=workers)
     if process:options['mp_context']=multiprocessing.get_context('spawn')
     else:options['thread_name_prefix']='die-shift'

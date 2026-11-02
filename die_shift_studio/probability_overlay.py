@@ -126,7 +126,7 @@ def _probability_maps(cache,bound,roles,p,exponent=12,masks=None,settings=None,p
     _,hard=mean_and_bounds(p,len(bound.centers))
     reach=max(hard[0],hard[1],max(radii or [0])*min(math.pi,hard[2]))
     cell=cfg.probability_cell_um or max(cache.data.dbu_um,min(max(reach/32,.05),min(sizes or [1])/12),max(sizes or [0])/128,.05)
-    deterministic=cfg.probability_method=='quadrature';sigma_angle=math.sqrt(cov[2,2]);samples=0;angle_error=0.
+    deterministic=cfg.probability_method=='quadrature' or not np.any(hard);sigma_angle=math.sqrt(cov[2,2]);samples=0;angle_error=0.
     if deterministic:
         if sigma_angle:
             nodes,weights=roots_legendre(cfg.quadrature_order)

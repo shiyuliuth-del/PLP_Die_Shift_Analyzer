@@ -5,7 +5,7 @@ import shapely
 from shapely.strtree import STRtree
 
 
-def occupied(ends,pairs,walls,geometries,half_depth,tol):
+def occupied(ends,pairs,walls,geometries,half_depth,tol,source_refs=None):
     """Project the copper inside each finite rectangle, not just its centreline."""
     result=defaultdict(list)
     if not len(ends):return result
@@ -14,9 +14,39 @@ def occupied(ends,pairs,walls,geometries,half_depth,tol):
     d=delta/np.maximum(length,tol)[:,None]
     side=np.column_stack((-d[:,1],d[:,0]))*half_depth
     rects=shapely.polygons(np.stack((ends[:,0]-side,ends[:,1]-side,ends[:,1]+side,ends[:,0]+side),axis=1))
-    ci,wi=STRtree(geometries).query(rects,predicate='intersects')
+    ci,wi=STRtree(geometries).query(rects)
+    # Reject boxes outside either axis of the oriented gate before polygon
+    # overlay. A long diagonal gate's axis-aligned envelope is very loose.
+    bounds=shapely.bounds(geometries)
+    center=(bounds[:,2:]+bounds[:,:2])/2;extent=(bounds[:,2:]-bounds[:,:2])/2
+    offset=center[wi]-ends.mean(axis=1)[ci]
+    t=np.column_stack((-d[ci,1],d[ci,0]))
+    along=abs(np.einsum('ij,ij->i',offset,d[ci]))
+    across=abs(np.einsum('ij,ij->i',offset,t))
+    keep=(along<=length[ci]/2+np.einsum('ij,ij->i',extent[wi],abs(d[ci]))+tol)&(across<=half_depth+np.einsum('ij,ij->i',extent[wi],abs(t))+tol)
+    ci,wi=ci[keep],wi[keep]
     keep=(wi!=pairs[ci,0]) & (wi!=pairs[ci,1]) & (length[ci]>tol)
     ci,wi=ci[keep],wi[keep]
+    if not len(ci):return result
+    if source_refs is not None:
+        # An unrelated third wall closes this parent rectangle. Exact
+        # intersection plus strict interior projection proves this without
+        # computing polygon cuts. Keep all cuts when a local pad can lock a
+        # strand, or when contact at the endpoint is numerically ambiguous.
+        potential=np.fromiter((not walls[w].contacts.isdisjoint(source_refs[k]) for k,w in zip(ci,wi)),bool)
+        protect=np.zeros(len(ends),bool);protect[ci[potential]]=True
+        mid=np.einsum('ij,ij->i',center[wi]-ends[ci,0],d[ci])
+        spread=np.einsum('ij,ij->i',extent[wi],abs(d[ci]))
+        interior=(~protect[ci])&(mid-spread>tol)&(mid+spread<length[ci]-tol)
+        v=np.flatnonzero(interior)
+        v=v[shapely.intersects(geometries[wi[v]],rects[ci[v]])]
+        blocked=np.zeros(len(ends),bool)
+        for k,w in zip(ci[v],wi[v]):
+            if not blocked[k]:
+                blocked[k]=True;result[int(k)].append((int(w),0.,0.))
+        keep=~blocked[ci];ci,wi=ci[keep],wi[keep]
+        if not len(ci):return result
+    hit=shapely.intersects(geometries[wi],rects[ci]);ci,wi=ci[hit],wi[hit]
     if not len(ci):return result
     clips=shapely.intersection(rects[ci],geometries[wi])
     # Disconnected parts of a concave island leave independent openings.
@@ -48,7 +78,31 @@ def occupied(ends,pairs,walls,geometries,half_depth,tol):
     return result
 
 
-def local_openings(gate,ends,spans,nominal_spans,walls,tol):
+def occupied_batches(ends,pairs,walls,geometries,half_depth,tol,source_refs=None):
+    """Parallel GEOS work for independent gates; all indices remain chart-local."""
+    if len(ends)<1200:return occupied(ends,pairs,walls,geometries,half_depth,tol,source_refs)
+    from .resources import resource_profile,parallel_map
+    profile=resource_profile();n=min(profile['workers'],max(1,len(ends)//450))
+    if n<2:return occupied(ends,pairs,walls,geometries,half_depth,tol,source_refs)
+    # Keep GEOS objects private including interior indices made by predicates.
+    from dataclasses import replace
+    packed=shapely.to_wkb(geometries)
+    pads=[shapely.to_wkb(w.pads) if w.pads else () for w in walls]
+    def solve(chunk):
+        start,stop=chunk
+        local=shapely.from_wkb(packed)
+        local_walls=[replace(w,pads=shapely.from_wkb(p)) if len(p) else w for w,p in zip(walls,pads)]
+        result=occupied(ends[start:stop],pairs[start:stop],local_walls,local,half_depth,tol,
+                        None if source_refs is None else source_refs[start:stop])
+        return {start+k:v for k,v in result.items()}
+    stride=(len(ends)+n-1)//n
+    batches=parallel_map(solve,[(k,min(k+stride,len(ends))) for k in range(0,len(ends),stride)],profile)
+    result={}
+    for batch in batches:result.update(batch)
+    return result
+
+
+def local_openings(gate,ends,spans,nominal_spans,walls,tol,evidence_only=False):
     """Keep each nominal strand between its original neighbours, in order.
 
     For an arriving pad, use its own nominal projection to find the side of
@@ -82,6 +136,7 @@ def local_openings(gate,ends,spans,nominal_spans,walls,tol):
         candidates=[i for i,(t,refs) in enumerate(zip(gate.positions,gate.strand_refs))
                     if walls[n[0]].contacts.intersection(refs) and n[3]-gate.widths[i]/2-tol<=t<=n[4]+gate.widths[i]/2+tol]
         if candidates:locked.add(min(candidates,key=lambda i:abs(gate.positions[i]-(n[3]+n[4])/2)))
+    if evidence_only and not locked:return
     for index,t in enumerate(gate.positions):
         if index in locked:continue
         centres=[(n[3]+n[4])/2 for block in blocks for n in block[:1]]
@@ -94,6 +149,9 @@ def local_openings(gate,ends,spans,nominal_spans,walls,tol):
     for k,(left,right) in enumerate(intervals):
         if not lanes[k]:continue
         l,r=left[2],right[1]
+        if evidence_only:
+            yield dict(pair=(left[0],right[0]),indices=lanes[k],point=ends[0]+direction*((l+r)/2),locked=len(locked))
+            continue
         known={ref for ref,_,_ in nominal_spans}|{i,j}
         original=(max(0.,right[3]-left[4]) if left[0] in known and right[0] in known else
                   walls[left[0]].geometry.distance(walls[right[0]].geometry))

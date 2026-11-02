@@ -40,6 +40,30 @@ def band_ratio(records,info,layers,width,space,travel,expand=False):
                 hypothesis='每个几何网络一条轨道，按最近切边分配并均分到可用层；同DIE束边界只留一对Q，非每条线留2Q')
 
 
+class ForeignIndex:
+    """One spatial index per physical plane, independent of the number of nets."""
+    def __init__(self,planes):
+        self.planes={}
+        for plane,items in planes.items():
+            geometries=np.asarray([q[0] for q in items],object)
+            nets=np.array([q[1] for q in items])
+            self.planes[plane]=(shapely.STRtree(geometries),geometries,nets,set(nets))
+
+    def distance(self,geometry,net,planes,first_radius):
+        active=[self.planes[k] for k in planes if k in self.planes and
+                (len(self.planes[k][3])>1 or self.planes[k][3] and net not in self.planes[k][3])]
+        if not active:return math.inf
+        radius=max(first_radius,1.)
+        while True:
+            best=math.inf
+            for tree,geometries,nets,_ in active:
+                ids=tree.query(geometry,predicate='dwithin',distance=radius)
+                other=ids[nets[ids]!=net]
+                if len(other):best=min(best,float(shapely.distance(geometry,geometries[other]).min()))
+            if math.isfinite(best):return best
+            radius*=2
+
+
 def scheme_metrics(model,p):
     case=model.case;count=len(case['dies']);model.configure_parameters(p)
     fixed_planes={k.split('/')[0] for k,v in model.roles.items() if v=='固定RDL'}
@@ -48,7 +72,9 @@ def scheme_metrics(model,p):
     fixed_layers=min(len(fixed_planes),p.panel_layers);moving_layers=min(len(moving_planes),p.wafer_layers)
     rows=[];net_owners={}
     for r in model.records:net_owners.setdefault(r['net'],set()).add(r['owner'])
-    captures=[]
+    captures=[];boundary=case['board'].boundary
+    copper=ForeignIndex({k:[(model.nodes[j]['poly'],model.nodes[j]['net']) for j in ids
+                            if model.roles[model.nodes[j]['key']]=='固定RDL'] for k,ids in model.planes.items()})
     for node in model.nodes:
         if model.roles[node['key']]!='固定过孔':continue
         owner_set=net_owners.get(node['net'],set())
@@ -58,11 +84,9 @@ def scheme_metrics(model,p):
             for link in links:
                 if model.roles.get(link[side])=='固定RDL':targets.append(link[side].split('/')[0])
         if not targets:continue
-        foreign=[j for plane in set(targets) for j in model.planes[plane]
-                 if model.roles[model.nodes[j]['key']]=='固定RDL' and model.nodes[j]['net']!=node['net']]
-        foreign_distance=min((node['poly'].distance(model.nodes[j]['poly']) for j in foreign),default=math.inf)
+        foreign_distance=copper.distance(node['poly'],node['net'],set(targets),p.annulus_um+p.line_space_um)
         free=foreign_distance-p.annulus_um-p.line_space_um
-        terms=dict(foreign_gap_um=foreign_distance,foreign_margin_um=free,package_margin_um=node['poly'].distance(case['board'].boundary)-p.annulus_um if case['board'].covers(node['poly']) else -math.inf,keepout_margin_um=math.inf,pair_half_margin_um=math.inf)
+        terms=dict(foreign_gap_um=foreign_distance,foreign_margin_um=free,package_margin_um=node['poly'].distance(boundary)-p.annulus_um if case['board'].covers(node['poly']) else -math.inf,keepout_margin_um=math.inf,pair_half_margin_um=math.inf)
         # Capture-pad growth is also bounded by package/keepout geometry.
         free=min(free,terms['package_margin_um'])
         for obstacle in case['obstacles']:terms['keepout_margin_um']=min(terms['keepout_margin_um'],node['poly'].distance(obstacle)-p.annulus_um-p.line_space_um)
@@ -71,12 +95,14 @@ def scheme_metrics(model,p):
         captures.append(dict(die=owner+1,key=key,index=index,net=node['net'],planes=set(targets),poly=node['poly'],need_um=q,free_um=free,margin_terms=terms))
     # Two enlarged pads share one gap; allocate half to each. This deliberately
     # sacrifices asymmetrical optimal growth for a simple conservative budget.
-    for i,a in enumerate(captures):
-        for b in captures[:i]:
-            if a['net']==b['net'] or not a['planes'].intersection(b['planes']):continue
-            half=(a['poly'].distance(b['poly'])-2*p.annulus_um-p.line_space_um)/2
-            a['free_um']=min(a['free_um'],half);b['free_um']=min(b['free_um'],half)
-            for item in (a,b):item['margin_terms']['pair_half_margin_um']=min(item['margin_terms']['pair_half_margin_um'],half)
+    landing_planes={}
+    for a in captures:
+        for plane in a['planes']:landing_planes.setdefault(plane,[]).append((a['poly'],a['net']))
+    landings=ForeignIndex(landing_planes)
+    for a in captures:
+        gap=landings.distance(a['poly'],a['net'],a['planes'],2*p.annulus_um+p.line_space_um)
+        half=(gap-2*p.annulus_um-p.line_space_um)/2
+        a['free_um']=min(a['free_um'],half);a['margin_terms']['pair_half_margin_um']=half
     for i,info in enumerate(case['infos']):
         records=[r for r in model.records if r['owner']==i];local=p.for_die(i);center=model.bound.centers[i]
         q=max((displacement_bound(r['poly'],center,local,count) for r in records),default=0.)

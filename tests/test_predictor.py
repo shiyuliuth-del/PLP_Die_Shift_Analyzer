@@ -59,7 +59,7 @@ class ModelTests(unittest.TestCase):
     def test_rotation_and_mean_bound(self):
         p=Parameters(single_bound_x_um=0,single_bound_y_um=0,bound_angle_deg=0,mean_angle_deg=90)
         q=uncertainty_bound([[1000,0]],[0,0],p,1)[0]
-        self.assertAlmostEqual(q,math.sqrt(2)*1000)
+        self.assertEqual(q,0.)  # A zero rotation amplitude locks the axis even with a system bias.
     def test_bad_parameters(self):
         for change in [dict(panel_layers=0,wafer_layers=0),dict(line_width_um=0),dict(rho_xy=1.1),dict(target_nsigma=-1),dict(wafer_layers=1.5),dict(mean_x_um=float('nan'))]:
             with self.assertRaises(ValueError):replace(Parameters(),**change).validate()

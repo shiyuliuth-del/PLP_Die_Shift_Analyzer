@@ -351,14 +351,14 @@ def uncertainty_bound(points,center,params,die_count,details=False,state=None):
     mu,covariance,k=statistical_state(p,die_count) if state is None else state
     st=math.sqrt(covariance[2,2])
     a=points-np.asarray(center)
-    t=math.radians(p.mean_angle_deg)
+    t=float(mu[2])
     rot=np.array([[math.cos(t),-math.sin(t)],[math.sin(t),math.cos(t)]])
     b=a@rot.T
     jac=np.zeros((len(a),2,3));jac[:,0,0]=1;jac[:,1,1]=1
     jac[:,0,2]=-b[:,1];jac[:,1,2]=b[:,0]
     cov=jac@covariance@np.swapaxes(jac,1,2)
     eig=np.maximum(0,np.linalg.eigvalsh(cov)[:,-1])
-    mean=np.linalg.norm(b-a+[p.mean_x_um,p.mean_y_um],axis=1)
+    mean=np.linalg.norm(b-a+mu[:2],axis=1)
     if math.isinf(k):
         linear=np.full(len(a),math.inf if np.any(np.diag(covariance)[:2]>0) else 0.)
         remainder=2*np.linalg.norm(a,axis=1) if st>0 else np.zeros(len(a))
@@ -392,7 +392,9 @@ def spacing_violation(polys,space):
     return False
 
 
-def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order=None,connections=None,contact_model=None,motions=None,settings=None,safe_range_cache=None):
+def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order=None,connections=None,contact_model=None,motions=None,settings=None,safe_range_cache=None,validate_extremes=False):
+    notify=progress
+    if validate_extremes:progress=lambda n,t:notify(round(.92*n),t)
     params.validate(); p=replace(params,residual_budget_um=0.,routing_edge_keepout_um=0.)
     from .drc_rules import effective_rules
     effective_rules(p,settings)
@@ -496,7 +498,7 @@ def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order
     progress(99,"整理窗口不足位置、安全范围与无接触概率")
     issues=contact['issues']
     progress(100,"评估完成")
-    return dict(version=__version__,units="μm",source_path=data.path,source_sha256=data.sha256,node_edit_count=len(data.node_edits),geometry_revision=data.edit_digest,import_warnings=data.import_warnings,
+    result=dict(version=__version__,units="μm",source_path=data.path,source_sha256=data.sha256,node_edit_count=len(data.node_edits),geometry_revision=data.edit_digest,import_warnings=data.import_warnings,
         top_cell=data.top_name,dbu_um=data.dbu_um,parameters=asdict(p),roles=roles,
         die_count=count,target_failure=alpha,input_ellipsoid_radius=statistical_state(p,count)[2],
         distribution='binary' if math.isinf(p.target_nsigma) else 'normal',
@@ -512,6 +514,30 @@ def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order
          "连续安全范围为原始固定RDL下经证明的较大体积内盒，不是有限极端点拼接或全局最优保证",
          "接触概率为每个接口与其他网络的联合接触概率；未把各接口概率直接相加当作整包概率",
          "源GDS只读；不会写入重构线路"],schema_version=3)
+    from .statistics import ExtremeCatalog
+    grid=ExtremeCatalog(original_case,p)
+    result.update(preview_count=grid.total,discrete_states=grid.total+1,die_state_counts=grid.radices)
+    if validate_extremes:
+        from .extreme_validation import evaluate_states,status_for
+        from .fast_preview import PreviewEngine
+        engine=PreviewEngine(contact_model.cache,original_case,roles,motions or {},p,result,connections,contact_model=contact_model)
+        try:
+            factors=evaluate_states(engine,grid,cfg,notify)
+        except InterruptedError:raise
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).exception('离散极端校验未完成')
+            factors=dict(checked=False,reason=str(exc))
+        finally:engine.close()
+        result['extreme_factors']=factors
+        from .representatives import RepresentativeExtremes
+        result['focused_states']=len(RepresentativeExtremes.from_result(original_case,p,result,grid))
+        counts=[grid.radices[r['owner']] for r in contact_model.records if grid.radices[r['owner']]>1]
+        result['footprint_vias']=len(counts);result['footprint_poses']=sum(counts)
+        result['extreme_validation']=[status_for(factors,row['choices']) for _,row in grid.page(0)]
+        notify(100,'方案评估与离散极端校验完成')
+    return result
+
 
 
 def clean_json(value):

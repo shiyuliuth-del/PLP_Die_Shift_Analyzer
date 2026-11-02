@@ -30,6 +30,10 @@ if errorlevel 1 goto failed
 if errorlevel 1 goto failed
 "%DSA_PYTHON%" tests\gui_v25.py > results\windows_v25_gui.log 2>&1
 if errorlevel 1 goto failed
+"%DSA_PYTHON%" -m unittest discover -s tests -p test_v26.py -v > results\windows_v26_tests.log 2>&1
+if errorlevel 1 goto failed
+"%DSA_PYTHON%" tests\gui_v26.py > results\windows_v26_gui.log 2>&1
+if errorlevel 1 goto failed
 type results\windows_desktop_smoke.json
 echo Windows offline source tests passed.
 pause

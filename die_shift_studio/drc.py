@@ -61,10 +61,13 @@ class GlobalDRC:
         self.cache[key]=out
         while len(self.cache)>self.capacity:self.cache.popitem(last=False)
         return out
-    def frame(self,states,replacements=None,settings=None,progress=lambda *_:None):
+    def fixed_regions(self,replacements,settings,progress):
         from .drc_rules import effective_rules
         m=self.model;p=self.p;dbu=m.data.dbu_um;replacements=replacements or {};groups={};items=[]
         width,space=effective_rules(p,settings)
+        rule_key=(width,space,settings.deformation_min_angle_deg if settings else 0)
+        if not replacements and getattr(self,'fixed_key',None)==rule_key:
+            self.hits+=1;return self.fixed_items
         # Check the reconstructed fixed RDL, including unchanged source copper.
         # Do not union different nets: union would erase shorted boundaries.
         for key,role in m.roles.items():
@@ -93,17 +96,31 @@ class GlobalDRC:
                         bad=separation_region(g,other[1],space,dbu)
                         if not bad.is_empty:
                             items.append(dict(layer=key,layers=tuple(set(layers+other[3])),geometry=bad,kind='异网短接 / 线距不足',nets=(net,other[2])))
-        # Enclosure uses actual adjacent metal only, with no test at unconnected vias.
-        for r in m.records:
+        if not replacements:self.fixed_key=rule_key;self.fixed_items=items
+        return items
+
+    def frame(self,states,replacements=None,settings=None,progress=lambda *_:None,owners=None):
+        m=self.model;p=self.p;dbu=m.data.dbu_um
+        items=list(self.fixed_regions(replacements,settings,progress)) if owners is None else []
+        # Keep the same target unions for all undeformed poses. Replacement
+        # geometry is resolved afresh, preserving the original net identities.
+        if replacements or not hasattr(self,'landing_targets'):
             targets=[]
-            for key,i in m.connections.fixed_interfaces(r['key'],r['index']):
-                replacement=next((q['geometry'] for q in replacements.get(key,[]) if i in q['indices']),None)
-                targets.append(m.cache.layers[key]['geometry'][i] if replacement is None else replacement)
-            if not targets:continue
-            via=m.moved(r['poly'],r['owner'],states)
-            missing=via.buffer(p.annulus_um/math.cos(math.pi/128),quad_segs=32).difference(shapely.union_all(targets))
-            if missing.area>dbu*dbu:items.append(dict(layer=r['target_layers'][0],layers=tuple(r['target_layers']),geometry=missing,kind='孔盘包围不足'))
+            for r in m.records:
+                pads=[next((q['geometry'] for q in (replacements or {}).get(k,[]) if i in q['indices']),m.cache.layers[k]['geometry'][i])
+                      for k,i in m.connections.fixed_interfaces(r['key'],r['index'])]
+                targets.append(shapely.union_all(pads) if pads else None)
+            if not replacements:self.landing_targets=targets
+        else:targets=self.landing_targets
+        indices=[j for j,r in enumerate(m.records) if owners is None or r['owner'] in owners]
+        if indices:
+            vias=np.array([m.moved(m.records[j]['poly'],m.records[j]['owner'],states) for j in indices],object)
+            missing=shapely.difference(shapely.buffer(vias,p.annulus_um/math.cos(math.pi/128),quad_segs=32),[targets[j] for j in indices])
+            for i in np.flatnonzero(shapely.area(missing)>dbu*dbu):
+                r=m.records[indices[i]]
+                items.append(dict(layer=r['target_layers'][0],layers=tuple(r['target_layers']),geometry=missing[i],
+                                  kind='孔盘包围不足',owner=r['owner']))
         from .edge_clearance import edge_violations
-        items.extend(edge_violations(m,states,p,settings,replacements))
+        items.extend(edge_violations(m,states,p,settings,replacements,owners))
         progress(100,f'全局 DRC 完成 · {len(items)} 组标记')
         return items

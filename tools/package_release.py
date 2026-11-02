@@ -21,7 +21,7 @@ def main():
     name = f'Die_Shift_Analyze_{__version__}_Source'
     target = ROOT / 'dist' / (name + '.zip')
     target.parent.mkdir(exist_ok=True)
-    files = [ROOT / p for p in ['README.md','main.py','main.pyw','die_shift_model.py','requirements.txt','run.sh','RUN.bat','RUN.vbs','SELECT_PYTHON.bat','BUILD_WINDOWS.bat','TEST_WINDOWS.bat','Die_Shift_Analyze.spec',f'docs/{__version__}_使用说明.md','AGENTS.md','Agent.md','CONTRIBUTING.md','.gitignore','.gitattributes','.github/pull_request_template.md','docs/DESIGN_REQUIREMENTS.md','docs/Agents.md','results/width_V23.json','results/width_V24.json','results/width_V25.json','docs/V24_使用说明.md','docs/V23_使用说明.md','docs/BASELINE_1102.md','docs/KNOWN_ISSUES.md','docs/imports/1102_source_manifest.json','results/1102_edge_audit.json']]
+    files = [ROOT / p for p in ['README.md','main.py','main.pyw','die_shift_model.py','requirements.txt','run.sh','RUN.bat','RUN.vbs','SELECT_PYTHON.bat','BUILD_WINDOWS.bat','TEST_WINDOWS.bat','Die_Shift_Analyze.spec',f'docs/{__version__}_使用说明.md','AGENTS.md','Agent.md','CONTRIBUTING.md','.gitignore','.gitattributes','.github/pull_request_template.md','docs/DESIGN_REQUIREMENTS.md','docs/Agents.md','results/width_V23.json','results/width_V24.json','results/width_V25.json','results/performance_V26.json','docs/V25_使用说明.md','docs/V24_使用说明.md','docs/V23_使用说明.md','docs/BASELINE_1102.md','docs/KNOWN_ISSUES.md','docs/imports/1102_source_manifest.json','results/1102_edge_audit.json']]
     # Explicit source/data whitelist. No images, screenshots, old archives,
     # generated cache, user jobs or large historical report assets.
     for folder in ('die_shift_studio','examples','tests','tools'):
@@ -56,6 +56,7 @@ def main():
         [sys.executable,'tests/gui_repair.py'],
         [sys.executable,'tests/gui_v24.py'],
         [sys.executable,'tests/gui_v25.py'],
+        [sys.executable,'tests/gui_v26.py'],
         [sys.executable,'main.py','--smoke-test','results/package_source_smoke.json'],
         [sys.executable,'-c',"import os,runpy,sys; os.environ['DIE_SHIFT_NATIVE_BACKEND']='desktop'; sys.argv=['main.py','--smoke-test','results/package_desktop_smoke.json']; runpy.run_path('main.py',run_name='__main__')"],
     ]
@@ -79,7 +80,7 @@ def main():
             if run.returncode:
                 raise SystemExit('Extracted archive validation failed: '+str(command)+' returncode='+str(run.returncode))
     record = {'version': __version__, 'package_revision':revision,'verified_at_utc': datetime.now(timezone.utc).isoformat(),
-              'method': 'Image-free source ZIP; fresh extraction, file hashes, all core tests, eight Qt suites, actual installed KLayout desktop backend, source startup and sample CLI; no frozen build',
+              'method': 'Image-free source ZIP; fresh extraction, file hashes, all core tests, nine Qt suites, actual installed KLayout desktop backend, source startup and sample CLI; no frozen build',
               'environment': 'Existing Linux Python environment; not a clean dependency-install or Windows test',
               'file_count_before_record': len(manifest), 'status': 'PASS', 'runs': records,
               'validation_scope':'Source/archive integrity and the executed checks; not a defect-free model or manufacturing signoff',

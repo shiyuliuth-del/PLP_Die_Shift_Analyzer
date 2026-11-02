@@ -44,6 +44,48 @@ def blend_points(xy,weights,center,state,method='bezier',arc_angle=30.,backend='
             logging.getLogger(__name__).exception('GPU型变坐标计算失败，使用CPU重算该批次')
     return _blend_kernel(np,*inputs,method,arc_angle)
 
+def _rigid_kernel(xp,points,owners,centers,states):
+    """Evaluate sin/cos once per DIE, including external fan-out vertices."""
+    idx=xp.maximum(owners,0);c=centers[idx];delta=points-c
+    co=xp.cos(states[:,2])[idx];si=xp.sin(states[:,2])[idx]
+    xy=xp.stack((co*delta[:,0]-si*delta[:,1],si*delta[:,0]+co*delta[:,1]),axis=1)+c+states[idx,:2]
+    xy=xp.where((states[idx,2]==0)[:,None],points+states[idx,:2],xy)
+    return xp.where((owners<0)[:,None],points,xy)
+
+
+def rigid_points(points,owners,centers,states,backend='auto'):
+    # Small exact geometry batches complete faster on CPU than a PCIe transfer.
+    if backend!='cpu' and len(points)>=(32768 if backend=='cuda' else 131072) and capabilities()['backend']=='cuda':
+        try:
+            import cupy as cp
+            with _gpu_lock,cp.cuda.Device(0):
+                free,_=cp.cuda.runtime.memGetInfo()
+                if len(points)*160>free*.45:raise MemoryError('刚体坐标批次超过显存预算')
+                return cp.asnumpy(_rigid_kernel(cp,*[cp.asarray(a) for a in (points,owners,centers,states)]))
+        except Exception:logging.getLogger(__name__).exception('GPU 刚体坐标未完成，转 CPU 计算')
+    return _rigid_kernel(np,points,owners,centers,states)
+
+
+def _pose_kernel(xp,vertices,center,states):
+    v=vertices-center
+    co=xp.cos(states[:,2,None]);si=xp.sin(states[:,2,None])
+    out=xp.stack((co*v[:,0]-si*v[:,1],si*v[:,0]+co*v[:,1]),axis=-1)+center+states[:,None,:2]
+    return xp.where((states[:,2]==0)[:,None,None],vertices+states[:,None,:2],out)
+
+
+def rigid_pose_batch(vertices,center,states,backend='auto'):
+    size=len(vertices)*len(states)
+    if backend!='cpu' and size>=(32768 if backend=='cuda' else 131072) and capabilities()['backend']=='cuda':
+        try:
+            import cupy as cp
+            with _gpu_lock,cp.cuda.Device(0):
+                free,_=cp.cuda.runtime.memGetInfo()
+                if size*96>free*.45:raise MemoryError('批量姿态超过显存预算')
+                return cp.asnumpy(_pose_kernel(cp,*[cp.asarray(a) for a in (vertices,center,states)]))
+        except Exception:logging.getLogger(__name__).exception('GPU 批量姿态未完成，转 CPU 计算')
+    return _pose_kernel(np,vertices,center,states)
+
+
 @lru_cache(maxsize=1)
 def capabilities():
     info={'backend':'cpu','devices':[],'reason':'未安装可用的 CuPy/CUDA 运行时'}
@@ -63,7 +105,13 @@ def capabilities():
                     inputs=(xy,weights,center,state)
                     got=cp.asnumpy(_blend_kernel(cp,*[cp.asarray(v) for v in inputs],method,30.))
                     np.testing.assert_allclose(got,_blend_kernel(np,*inputs,method,30.),rtol=1e-12,atol=1e-8)
-            info.update(backend='cuda',reason='CUDA 卷积与型变坐标自检通过；拓扑及最终DRC使用CPU')
+                owners=np.arange(len(xy))%3-1;centers=np.stack([center,-center]);states=np.stack([state,-state])
+                arrays=(xy,owners,centers,states)
+                got=cp.asnumpy(_rigid_kernel(cp,*[cp.asarray(a) for a in arrays]))
+                np.testing.assert_allclose(got,_rigid_kernel(np,*arrays),rtol=1e-12,atol=1e-8)
+                got=cp.asnumpy(_pose_kernel(cp,*[cp.asarray(a) for a in (xy,center,states)]))
+                np.testing.assert_allclose(got,_pose_kernel(np,xy,center,states),rtol=1e-12,atol=1e-8)
+            info.update(backend='cuda',reason='CUDA 卷积、刚体与型变坐标自检通过；拓扑及最终DRC使用CPU')
     except Exception as exc:info['reason']=f'CPU 回退：{type(exc).__name__}: {exc}'
     return info
 

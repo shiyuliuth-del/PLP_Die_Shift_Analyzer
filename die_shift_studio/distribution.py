@@ -40,7 +40,7 @@ def normalizer(p,count):
 
 def bounded_poses(p,count,settings):
     mu,b=mean_and_bounds(p,count);n=2**settings.sample_exponent
-    if math.isinf(p.target_nsigma):return np.tile(np.zeros(3),(n,1))
+    if math.isinf(p.target_nsigma) or not b.any():return np.zeros((n,3))
     sig=b/p.scale_nsigma;rho=p.rho_xy
     root=np.array([[sig[0],0,0],[rho*sig[1],sig[1]*math.sqrt(max(0,1-rho*rho)),0],[0,0,sig[2]]])
     sobol=qmc.Sobol(3,scramble=True,seed=settings.random_seed) if settings.probability_method=='sobol' else None

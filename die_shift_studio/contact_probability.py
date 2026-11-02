@@ -37,15 +37,14 @@ def contact_probability(model,record,p,budget=2048):
     lever=float(np.linalg.norm(vertices-center,axis=1).max())
     foreign=np.asarray(record['foreign'],int)
     if not len(foreign):return dict(lower=0.,upper=0.,estimate=0.,verdict='通过',boxes=0,threshold=alpha,witness=None)
-    others=model.node_geometry[foreign]
     mean_via=Polygon(rigid_transform(vertices,center,mu))
     reach=float(np.linalg.norm(hard_bounds[:2])+2*lever*math.sin(min(math.pi,hard_bounds[2])/2))
-    keep=shapely.distance(mean_via,others)<=radius+reach+tol
-    foreign=foreign[keep];others=others[keep]
+    from .contact import nearby_foreign
+    foreign=nearby_foreign(model,record,mean_via,radius+reach+tol);others=model.node_geometry[foreign]
     if not len(foreign):return dict(lower=0.,upper=0.,estimate=0.,verdict='通过',boxes=0,threshold=alpha,witness=None)
     from .probability_overlay import input_envelope
     envelope=input_envelope(record['poly'],center,p,count)
-    keep=shapely.distance(envelope,others)<=radius+tol
+    keep=shapely.dwithin(envelope,others,radius+tol)
     foreign=foreign[keep];others=others[keep]
     if not len(foreign):return dict(lower=0.,upper=0.,estimate=0.,verdict='通过',boxes=0,threshold=alpha,witness=None)
     tree=STRtree(others)

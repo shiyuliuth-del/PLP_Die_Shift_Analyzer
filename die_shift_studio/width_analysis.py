@@ -6,14 +6,16 @@ references at every pose. The nominal catalogue is built once per engine.
 from collections import defaultdict
 from dataclasses import dataclass
 import math
+import threading
 import numpy as np
 import shapely
 from shapely.geometry import LineString, Point, Polygon
 from shapely.strtree import STRtree
 from .drc_rules import effective_rules
 from .session_cache import SessionCache
+from .resources import parallel_map,resource_profile
 from .stack import UnionFind
-from .neighbor_channels import occupied, local_openings
+from .neighbor_channels import occupied_batches, local_openings
 from .landing_geometry import embedded_pad
 
 ADEQUATE, NARROW, BLOCKED = '宽度足够','需局部收窄','宽度不足'
@@ -360,8 +362,6 @@ class WidthAnalyzer:
     def _catalogue(self, plane, progress):
         walls = plane['walls']
         geometries = np.array([o.geometry for o in walls],object)
-        shapely.prepare(geometries)
-        tree = STRtree(geometries)
         if not len(plane['routes']):
             return []
         # The opposite sides of a concave island or a hole can carry different
@@ -389,10 +389,25 @@ class WidthAnalyzer:
         local = np.fromiter((g is not geometries[j] for g,j in zip(pieces,parent)),bool)
         plane['local'] = local
         faces = [_faces(g) for g in pieces]
-        events = STRtree([*geometries,*plane['routes']])
-        gates = []
-        metals = int(np.count_nonzero(parent<plane['metal_count']))
-        for i in range(metals):
+        metals=int(np.count_nonzero(parent<plane['metal_count']))
+        profile=resource_profile()
+        if metals<64:profile=dict(profile,workers=1)
+        # Prepared GEOS predicates lazily build native indices. Give each
+        # worker its own geometries, prepared polygons and STRtrees.
+        wall_bytes=shapely.to_wkb(geometries);piece_bytes=shapely.to_wkb(pieces)
+        route_bytes=shapely.to_wkb(plane['routes']);board_bytes=self.inside.wkb
+        source_bytes=[[(ref,g.wkb) for ref,g in lane] for lane in plane['route_sources']]
+        local_context=threading.local()
+        def candidates_for_wall(i):
+            if not hasattr(local_context,'trees'):
+                geo=shapely.from_wkb(wall_bytes);shapely.prepare(geo)
+                routes=shapely.from_wkb(route_bytes);shapely.prepare(routes)
+                local_plane=dict(plane,routes=routes,tree=STRtree(routes),boundaries=shapely.boundary(routes),
+                                 route_sources=[[(ref,shapely.from_wkb(wkb)) for ref,wkb in lane] for lane in source_bytes])
+                inside=shapely.from_wkb(board_bytes);shapely.prepare(inside)
+                local_context.trees=geo,shapely.from_wkb(piece_bytes),STRtree(geo),STRtree([*geo,*routes]),local_plane,inside
+            geometries,pieces,tree,events,route_plane,inside=local_context.trees
+            gates=[]
             for offset in range(i+1,len(pieces),CHUNK):
                 js = np.arange(offset,min(offset+CHUNK,len(pieces)))
                 lines = shapely.shortest_line(pieces[i],pieces[js])
@@ -420,7 +435,7 @@ class WidthAnalyzer:
                 pairs = parent[feature_pairs]
                 lines = shapely.linestrings(ends)
                 blocked = _intruders(lines,pairs,geometries,tree,self.tol)
-                accessible = shapely.covers(self.inside,lines)
+                accessible = shapely.covers(inside,lines)
                 # For a concave feature, reject seams that cross its own copper.
                 for side in (0,1):
                     mask = local[feature_pairs[:,side]]
@@ -429,7 +444,7 @@ class WidthAnalyzer:
                 indices = [k for k,ok in enumerate(accessible) if ok and k not in blocked]
                 if not indices:
                     continue
-                crossing=dict(zip(indices,_crossings(ends[indices],plane,self.tol)))
+                crossing=dict(zip(indices,_crossings(ends[indices],route_plane,self.tol)))
                 # For tied parallel faces, each station samples an interval
                 # between nominal topology events. A missing or different
                 # passage interrupts the run even on the same two straight walls.
@@ -447,8 +462,10 @@ class WidthAnalyzer:
                         gap=float(np.linalg.norm(ends[k,1]-ends[k,0]))
                         gates.append(Gate(tuple(pairs[k]),feature,ends[k],anchored[k],tuple(w for _,w,_ in strands),
                                           tuple(t for t,_,_ in strands),refs,gap,(*feature,run,ordinal)))
-            progress((i+1)/max(1,metals),'识别名义线路穿越')
-        return gates
+            return gates
+        groups=parallel_map(candidates_for_wall,range(metals),profile,
+                            progress=lambda done,total:progress(done/max(1,total),'识别名义线路穿越'))
+        return [gate for group in groups for gate in group]
 
     def _measure(self, name, plane, states, progress):
         if plane['gates'] is None:
@@ -461,15 +478,28 @@ class WidthAnalyzer:
                     for w,g in zip(walls[:plane['metal_count']],geometries)]
         if not gates:
             return [],retained
-        pairs = np.array([g.pair for g in gates])
-        orig = np.array([g.ends for g in gates])
-        features = np.array([g.features for g in gates])
-        pieces = plane['pieces']
+        if 'arrays' not in plane:
+            orig=np.array([g.ends for g in gates]);pairs=np.array([g.pair for g in gates])
+            features=np.array([g.features for g in gates]);owners=np.array([w.owner for w in walls])
+            unique,inv=np.unique(features,axis=0,return_inverse=True)
+            plane['arrays']=(orig,pairs,features,owners,unique,inv,
+                             np.array([g.anchored for g in gates]),[frozenset(ref for strand in g.strand_refs for ref in strand) for g in gates])
+        orig,pairs,features,owners,unique,inverse,is_anchor,sources=plane['arrays']
+        pieces=plane['pieces'];lines=shapely.linestrings(orig)
+        anchored=np.empty(0,int)
         if not nominal:
-            pieces = np.array([geometries[parent] if p is walls[parent].geometry else
-                               self.model.moved(p,walls[parent].owner,states) for p,parent in zip(pieces,plane['parents'])],object)
-        lines = shapely.linestrings(orig) if nominal else shapely.shortest_line(pieces[features[:,0]],pieces[features[:,1]])
-        anchored = np.where([g.anchored for g in gates])[0]
+            pieces=np.array([geometries[parent] if piece is walls[parent].geometry else
+                             self.model.moved(piece,walls[parent].owner,states) for piece,parent in zip(pieces,plane['parents'])],object)
+            # Only recompute truly changed feature pairs. Many parallel samples
+            # share two features; their feature minimum is the same operation.
+            is_moving=(owners>=0)&np.any(states[np.maximum(owners,0)]!=0,axis=1)
+            changed=np.any(is_moving[pairs],axis=1)
+            selected=np.flatnonzero(changed)
+            if len(selected):
+                inds,reverse=np.unique(inverse[selected],return_inverse=True)
+                u=unique[inds]
+                lines[selected]=shapely.shortest_line(pieces[u[:,0]],pieces[u[:,1]])[reverse]
+            anchored=np.flatnonzero(is_anchor & changed)
         if not nominal and len(anchored):
             owners = np.array([w.owner for w in walls])
             at = pairs[anchored]
@@ -494,8 +524,8 @@ class WidthAnalyzer:
         half_depth=.65*(self.width+self.space)
         if 'occupied' not in plane:
             original=np.asarray([w.geometry for w in walls],object)
-            plane['occupied']=occupied(orig,pairs,walls,original,half_depth,self.tol)
-        obstacles=plane['occupied'] if nominal else occupied(ends,pairs,walls,geometries,half_depth,self.tol)
+            plane['occupied']=occupied_batches(orig,pairs,walls,original,half_depth,self.tol)
+        obstacles=plane['occupied'] if nominal else occupied_batches(ends,pairs,walls,geometries,half_depth,self.tol,sources)
         # A pad that has travelled through the opposite wall cannot reopen the
         # original routing order on the far side. Rotate the reference with a
         # common rigid owner, so a rigid board rotation preserves the channel.
@@ -517,7 +547,8 @@ class WidthAnalyzer:
             if not spans:
                 direct.append(k)
                 continue
-            for sub in local_openings(g,ends[k],spans,plane['occupied'].get(k,[]),walls,self.tol):
+            if not any(walls[w].contacts.intersection(sources[k]) for w,_,_ in spans):continue
+            for sub in local_openings(g,ends[k],spans,plane['occupied'].get(k,[]),walls,self.tol,evidence_only=True):
                 pair=tuple(sorted(sub['pair']))
                 refs=frozenset(ref for t in sub['indices'] for ref in g.strand_refs[t])
                 if refs:splits[pair].append((sub['point'],refs,sub['locked']))
