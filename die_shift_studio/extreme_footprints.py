@@ -37,4 +37,5 @@ class FootprintOverlay:
         if stamp==self.stamp:return
         features=[q for q in (data or {}).get('features',()) if q['key'] in visible and overlaps(q['bounds'],w.view_bounds)]
         self.artist.set_paths([w.geometry_patch(q['geometry']) for q in features])
-        self.artist.set_visible(bool(features));self.stamp=stamp
+        self.artist.set_visible(bool(features));self.artist._static_preview=('discrete-footprint',stamp)
+        self.stamp=stamp
