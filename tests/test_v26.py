@@ -22,7 +22,8 @@ def fixture():
     copper={'9/0':[box(-250,-120,250,120)],'8/0':[box(-190,-65,-5,65),box(10,-65,190,65)],
             '5/0':[box(-52,-18,-24,18),box(24,-17,52,17),box(-6,-50,5,45)],
             '4/0':[box(-40,-5,-32,5),box(32,-5,40,5)],
-            '3/0':[box(-90,-4,-32,4),box(32,-4,90,4)],'10/0':[box(-122,-5,-116,5)]}
+            '3/0':[box(-90,-4,-32,4),box(32,-4,90,4)],'10/0':[box(-122,-5,-116,5)],
+            '90/0':[box(-245,-118,245,118)]}  # older Jobs omit unused layers from their role map
     data=GDSData('local.gds','v26fixture','TOP',['TOP'],.001,{k:[np.array(g.exterior.coords) for g in gs] for k,gs in copper.items()},roles)
     case=build_case(data,roles,layer_order=['3/0','4/0','5/0'])
     p=Parameters(multi_bound_x_um=35,multi_bound_y_um=5,bound_angle_deg=1,annulus_um=3,line_width_um=5,line_space_um=5,
@@ -60,6 +61,8 @@ class V26Tests(unittest.TestCase):
     def test_all_729_statuses_match_full_geometry_and_drc(self):
         e,c,p=fixture();g=ExtremeCatalog(c,p);settings=ViewSettings()
         try:
+            self.assertIn('90/0',e.contact.cache.layers)
+            self.assertNotIn('90/0',e.bound.keys)
             factors=evaluate_states(e,g,settings)
             self.assertEqual((factors['local_states'],factors['batches'],factors['pair_states']),(54,27,729))
             self.assertTrue(any(any(row) for row in factors['pairs'][0]['hits']))

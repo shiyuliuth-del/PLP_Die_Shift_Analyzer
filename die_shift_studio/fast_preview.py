@@ -131,7 +131,7 @@ def check_frame(bound,roles,p,result,states,layers,scheme,connections=None,check
 class PreviewEngine:
     """One engine per geometry/role/motion generation; called by one UI worker."""
     def __init__(self,cache,case,roles,motions,p,result,connections,cache_group=None,cache_identity=None,contact_model=None):
-        self.bound=cache.bind(case,motions,[k for k in cache.layers if roles.get(k)!='不参与'],p)
+        self.bound=cache.bind(case,motions,[k for k in cache.layers if roles.get(k,'不参与')!='不参与'],p)
         self.roles=roles;self.p=p;self.result=result;self.connections=connections;self.cache_group=cache_group
         from .session_cache import SessionCache
         if cache_group is not None and cache_identity is not None:

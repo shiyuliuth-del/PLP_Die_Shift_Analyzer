@@ -536,7 +536,7 @@ def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order
         result['footprint_vias']=len(counts);result['footprint_poses']=sum(counts)
         result['nominal_discrete_check']=status_for(factors,[0]*grid.count)
         result['extreme_validation']=[status_for(factors,row['choices']) for _,row in grid.page(0)]
-        notify(100,'方案评估与离散极端校验完成')
+        notify(100,'方案评估与离散极端校验完成' if factors['checked'] else '方案初筛完成，离散极端校验未完成')
     return result
 
 

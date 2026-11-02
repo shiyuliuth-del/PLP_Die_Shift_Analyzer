@@ -31,7 +31,7 @@ def evaluate_states(engine,catalog,settings,progress=lambda *_:None):
     engine.configure_deformation(False,settings);engine.configure_drc(True,settings)
     n=grid.count;model=engine.contact;bound=engine.bound;p=engine.p
     model.configure_parameters(p);tol=max(1e-9,model.data.dbu_um*1e-6)
-    waves=max(grid.radices);unknown=sum(np.count_nonzero(own<0) for k,own in bound.owners.items() if engine.roles[k] in ('运动过孔','运动RDL'))
+    waves=max(grid.radices);unknown=sum(np.count_nonzero(own<0) for k,own in bound.owners.items() if engine.roles.get(k) in ('运动过孔','运动RDL'))
     obstacles='禁布区' in engine.roles.values()
     def wave(k):
         z=np.array([v[k] if k<len(v) else v[0] for v in grid.locals])

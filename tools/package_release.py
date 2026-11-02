@@ -61,7 +61,8 @@ def main():
         [sys.executable,'-c',"import os,runpy,sys; os.environ['DIE_SHIFT_NATIVE_BACKEND']='desktop'; sys.argv=['main.py','--smoke-test','results/package_desktop_smoke.json']; runpy.run_path('main.py',run_name='__main__')"],
     ]
     for sample in sorted((ROOT/'Jobs').glob('示例*.dshift.json')):
-        commands.append([sys.executable,'-m','die_shift_studio','--project','Jobs/'+sample.name])
+        commands.append([sys.executable,'-m','die_shift_studio','--project','Jobs/'+sample.name,
+                         '--json','results/'+sample.stem+'.verified.json'])
     records = []
     with tempfile.TemporaryDirectory(prefix='die_shift_release_') as temp:
         with zipfile.ZipFile(target) as archive:
@@ -79,6 +80,14 @@ def main():
             print(run.stdout, end='', flush=True)
             if run.returncode:
                 raise SystemExit('Extracted archive validation failed: '+str(command)+' returncode='+str(run.returncode))
+            if 'Traceback (most recent call last)' in run.stdout or '未处理异常' in run.stdout:
+                raise SystemExit('Unhandled exception in extracted archive: '+str(command))
+            if '--project' in command:
+                result=json.loads((extracted/command[-1]).read_text(encoding='utf-8'))
+                factors=result['extreme_factors']
+                if not factors['checked'] or factors['package_states']!=result['discrete_states']:
+                    raise SystemExit('Incomplete discrete evaluation for '+command[command.index('--project')+1])
+                records[-1]['verified_discrete_states']=factors['package_states']
     record = {'version': __version__, 'package_revision':revision,'verified_at_utc': datetime.now(timezone.utc).isoformat(),
               'method': 'Image-free source ZIP; fresh extraction, file hashes, all core tests, nine Qt suites, actual installed KLayout desktop backend, source startup and sample CLI; no frozen build',
               'environment': 'Existing Linux Python environment; not a clean dependency-install or Windows test',
