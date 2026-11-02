@@ -155,7 +155,7 @@ class PreviewEngine:
             self.global_drc=GlobalDRC(self.contact,self.p)
         self.drc_key=key;self.drc_enabled=enabled;self.drc_settings=settings
     def configure_width(self,enabled,settings):
-        key=(True,settings.drc_tolerance_um) if enabled else (False,)
+        key=settings.width_key() if enabled else (False,)
         if getattr(self,'width_key',(False,))==key:return
         if enabled:
             from .width_analysis import WidthAnalyzer
@@ -163,13 +163,25 @@ class PreviewEngine:
             if key not in self.width_analyzers:self.width_analyzers[key]=WidthAnalyzer(self.contact,self.p,settings,self.cache_group)
             self.width_analyzer=self.width_analyzers[key]
         self.width_key=key
+    def configure_reconstruction(self,enabled,settings):
+        key=settings.reconstruction_key() if enabled else (False,)
+        if getattr(self,'reconstruction_config',(False,))==key:return
+        self.reconstructor=None
+        if enabled:
+            from .reconstruction import Reconstructor
+            if not hasattr(self,'reconstructors'):self.reconstructors={}
+            if key not in self.reconstructors:self.reconstructors[key]=Reconstructor(self.contact,self.p,settings,self.cache_group)
+            self.reconstructor=self.reconstructors[key]
+        self.reconstruction_config=key
     def cache_key(self):
-        return (getattr(self,'deformation_key',None),getattr(self,'drc_key',None),getattr(self,'width_key',(False,)))
+        return (getattr(self,'deformation_key',None),getattr(self,'drc_key',None),getattr(self,'width_key',(False,)),
+                getattr(self,'reconstruction_config',(False,)))
     def close(self):
         self.frames.close();self.intermediate.clear()
         for d in self.deformers.values():d.close()
         self.deformers.clear()
         for analyzer in getattr(self,'width_analyzers',{}).values():analyzer.close()
+        for reconstructor in getattr(self,'reconstructors',{}).values():reconstructor.close()
     def frame(self,states,progress=lambda *_:None,quick=False):
         states=np.array(states,dtype=float,copy=True);states[states==0]=0.
         if not np.any(states):quick=False
@@ -193,6 +205,11 @@ class PreviewEngine:
             check['scope']='当前状态：线距控制区与下一金属层其他几何网络接触，另检查净距/禁布区'
         frame=dict(motion_issues=list(self.connections.ownership_notes) if np.any(states) else [],layers=layers,checks=checks,states=np.asarray(states).copy(),rotation_centers=self.bound.centers.copy(),contact=current)
         if deformation is not None:frame['deformation']=deformation
+        if getattr(self,'reconstructor',None) is not None:
+            # Reconstructed fixed RDL is a hypothesis about an operator's split,
+            # so it travels with the frame: the air-gap check and the plot both
+            # read the same geometry, and the piece table says what was guessed.
+            frame['reconstruction']=self.reconstructor.frame(states,deformation,progress)
         if getattr(self,'drc_enabled',False):
             frame['drc']=deformation['violations'] if deformation is not None else self.global_drc.frame(states,settings=self.drc_settings,progress=progress)
         if deformation is not None or getattr(self,'drc_enabled',False):
