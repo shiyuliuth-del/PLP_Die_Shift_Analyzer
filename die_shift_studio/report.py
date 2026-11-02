@@ -203,7 +203,7 @@ def report_document(r,motions=None,progress=lambda *_:None):
              f"移动区按所属 DIE 的刚体变换移动（同一块固定RDL跨多个芯片时只取本 DIE 芯片边框 128/0 以内的铜，"
              f"边框外的铜归相邻 DIE、留在原位）；裂隙用两个切口面的 4 个端点围成的多边形补上"
              f"（不论是否短路都补，外扩 {fmt(parameters.get('width_um',0))} μm，0 表示正好覆盖切口）；"
-             f"之后用重构后的铜作为固定RDL跑落盘 air-gap",
+             f"按当前姿态显示重构的固定 RDL",
              [r'P_{\rm move}=C\cap\{p:(p-o)\cdot n\geq 0\}',
               r"P'_{\rm move}=R_{\theta}(P_{\rm move}-c)+c+\Delta",
               r'Q=\mathrm{conv}\{F_{0},F_{1},F^{\prime}_{1},F^{\prime}_{0}\}'],
@@ -234,35 +234,23 @@ def report_document(r,motions=None,progress=lambda *_:None):
         if len(recon['pieces'])>100:blocks.append(f"<p>重构移动区共{len(recon['pieces'])}块，报告列出前100块；“重构预演”表可定位当前全部块。</p>")
     width=r.get('preview_width_analysis')
     if width:
-        parameters=width.get('parameters',{})
-        target_label=width.get('target_label','最近异网固定RDL')
-        tgt_noun=('其他网络的落盘区' if width.get('mode')=='landing' else '其他网络的固定RDL铜')
-        def nearest(q):
-            target=q.get('target')
-            if not target:return '—'
-            kind='固定RDL' if target.get('kind')=='fixed' else '过孔原始落盘'
-            return f"{target['layer']} #{target['index']+1}（{kind}，net {target['net']}）"
-        def owner(q):
-            return '—' if q.get('owner',-1)<0 else f"DIE{q['owner']+1}"
-        step('当前姿态的落盘 air-gap 分析',
-             f"分析对象：{width.get('mode_label','垂直方向固定RDL')}；运动过孔按 overlap {fmt(parameters.get('overlap_um',0))} μm 外扩作为落盘区；"
-             f"只在局部半径 R {fmt(parameters.get('radius_um',0))} μm 内查找{tgt_noun}；工艺线宽/线距及共同DRC容差",
-             [r'r_{\rm land}=r_{\rm via}+x_{\rm overlap}',
-              r'g=\min\{\mathrm{dist}(L,C)\},\qquad \mathrm{dist}(L,C)\leq R',
-              r'g<s_{\rm eff}\Rightarrow\mathrm{FAIL},\qquad g<\tau_{\rm anno}\Rightarrow\mathrm{WARN}'],
-             '；'.join(f'{k}{v}处' for k,v in width['counts'].items()),
-             'FAIL=不足（air-gap低于有效线距），WARN=临界（低于标注阈值）。'
-             'x为输入的落盘外扩量；r_via取过孔最小外接矩形短边的一半；L为落盘区，C为垂直方向固定RDL层上**其他网络**的铜，'
-             f"同网落盘不是风险、已排除。s_eff为有效线距（工艺线距−共同容差），标注阈值τ_anno默认等于s_eff，可在设置中放宽以提前预警。"
-             f"本次共检查{width.get('examined',0)}个运动过孔，其中{width.get('beyond_radius',0)}个在R内没有异网固定RDL铜。"
-             'air-gap只是R范围内的局部间距：R之外的铜未参与测量，通过不代表整图可布通、完整DRC通过或量产良率。本项不改变模型良率与三方案评分。')
-        blocks.append('<p>以下为最近一次完成的落盘air-gap分析姿态；其计算独立于方案评估快照。</p>'+grid(['DIE','DX / μm','DY / μm','O / °'],[[i+1,fmt(z[0]),fmt(z[1]),fmt(math.degrees(z[2]))] for i,z in enumerate(width['states'])]))
-        selected=[q for q in width['rows'] if q['status']!='充足']
-        blocks.append(grid(['风险','运动过孔','所属','落盘半径 / μm','air-gap / μm','有效线距 / μm',target_label,'位置 / μm'],
-                           [[q['status'],f"{q['key']} #{q['via_index']}",owner(q),fmt(q['land_radius_um']),
-                             '—' if q['gap_um'] is None else fmt(q['gap_um']),fmt(q['rule_space_um']),nearest(q),
-                             str([round(x,3) for x in q['point']])] for q in selected[:100]]))
-        if len(selected)>100:blocks.append(f'<p>风险落盘共{len(selected)}处，报告列出前100处；图形下方“宽度分析”表可定位当前全部风险行，图上最多标注200处尺寸。</p>')
+        parameters=width['parameters']
+        step('当前姿态的固定 RDL 通道容量',
+             f"名义图纸的穿越线路，有效线宽 {fmt(parameters['width_um'])} μm，有效线距 {fmt(parameters['space_um'])} μm，最小包围量 {fmt(parameters['enclosure_um'])} μm。",
+             [r'W(n)=nw+(n+1)s',r'C(g)=\max\left(0,\left\lfloor\frac{g-s}{w+s}\right\rfloor\right)',
+              r'C_0=C(g_0),\quad C_t=\sum_j C(g_{t,j})',r'u_i=2\,\mathrm{dist}(m_i,\partial R_i),\quad W_{\rm keep}=\sum_{i=1}^{N}\max(u_i,w)+(N+1)s'],
+             f"有名义线路穿越的截面 {width['examined']} 个，宽度足够 {width['counts']['宽度足够']} 个，需局部收窄 {width['counts']['需局部收窄']} 个，宽度不足 {width['counts']['宽度不足']} 个。",
+             'w、s 为工艺固定线宽、线距分别减去共用 DRC 容差。n 根线所需宽度 W(n) 包含两侧线距。'
+             'N 为原图确实穿越截面的线路根数。g₀ 为原净宽，gₜ,ⱼ 为运动后第 j 段可用净宽。C₀ 和 Cₜ 分别为原可通与现可通根数。'
+             '孔盘以实际过孔和最小包围量为基础。有独立可识别的同心孔盘时保留较大外形。无运动过孔的固定 RDL 网络整块占用。'
+             'mᵢ 是第 i 条线路与截面相交区间的中点，∂Rᵢ 是其名义铜边界。uᵢ 是局部铜厚度的平面量测值，对直线斜穿同样给出横向原宽。'
+             'W_keep 是原宽和工艺下限取大后所需的总宽。按穿越次序分配到各段，原宽可放入时为绿色。原宽放不下而 Cₜ ≥ N 时为琥珀色。Cₜ < N 时为红色。'
+             '遇分段还须复核实际线路的绕行侧别，整图连通与良率另行评估。')
+        blocks.append(grid(['DIE','DX / μm','DY / μm','O / °'],[[i+1,fmt(z[0]),fmt(z[1]),fmt(math.degrees(z[2]))] for i,z in enumerate(width['states'])]))
+        blocks.append(grid(['固定 RDL','状态','通道','原可通','必须通过','现可通','位置 / μm'],
+                           [[q['plane'],q['status'],' ↔ '.join(q['pair']),q['original'],q['required'],q['current'],
+                             str([round(x,3) for x in q['point']])] for q in width['rows'][:100]]))
+        if width.get('displayed',len(width['rows']))>100:blocks.append('<p>报告列出前 100 个选定类别的截面。完整清单见图形下方的宽度分析表。</p>')
     hidden={'per_die_enabled','die_bounds','die_pivots','input_nsigma','interdie','fixed_via_assignment','residual_budget_um','transition_length_um','max_route_angle_deg','routing_edge_keepout_um'}
     appendix='<h2>附录：输入与几何明细</h2>'+grid(['参数','含义/单位','值'],[[key,PARAMETER_DESCRIPTIONS.get(key,key),fmt(value,8)] for key,value in r['parameters'].items() if key not in hidden])
     appendix+=grid(['图层','图形编号','归属问题','可达DIE'],[[q['layer'],q['index'],q['reason'],q['dies']] for q in con.get('ownership_notes',[])])

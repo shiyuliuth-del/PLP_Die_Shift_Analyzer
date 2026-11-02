@@ -98,7 +98,7 @@ class ReconstructionOverlay:
                             '同一网络、彼此相距不远的多个落盘算作一条串，整条串只切一刀，切口量到串里最远的'
                             '那个落盘再往外；同一块固定RDL跨多个芯片时，移动区只取本 DIE 芯片边框以内的铜；'
                             '移动区按当前姿态移动后，用两个切口面的 4 个端点围成的多边形'
-                            '补上裂隙，再用重构后的铜做落盘 air-gap。')
+                            '补上裂隙。')
             return
         table.blockSignals(True)
         if data is None:

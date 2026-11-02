@@ -106,7 +106,7 @@ class Reconstructor:
         # Outward expansion of the cover polygon: 0 = exactly the four cut-face
         # corners, which is the default reconstruction.
         self.width_um=max(0.,float(getattr(settings,'reconstruction_width_um',0.)))
-        self.overlap_um=max(0.,float(getattr(settings,'width_overlap_um',0.)))
+        self.overlap_um=max(0.,float(getattr(settings,'reconstruction_overlap_um',0.)))
         self.vias=[]
         for key,role in model.roles.items():
             if role!='运动过孔':continue

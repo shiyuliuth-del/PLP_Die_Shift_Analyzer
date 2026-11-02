@@ -35,59 +35,44 @@ w.mouse_die.press(SimpleNamespace(inaxes=w.ax,button=3,x=px,y=py));w.mouse_die.m
 np.testing.assert_allclose(w.shown_states[1,:2],start[1,:2]+[dx,dy],atol=1e-8);check_pad(1)
 w.mouse_die.scroll(SimpleNamespace(inaxes=w.ax,key=None,step=1));wait();check_pad(1)
 assert np.isclose(w.shown_states[1,2],start[1,2]+math.radians(.1));w.mouse_die.exit()
-w.grab().save(str(ROOT/'figures/software_V21_pad_motion.png'))
-# Landing air-gap follows the moving via and its vertical fixed-RDL neighbour.
-w.load_project(ROOT/'Jobs/示例N_三线路窄通道宽度.dshift.json');wait();w.run_evaluation();wait();w.width_toggle.setChecked(True);wait()
-assert w.current_frame['width_analysis']['complete'];w.preview_tabs.setCurrentIndex(w.preview_tabs.count()-1)
-poses=[np.array([[x,0.,0.],[0.,0.,0.]]) for x in (35.,-35.)];seen=[];dims=[];original=w.show_motion_frame
+# The portable mixed-width project saves the analysis checkbox on.
+w.load_project(ROOT/'Jobs/示例O_运动网络三线路通道.dshift.json');wait();w.run_evaluation();wait()
+assert w.width_toggle.isChecked() and not w.width_sufficient_toggle.isChecked()
+w.tabs.setCurrentIndex(0);w.preview_tabs.setCurrentWidget(w.width_table.parentWidget());wait()
+poses=[np.array([[x,0.,0.],[0.,0.,0.]]) for x in (35.,-35.)];seen=[];labels=[];original=w.show_motion_frame
 def record(f):
  seen.append(f['states'].copy());original(f)
- dims.append([l.get_text() for l,a in zip(w.width_overlay.labels,w.width_overlay.arrows) if a.get_visible()])
+ labels.extend(a.get_text() for a in w.width_overlay.labels if a.get_visible())
 w.show_motion_frame=record
 for z in poses:w.manual_states=z;w.request_preview();wait()
 for z in poses:w.manual_states=z;w.request_preview();wait()
-with patch.object(WidthAnalyzer,'_measure',side_effect=AssertionError('Completed pose air-gap recalculated')):
+with patch.object(WidthAnalyzer,'_measure',side_effect=AssertionError('Completed channel pose recalculated')):
  for z in poses:w.manual_states=z;w.request_preview();wait()
-assert len(seen)>1 and w._prepared_motion['cached']
-# The CAD dimensions must be live during the animation, not only at its end.
-drawn=[d for d in dims if d]
-assert drawn and any(text.replace('.','',1).isdigit() for d in drawn for text in d)
-assert len(drawn)<len(dims) or len(dims)==1
+assert len(seen)>1 and w._prepared_motion['cached'] and any('原可通' in t and '必须' in t and '现可通' in t for t in labels)
 w.show_motion_frame=original
 w.manual_states=poses[0];w.request_preview();wait()
-rows=w.current_frame['width_analysis']['rows'];target=next(q for q in rows if q['key']=='4/0' and q['index']==0)
-assert target['status']=='不足' and target['gap_um']==0.,target
-assert target['target']['layer']=='5/0' and target['target']['net']!=target['net']
-assert w.width_overlay.lands.get_visible() and w.width_overlay.arrows[0].get_visible()
-assert any(q['status']=='不足' for q in w.width_rows)
-w.visible_boxes['4/0'].setChecked(False);wait();assert not any(q['key']=='4/0' for q in w.width_overlay.rows)
-w.visible_boxes['4/0'].setChecked(True);wait()
-row=next(i for i,q in enumerate(w.width_rows) if q['key']=='4/0' and q['index']==0)
-w.width_table.setCurrentCell(row,0);wait();w.grab().save(str(ROOT/'figures/software_V21_width_risk.png'))
-w.tabs.setCurrentWidget(w.detail);wait();assert '落盘 air-gap' in w.detail.toPlainText();assert '落盘外扩量' in w.detail.toPlainText()
-w.grab().save(str(ROOT/'figures/software_V21_width_report.png'))
-w.tabs.setCurrentIndex(0);wait()
-# Switching the analysis object re-runs against the other vias' original footprints.
-w.view_settings=replace(w.view_settings,width_mode='landing',width_search_radius_um=400.,width_gap_threshold_um=60.)
-w.manual_states=poses[1];w.request_preview();wait()
-landing=w.current_frame['width_analysis']
-assert landing['mode']=='landing' and landing['target_label']=='最近异网原始落盘',landing['mode_label']
-assert all(q['target'] is None or q['target']['kind']=='via' for q in landing['rows'])
-assert all(q['target'] is None or q['target']['layer']==q['key'] for q in landing['rows'])
-assert '其他落盘区原始位置' in w.width_summary.text()
-assert w.width_table.horizontalHeaderItem(6).text()=='最近异网原始落盘'
-w.grab().save(str(ROOT/'figures/software_V21_landing_mode.png'))
-w.view_settings=replace(w.view_settings,width_mode='vertical',width_search_radius_um=100.,width_gap_threshold_um=0.)
-w.manual_states=poses[0];w.request_preview();wait()
-assert w.current_frame['width_analysis']['mode']=='vertical'
-w.tabs.setCurrentIndex(0);w.manual_states=None;w.active_preview=None;w.request_preview();wait();assert not np.any(w.current_frame['states'])
-with patch.object(WidthAnalyzer,'_measure',side_effect=AssertionError('Zero cache lost')):
- w.manual_states=poses[0];w.request_preview();wait();w.manual_states=None;w.request_preview();wait()
-assert not np.any(w.current_frame['states']);w.width_toggle.setChecked(False);wait();assert not w.width_overlay.lands.get_visible()
+def central(r):return r['pair']==('运动过孔孔盘 4/0 #1','运动过孔孔盘 4/0 #2')
+target=next(r for r in w.width_rows if central(r))
+assert (target['status'],target['original'],target['required'],target['current'])==('宽度不足',3,3,2)
+assert w.width_overlay.boxes.get_visible() and w.width_overlay.outlines.get_visible()
+w.visible_boxes['4/0'].setChecked(False);wait();assert not any(central(r) for r in w.width_overlay.rows)
+w.visible_boxes['4/0'].setChecked(True);wait();row=next(i for i,q in enumerate(w.width_rows) if central(q))
+w.width_table.setCurrentIndex(w.width_table.model().index(row,0));wait()
+w.tabs.setCurrentWidget(w.detail);wait();assert '固定 RDL 通道容量' in w.detail.toPlainText()
+w.tabs.setCurrentIndex(0);w.manual_states=np.array([[3.,0,0],[0.,0,0]]);w.request_preview();wait()
+assert any(central(r) and r['status']=='需局部收窄' for r in w.width_rows)
+w.manual_states=None;w.active_preview=None;w.request_preview();wait()
+assert not any(r['status']=='宽度足够' for r in w.width_rows)
+with patch.object(WidthAnalyzer,'_measure',side_effect=AssertionError('Display filter recalculated channels')):
+ w.width_sufficient_toggle.setChecked(True);wait()
+ assert any(central(r) and r['status']=='宽度足够' for r in w.width_rows)
+ path=w.jobs_dir/'V23.dshift.json';w.write_project(path);w.write_project(path)
+ w.width_toggle.setChecked(False);w.width_sufficient_toggle.setChecked(False);wait()
+w.load_project(path);wait();assert w.width_toggle.isChecked() and w.width_sufficient_toggle.isChecked()
+assert any(central(r) for r in w.width_rows) and w.width_table.model().rowCount()==len(w.width_rows)
 # Reconstruction preview: the cut is taken across the route, the movable part
 # follows its die, and the fissure is covered by the two cut faces' four corners.
 w.load_project(ROOT/'Jobs/示例N_三线路窄通道宽度.dshift.json');wait();w.run_evaluation();wait()
-w.view_settings=replace(w.view_settings,width_mode='vertical',width_search_radius_um=100.,width_gap_threshold_um=0.)
 w.width_toggle.setChecked(True);w.reconstruction_toggle.setChecked(True);wait()
 w.manual_states=poses[0];w.request_preview();wait()
 recon=w.current_frame['reconstruction'];piece=recon['pieces'][0]
@@ -101,20 +86,17 @@ summary=w.reconstruction_summary.text()
 assert '自动划分' in summary and '不代表产线' in summary and '整块随动' in summary,summary
 assert '贴合' in summary and '任何切线位置' in summary,summary
 assert '2.5 个落盘直径' in summary and '90°' in summary,summary
-assert '移动后的固定RDL铜' in w.width_summary.text(),w.width_summary.text()
+assert not w.width_sufficient_toggle.isChecked() and w.current_frame['width_analysis']['examined']==0
 w.preview_tabs.setCurrentWidget(w.reconstruction_page)
 w.reconstruction_table.setCurrentCell(0,0);wait()
 assert w.reconstruction_overlay.movable.get_visible() and w.reconstruction_overlay.moved.get_visible()
-w.grab().save(str(ROOT/'figures/software_V21_reconstruction.png'))
 w.tabs.setCurrentWidget(w.detail);wait()
 text=w.detail.toPlainText()
 assert '当前姿态的固定RDL重构预演' in text and '自动划分是软件猜测' in text
-w.grab().save(str(ROOT/'figures/software_V21_reconstruction_report.png'))
 w.tabs.setCurrentIndex(0);wait()
 # A stepped trace: the cut lands inside the pad, so a real seam opens and is
 # covered by the polygon of the two cut faces' four corners.
 w.load_project(ROOT/'Jobs/示例F_逐芯片幅度与迭代窗口.dshift.json');wait();w.run_evaluation();wait()
-w.view_settings=replace(w.view_settings,width_mode='vertical',width_search_radius_um=100.,width_gap_threshold_um=0.)
 w.width_toggle.setChecked(True);w.reconstruction_toggle.setChecked(True);wait()
 w.manual_states=np.array([[35.,0.,0.],[0.,0.,0.]]);w.request_preview();wait()
 recon=w.current_frame['reconstruction'];piece=recon['pieces'][0]
@@ -128,20 +110,22 @@ assert abs((moved_anchor[0]-anchor[0])-35.)<1e-6 and abs(moved_anchor[1]-anchor[
 w.preview_tabs.setCurrentWidget(w.reconstruction_page)
 w.reconstruction_table.setCurrentCell(0,0);wait()
 assert w.reconstruction_overlay.bridges.get_visible() and w.reconstruction_overlay.cuts.get_visible()
-w.grab().save(str(ROOT/'figures/software_V21_reconstruction_bridge.png'))
-# On this example the reconstruction exposes a short that the original geometry hides.
+# Both panels use the selected pose. Reconstruction can expose a copper short
+# even on a design with no routed demand crossing a specific gap.
 collide=np.array([[35.,0.,0.],[-35.,0.,0.]]);w.manual_states=collide;w.request_preview();wait()
-rows=[q for q in w.width_rows if q['key']=='4/0' and q['index'] in (0,1)]
-assert len(rows)==2 and all(q['status']=='不足' and q['gap_um']==0. for q in rows),rows
+before=w.current_frame['width_analysis']['counts'].copy()
 assert w.current_frame['reconstruction']['summary']['pieces']==2
-w.grab().save(str(ROOT/'figures/software_V21_reconstruction_collision.png'))
 w.reconstruction_toggle.setChecked(False);wait()
 assert w.current_frame.get('reconstruction') is None
-assert not w.width_rows  # 25 um is safe, so nothing needs dimensioning any more
-rows=[q for q in w.current_frame['width_analysis']['rows'] if q['key']=='4/0' and q['index'] in (0,1)]
-assert len(rows)==2 and all(q['status']=='充足' and abs(q['gap_um']-25.)<1e-6 for q in rows),rows
-assert '移动后的固定RDL铜' not in w.width_summary.text(),w.width_summary.text()
+assert before==w.current_frame['width_analysis']['counts']
 w.width_toggle.setChecked(False);wait()
-result=dict(status='PASS',extreme_and_m_key_pad_motion=True,independent_die_stacks=True,width_rule_violation=1,width_gap_um=0.0,width_target_net_foreign=True,landing_mode='其他落盘区原始位置',reconstruction_pieces=1,reconstruction_gap_um=35.0,reconstruction_seam_um=32.0,reconstruction_cover_area_um2=1120.0,reconstruction_collision=0.0,reconstruction_orphan_area_um2=20700.0,animation_frames_seen=len(seen),cached_replay=True,zero_cache=True,layer_visibility=True,table_focus=True,report_formulas=True)
-(ROOT/'results/gui_V21.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
-w.close();app.processEvents();tmp.cleanup();print('GUI_V21_PASS',result)
+result=dict(status='PASS',extreme_and_m_key_pad_motion=True,independent_die_stacks=True,channel_counts=[3,3,2],three_risk_classes=True,
+            project_roundtrip=True,legacy_defaults=True,reconstruction_gap_um=35.,reconstruction_seam_um=32.,
+            reconstruction_cover_area_um2=1120.,animation_frames_seen=len(seen),cached_replay=True,layer_visibility=True,table_focus=True,report_formulas=True)
+w.close();app.processEvents()
+w=MainWindow(jobs_dir=Path(tmp.name)/'Jobs');w.error=lambda msg:errors.append(str(msg));w.show()
+w.load_project(path);wait()
+assert w.width_toggle.isChecked() and w.width_sufficient_toggle.isChecked() and w.width_table.model().rowCount()>0
+w.load_project(ROOT/'Jobs/示例N_三线路窄通道宽度.dshift.json');wait()
+assert not any((w.width_toggle.isChecked(),w.width_sufficient_toggle.isChecked(),w.reconstruction_toggle.isChecked()))
+w.close();app.processEvents();tmp.cleanup();print('GUI_V23_CHANNEL_PASS',result)

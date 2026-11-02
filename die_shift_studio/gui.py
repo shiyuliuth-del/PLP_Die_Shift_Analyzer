@@ -100,7 +100,8 @@ def table(headers):
     return x
 
 
-from .project import normalize_project
+from .project import normalize_project, project_overlays, OVERLAY_DEFAULTS
+from .width_overlay import ChannelTable, INTRO as WIDTH_INTRO
 from .preview import default_motion,extreme_cases,layer_owners,transformed_layers,PREVIEW_SCOPE
 from .navigation import Navigation
 from .report import report_document
@@ -254,7 +255,7 @@ class MainWindow(W.QMainWindow):
         self.deformation_toggle.toggled.connect(self.deformation_changed)
         self.width_toggle=W.QCheckBox('宽度分析');self.width_toggle.setToolTip('按实际线路穿越数量检查局部通道容量：矩形颜色显示宽度余量，轮廓高亮风险线路；不代表全局可布通证明。');corner_layout.addWidget(self.width_toggle);self.width_toggle.toggled.connect(self.width_changed)
         self.repair_toggle=W.QCheckBox('修复补块');self.repair_toggle.setToolTip('设备方修复模型：过孔偏移后脱离固定RDL时，在固定RDL层按偏移量拉直线补块，并对补块后的图形做DRC；补块是简化模型，不代表设备实际修复合格。');corner_layout.addWidget(self.repair_toggle);self.repair_toggle.toggled.connect(self.repair_changed)
-        self.reconstruction_toggle=W.QCheckBox('重构预演');self.reconstruction_toggle.setToolTip('重构预演：软件自动把运动过孔下方的固定RDL铜划为移动区——同一网络、彼此相距不远的多个落盘合成一条串，整条串只切一刀，切口线垂直于这条串的走线（与走线两侧各成 90°），位置从串里最远的落盘再往外量 2.5 个落盘直径（0＝自动，可用“切口距离 D”改）；同一块固定RDL跨多个芯片时，移动区只取本 DIE 芯片边框（128/0）以内的铜，边框外的铜留在原位归相邻 DIE。移动区按该 DIE 的刚体变换移动，并用两面切口的 4 个端点围成的多边形补上裂隙（不论是否短路都补），再用重构后的铜测量落盘 air-gap。自动划分可能与人工划分不同，仅作预演。');corner_layout.addWidget(self.reconstruction_toggle);self.reconstruction_toggle.toggled.connect(self.reconstruction_changed)
+        self.reconstruction_toggle=W.QCheckBox('重构预演');self.reconstruction_toggle.setToolTip('重构预演：软件自动把运动过孔下方的固定RDL铜划为移动区——同一网络、彼此相距不远的多个落盘合成一条串，整条串只切一刀，切口线垂直于这条串的走线（与走线两侧各成 90°），位置从串里最远的落盘再往外量 2.5 个落盘直径（0＝自动，可用“切口距离 D”改）；同一块固定RDL跨多个芯片时，移动区只取本 DIE 芯片边框（128/0）以内的铜，边框外的铜留在原位归相邻 DIE。移动区按该 DIE 的刚体变换移动，并用两面切口的 4 个端点围成的多边形补上裂隙（不论是否短路都补）。自动划分可能与人工划分不同，仅作预演。');corner_layout.addWidget(self.reconstruction_toggle);self.reconstruction_toggle.toggled.connect(self.reconstruction_changed)
         self.preview_tabs.setCornerWidget(corner)
         self.probability_toggle.toggled.connect(self.probability_changed);self.space_toggle.toggled.connect(self.space_changed)
         extreme_page=W.QWidget();ep=W.QVBoxLayout(extreme_page);ep.setContentsMargins(0,0,0,0)
@@ -297,11 +298,13 @@ class MainWindow(W.QMainWindow):
         rv.addWidget(self.repair_violation_table)
         self.preview_tabs.addTab(repair_page,'修复补块')
         width_page=W.QWidget();wv=W.QVBoxLayout(width_page);wv.setContentsMargins(3,3,3,3)
-        self.width_summary=label('勾选宽度分析后，按当前姿态测量运动过孔落盘区到固定RDL异网铜的 air-gap。');wv.addWidget(self.width_summary)
-        self.width_table=table(['风险','运动过孔','所属','落盘半径 / μm','air-gap / μm','有效线距 / μm','最近异网固定RDL','位置 / μm']);wv.addWidget(self.width_table)
-        self.width_table.currentCellChanged.connect(lambda row,*_:self.width_overlay.locate(row));self.preview_tabs.addTab(width_page,'宽度分析')
+        self.width_summary=label(WIDTH_INTRO);wv.addWidget(self.width_summary)
+        self.width_sufficient_toggle=W.QCheckBox('显示宽度足够');wv.addWidget(self.width_sufficient_toggle)
+        self.width_sufficient_toggle.toggled.connect(self.width_filter_changed)
+        self.width_table=ChannelTable();wv.addWidget(self.width_table)
+        self.width_table.selectionModel().currentRowChanged.connect(lambda index,_:self.width_overlay.locate(index.row()));self.preview_tabs.addTab(width_page,'宽度分析')
         self.reconstruction_page=W.QWidget();cv=W.QVBoxLayout(self.reconstruction_page);cv.setContentsMargins(3,3,3,3)
-        self.reconstruction_summary=label('勾选“重构预演”后，软件按运动过孔自动划分固定RDL的移动区（同一网络的落盘合为一条串、只切一刀，切口垂直于这条串的走线；同一块固定RDL跨多个芯片时只取本 DIE 芯片边框以内的铜），按当前姿态移动，并用两个切口面的 4 个端点围成的多边形补上裂隙，再用重构后的铜做落盘 air-gap。');cv.addWidget(self.reconstruction_summary)
+        self.reconstruction_summary=label('勾选“重构预演”后，软件按运动过孔自动划分固定RDL的移动区（同一网络的落盘合为一条串、只切一刀，切口垂直于这条串的走线；同一块固定RDL跨多个芯片时只取本 DIE 芯片边框以内的铜），按当前姿态移动，并用两个切口面的 4 个端点围成的多边形补上裂隙。');cv.addWidget(self.reconstruction_summary)
         self.reconstruction_table=table(['固定RDL层','所属','网络','移动区面积 / μm²','位移 / μm','裂隙 / μm','补线面积 / μm²','切口缝长 / μm','状态']);cv.addWidget(self.reconstruction_table)
         self.reconstruction_table.currentCellChanged.connect(lambda row,*_:self.reconstruction_overlay.locate(row));self.preview_tabs.addTab(self.reconstruction_page,'重构预演')
         right_split.addWidget(bottom);right_split.setSizes([560,240]);self.tabs.addTab(page,'结果图形')
@@ -342,7 +345,6 @@ class MainWindow(W.QMainWindow):
                  'space_interpolation':[('无平滑','nearest'),('双线性','bilinear'),('双三次','bicubic')]}
         choices['probability_cmap']=[('清晰 · 蓝青','blue'),('青绿','teal'),('暖橙','amber'),('玫紫','rose')]+choices['space_cmap'][1:]+[('等感知 · 紫橙','plasma'),('深紫 · 暖白','magma'),('多色 · 高对比','turbo')]
         choices['probability_interpolation']=choices['space_interpolation']
-        choices['width_mode']=[('垂直方向固定RDL（落盘↔下方固定RDL异网铜）','vertical'),('其他落盘区原始位置（落盘↔其他过孔原位落盘）','landing')]
         choices['space_scope']=[('运动内容范围','moving'),('整个封装范围','package')]
         def choice(form,key,title):
             widget=W.QComboBox()
@@ -428,17 +430,10 @@ class MainWindow(W.QMainWindow):
         landing.setToolTip('“修复补块”的直线补块默认只有固定RDL线宽，通常无法满足最小包围量，DRC会报“孔盘包围不足”；勾选后额外在过孔位置补一个包围量半径的孔盘，用于对比两种模型。')
         spin(drc_group,'repair_patch_width_um','补块直径 / μm（0=与过孔等宽）',0,10000,3)
         self.setting_fields['repair_patch_width_um'].setToolTip('“修复补块”所画直线补块的直径。0 表示每块补块取所连过孔的最小外形尺寸（最小外接矩形的短边），即与孔等宽；填正数则所有补块统一使用该直径。')
-        choice(drc_group,'width_mode','宽度分析对象')
-        self.setting_fields['width_mode'].setToolTip('宽度分析测量哪个对象：垂直方向固定RDL＝偏移后落盘区到下方固定RDL层异网铜的最近距离（短路风险）；其他落盘区原始位置＝偏移后落盘区到附近其他过孔**未偏移原位落盘**的最近距离（侵占预留空间的风险）。')
-        spin(drc_group,'width_overlap_um','落盘外扩 overlap / μm',0,10000,3)
-        self.setting_fields['width_overlap_um'].setToolTip('宽度分析中，运动过孔按其外扩该值后作为“该孔对应的运动RDL落盘区”。半径 r 的过孔，落盘区半径=r+该值；0表示只用过孔本身。')
-        spin(drc_group,'width_search_radius_um','air-gap 查找半径 R / μm',.001,100000,3)
-        self.setting_fields['width_search_radius_um'].setToolTip('只在每个过孔落盘区周围该半径内查找异网固定RDL铜；更远的铜不参与测量，因此结果是局部结论。')
-        spin(drc_group,'width_gap_threshold_um','air-gap 标注阈值 / μm（0=有效线距）',0,10000,3)
-        self.setting_fields['width_gap_threshold_um'].setToolTip('air-gap 小于有效线距判为“不足”，小于该阈值判为“临界”；两者都会在图上报出尺寸标注。设为0时阈值等于有效线距。')
         recon=group('固定RDL重构预演')
         spin(recon,'reconstruction_length_um','切口距离 D / μm（0=自动）',0,100000,3)
         self.setting_fields['reconstruction_length_um'].setToolTip('切口线到落盘的距离：同一网络、彼此相距不远的多个落盘合为一条串，整条串只切一刀，这个距离从串里最远的那个落盘再往外量。0 表示自动取 2.5 个落盘直径（落盘直径按等面积圆的直径算），填正数则改用该长度。切口线始终垂直于这条串的走线（与走线两侧各成 90°）。同一块固定RDL跨多个芯片时，移动区只取本 DIE 芯片边框以内的铜，边框外的铜归相邻 DIE。')
+        spin(recon,'reconstruction_overlap_um','重构落盘外扩 / μm',0,10000,3)
         spin(recon,'reconstruction_width_um','补线外扩 / μm（0=只覆盖切口）',0,10000,3)
         self.setting_fields['reconstruction_width_um'].setToolTip('补线多边形向外扩张的量；0 表示补线正好是两面切口的 4 个端点围成的多边形。补线不论裂隙大小都会生成，只有两面完全重合或缝隙已被铜盖住时才不重复补。')
         drawing=group('接触标记');spin(drawing,'intrusion_alpha','侵入面积不透明度',.05,.85,2)
@@ -497,14 +492,13 @@ class MainWindow(W.QMainWindow):
         deform=updated.deformation_key()!=old_settings.deformation_key();numeric=(updated.numeric_key()!=self.view_settings.numeric_key() or (updated.probability_show_ranges!=old_settings.probability_show_ranges and self.target_sigma.currentText()=='∞'));self.view_settings=updated;self.enable_settings();self.refresh_extreme_colors();self.cache_group.limit(updated.cache_max_entries);self.refresh_cache_status()
         live_motion=any(getattr(updated,k)!=getattr(old_settings,k) for k in ('animation_enabled','animation_duration_ms','animation_fps','animation_speed','animation_strategy'))
         repair_shape=(updated.repair_landing_pad!=old_settings.repair_landing_pad or updated.repair_patch_width_um!=old_settings.repair_patch_width_um)
-        width_shape=any(getattr(updated,k)!=getattr(old_settings,k) for k in ('width_overlap_um','width_search_radius_um','width_gap_threshold_um','width_mode'))
-        reconstruction_shape=any(getattr(updated,k)!=getattr(old_settings,k) for k in ('reconstruction_length_um','reconstruction_width_um'))
+        reconstruction_shape=any(getattr(updated,k)!=getattr(old_settings,k) for k in ('reconstruction_length_um','reconstruction_width_um','reconstruction_overlap_um'))
         if numeric:
             self.dirty=self.result is not None
             self.revision+=1;self.probability_data=None;self.space_data=None;self.repair_data=None
             if self.worker and self._evaluation_requested:self._coverage_pending=True;self.coverage_timer.start()
             if self.data:self.request_preview()
-        elif (deform or live_motion or repair_shape or width_shape or reconstruction_shape) and (self.deformation_toggle.isChecked() or self.drc_toggle.isChecked() or self.width_toggle.isChecked() or self.repair_toggle.isChecked() or self.reconstruction_toggle.isChecked()):self.request_preview()
+        elif (deform or live_motion or repair_shape or reconstruction_shape) and (self.deformation_toggle.isChecked() or self.drc_toggle.isChecked() or self.width_toggle.isChecked() or self.repair_toggle.isChecked() or self.reconstruction_toggle.isChecked()):self.request_preview()
         elif intent:
             if intent[0]=='frame':self.present_frame(intent[1])
             else:self.animate_view(*intent[1:])
@@ -682,7 +676,7 @@ class MainWindow(W.QMainWindow):
         if self.loading:return
         self.revision+=1;self.dirty=self.result is not None;self.refresh_extreme_colors();self.engine=None;self.connections=None;self.probability_data=None;self.space_data=None;self.repair_data=None
         self.statusBar().showMessage('参数已修改；保留上次计算结果。预演控制区使用当前工艺，重新评估后更新统计结论。')
-        if self.data and (self.active_preview is not None or self.manual_states is not None or self.probability_toggle.isChecked() or self.space_toggle.isChecked() or self.deformation_toggle.isChecked() or self.drc_toggle.isChecked() or self.width_toggle.isChecked() or self.reconstruction_toggle.isChecked()):
+        if self.data and (self.active_preview is not None or self.manual_states is not None or self.probability_toggle.isChecked() or self.space_toggle.isChecked() or self.deformation_toggle.isChecked() or self.drc_toggle.isChecked() or self.width_toggle.isChecked() or self.repair_toggle.isChecked() or self.reconstruction_toggle.isChecked()):
             try:self.request_preview()
             except ValueError:pass
     def drop_result(self):
@@ -741,6 +735,11 @@ class MainWindow(W.QMainWindow):
         try:
             self.data=data;self.gds_label.setText(Path(data.path).name+'\n'+str(Path(data.path).resolve()));self.gds_label.setToolTip(str(Path(data.path).resolve()))
             self.view_settings=ViewSettings.from_dict(project.get('settings'));self.load_view_settings();self.layer_styles=project.get('layer_styles',{})
+            for name,value in project_overlays(project).items():
+                toggle=getattr(self,name+'_toggle')
+                toggle.blockSignals(True)
+                toggle.setChecked(value)
+                toggle.blockSignals(False)
             self.case=None;self.result=None;self.geometry_cache=getattr(data,'geometry_cache',None);self.connections=None;self.reset_plot();self.top.clear();self.top.addItems(data.top_names);self.top.setCurrentText(data.top_name)
             selected_roles=project.get('roles',data.auto_roles)
             self.stage_hints=project.get('stage_hints',{})
@@ -888,9 +887,7 @@ class MainWindow(W.QMainWindow):
         if frame and frame.get('reconstruction') and self.reconstruction_toggle.isChecked() and self.result is not None:
             source=frame['reconstruction'];keep=('die','layer','index','net','movable_area_um2','shift_um','gap_um','bridge_length_um','bridge_area_um2','cut_distance_um','orphan')
             self.result['preview_reconstruction']=dict(states=frame['states'].tolist(),scope=source['scope'],summary=source['summary'],parameters=source.get('parameters',{}),pieces=[{k:q[k] for k in keep if k in q} for q in source['pieces']]);self.report_dirty=True
-        if frame and frame.get('width_analysis',{}).get('complete') and self.result is not None:
-            source=frame['width_analysis'];keep=('status','key','via_index','owner','plane','point','gap_um','rule_space_um','threshold_um','land_radius_um','target','detail')
-            self.result['preview_width_analysis']=dict(states=frame['states'].tolist(),counts=source['counts'],scope=source['scope'],parameters=source.get('parameters',{}),examined=source.get('examined',0),beyond_radius=source.get('beyond_radius',0),rows=[{k:q[k] for k in keep if k in q} for q in source['rows']]);self.report_dirty=True
+        self.update_width_report(frame)
         if frame and frame.get('drc_rules') and self.result is not None:
             self.result['preview_drc_rules']=frame['drc_rules'];self.report_dirty=True
         message=('预演已更新' if frame is not None else '名义位置')+f' · 当前所选方案 {len(self.filtered_issues)} 处接触或风险'
@@ -903,8 +900,7 @@ class MainWindow(W.QMainWindow):
         if frame and frame.get('deformation',{}).get('search_quality')=='interactive':message+=' · 交互候选已复核，停止操作后完整搜索'
         if frame and frame.get('motion_issues'):message+=f" · {len(frame['motion_issues'])}个运动图形归属待确认，已用橙色虚线标记"
         if frame and frame.get('width_analysis') and self.width_toggle.isChecked():
-            q=frame['width_analysis']['counts'];message+=f" · 落盘air-gap：不足 {q['不足']}，临界 {q['临界']}"
-            if not frame['width_analysis'].get('complete',True):message+='（动画中只更新已定位风险，终态全量测量）'
+            q=frame['width_analysis']['counts'];message+=f" · 保宽足够 {q['宽度足够']}，需收窄 {q['需局部收窄']}，宽度不足 {q['宽度不足']}"
         self.statusBar().showMessage(message)
         self.refresh_extreme_colors(frame)
     def present_frame(self,frame):
@@ -972,6 +968,20 @@ class MainWindow(W.QMainWindow):
             self.motion_worker=None;worker.deleteLater();self.launch_motion_frame();self.launch_preview()
         worker.done.connect(accepted);worker.finished.connect(finished)
         worker.failed.connect(lambda message:self.statusBar().showMessage('型变中间帧跳过：'+message.split('\n')[0]));worker.start()
+    def update_width_report(self,frame):
+        data=(frame or {}).get('width_analysis')
+        if self.result is None or not data or not self.width_toggle.isChecked():return
+        show=self.width_sufficient_toggle.isChecked()
+        visible=[r for r in data['rows'] if show or r['status']!='宽度足够']
+        keys=('status','pair','refs','original','required','current','point','plane','gap_um','nominal_gap_um','slots_um','widths_um','minimum_um','keep_um','split','unresolved')
+        self.result['preview_width_analysis']=dict(states=frame['states'].tolist(),counts=data['counts'],scope=data['scope'],parameters=data['parameters'],examined=data['examined'],
+                                                   displayed=len(visible),rows=[{k:r[k] for k in keys} for r in visible[:100]])
+        self.report_dirty=True
+
+    def width_filter_changed(self,*_):
+        if not self.loading and self.data:
+            self.update_width_report(self.current_frame)
+            self.plot_layout(preserve=True)
     def width_changed(self,*_):
         if self.loading:return
         if self.width_toggle.isChecked():self.request_preview()
@@ -986,10 +996,10 @@ class MainWindow(W.QMainWindow):
     def reconstruction_changed(self,*_):
         if self.loading:return
         if self.reconstruction_toggle.isChecked():
-            self.statusBar().showMessage('重构预演：按串联落盘自动划分固定RDL移动区（跨芯片时限定在本 DIE 芯片边框内）、按姿态移动、用切口 4 端点多边形补上裂隙，并用重构后的铜做 air-gap…')
+            self.statusBar().showMessage('重构预演：按串联落盘自动划分固定RDL移动区（跨芯片时限定在本 DIE 芯片边框内）、按姿态移动、用切口 4 端点多边形补上裂隙…')
             self.request_preview()
         else:
-            # 落盘 air-gap 的结论引用了重构后的铜：关掉重构预演就要重新测量。
+            # Refresh the displayed frame after removing the reconstruction overlay.
             if self.width_toggle.isChecked():self.request_preview()
             else:self.plot_layout(preserve=True)
     def deformation_changed(self,*_):
@@ -1088,6 +1098,10 @@ class MainWindow(W.QMainWindow):
         states=frame['states'] if frame else None
         stamp=(id(self.data),id(frame),self.view_bounds);changed=stamp!=self._artist_frame;self.rendered_layers={}
         self.preview_applied=frame is not None;self.shown_states=frame['states'] if frame else None
+        analysis=frame.get('width_analysis') if frame and self.width_toggle.isChecked() else None
+        if not hasattr(self,'width_source_refs') or getattr(self,'_width_source_data',None) is not analysis:
+            self._width_source_data=analysis
+            self.width_source_refs=None if analysis is None else {ref for o in analysis['retained'] for ref in o['refs']} | {ref for r in analysis['rows'] if r['status']!='宽度足够' for ref in r['refs']}
         for rank,key in enumerate(order):
             values=frame['layers'][key]['polygons'] if frame and key in frame['layers'] else self.data.layers[key]
             role=roles[key];sty=self.style_for(key);visible=self.visible_boxes[key].isChecked()
@@ -1097,11 +1111,12 @@ class MainWindow(W.QMainWindow):
             replacements=deformation.get('replacements',{}).get(key,[])
             hidden={i for q in replacements for i in q['indices']}
             ids=np.array([i for i in ids if i not in hidden],int)
-            drawn=[polys[i] for i in ids]
+            analysis_layer=analysis is not None and role=='固定RDL'
+            drawn=[] if analysis_layer else [polys[i] for i in ids]
             if key not in self.layer_artists:
                 self.layer_artists[key]=PolyCollection([]);self.ax.add_collection(self.layer_artists[key])
             artist=self.layer_artists[key]
-            geometry_stamp=(id(values),ids.tobytes())
+            geometry_stamp=(id(values),ids.tobytes(),analysis_layer)
             if getattr(artist,'_geometry_stamp',None)!=geometry_stamp:artist.set_verts(drawn);artist._visible_ids=ids.tobytes();artist._geometry_stamp=geometry_stamp
             artist.set_facecolor(sty['color'] if sty['fill'] else 'none');artist.set_edgecolor(sty['color'] if not sty['fill'] else 'none')
             artist.set_alpha(sty['alpha']);artist.set_linewidth(sty['width']);artist.set_linestyle(sty.get('linestyle','-'));artist.set_visible(visible)
@@ -1113,7 +1128,7 @@ class MainWindow(W.QMainWindow):
                 base=PatchCollection([],linewidth=0);dark=PatchCollection([],linewidth=0);adapt=PatchCollection([],facecolor='none',edgecolor='#38536f',linestyle=(0,(4,3)),linewidth=.9)
                 self.ax.add_collection(base);self.ax.add_collection(dark);self.ax.add_collection(adapt);self.deformation_artists[key]=(base,dark,adapt)
             base,dark,adapt=self.deformation_artists[key]
-            visible_replacements=[q for q in replacements if overlaps(q['geometry'].bounds,self.view_bounds)]
+            visible_replacements=[] if analysis_layer else [q for q in replacements if overlaps(q['geometry'].bounds,self.view_bounds)]
             for overlay,part in ((base,'geometry'),(dark,'dark')):
 
                 path_stamp=tuple(id(q[part]) for q in visible_replacements)
@@ -1231,7 +1246,7 @@ class MainWindow(W.QMainWindow):
         return origin
     def refresh_legend(self):
         stamp=(tuple((k,self.visible_boxes[k].isChecked(),str(self.style_for(k))) for k in self.ordered_layers()),
-               self.current_frame is not None,bool(getattr(self,'deformation_diagnostics',[])),self.probability_toggle.isChecked(),id(self.probability_data),self.view_settings.probability_cmap,self.view_settings.probability_alpha,self.view_settings.probability_gamma,self.view_settings.probability_show_ranges,self.view_settings.probability_ranges,self.view_settings.probability_target_color,self.view_settings.contact_marker_color,self.view_settings.unadapted_marker_color,self.width_toggle.isChecked(),self.repair_toggle.isChecked(),self.reconstruction_toggle.isChecked(),bool(self.current_frame and self.current_frame.get('motion_issues')))
+               self.current_frame is not None,bool(getattr(self,'deformation_diagnostics',[])),self.probability_toggle.isChecked(),id(self.probability_data),self.view_settings.probability_cmap,self.view_settings.probability_alpha,self.view_settings.probability_gamma,self.view_settings.probability_show_ranges,self.view_settings.probability_ranges,self.view_settings.probability_target_color,self.view_settings.contact_marker_color,self.view_settings.unadapted_marker_color,self.width_toggle.isChecked(),self.width_sufficient_toggle.isChecked(),self.repair_toggle.isChecked(),self.reconstruction_toggle.isChecked(),bool(self.current_frame and self.current_frame.get('motion_issues')))
         if stamp==self._legend_stamp:return
         self._legend_stamp=stamp
         if self.legend is not None:self.legend.remove()
@@ -1247,9 +1262,10 @@ class MainWindow(W.QMainWindow):
             handles += [Patch(facecolor='#d98a2b',edgecolor='#8a5a14',alpha=.45,label='固定RDL直线补块'),
                         Patch(facecolor='#c0392b',edgecolor='#8e2b21',alpha=.5,hatch='///',label='补块新增违规')]
         if self.width_toggle.isChecked():
-            from .width_analysis import COLORS
-            handles += [Patch(facecolor='none',edgecolor=color,alpha=.9,label='落盘air-gap '+name) for name,color in COLORS.items()]
-            handles += [Line2D([],[],color='#5b6b7c',lw=.9,label='尺寸标注 = air-gap / μm')]
+            handles += [Patch(facecolor='#c3d2d8',edgecolor='#657d8b',label='孔盘及固定障碍'),
+                        Patch(facecolor='none',edgecolor='#c44956',label='通道容量不足'),
+                        Patch(facecolor='none',edgecolor='#bd8127',label='需局部收窄')]
+            if self.width_sufficient_toggle.isChecked():handles += [Patch(facecolor='none',edgecolor='#498d79',label='宽度足够')]
         if self.reconstruction_toggle.isChecked():
             handles += [Patch(facecolor='#9fb3c8',edgecolor='#5d7894',alpha=.20,hatch='//',label='重构：移动区原位（冷色，移走后空出）'),
                         Patch(facecolor='#e07a2f',edgecolor='#8f4712',alpha=.78,label='重构：重构后的铜（暖色）'),
@@ -1848,7 +1864,8 @@ class MainWindow(W.QMainWindow):
         path=Path(path).resolve();gds=Path(self.data.path).resolve()
         source=os.path.relpath(gds,path.parent) if gds.is_relative_to(installation_root()) else str(gds)
         project=dict(schema_version=5,app_version=__version__,gds_path=source,sha256=self.data.sha256,top_cell=self.data.top_name,
-                     roles=self.roles(),parameters=asdict(self.params()),settings=asdict(self.view_settings),layer_styles=self.layer_styles,visibility={k:w.isChecked() for k,w in self.visible_boxes.items()},motions=self.motions(),layer_order=self.ordered_layers())
+                     roles=self.roles(),parameters=asdict(self.params()),settings=asdict(self.view_settings),
+                     overlays={name:getattr(self,name+'_toggle').isChecked() for name in OVERLAY_DEFAULTS},layer_styles=self.layer_styles,visibility={k:w.isChecked() for k,w in self.visible_boxes.items()},motions=self.motions(),layer_order=self.ordered_layers())
         from .core import clean_json
         atomic_save(path,clean_json(project));self.project_path=path
         from .session_cache import logical_fingerprint

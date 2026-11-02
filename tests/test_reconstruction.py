@@ -1,6 +1,5 @@
 """RDL reconstruction preview: cut across the route, rigid move, a cover polygon
-built from the four corners of the two cut faces, and the air-gap that sees the
-reconstructed copper.  Numbers below are measured on the checked-in examples."""
+built from the four corners of the two cut faces, independently of channel capacity.  Numbers below are measured on the checked-in examples."""
 import json
 import unittest
 from pathlib import Path
@@ -112,11 +111,6 @@ def shifted(count, dx=0., dy=0., dtheta=0.):
     states = np.zeros((count, 3))
     states[0] = (dx, dy, dtheta)
     return states
-
-
-def row_for(frame, key, one_based_index):
-    return next(q for q in frame['width_analysis']['rows']
-                if q['key'] == key and q['index'] == one_based_index - 1)
 
 
 def direction(line):
@@ -392,68 +386,26 @@ class ReconstructionTests(unittest.TestCase):
         finally:
             engine.close()
 
-    def test_air_gap_sees_the_reconstructed_copper(self):
-        # Example F: the pad under the other die is what a static via measures.
-        engine, data, case = example(BRIDGE, reconstruction=False)
-        try:
-            plain = row_for(engine.frame(shifted(2, 35.)), '4/0', 2)
-            self.assertAlmostEqual(plain['gap_um'], 60., places=6)
-            self.assertEqual(plain['status'], '充足')
-            self.assertEqual(plain['target']['kind'], 'fixed')
-        finally:
-            engine.close()
+    def test_reconstruction_moves_real_copper_independently_of_channel_capacity(self):
         engine, data, case = example(BRIDGE)
         try:
-            piece = engine.frame(shifted(2, 35.))['reconstruction']['pieces'][0]
-            self.assertAlmostEqual(piece['gap_um'], 35., places=6)
-            row = row_for(engine.frame(shifted(2, 35.)), '4/0', 2)
-            self.assertAlmostEqual(row['gap_um'], 25., places=6)   # 60 - the 35 um the pad followed
-            self.assertEqual(row['status'], '充足')
-            self.assertEqual(row['target']['layer'], '5/0')
-            self.assertEqual(row['target']['index'], 0)
-        finally:
-            engine.close()
-
-    def test_reconstruction_exposes_a_collision_the_original_geometry_hides(self):
-        # Each pad follows its own die, so the two dies moving apart still bring
-        # one die's via onto the other die's pad: 25 um nominal becomes an overlap.
-        engine, data, case = example(BRIDGE, reconstruction=False)
-        try:
-            states = shifted(2, 35.)
-            states[1] = (-35., 0., 0.)
-            for index in (1, 2):
-                row = row_for(engine.frame(states), '4/0', index)
-                self.assertAlmostEqual(row['gap_um'], 25., places=6)
-                self.assertEqual(row['status'], '充足')
-        finally:
-            engine.close()
-        engine, data, case = example(BRIDGE)
-        try:
-            states = shifted(2, 35.)
-            states[1] = (-35., 0., 0.)
-            frame = engine.frame(states)
-            self.assertEqual(frame['reconstruction']['summary']['pieces'], 2)
-            for index in (1, 2):
-                row = row_for(frame, '4/0', index)
-                self.assertEqual(row['status'], '不足')
-                self.assertAlmostEqual(row['gap_um'], 0., places=6)
-        finally:
-            engine.close()
-
-    def test_landing_mode_is_unaffected_by_the_reconstruction(self):
-        # The landing reading compares vias against original landings, which do
-        # not depend on how the fixed RDL is split.
-        rows = []
-        for reconstruction in (False, True):
-            engine, data, case = example(settings=ViewSettings(width_mode='landing',
-                                                               width_search_radius_um=400.))
-            try:
-                frame = engine.frame(shifted(2, 35.))
-                rows.append([(q['key'], q['via_index'], q['gap_um'], q['status'])
-                             for q in frame['width_analysis']['rows']])
-            finally:
-                engine.close()
-        self.assertEqual(rows[0], rows[1])
+            states=shifted(2,35.)
+            states[1]=(-35.,0.,0.)
+            frame=engine.frame(states)
+            self.assertEqual(frame['reconstruction']['summary']['pieces'],2)
+            replacements=frame['reconstruction']['replacements']['5/0']
+            # The actual reconstructed copper touches the opposite moving via.
+            hits=[]
+            for record in engine.contact.records:
+                via=engine.contact.moved(record['poly'],record['owner'],states)
+                foreign=[q['geometry'] for q in replacements if any(engine.contact.nodes[engine.contact.ids['5/0',i]]['net']!=record['net'] for i in q['indices'])]
+                if foreign:hits.append(min(via.distance(g) for g in foreign))
+            self.assertIn(0.,hits)
+            engine.configure_reconstruction(False,ViewSettings())
+            plain=engine.frame(states)
+            self.assertNotIn('reconstruction',plain)
+            self.assertEqual(plain['width_analysis']['rows'],frame['width_analysis']['rows'])
+        finally:engine.close()
 
     def test_a_plate_shared_by_two_chips_is_split_at_the_frame(self):
         # One fixed-RDL polygon covers two chips. Copper may follow only the die
