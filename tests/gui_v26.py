@@ -20,6 +20,7 @@ def wait():
         time.sleep(.005)
     else:raise AssertionError('Qt task timeout')
     assert not errors,errors
+    assert '未处理异常' not in w.runtime_view.toPlainText(),w.runtime_view.toPlainText()[-2500:]
 def row_info(row):
     w.refresh_extreme_colors(w.current_frame)
     item=w.extreme_table.item(row,0);tip=item.toolTip();n=int(tip.split('可复用缓存 ')[-1].split(' 项')[0])
