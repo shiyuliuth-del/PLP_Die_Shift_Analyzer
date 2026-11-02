@@ -186,7 +186,9 @@ class SessionCache(MutableMapping):
                         and isinstance(value,dict) and 'checks' in value):
                     from .extreme_validation import frame_status
                     q=frame_status(value);self.row_status[key]=dict(safe=q['safe'],checked=q['checked'],width_pending=q.get('width_pending',False))
-                if self is self.group.motions and isinstance(value,dict) and value.get('complete'):self.completed.add(key)
+                if self is self.group.motions:
+                    if isinstance(value,dict) and value.get('complete'):self.completed.add(key)
+                    else:self.completed.discard(key)
                 self.group.stored(self,key,len(blob)-previous)
 
     def pin(self,key):
