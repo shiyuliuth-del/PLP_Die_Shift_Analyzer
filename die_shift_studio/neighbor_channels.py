@@ -81,13 +81,16 @@ def occupied(ends,pairs,walls,geometries,half_depth,tol,source_refs=None):
 def occupied_batches(ends,pairs,walls,geometries,half_depth,tol,source_refs=None):
     """Parallel GEOS work for independent gates; all indices remain chart-local."""
     if len(ends)<1200:return occupied(ends,pairs,walls,geometries,half_depth,tol,source_refs)
-    from .resources import resource_profile,parallel_map
+    from .resources import resource_profile,parallel_map,geometry_budget
     profile=resource_profile();n=min(profile['workers'],max(1,len(ends)//450))
     if n<2:return occupied(ends,pairs,walls,geometries,half_depth,tol,source_refs)
     # Keep GEOS objects private including interior indices made by predicates.
     from dataclasses import replace
     packed=shapely.to_wkb(geometries)
     pads=[shapely.to_wkb(w.pads) if w.pads else () for w in walls]
+    n=min(n,geometry_budget(profile,sum(map(len,packed))+sum(sum(map(len,row)) for row in pads)))
+    if n<2:return occupied(ends,pairs,walls,geometries,half_depth,tol,source_refs)
+    profile=dict(profile,workers=n)
     def solve(chunk):
         start,stop=chunk
         local=shapely.from_wkb(packed)

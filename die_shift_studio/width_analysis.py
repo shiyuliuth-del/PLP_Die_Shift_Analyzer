@@ -13,7 +13,7 @@ from shapely.geometry import LineString, Point, Polygon
 from shapely.strtree import STRtree
 from .drc_rules import effective_rules
 from .session_cache import SessionCache
-from .resources import parallel_map,resource_profile
+from .resources import parallel_map,resource_profile,geometry_budget
 from .stack import UnionFind
 from .neighbor_channels import occupied_batches, local_openings
 from .landing_geometry import embedded_pad
@@ -397,6 +397,9 @@ class WidthAnalyzer:
         wall_bytes=shapely.to_wkb(geometries);piece_bytes=shapely.to_wkb(pieces)
         route_bytes=shapely.to_wkb(plane['routes']);board_bytes=self.inside.wkb
         source_bytes=[[(ref,g.wkb) for ref,g in lane] for lane in plane['route_sources']]
+        packed_bytes=sum(sum(map(len,arr)) for arr in (wall_bytes,piece_bytes,route_bytes))
+        packed_bytes+=sum(len(wkb) for lane in source_bytes for _,wkb in lane)+len(board_bytes)
+        profile=dict(profile,workers=geometry_budget(profile,packed_bytes))
         local_context=threading.local()
         def candidates_for_wall(i):
             if not hasattr(local_context,'trees'):

@@ -34,6 +34,13 @@ def resource_profile():
     return constrain(profile)
 
 
+def geometry_budget(profile,packed_bytes):
+    """Limit simultaneous GEOS copies (decoded coordinates, rings and trees)."""
+    available=profile['available_memory_mb']*1024**2
+    per_lane=max(16*1024**2,8*packed_bytes)
+    return max(1,min(profile['workers'],int(.35*available//per_lane)))
+
+
 def parallel_map(fn,items,profile=None,progress=None,process=False):
     items=list(items);profile=profile or resource_profile();workers=min(profile['process_workers' if process else 'workers'],len(items))
     if getattr(_local,'nested',False):workers=1
