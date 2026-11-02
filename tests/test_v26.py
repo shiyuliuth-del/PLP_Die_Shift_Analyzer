@@ -116,6 +116,13 @@ class V26Tests(unittest.TestCase):
             group.clear();self.assertEqual(group.pose_inventory('A',a)[1],{})
         finally:reg.close()
 
+    def test_foreign_index_ignores_empty_and_preserves_distant_geometry(self):
+        from die_shift_studio.screening import ForeignIndex
+        wall=box(1e12,0,1e12+2,2);via=box(0,0,1,1)
+        index=ForeignIndex({'5':[(shapely.Polygon(),2),(via,0)],'6':[(wall,2)]})
+        self.assertEqual(index.distance(via,0,['5'],1),float('inf'))
+        self.assertEqual(index.distance(via,0,['5','6'],1),wall.distance(via))
+
     def test_batched_rigid_transform_matches_per_owner_reference(self):
         random=np.random.default_rng(16);xy=random.normal(size=(1000,2))*300;owners=random.integers(-2,3,len(xy))
         pivots=random.normal(size=(3,2))*1000;poses=random.normal(size=(3,3))

@@ -47,14 +47,16 @@ class ForeignIndex:
         for plane,items in planes.items():
             geometries=np.asarray([q[0] for q in items],object)
             nets=np.array([q[1] for q in items])
+            valid=~shapely.is_empty(geometries) & np.all(np.isfinite(shapely.bounds(geometries)),axis=1)
+            geometries,nets=geometries[valid],nets[valid]
             self.planes[plane]=(shapely.STRtree(geometries),geometries,nets,set(nets))
 
     def distance(self,geometry,net,planes,first_radius):
         active=[self.planes[k] for k in planes if k in self.planes and
                 (len(self.planes[k][3])>1 or self.planes[k][3] and net not in self.planes[k][3])]
-        if not active:return math.inf
+        if not active or geometry.is_empty or not np.all(np.isfinite(geometry.bounds)):return math.inf
         radius=max(first_radius,1.)
-        while True:
+        for _ in range(32):
             best=math.inf
             for tree,geometries,nets,_ in active:
                 ids=tree.query(geometry,predicate='dwithin',distance=radius)
@@ -62,6 +64,9 @@ class ForeignIndex:
                 if len(other):best=min(best,float(shapely.distance(geometry,geometries[other]).min()))
             if math.isfinite(best):return best
             radius*=2
+        # Very distant geometry can exceed the practical expansion scales.
+        # Use the same exact distance on all remaining foreign conductors.
+        return min(float(shapely.distance(geometry,geoms[nets!=net]).min()) for _,geoms,nets,_ in active)
 
 
 def scheme_metrics(model,p):
