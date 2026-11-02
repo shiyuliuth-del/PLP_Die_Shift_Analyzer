@@ -111,6 +111,11 @@ class V26Tests(unittest.TestCase):
                 rev,data=group.pose_inventory('A',a)
                 self.assertEqual(data,{b:3,a:1});self.assertEqual(list(group.recent),recent)
                 self.assertIsNone(group.pose_inventory('A',a,rev));self.assertEqual(group.pose_inventory('different',a)[1],{})
+            # The frame store itself has no source_config; do not shadow the
+            # actual overlay mask requested by the GUI or lose the third result.
+            group.frame_stores['A']=store
+            _,counts,statuses=group.pose_inventory('A',a,config=('active',))
+            self.assertEqual(counts[b],3);self.assertEqual(statuses,{})
             group.values['new entry']=2
             self.assertEqual(group.pose_inventory('A',a)[1][b],2)
             group.clear();self.assertEqual(group.pose_inventory('A',a)[1],{})

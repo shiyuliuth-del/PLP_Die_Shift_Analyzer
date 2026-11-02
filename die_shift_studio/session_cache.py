@@ -57,14 +57,14 @@ class ProjectCacheGroup:
             for cache in self.caches.values():
                 tag=cache.pose_source
                 if tag and tag[0]==signature:
-                    _,kind,config=tag
+                    _,kind,source_config=tag
                     for key in cache.sizes:
                         if kind=='预演帧':
                             if key[0]=='global':state=zero
                             elif key[2] is False:state=key[1]
                             else:continue
                         else:state=key if kind=='宽度' else key[0]
-                        add(state,kind,(config,key))
+                        add(state,kind,(source_config,key))
             for key in self.motions.completed:
                 if key[1]==signature:
                     for state in {key[3],key[4]}:add(state,'动画',key)
