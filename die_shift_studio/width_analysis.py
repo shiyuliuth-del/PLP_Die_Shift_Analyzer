@@ -280,6 +280,11 @@ class WidthAnalyzer:
         self.inside = self.board.buffer(self.tol)
         shapely.prepare(self.inside)
         self.cache = SessionCache(group=cache_group)
+        self.catalogue_store=cache_group.values if cache_group is not None else None
+        if self.catalogue_store is not None:
+            self.catalogue_key=('width-catalogue-v27',model.data.geometry_id,model.data.top_name,
+                                tuple(sorted(model.roles.items())),tuple(model.connections.order),
+                                self.width,self.space,self.annulus,self.tol)
         self.planes = self._planes()
         from .width_probability import ChannelProbability
         self.probability=ChannelProbability(model,parameters,self.board,self.tol) if 0<parameters.target_nsigma<math.inf else None
@@ -422,7 +427,7 @@ class WidthAnalyzer:
             if not hasattr(local_context,'trees'):
                 geo=shapely.from_wkb(wall_bytes);shapely.prepare(geo)
                 routes=shapely.from_wkb(route_bytes);shapely.prepare(routes)
-                local_plane=dict(plane,routes=routes,tree=STRtree(routes),boundaries=shapely.boundary(routes),
+                local_plane=dict(plane,routes=routes,tree=STRtree(routes),source_trees={},boundaries=shapely.boundary(routes),
                                  route_sources=[[(ref,shapely.from_wkb(wkb)) for ref,wkb in lane] for lane in source_bytes])
                 inside=shapely.from_wkb(board_bytes);shapely.prepare(inside)
                 local_context.trees=geo,shapely.from_wkb(piece_bytes),STRtree(geo),STRtree([*geo,*routes]),local_plane,inside
@@ -504,7 +509,21 @@ class WidthAnalyzer:
 
     def _measure(self, name, plane, states, progress):
         if plane['gates'] is None:
-            plane['gates'] = self._catalogue(plane,lambda n,t:progress(.65*n,t))
+            notify=lambda n,t:progress(.65*n,t)
+            if self.catalogue_store is None:
+                plane['gates']=self._catalogue(plane,notify)
+            else:
+                def identify():
+                    gates=self._catalogue(plane,notify)
+                    # Share only nominal topology. Each receiver reconstructs its
+                    # own GEOS objects and computes its own statistical bounds.
+                    pieces=(shapely.to_wkb(plane['pieces']),plane['parents'],plane['local']) if gates else None
+                    return gates,pieces
+                gates,pieces=self.catalogue_store.get_or_compute((*self.catalogue_key,name),identify)
+                if pieces is not None and 'pieces' not in plane:
+                    wkb,plane['parents'],plane['local']=pieces
+                    plane['pieces']=shapely.from_wkb(wkb)
+                plane['gates']=gates
         gates, walls = plane['gates'], plane['walls']
         nominal = not np.any(states)
         if 'wall_templates' not in plane:

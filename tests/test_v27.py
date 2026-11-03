@@ -121,6 +121,33 @@ class YieldDisplayTests(unittest.TestCase):
         concave=ChannelProbability(model,p,Polygon([(0,0),(10,0),(10,10),(7,4),(0,10)]),1.e-8)
         self.assertIsNone(concave.edge('3/0',0,a.geometry,0,15))
 
+    def test_new_yield_level_reuses_nominal_catalogue_but_recomputes_risk(self):
+        from unittest.mock import patch
+        from tests.test_v21 import example
+        from die_shift_studio.session_cache import ProjectCacheRegistry
+        from die_shift_studio.width_analysis import WidthAnalyzer
+        _,_,_,base,engine=example('示例O_运动网络三线路通道')
+        registry=ProjectCacheRegistry();group=registry.get('test')
+        p=replace(base,line_width_um=9,line_space_um=13,per_die_enabled=True,die_bounds=[[35,0,0],[0,0,0]])
+        z=np.array([[35.,0,0],[0.,0,0]]);results=[];analyzers=[]
+        try:
+            for k in (2,6):
+                a=WidthAnalyzer(engine.contact,replace(p,target_nsigma=k),ViewSettings(),group);analyzers.append(a)
+                if k==6:
+                    with patch.object(a,'_catalogue',side_effect=AssertionError('catalogue rebuilt for k')):
+                        data=a.frame({'states':z})
+                else:data=a.frame({'states':z})
+                matches=[r for r in data['rows'] if r['pair']==('运动过孔孔盘 4/0 #1','运动过孔孔盘 4/0 #2') and not r['split']]
+                results.append(matches[0])
+            self.assertEqual([q['event_probability']['low'] for q in results],[True,False])
+            self.assertEqual(results[0]['witness_um'],results[1]['witness_um'])
+            changed=WidthAnalyzer(engine.contact,replace(p,line_width_um=10),ViewSettings(),group);analyzers.append(changed)
+            with patch.object(changed,'_catalogue',wraps=changed._catalogue) as call:
+                changed.frame({'states':z});self.assertTrue(call.called)
+        finally:
+            for a in analyzers:a.close()
+            engine.close();group.close()
+
     def test_old_pages_and_label_precision_are_display_only(self):
         p={'schema_version':5,'parameters':{},'roles':{}}
         defaults=normalize_project(p);self.assertEqual(defaults['extreme_view'],dict(mode='focus',page=1,page_size=256))

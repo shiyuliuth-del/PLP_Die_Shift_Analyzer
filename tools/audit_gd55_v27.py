@@ -4,14 +4,84 @@ from pathlib import Path
 import numpy as np
 
 
+def sample_proof(gds,path):
+    import time
+    from unittest.mock import patch
+    sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+    from die_shift_studio import acceleration
+    from die_shift_studio.core import Parameters,read_gds,build_case
+    from die_shift_studio.contact import ContactModel
+    from die_shift_studio.distribution import bounded_poses
+    from die_shift_studio.model_yield import DieEvent
+    from die_shift_studio.settings import ViewSettings
+    data=read_gds(gds);roles=mapping_for(data)
+    case=build_case(data,roles,layer_order=['6/0','5/0','4/0','3/0'])
+    model=ContactModel(data,case,roles,case['connections']);p=Parameters()
+    runs=[];exact_fn=acceleration.rigid_pose_batch
+    for i in range(len(case['dies'])):
+        event=DieEvent(model,p.for_die(i),i,'cpu')
+        z=bounded_poses(p.for_die(i),len(case['dies']),ViewSettings(sample_exponent=10,random_seed=27+i))
+        enabled=event.projections
+        results=[];oracle=None
+        for label,projections in (('full',[None]*len(enabled)),('projected',enabled)):
+            event.projections=projections;count=0
+            def count_batch(xy,center,states,backend):
+                nonlocal count
+                count+=len(states)
+                return exact_fn(xy,center,states,backend)
+            started=time.perf_counter()
+            with patch.object(acceleration,'rigid_pose_batch',count_batch):safe=event.no_contact(z)
+            elapsed=time.perf_counter()-started
+            if oracle is None:oracle=safe
+            else:np.testing.assert_array_equal(safe,oracle)
+            results.append(dict(mode=label,polygons=count,seconds=elapsed,safe_samples=int(safe.sum())))
+        runs.append(dict(die=i+1,samples=len(z),runs=results))
+    out=dict(dies=runs,full=sum(v['runs'][0]['polygons'] for v in runs),
+             projected=sum(v['runs'][1]['polygons'] for v in runs),all_samples_identical=True)
+    path.write_text(json.dumps(out,indent=2)+'\n');print(out)
+
+
+def catalogue_proof(gds,path):
+    from dataclasses import replace
+    from time import perf_counter
+    from unittest.mock import patch
+    sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+    from die_shift_studio.core import Parameters,read_gds,build_case
+    from die_shift_studio.contact import ContactModel
+    from die_shift_studio.settings import ViewSettings
+    from die_shift_studio.width_analysis import WidthAnalyzer
+    from die_shift_studio.session_cache import ProjectCacheRegistry
+    data=read_gds(gds);roles=mapping_for(data);case=build_case(data,roles,layer_order=['6/0','5/0','4/0','3/0'])
+    model=ContactModel(data,case,roles,case['connections']);z=np.tile([-35.,-35.,-math.pi/180],(len(case['dies']),1))
+    group=ProjectCacheRegistry().get('proof');rows={};times={}
+    try:
+        for name,k,cache in (('initial_6sigma',6,group),('new_2sigma_reuse',2,group),('new_2sigma_cold',2,None)):
+            started=perf_counter();a=WidthAnalyzer(model,replace(Parameters(),target_nsigma=k),ViewSettings(),cache)
+            try:
+                with patch.object(a,'_catalogue',wraps=a._catalogue) as calls:
+                    result=a.frame({'states':z});times[name]=dict(seconds=perf_counter()-started,catalogue_builds=calls.call_count,
+                        confirmed_low=sum(bool((r.get('event_probability') or {}).get('low')) for r in result['rows']))
+                    rows[name]=result['rows']
+            finally:a.close()
+        assert rows['new_2sigma_reuse']==rows['new_2sigma_cold']
+        assert times['new_2sigma_reuse']['catalogue_builds']==0 and times['new_2sigma_cold']['catalogue_builds']>0
+    finally:group.close()
+    proof=dict(one_run=times,all_2sigma_rows_identical=True)
+    path.write_text(json.dumps(proof,indent=2)+'\n');print(proof)
+
+
+def mapping_for(data):
+    mapping={'3/0':'运动RDL','4/0':'运动过孔','5/0':'固定RDL','6/0':'固定过孔','127/0':'封装边框','128/0':'芯片边框'}
+    return {k:mapping.get(k,'不参与') for k in data.layers}
+
+
 def snapshot(checkout,gds,path):
     sys.path.insert(0,str(checkout))
     from die_shift_studio.core import Parameters,read_gds,build_case,evaluate
     from die_shift_studio.fast_preview import GeometryCache,PreviewEngine
     from die_shift_studio.settings import ViewSettings
     data=read_gds(gds)
-    mapping={'3/0':'运动RDL','4/0':'运动过孔','5/0':'固定RDL','6/0':'固定过孔','127/0':'封装边框','128/0':'芯片边框'}
-    roles={k:mapping.get(k,'不参与') for k in data.layers}
+    roles=mapping_for(data)
     order=['6/0','5/0','4/0','3/0'];case=build_case(data,roles,layer_order=order)
     p=Parameters();cfg=ViewSettings();engine=PreviewEngine(GeometryCache(data),case,roles,{},p,None,case['connections'])
     engine.configure_width(True,cfg)
@@ -48,9 +118,14 @@ def compare(base,new):
 
 def main():
     parser=argparse.ArgumentParser()
-    parser.add_argument('--gds',type=Path,required=True);parser.add_argument('--base',type=Path,required=True)
+    parser.add_argument('--gds',type=Path,required=True);parser.add_argument('--base',type=Path)
     parser.add_argument('--out',type=Path,required=True);parser.add_argument('--snapshot',action='store_true',help=argparse.SUPPRESS)
+    parser.add_argument('--sample-proof',action='store_true',help='Compare projected and full sampled contact predicates')
+    parser.add_argument('--catalogue-proof',action='store_true',help='Verify width catalogue reuse at a new yield level')
     args=parser.parse_args()
+    if args.catalogue_proof:return catalogue_proof(args.gds,args.out)
+    if args.sample_proof:return sample_proof(args.gds,args.out)
+    if args.base is None:parser.error('--base is required to compare checkouts')
     if args.snapshot:return snapshot(args.base.resolve(),args.gds,args.out)
     with tempfile.TemporaryDirectory() as directory:
         samples=[]
