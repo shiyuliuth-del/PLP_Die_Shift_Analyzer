@@ -56,6 +56,16 @@ def main():
     parser.add_argument('--source-root',required=True,type=Path)
     source=parser.parse_args().source_root.resolve()
     binary=source/'dist'/'Die_Shift_Analyze.exe'
+    from PyInstaller.archive.readers import CArchiveReader
+    archive=CArchiveReader(str(binary));pyz=next(n for n in archive.toc if n.lower().endswith('.pyz'))
+    modules=archive.open_embedded_archive(pyz).toc
+    banned={'cupy','cupyx','cupy_backends','torch','tensorflow','nvidia','jax','jaxlib'}
+    assert not {m.split('.')[0] for m in modules}.intersection(banned)
+    assert any(n.replace('\\','/').endswith('die_shift_studio/cuda_kernels.ptx') for n in archive.toc)
+    report=json.loads(next((source/'build').rglob('size-report.json')).read_text(encoding='utf8'))
+    assert not report['unexpected_cuda_dlls'] and report['exe_bytes']==binary.stat().st_size
+    assert 0<report['exe_bytes']<256*2**20,report
+    print('WINDOWS_SIZE_BYTES',report['exe_bytes'],'LARGEST_INPUTS',report['largest_inputs'][:5],flush=True)
     with pefile.PE(str(binary)) as pe:
         assert pe.FILE_HEADER.Machine==0x8664 and pe.OPTIONAL_HEADER.Subsystem==2,'Windows x64 GUI subsystem required'
         resources={x.id:x for x in pe.DIRECTORY_ENTRY_RESOURCE.entries}
@@ -65,6 +75,12 @@ def main():
         exe=install/binary.name;shutil.copy2(binary,exe)
         elapsed=normal_launch(exe,cwd,'Die Shift Analyze '+__version__)
         assert sorted(x.name for x in install.iterdir())==sorted([exe.name,'Jobs','logs'])
+        out=base/'gpu.json'
+        subprocess.run([str(exe),'--gpu-info',str(out)],cwd=cwd,timeout=90,check=True)
+        gpu=json.loads(out.read_text(encoding='utf8'))
+        assert gpu['backend'] in ('cuda','cpu') and 'CuPy' not in gpu['reason'] and 'ImportError' not in gpu['reason'],gpu
+        if gpu['backend']=='cuda':assert gpu['provider']=='NVIDIA Driver' and gpu['operations']
+        print('FROZEN_GPU_PROBE',json.dumps(gpu,ensure_ascii=True),flush=True)
         marker=install/'Jobs'/'用户文件.json';marker.write_bytes(b'{}')
         shutil.rmtree(install/'logs')
         records=[]

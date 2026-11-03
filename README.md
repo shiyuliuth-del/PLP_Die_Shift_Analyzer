@@ -1,12 +1,12 @@
-# Die Shift Analyze V31
+# Die Shift Analyze V32
 
-当前唯一长期主线为 **main**，规范仓库为 [shiyuliuth-del/PLP_Die_Shift_Analyzer](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer)（末尾有r）。V22接入用户2026-11-02提供的 `1102.zip`；V24 支持单点 PATH 圆、Q 属性编辑、封装边距与相邻孔盘三档分析，V25 修复手动回零，按实际穿线窄口定位并避让宽度标签，增加 Windows 无控制台源码入口。V26 支持每轴三值的完整多芯片离散目录，增加极端足迹、缓存深浅提示和硬件自适应批量计算。V27 默认重点组合，每页最多 256 个非零姿态，支持一键复原，并按具体过孔和宽度窄口的事件概率分别淡显或隐藏。V28 增加极端情况筛选、空白首行的全组合风险轮廓、保留滚动位置的复原，以及 Shift 追加和 Ctrl 扣除选择。∞ 级直接显示当前过孔实体。V29 支持在零位点选或多选淡填充风险线路，显示可回放工况与缺口；极端表缓存底色进一步调淡，当前行显示连续边框。V30 验证了带图标的 Windows 单文件构建，新增两个独立的过孔范围开关和交互优化。V31 正式发布源码，用户在目标 Windows 环境双击 BUILD.bat 完成打包。
+当前唯一长期主线为 **main**，规范仓库为 [shiyuliuth-del/PLP_Die_Shift_Analyzer](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer)（末尾有r）。V22接入用户2026-11-02提供的 `1102.zip`；V24 支持单点 PATH 圆、Q 属性编辑、封装边距与相邻孔盘三档分析，V25 修复手动回零，按实际穿线窄口定位并避让宽度标签，增加 Windows 无控制台源码入口。V26 支持每轴三值的完整多芯片离散目录，增加极端足迹、缓存深浅提示和硬件自适应批量计算。V27 默认重点组合，每页最多 256 个非零姿态，支持一键复原，并按具体过孔和宽度窄口的事件概率分别淡显或隐藏。V28 增加极端情况筛选、空白首行的全组合风险轮廓、保留滚动位置的复原，以及 Shift 追加和 Ctrl 扣除选择。∞ 级直接显示当前过孔实体。V29 支持在零位点选或多选淡填充风险线路，显示可回放工况与缺口；极端表缓存底色进一步调淡，当前行显示连续边框。V30 验证了带图标的 Windows 单文件构建，新增两个独立的过孔范围开关和交互优化。V31 正式发布源码，用户在目标 Windows 环境双击 BUILD.bat 完成打包。V32 的 EXE 直接调用 NVIDIA 驱动，不收集 CuPy 和整套 CUDA 数学库；可独立查看打包大小与逐项 GPU 自检结果。
 
 **参与开发前必读：** [AGENTS.md](AGENTS.md) → [Agent.md](Agent.md) → [设计要求](docs/DESIGN_REQUIREMENTS.md) → [1102交接记录](docs/BASELINE_1102.md) → [已知问题](docs/KNOWN_ISSUES.md)。提交使用[PR模板](.github/pull_request_template.md)，合并后清理自己的任务分支。
 
 GDS芯片偏移分析，长度单位为μm。当前包含运动归属、概率/Space Map、原材料型变、固定 RDL 通道容量、直线修复补块与切分重构预演；各功能按自己的几何来源和验证范围解释。
 
-- [V31 源码包与一键打包说明](docs/V31_使用说明.md)
+- [V32 源码包、显卡诊断与构建体积](docs/V32_使用说明.md)
 - [研究报告](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/blob/main/DIE_SHIFT评估报告.md)
 - [1102接入与验证记录](docs/BASELINE_1102.md)
 - [首次V21历史图文验证（旧宽度口径）](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/blob/V21/docs/V21_操作与验证说明.md)
@@ -80,7 +80,7 @@ python3 tools/validate_width_v24.py --gds /path/to/GD55_9-21.gds
 python3 tools/package_release.py verify-source
 ```
 
-当前标签为 `V31`。正式 ZIP 只包含源码、运行与打包脚本、依赖清单和构建规范，SHA-256 单独发布。完整开发文档、示例和测试保留在 Git 检出，GitHub 自动源码归档提供运行源码和构建配置。
+当前标签为 `V32`。正式 ZIP 只包含源码、运行与打包脚本、依赖清单和构建规范，SHA-256 单独发布。完整开发文档、示例和测试保留在 Git 检出，GitHub 自动源码归档提供运行源码和构建配置。
 
 全输入模型良率统计全部真实运动孔接口同时无异网接触的概率，包含安全内盒外状态；默认蒙特卡洛与99%联合置信区间，也可选不随机采样的状态盒积分。各DIE独立、同DIE各孔共用姿态。仅针对原始固定RDL接口，不代表含其他缺陷的实际生产良率。设置中可调整样本量或确定性预算。
 

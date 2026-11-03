@@ -55,14 +55,15 @@ def tagged_sources(ref):
                                   'archive','--format=tar',ref],cwd=ROOT)
     with tarfile.open(fileobj=io.BytesIO(tree),mode='r:') as tar:
         files={info.name:tar.extractfile(info).read() for info in tar if info.isfile()}
+    kernels={'die_shift_studio/cuda_kernels.cu','die_shift_studio/cuda_kernels.ptx'}
     root_files={name for name in files if '/' not in name}
     if root_files!=SOURCE_FILES or any(
-            name not in SOURCE_FILES and not (name.startswith('die_shift_studio/') and name.endswith('.py'))
+            name not in SOURCE_FILES|kernels and not (name.startswith('die_shift_studio/') and name.endswith('.py'))
             for name in files):
         raise ValueError('The source export must contain only the application and the two Windows entry points.')
     required={'die_shift_studio/__init__.py','die_shift_studio/gui.py','die_shift_studio/app_icon.py',
               'die_shift_studio/native_ops.py','die_shift_studio/klayout_worker.py'}
-    if not required.issubset(files):raise ValueError('A required runtime module is missing')
+    if not (required|kernels).issubset(files):raise ValueError('A required runtime module is missing')
     return files
 
 def make_source(out):

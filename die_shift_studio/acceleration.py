@@ -1,12 +1,11 @@
-"""Optional CUDA convolution; CPU is always a complete, equivalent fallback."""
-import logging
+"""Verified, optional FP64 compute. Frozen Windows builds use the NVIDIA driver directly."""
+import atexit,importlib.util,logging,multiprocessing,sys
 from functools import lru_cache
-from threading import Lock
+from threading import Lock,RLock
 import numpy as np
 from scipy.signal import fftconvolve
 
-_gpu_lock=Lock()
-
+_probe_lock=Lock();_gpu_lock=RLock();_runtime=None
 
 def _blend_kernel(xp,xy,w,center,state,method,arc_angle):
     """Float64 only; shared NumPy/CuPy formula for audited coordinate mapping."""
@@ -19,31 +18,6 @@ def _blend_kernel(xp,xy,w,center,state,method,arc_angle):
     return xy+a[:,None]*delta+b[:,None]*xp.stack((-delta[:,1],delta[:,0]),axis=1)
 
 
-def blend_points(xy,weights,center,state,method='bezier',arc_angle=30.,backend='auto'):
-    """Offload large coordinate batches only; native topology/DRC remain on CPU.
-
-    Worker processes deliberately use CPU to avoid independent CUDA contexts
-    competing for VRAM. No dependency download or unverified geometry fallback.
-    """
-    from .resources import _local
-    inputs=[np.asarray(v,dtype=np.float64) for v in (xy,weights,center,state)]
-    if backend!='cpu' and not getattr(_local,'nested',False) and (len(xy)>=65536 or backend=='cuda') and capabilities()['backend']=='cuda':
-        try:
-            import cupy as cp
-            with _gpu_lock,cp.cuda.Device(0):
-                free,_=cp.cuda.runtime.memGetInfo()
-                if len(xy)*8*32>free*.35:raise MemoryError('型变坐标批次超过GPU内存预算')
-                gpu=_blend_kernel(cp,*[cp.asarray(v) for v in inputs],method,arc_angle)
-                result=cp.asnumpy(gpu)
-                # Per-batch sentinel catches runtime/platform numerical drift.
-                indices=np.linspace(0,len(xy)-1,min(17,len(xy)),dtype=int)
-                expected=_blend_kernel(np,inputs[0][indices],inputs[1][indices],inputs[2],inputs[3],method,arc_angle)
-                if not np.isfinite(result).all() or not np.allclose(result[indices],expected,rtol=1e-12,atol=1e-8):raise ValueError('GPU型变坐标自检不一致')
-                return result
-        except Exception:
-            logging.getLogger(__name__).exception('GPU型变坐标计算失败，使用CPU重算该批次')
-    return _blend_kernel(np,*inputs,method,arc_angle)
-
 def _rigid_kernel(xp,points,owners,centers,states):
     """Evaluate sin/cos once per DIE, including external fan-out vertices."""
     idx=xp.maximum(owners,0);c=centers[idx];delta=points-c
@@ -53,19 +27,6 @@ def _rigid_kernel(xp,points,owners,centers,states):
     return xp.where((owners<0)[:,None],points,xy)
 
 
-def rigid_points(points,owners,centers,states,backend='auto'):
-    # Small exact geometry batches complete faster on CPU than a PCIe transfer.
-    if backend!='cpu' and len(points)>=(32768 if backend=='cuda' else 131072) and capabilities()['backend']=='cuda':
-        try:
-            import cupy as cp
-            with _gpu_lock,cp.cuda.Device(0):
-                free,_=cp.cuda.runtime.memGetInfo()
-                if len(points)*160>free*.45:raise MemoryError('刚体坐标批次超过显存预算')
-                return cp.asnumpy(_rigid_kernel(cp,*[cp.asarray(a) for a in (points,owners,centers,states)]))
-        except Exception:logging.getLogger(__name__).exception('GPU 刚体坐标未完成，转 CPU 计算')
-    return _rigid_kernel(np,points,owners,centers,states)
-
-
 def _pose_kernel(xp,vertices,center,states):
     v=vertices-center
     co=xp.cos(states[:,2,None]);si=xp.sin(states[:,2,None])
@@ -73,64 +34,166 @@ def _pose_kernel(xp,vertices,center,states):
     return xp.where((states[:,2]==0)[:,None,None],vertices+states[:,None,:2],out)
 
 
-def rigid_pose_batch(vertices,center,states,backend='auto'):
-    size=len(vertices)*len(states)
-    if backend!='cpu' and size>=(32768 if backend=='cuda' else 131072) and capabilities()['backend']=='cuda':
-        try:
-            import cupy as cp
-            with _gpu_lock,cp.cuda.Device(0):
-                free,_=cp.cuda.runtime.memGetInfo()
-                if size*96>free*.45:raise MemoryError('批量姿态超过显存预算')
-                return cp.asnumpy(_pose_kernel(cp,*[cp.asarray(a) for a in (vertices,center,states)]))
-        except Exception:logging.getLogger(__name__).exception('GPU 批量姿态未完成，转 CPU 计算')
-    return _pose_kernel(np,vertices,center,states)
+class _CuPy:
+    """Compatibility for source installations with their own working CuPy/ROCm."""
+    def __init__(self,cp,ordinal):
+        self.cp=cp;self.ordinal=ordinal
 
+    def calculate(self,budget,compute):
+        cp=self.cp
+        with _gpu_lock,cp.cuda.Device(self.ordinal):
+            free,_=cp.cuda.runtime.memGetInfo()
+            if budget>free*.45:raise MemoryError('该批次超过可用显存预算')
+            return cp.asnumpy(compute(cp))
+
+    def blend(self,points,w,center,state,method,angle):
+        return self.calculate(len(points)*256,lambda cp:_blend_kernel(cp,*map(cp.asarray,(points,w,center,state)),method,angle))
+
+    def rigid(self,p,owners,centers,states):
+        return self.calculate(len(p)*160,lambda cp:_rigid_kernel(cp,*map(cp.asarray,(p,owners,centers,states))))
+
+    def poses(self,points,center,states):
+        return self.calculate(len(points)*len(states)*96,lambda cp:_pose_kernel(cp,*map(cp.asarray,(points,center,states))))
+
+    def convolution(self,a,b,mode):
+        from cupyx.scipy.signal import fftconvolve as gpu_fft
+        return self.calculate(128*int(np.prod(np.add(a.shape,b.shape))),lambda cp:gpu_fft(cp.asarray(a),cp.asarray(b),mode=mode))
+
+def _selftest(rt):
+    xy=np.arange(64,dtype=float).reshape(32,2);c=np.array([20.,-5.]);z=np.array([-35.,-35.,-.017])
+    owners=np.arange(len(xy),dtype=np.int32)%3-1;centers=np.stack([c,-c]);states=np.stack([z,-z]);w=np.linspace(0,1,len(xy))
+    a=np.arange(35,dtype=float).reshape(5,7)/19.;b=np.array([[.1,.03],[.04,.05],[.02,.3]])
+    tests={
+        'rigid':[(lambda:rt.rigid(xy,owners,centers,states),_rigid_kernel(np,xy,owners,centers,states))],
+        'poses':[(lambda:rt.poses(xy,c,states),_pose_kernel(np,xy,c,states))],
+        'blend':[(lambda m=m:rt.blend(xy,w,c,z,m,30.),_blend_kernel(np,xy,w,c,z,m,30.)) for m in ('bezier','arc')],
+        'convolution':[(lambda m=m:rt.convolution(a,b,m),fftconvolve(a,b,mode=m)) for m in ('full','same','valid')]}
+    passed=[];errors={}
+    for name,cases in tests.items():
+        try:
+            for run,expected in cases:np.testing.assert_allclose(run(),expected,rtol=1e-12,atol=1e-10)
+            passed.append(name)
+        except Exception as exc:errors[name]=str(exc)
+    return passed,errors
+
+def _select(devices,open_runtime,provider,info,notes):
+    global _runtime
+    best=None;best_ops=[];best_device=None;best_errors={}
+    for dev in sorted(devices,key=lambda d:d.get('memory_mb',0),reverse=True):
+        try:
+            rt=open_runtime(dev)
+        except Exception as exc:
+            notes.append(f"{dev['name']} · {exc}");continue
+        try:ops,errors=_selftest(rt)
+        except BaseException:
+            if hasattr(rt,'close'):rt.close()
+            raise
+        if len(ops)>len(best_ops):
+            if best is not None and hasattr(best,'close'):best.close()
+            best,best_ops,best_device,best_errors=rt,ops,dev,errors
+        elif hasattr(rt,'close'):rt.close()
+        if not ops:notes.append(f"{dev['name']} · "+str(errors))
+        if len(best_ops)==4:break
+    if best is None:return False
+    _runtime=best
+    if hasattr(best,'close'):atexit.register(best.close)
+    labels={'rigid':'刚体坐标','poses':'批量姿态','blend':'型变坐标','convolution':'概率卷积'}
+    reason=f"{provider} · {best_device['name']} · 通过自检："+'、'.join(labels[k] for k in best_ops)
+    if best_errors:reason+='；转 CPU：'+'、'.join(labels[k]+' ('+v+')' for k,v in best_errors.items())
+    info.update(backend='cuda',provider=provider,selected=best_device,operations=best_ops,operation_errors=best_errors,reason=reason)
+    return True
 
 @lru_cache(maxsize=1)
-def capabilities():
-    info={'backend':'cpu','devices':[],'reason':'未安装可用的 CuPy/CUDA 运行时'}
+def _probe():
+    info=dict(backend='cpu',devices=[],operations=[],reason='');notes=[]
+    if multiprocessing.parent_process() is not None:
+        info['reason']='工作子进程使用 CPU，主进程统一管理显存';return info
+    from .cuda_driver import API,Runtime
     try:
-        import cupy as cp
-        for i in range(cp.cuda.runtime.getDeviceCount()):
-            props=cp.cuda.runtime.getDeviceProperties(i)
-            name=props['name'];name=name.decode() if isinstance(name,bytes) else str(name)
-            info['devices'].append(dict(index=i,name=name,memory_mb=int(props['totalGlobalMem']//1024**2)))
-        if info['devices']:
-            from cupyx.scipy.signal import fftconvolve as gpu_convolve
-            with cp.cuda.Device(0):
-                got=cp.asnumpy(gpu_convolve(cp.ones((5,7)),cp.ones((3,3)),mode='same'))
-                np.testing.assert_allclose(got,fftconvolve(np.ones((5,7)),np.ones((3,3)),mode='same'),atol=1e-10)
-                xy=np.arange(64,dtype=float).reshape(32,2);weights=np.linspace(0,1,32);center=np.array([20.,-5.]);state=np.array([-35.,-35.,-.017])
-                for method in ('bezier','arc'):
-                    inputs=(xy,weights,center,state)
-                    got=cp.asnumpy(_blend_kernel(cp,*[cp.asarray(v) for v in inputs],method,30.))
-                    np.testing.assert_allclose(got,_blend_kernel(np,*inputs,method,30.),rtol=1e-12,atol=1e-8)
-                owners=np.arange(len(xy))%3-1;centers=np.stack([center,-center]);states=np.stack([state,-state])
-                arrays=(xy,owners,centers,states)
-                got=cp.asnumpy(_rigid_kernel(cp,*[cp.asarray(a) for a in arrays]))
-                np.testing.assert_allclose(got,_rigid_kernel(np,*arrays),rtol=1e-12,atol=1e-8)
-                got=cp.asnumpy(_pose_kernel(cp,*[cp.asarray(a) for a in (xy,center,states)]))
-                np.testing.assert_allclose(got,_pose_kernel(np,xy,center,states),rtol=1e-12,atol=1e-8)
-            info.update(backend='cuda',reason='CUDA 卷积、刚体与型变坐标自检通过；拓扑及最终DRC使用CPU')
-    except Exception as exc:info['reason']=f'CPU 回退：{type(exc).__name__}: {exc}'
-    return info
-
-
-def convolve(a,b,mode='same',backend='auto'):
-    # Small grids cost more to transfer than to compute. Serialize GPU work to
-    # bound device memory, while independent CPU geometry jobs remain threaded.
-    if backend!='cpu' and (backend=='cuda' or a.size+b.size>=262144) and capabilities()['backend']=='cuda':
+        api=API();info['driver_version']=api.version
+        devices=api.devices();info['devices']=devices
+        if not devices:notes.append('NVIDIA 驱动未枚举到 CUDA 设备')
+        if _select(devices,lambda d:Runtime(api,d),'NVIDIA Driver',info,notes):return info
+    except Exception as exc:notes.append('NVIDIA 驱动 · '+str(exc))
+    if not getattr(sys,'frozen',False) and importlib.util.find_spec('cupy') is not None:
         try:
             import cupy as cp
-            from cupyx.scipy.signal import fftconvolve as gpu_convolve
-            with _gpu_lock,cp.cuda.Device(0):
-                free,_=cp.cuda.runtime.memGetInfo()
-                need=8*16*np.prod(np.asarray(a.shape)+b.shape)
-                if need>free*.5:raise MemoryError('GPU 卷积临时内存预算不足')
-                return cp.asnumpy(gpu_convolve(cp.asarray(a),cp.asarray(b),mode=mode))
-        except Exception:
-            logging.getLogger(__name__).exception('GPU 计算未完成，使用 CPU 重算同一任务')
-    return fftconvolve(a,b,mode=mode)
+            devices=[]
+            for i in range(cp.cuda.runtime.getDeviceCount()):
+                props=cp.cuda.runtime.getDeviceProperties(i);name=props['name']
+                devices.append(dict(index=i,name=name.decode() if isinstance(name,bytes) else str(name),
+                                    memory_mb=int(props['totalGlobalMem']//2**20)))
+            info['devices']=devices
+            if _select(devices,lambda d:_CuPy(cp,d['index']),'CuPy',info,notes):return info
+        except Exception as exc:notes.append('CuPy · '+str(exc))
+    info['reason']='CPU 回退：'+'；'.join(notes or ['没有通过自检的 CUDA 设备'])
+    return info
+
+def capabilities():
+    # lru_cache alone allows duplicate in-flight initializations on different threads.
+    with _probe_lock:return _probe()
+
+def _device_call(name,backend,eligible,args,check=None):
+    if backend=='cpu' or not eligible or multiprocessing.parent_process() is not None:return None
+    cap=capabilities()
+    if cap['backend']!='cuda' or name not in cap.get('operations',(name,)):return None
+    rt=_runtime
+    if 'provider' not in cap:  # Source-compatible CuPy provider without recorded metadata.
+        import cupy as cp
+        rt=_CuPy(cp,cap.get('selected',{}).get('index',0))
+    try:
+        result=getattr(rt,name)(*args)
+        if not np.isfinite(result).all():raise ArithmeticError('CUDA output is not finite')
+        if check is not None:check(result)
+        return result
+    except MemoryError:
+        return None
+    except Exception as exc:
+        logging.getLogger(__name__).error('%s GPU 运算失败，使用 CPU 重算：%s',name,exc)
+        with _probe_lock:
+            if 'operations' in cap and name in cap['operations']:
+                cap['operations']=[op for op in cap['operations'] if op!=name]
+                cap.setdefault('operation_errors',{})[name]=str(exc)
+                cap['reason']+=f'；{name} 运行时停用：{exc}'
+                if not cap['operations']:cap['backend']='cpu'
+        return None
+
+def blend_points(xy,weights,center,state,method='bezier',arc_angle=30.,backend='auto'):
+    inputs=tuple(np.asarray(v,dtype=np.float64) for v in (xy,weights,center,state))
+    def check(result):
+        ids=np.linspace(0,len(xy)-1,min(17,len(xy)),dtype=int)
+        expected=_blend_kernel(np,inputs[0][ids],inputs[1][ids],inputs[2],inputs[3],method,arc_angle)
+        np.testing.assert_allclose(result[ids],expected,rtol=1e-12,atol=1e-8)
+    result=_device_call('blend',backend,len(xy)>0 and (len(xy)>=65536 or backend=='cuda'),(*inputs,method,arc_angle),check)
+    return result if result is not None else _blend_kernel(np,*inputs,method,arc_angle)
+
+def rigid_points(points,owners,centers,states,backend='auto'):
+    if not len(points):return np.array(points,copy=True)
+    # Most UI layers share one owner. Avoid per-vertex owner gathers and trig arrays.
+    low,high=int(np.min(owners)),int(np.max(owners))
+    if high<0:return np.array(points,copy=True)
+    if low==high and states[high,2]==0:return points+states[high,:2]
+    result=_device_call('rigid',backend,len(points)>=(32768 if backend=='cuda' else 131072),(points,owners,centers,states))
+    if result is not None:return result
+    if low==high:
+        dx,dy,t=states[high];pivot=centers[high];r=points-pivot;co,si=np.cos(t),np.sin(t)
+        return np.column_stack((co*r[:,0]-si*r[:,1],si*r[:,0]+co*r[:,1]))+pivot+[dx,dy]
+    if not np.any(states[:,2]):
+        shifts=np.vstack((states[:,:2],np.zeros(2)))
+        return points+shifts[np.where(owners>=0,owners,-1)]
+    return _rigid_kernel(np,points,owners,centers,states)
+
+def rigid_pose_batch(vertices,center,states,backend='auto'):
+    if not np.any(states[:,2]):return vertices+states[:,None,:2]
+    size=len(vertices)*len(states)
+    result=_device_call('poses',backend,size>=(32768 if backend=='cuda' else 131072),(vertices,center,states))
+    return result if result is not None else _pose_kernel(np,vertices,center,states)
+
+def convolve(a,b,mode='same',backend='auto'):
+    eligible=(a.ndim==b.ndim==2 and a.size and b.size and not (np.iscomplexobj(a) or np.iscomplexobj(b))
+              and (backend=='cuda' or a.size+b.size>=262144))
+    result=_device_call('convolution',backend,eligible,(a,b,mode))
+    return result if result is not None else fftconvolve(a,b,mode=mode)
 
 @lru_cache(maxsize=1)
 def graphics_inventory():

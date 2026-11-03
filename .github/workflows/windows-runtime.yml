@@ -20,6 +20,10 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [clean, with-cupy]
     timeout-minutes: 35
     env:
       PYTHONUTF8: '1'
@@ -29,10 +33,16 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
       - name: Prepare the Windows test environment
         run: |
           python -m venv .venv
           .\.venv\Scripts\python -m pip install -r requirements.txt
+      - name: Exercise an existing CuPy build environment
+        if: matrix.environment == 'with-cupy'
+        run: .\.venv\Scripts\python -m pip install cupy-cuda12x
       - name: Generate and expand the actual source-only ZIP
         run: |
           $py = (Get-Item .\.venv\Scripts\python.exe).FullName
