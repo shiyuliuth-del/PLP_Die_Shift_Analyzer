@@ -10,11 +10,57 @@ from matplotlib.backends.backend_agg import RendererAgg
 class SceneRenderer:
     def __init__(self,canvas,ax):
         self.canvas=canvas;self.ax=ax;self.key=None;self.background=None;self.capturing=False;self.legend_region=None;self.static_cache=OrderedDict();self.pending_key=None
-        self.static_budget=64*1024**2
+        self.static_budget=64*1024**2;self.selection_background=None;self.selection_images=OrderedDict();self.unselected_key=None
         canvas.mpl_connect('draw_event',self.external_draw)
     def external_draw(self,event):
-        if not self.capturing:self.key=None;self.background=None
+        if not self.capturing:self.key=None;self.background=None;self.selection_background=None;self.selection_images.clear();self.unselected_key=None
+
+    def selection_key(self,legend):
+        return (tuple(self.ax.get_xlim()),tuple(self.ax.get_ylim()),tuple(self.ax.bbox.bounds),self.canvas.figure.dpi,
+                id(legend),bool(legend and legend.get_visible()))
+
+    def draw_selection(self,artists,legend,signature):
+        """At a stable zero pose only selection and callouts can change."""
+        key=self.selection_key(legend)
+        if self.selection_background is None or self.selection_background[0]!=key:
+            visible=[a for a in artists if a is not None and a.get_visible()]
+            self.capturing=True;show_legend=bool(legend and legend.get_visible())
+            try:
+                self.selection_images.clear()
+                # A freshly drawn, unselected zero view already is the base.
+                # Copy that framebuffer before painting the first selection.
+                if self.unselected_key!=key:
+                    for a in visible:a.set_visible(False)
+                    if show_legend:legend.set_visible(False)
+                    self.canvas.draw()
+                region=None
+                if show_legend:
+                    if self.unselected_key!=key:legend.set_visible(True);self.ax.draw_artist(legend)
+                    bounds=legend.get_window_extent(self.canvas.get_renderer()).expanded(1.01,1.02)
+                    region=self.canvas.copy_from_bbox(bounds)
+                background=self.canvas.copy_from_bbox(self.ax.bbox)
+                self.selection_background=(key,background,region);self.unselected_key=None
+            finally:
+                self.capturing=False
+                for a in visible:a.set_visible(True)
+                if show_legend:legend.set_visible(True)
+        if signature in self.selection_images:
+            self.canvas.restore_region(self.selection_images[signature]);self.selection_images.move_to_end(signature)
+            self.canvas.blit(self.ax.bbox);return
+        _,background,region=self.selection_background
+        self.canvas.restore_region(background)
+        for a in sorted((a for a in artists if a is not None and a.get_visible()),key=lambda obj:obj.get_zorder()):
+            self.ax.draw_artist(a)
+        if region is not None:self.canvas.restore_region(region)
+        pixels=max(1,int(np.ceil(self.ax.bbox.width)*np.ceil(self.ax.bbox.height)*4))
+        limit=min(3,(16*1024**2)//pixels)
+        if limit:
+            self.selection_images[signature]=self.canvas.copy_from_bbox(self.ax.bbox)
+            while len(self.selection_images)>limit:self.selection_images.popitem(last=False)
+        self.canvas.blit(self.ax.bbox)
+
     def draw(self,key,legend=None):
+        self.selection_background=None;self.selection_images.clear();self.unselected_key=None
         artists=[a for a in list(self.ax.collections)+list(self.ax.patches)+list(self.ax.images)+list(self.ax.texts) if a.get_visible()]
         # During camera motion, the view changes every frame. A single normal
         # draw is cheaper than building background and static-run caches that

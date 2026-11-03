@@ -37,7 +37,7 @@ a movable part always stays aligned with the via it belongs to.
 """
 import numpy as np
 import shapely
-from .session_cache import SessionCache
+from .session_cache import SessionCache,EphemeralCache
 from .preview import rigid_transform
 
 # Distance from the farthest landing of a chain to the cut when no explicit
@@ -85,7 +85,7 @@ def bridge_quads(faces,center,state,expand_um=0.):
         quad=shapely.Polygon(np.vstack([coordinates,moved_coordinates[::-1]]))
         if not quad.is_valid:quad=shapely.make_valid(quad)
         if quad.is_empty:continue
-        if expand_um>0.:quad=shapely.buffer(quad,expand_um,join_style=2,quad_segs=8)
+        if expand_um>0.:quad=shapely.buffer(quad,expand_um,join_style=2,quad_segs=8,mitre_limit=5.)
         if quad.is_empty:continue
         quads.append(quad)
     return quads
@@ -120,7 +120,12 @@ class Reconstructor:
                                       land=land,targets=[(k,i) for k,i in targets],
                                       land_diameter=2.*float(np.sqrt(max(land.area,0.)/np.pi))))
 
-    def close(self):self.cache.close()
+        self.block_cache=EphemeralCache(budget=16*1024**2,max_entries=2048)
+        self.vias_by_target={}
+        for via in self.vias:
+            for ref in via['targets']:self.vias_by_target.setdefault(ref,[]).append(via)
+
+    def close(self):self.cache.close();self.block_cache.clear()
 
     def _copper(self,layer,index,replacements):
         # Accepted deformation already moved some fixed copper; start from it.
@@ -369,57 +374,70 @@ class Reconstructor:
         return dict(movable=best['movable'],faces=best['faces'],distance=best['distance'],
                     span=best['span'])
 
-    def frame(self,states,deformation=None,progress=lambda *_:None,quick=False):
+    def _source_blocks(self,polygon,vias,states,owner):
+        """Partition unchanged source copper once per owning DIE pose."""
+        threshold=self._step(max(v['land_diameter'] for v in vias))
+        frame=self._own_frame(owner)
+        chains=self._clusters(threshold,vias)
+        blocks=[]
+        for cluster in chains:
+            # The cut may search outward only as far as the next landing of
+            # the same net: cutting past it would put that landing on the far
+            # side of a seam it does not belong to.
+            others=[v['land'] for other in chains if other is not cluster for v in other]
+            block=self._block(polygon,cluster,states,owner,others)
+            if block is None:continue
+            block.update(owner=owner,cluster=cluster)
+            blocks.append(block)
+        if not blocks:return []
+        # Copper may follow only the die whose chip frame holds it: one fixed
+        # RDL polygon can span several chips, and without this the same copper
+        # would be claimed by two dies and move two different ways. Only a
+        # feature that actually carries landings in a neighbouring chip is
+        # clipped, so a route that merely runs between the chips keeps its
+        # shape and its single cut.
+        foreign=[q for k,q in self._frames() if frame is None or not q.equals(frame)]
+        shared=(frame is not None and bool(foreign)
+                and shapely.intersection(polygon,shapely.union_all(foreign)).area>self.tol**2)
+        for block in blocks:
+            clip=frame if (shared and all(frame.covers(shapely.Point(v['center']))
+                                          for v in block['cluster'])) else None
+            block['movable']=self._clip(block['movable'],clip,[v['land'] for v in block['cluster']])
+            block['frame']=clip
+        blocks=[q for q in blocks if q['movable'] is not None and not q['movable'].is_empty
+                and q['movable'].area>self.tol**2]
+        return self._merge(blocks) if blocks else []
+
+    def frame(self,states,deformation=None,progress=lambda *_:None,quick=False,*,targets=None):
         states=np.asarray(states,float)
         replacements=(deformation or {}).get('replacements',{}) or {}
         fingerprint=tuple((k,tuple(v['indices']),v['geometry'].wkb)
                           for k,items in sorted(replacements.items()) for v in items)
         key=(states.tobytes(),fingerprint)
-        hit=self.cache.get(key)
-        if hit is not None:return hit
+        if targets is None:
+            hit=self.cache.get(key)
+            if hit is not None:return hit
         progress(0,f'重构预演：{len(self.vias)} 个落在固定RDL上的运动过孔')
         groups={}
-        for via in self.vias:
-            owner=via['owner']
-            if owner<0 or not np.any(states[owner]):continue
-            for layer,index in via['targets']:
-                groups.setdefault((owner,layer,index),[]).append(via)
+        # A cut depends on the landings of this source polygon. Other source
+        # polygons never enter its chain, stationary part or bridge geometry.
+        refs=self.vias_by_target if targets is None else targets
+        for layer,index in refs:
+            for via in self.vias_by_target[layer,index]:
+                owner=via['owner']
+                if owner>=0 and np.any(states[owner]):
+                    groups.setdefault((owner,layer,index),[]).append(via)
         features={}
         for order,((owner,layer,index),vias) in enumerate(sorted(groups.items())):
             polygon=self._copper(layer,index,replacements)
             if polygon is None or polygon.is_empty:continue
-            threshold=self._step(max(v['land_diameter'] for v in vias))
-            frame=self._own_frame(owner)
-            chains=self._clusters(threshold,vias)
-            blocks=[]
-            for cluster in chains:
-                # The cut may search outward only as far as the next landing of
-                # the same net: cutting past it would put that landing on the far
-                # side of a seam it does not belong to.
-                others=[v['land'] for other in chains if other is not cluster for v in other]
-                block=self._block(polygon,cluster,states,owner,others)
-                if block is None:continue
-                block.update(owner=owner,cluster=cluster)
-                blocks.append(block)
+            key_block=(layer,index,owner,states[owner].tobytes(),self.model.bound.centers[owner].tobytes())
+            original=polygon is self.model.cache.layers[layer]['geometry'][index]
+            blocks=self.block_cache.get(key_block) if original else None
+            if blocks is None:
+                blocks=self._source_blocks(polygon,vias,states,owner)
+                if original:self.block_cache.put(key_block,blocks)
             if not blocks:continue
-            # Copper may follow only the die whose chip frame holds it: one fixed
-            # RDL polygon can span several chips, and without this the same copper
-            # would be claimed by two dies and move two different ways. Only a
-            # feature that actually carries landings in a neighbouring chip is
-            # clipped, so a route that merely runs between the chips keeps its
-            # shape and its single cut.
-            foreign=[q for k,q in self._frames() if frame is None or not q.equals(frame)]
-            shared=(frame is not None and bool(foreign)
-                    and shapely.intersection(polygon,shapely.union_all(foreign)).area>self.tol**2)
-            for block in blocks:
-                clip=frame if (shared and all(frame.covers(shapely.Point(v['center']))
-                                              for v in block['cluster'])) else None
-                block['movable']=self._clip(block['movable'],clip,[v['land'] for v in block['cluster']])
-                block['frame']=clip
-            blocks=[q for q in blocks if q['movable'] is not None and not q['movable'].is_empty
-                    and q['movable'].area>self.tol**2]
-            if not blocks:continue
-            blocks=self._merge(blocks)
             # One fixed-RDL polygon can carry vias of several dies; every die's
             # blocks belong to that feature, so accumulate instead of replacing.
             feature=features.setdefault((layer,index),dict(original=polygon,blocks=[]))
@@ -497,7 +515,8 @@ class Reconstructor:
                                  movable_area_um2=moved_area,cover_area_um2=cover_area,max_shift_um=max_shift,
                                  width_um=self.width_um,length_um=self.length_um,
                                  landing_diameters=AUTO_LANDING_DIAMETERS))
-        if not np.any(states) and not fingerprint:self.cache.pin(key)
-        if not quick:self.cache[key]=result
+        if targets is None:
+            if not np.any(states) and not fingerprint:self.cache.pin(key)
+            if not quick:self.cache[key]=result
         progress(100,'重构预演完成')
         return result

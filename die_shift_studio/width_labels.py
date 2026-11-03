@@ -66,6 +66,29 @@ class LabelLayout:
             self.measurements[key]=half
         return self.measurements[key]
 
+    def place_selected(self,index,text):
+        near=self.place(index,text)
+        if near is not None:return near
+        # An explicit selection can use a more distant leader before moving
+        # its full label to the scrollable overflow. Never obscure other tags.
+        half=self.half_size(text);low=self.viewport[:2]+half+1;high=self.viewport[2:]-half-1
+        if np.any(high<low):return
+        base=self.quads[index].mean(axis=0)
+        x=np.linspace(low[0],high[0],1+int(np.ceil((high[0]-low[0])/10)))
+        y=np.linspace(low[1],high[1],1+int(np.ceil((high[1]-low[1])/10)))
+        centers=np.stack(np.meshgrid(x,y),axis=-1).reshape(-1,2)
+        lo,hi=centers-half,centers+half
+        valid=np.ones(len(lo),bool)
+        for a,b in self.labels:valid &= ~((hi>a)&(lo<b)).all(axis=1)
+        ids=np.flatnonzero(valid)
+        if len(ids) and self.tree is not None:
+            blocked,_=self.tree.query(shapely.box(*lo[ids].T,*hi[ids].T),predicate='intersects')
+            valid[ids[blocked]]=False;ids=np.flatnonzero(valid)
+        if not len(ids):return
+        i=ids[np.argmin(np.sum((centers[ids]-base)**2,axis=1))]
+        self.labels.append((lo[i],hi[i]))
+        return None,tuple(self.ax.transData.inverted().transform(base*self.scale)),tuple(centers[i]-base)
+
     def place(self,index,text,preferred=None):
         if self.viable is not None and not self.viable[index]:return
         q=self.quads[index];low,high=self.viewport[:2],self.viewport[2:]

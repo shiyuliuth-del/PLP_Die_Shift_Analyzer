@@ -5,39 +5,32 @@ reach that section can change third-pad occupancy or the split-lane evidence.
 Independent DIE therefore remain free digits rather than multiplying solves.
 """
 from collections import defaultdict
-from dataclasses import replace
 from itertools import product
 import math
 import numpy as np
 import shapely
-from .width_analysis import ADEQUATE,BLOCKED,NARROW
+from .width_analysis import ADEQUATE,BLOCKED,NARROW,section_subset
 from .edge_clearance import edge_violations
 from .statistics import ExtremeCatalog
+from .width_witness import channel_witness,edge_witness
 
 SEVERITY={NARROW:1,BLOCKED:2}
 
 
-def strongest(found,refs,status,event,binary):
+def strongest(found,refs,status,event,binary,witnesses=None,witness=None):
     if event and event.get('low'):return
     evidence='binary' if binary else 'exceeded' if event and event.get('lower',0)>event['threshold'] else 'undetermined'
     rank=(SEVERITY[status],evidence!='undetermined')
     for ref in refs:
         old=found.get(ref)
-        if old is None or rank>(SEVERITY[old[0]],old[1]!='undetermined'):
-            found[ref]=(status,evidence)
-
-
-def subset(plane,ids,wall_ids):
-    """Compact indices keep a local solve proportional to participating geometry."""
-    walls=plane['walls'];wall_ids=sorted(wall_ids)
-    wall_map={v:i for i,v in enumerate(wall_ids)}
-    features=sorted({f for k in ids for f in plane['gates'][k].features})
-    fmap={v:i for i,v in enumerate(features)}
-    gates=[replace(plane['gates'][k],pair=tuple(wall_map[i] for i in plane['gates'][k].pair),
-                   features=tuple(fmap[i] for i in plane['gates'][k].features)) for k in ids]
-    return dict(gates=gates,walls=[walls[i] for i in wall_ids],keys=plane['keys'],
-                metal_count=sum(i<plane['metal_count'] for i in wall_ids),pieces=plane['pieces'][features],
-                parents=np.array([wall_map[plane['parents'][i]] for i in features],int),local=plane['local'][features])
+        previous=(SEVERITY[old[0]],old[1]!='undetermined') if old else (0,False)
+        if rank<previous:continue
+        if rank==previous:
+            if witnesses is None:continue
+            prior=witnesses[ref]
+            if (witness['shortfall_um'],-witness['index'])<=(prior['shortfall_um'],-prior['index']):continue
+        found[ref]=(status,evidence)
+        if witnesses is not None:witnesses[ref]=witness
 
 
 def combinations(grid,owners):
@@ -118,10 +111,18 @@ def _sweeps(analyzer,plane,grid,progress):
     for i,w in enumerate(walls):
         if w.owner<0:sweeps[i]=w.geometry.bounds;continue
         xy=hulls[i]
-        from .preview import rigid_transform
-        points=np.vstack([rigid_transform(xy,analyzer.model.bound.centers[w.owner],v) for v in grid.locals[w.owner]])
-        sweeps[i]=[*points.min(axis=0),*points.max(axis=0)]
-        travel[i]=np.linalg.norm(points.reshape(-1,len(xy),2)-xy,axis=2).max()
+        from .acceleration import rigid_pose_batch
+        center=analyzer.model.bound.centers[w.owner]
+        poses=grid.locals[w.owner];lo=np.full(2,np.inf);hi=-lo;distance=0.
+        # Cap the temporary pose/vertex product even for a very large polygon.
+        block=max(1,262144//len(poses))
+        for start in range(0,len(xy),block):
+            pts=xy[start:start+block]
+            moved=rigid_pose_batch(pts,center,poses,analyzer.settings.acceleration)
+            lo=np.minimum(lo,moved.min(axis=(0,1)));hi=np.maximum(hi,moved.max(axis=(0,1)))
+            distance=max(distance,np.linalg.norm(moved-pts,axis=2).max())
+        guard=64*np.finfo(float).eps*(1+max(abs(lo).max(),abs(hi).max(),abs(center).max()))
+        sweeps[i]=[*(lo-guard),*(hi+guard)];travel[i]=distance+guard
     tree=shapely.STRtree(shapely.box(*sweeps.T))
     scope=lambda g:tuple(sorted({walls[i].owner for i in g.pair if walls[i].owner>=0 and grid.radices[walls[i].owner]>1}))
     groups=defaultdict(list)
@@ -157,7 +158,7 @@ def _sweeps(analyzer,plane,grid,progress):
         high=np.minimum(ab[:,2:],ab[::-1,2:]+limit)
         bounds[k]=[*low.min(axis=0)-half-analyzer.tol,*high.max(axis=0)+half+analyzer.tol]
     for j,(owners,ids) in enumerate(groups.items()):
-        sub=subset(plane,ids,{w for i in ids for w in gates[i].pair})
+        sub=section_subset(plane,ids,{w for i in ids for w in gates[i].pair})
         demand=np.array([sum(max(analyzer.width,v) for v in g.widths)+(len(g.widths)+1)*analyzer.space for g in sub['gates']])
         b=bounds[ids];possible=risk[ids]
         for ends,gaps in sweep_sections(analyzer,sub,grid,owners,lambda f:progress((j+f)/len(groups),'检查截面可达范围')):
@@ -189,7 +190,7 @@ def _target_groups(analyzer,plane,grid,progress):
                       and np.all(bounds[k,:2]<=hi+pad) and np.all(bounds[k,2:]>=lo-pad)
                       and any(walls[w].contacts & refs[k] for w in potential-set(gates[k].pair))
                       for k,potential in enumerate(wallsets) if k not in ids)
-        yield subset(plane,ids,set(pair)),partners,ambiguous
+        yield section_subset(plane,ids,set(pair)),partners,ambiguous
 
 
 class OccupancyBank:
@@ -225,7 +226,7 @@ class OccupancyBank:
         return classes
 
 
-def _solve_throat(analyzer,name,plane,grid,target,partners,ambiguous,found,clauses,binary,progress):
+def _solve_throat(analyzer,name,plane,grid,target,partners,ambiguous,found,witnesses,clauses,binary,progress):
     from .extreme_filter import PoseClause
     gates=target['gates'];walls=target['walls'];half=.65*(analyzer.width+analyzer.space)
     owners=tuple(sorted({w.owner for w in walls if w.owner>=0 and grid.radices[w.owner]>1}))
@@ -262,10 +263,16 @@ def _solve_throat(analyzer,name,plane,grid,target,partners,ambiguous,found,claus
                 fixed_mask |= next(iter(classes))
             else:free.append((o,classes))
         resolved={}
+        free.sort(key=lambda entry:entry[0])
         for choices in product(*(groups.items() for o,groups in free)):
-            mask=fixed_mask
-            for bits,_ in choices:mask |= bits
+            mask=fixed_mask;allowed=dict(conditions)
+            for (o,_),(bits,ds) in zip(free,choices):
+                mask |= bits;allowed[o]=tuple(ds)
             if mask not in resolved:
+                # This concrete assignment realizes this exact obstruction mask.
+                # Equivalent unrelated digits are free; use their smallest value.
+                pose_index=grid.index([allowed[i][0] if i in allowed else 0 for i in range(grid.count)])
+
                 direct=[(g,dict(r)) for i,(g,r) in enumerate(zip(gates,base)) if not mask>>i&1]
                 rows=analyzer._distinct_throats(direct,half);red=False
                 for r in rows:
@@ -274,27 +281,25 @@ def _solve_throat(analyzer,name,plane,grid,target,partners,ambiguous,found,claus
                     event=None
                     if analyzer.probability and not ambiguous:
                         event=analyzer.probability.classify(r,[next(w for w in walls if w.name==key) for key in r['pair']])
-                    strongest(found,r['refs'],r['status'],event,binary)
+                    strongest(found,r['refs'],r['status'],event,binary,witnesses,channel_witness(r,pose_index))
                 resolved[mask]=red
             if resolved[mask]:
-                allowed=dict(conditions)
-                for (o,_),(_,ds) in zip(free,choices):allowed[o]=tuple(ds)
                 clauses.add(PoseClause(tuple(sorted(allowed.items()))))
     return total
 
 
 def summarize(analyzer,p,progress=lambda *_:None):
     grid=ExtremeCatalog(analyzer.model.case,p);binary=p.target_nsigma==0 or math.isinf(p.target_nsigma)
-    found={};factors=[];nchecks=0;clauses=set()
+    found={};witnesses={};factors=[];nchecks=0;clauses=set()
     analyzer.frame({'states':np.zeros((grid.count,3))},lambda n,t:progress(round(n*.08),t))
     for j,(name,plane) in enumerate(analyzer.planes.items()):
         def update(f,text):progress(8+int(86*(j+f)/len(analyzer.planes)),text)
         groups=list(_target_groups(analyzer,plane,grid,lambda f,t:update(.6*f,t)))
         for k,(target,partners,ambiguous) in enumerate(groups):
-            nchecks+=_solve_throat(analyzer,name,plane,grid,target,partners,ambiguous,found,clauses,binary,
+            nchecks+=_solve_throat(analyzer,name,plane,grid,target,partners,ambiguous,found,witnesses,clauses,binary,
                                    lambda f:update(.6+.4*(k+f)/len(groups),'核对独立姿态与第三方孔盘占位'))
     factors.extend(sorted(clauses,key=lambda c:c.allowed))
-    channel_lines=found.copy();channel_factors=list(factors)
+    channel_lines=found.copy();channel_witnesses=witnesses.copy();channel_factors=list(factors)
     # Board spacing has only one motion owner. A diagonal batch visits every
     # local pose without mixing independent DIE probabilities.
     model=analyzer.model
@@ -307,9 +312,13 @@ def summarize(analyzer,p,progress=lambda *_:None):
             if owner>=0:edge_flags[owner][digit if digit<grid.radices[owner] else 0]=True
             else:fixed=True
             event=analyzer.probability.edge(key,indices[0],node['poly'],owner,row['required_um']) if analyzer.probability else None
-            strongest(found,[(key,i) for i in indices],BLOCKED,event,binary)
+            digits=[0]*grid.count
+            if owner>=0 and digit<grid.radices[owner]:digits[owner]=digit
+            strongest(found,[(key,i) for i in indices],BLOCKED,event,binary,witnesses,
+                      edge_witness(row,grid.index(digits),model,z))
         progress(94+round(6*(digit+1)/max(grid.radices)),'汇总线路与封装边距')
     factors.extend(((i,),flag) for i,flag in enumerate(edge_flags) if np.any(flag))
     if fixed:factors.append(((),True))
-    return dict(lines=found,red_factors=factors,channel_lines=channel_lines,channel_factors=channel_factors,
+    return dict(lines=found,witnesses=witnesses,red_factors=factors,channel_lines=channel_lines,
+                channel_witnesses=channel_witnesses,channel_factors=channel_factors,has_edge_risk=fixed or any(np.any(v) for v in edge_flags),
                 grid_key=tuple(v.tobytes() for v in grid.locals),package_states=grid.total+1,local_checks=nchecks,complete=True)

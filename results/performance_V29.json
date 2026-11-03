@@ -1,0 +1,163 @@
+{
+  "baseline": "V28 main at 725f166dbf836b833e67c8e1cc58234e12b8ed87",
+  "candidate": "V29",
+  "measured_local_date": "2026-11-03",
+  "environment": {
+    "platform": "Linux",
+    "resource_profile": {
+      "cpu": 8,
+      "total_memory_mb": 15708,
+      "available_memory_mb": 8681,
+      "workers": 6,
+      "worker_capacity": 6,
+      "process_workers": 3,
+      "policy": "预留至少2个逻辑CPU（大机器约10%）与65%可用内存；原生几何/FFT使用线程；大型独立原图DRC与RDL候选搜索使用spawn进程；小任务串行"
+    },
+    "compute": {
+      "backend": "cpu",
+      "devices": [],
+      "reason": "CPU 回退：ModuleNotFoundError: No module named 'cupy'"
+    },
+    "qt_surface": "offscreen 1440 x 900"
+  },
+  "case": {
+    "name": "GD55_9-21.gds",
+    "sha256": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+    "shapes": 1225,
+    "dies": 3,
+    "roles": {
+      "127/0": "封装边框",
+      "128/0": "芯片边框",
+      "3/0": "运动RDL",
+      "4/0": "运动过孔",
+      "5/0": "固定RDL",
+      "6/0": "固定过孔"
+    },
+    "width_space_enclosure_um": [
+      15,
+      15,
+      15
+    ],
+    "dx_um_dy_um_angle_deg": [
+      35,
+      35,
+      1
+    ],
+    "yield_level": 6,
+    "package_poses": 19683
+  },
+  "original_geometry": {
+    "risk_lines": 6,
+    "red_poses": 2835,
+    "source_rows_compared": 24894,
+    "hashes_for_both_versions": {
+      "lines": "acff664a5cd8f8cd3ac0bfa6ba4f41f08fc316c8b216edfe81fdfbd6079fa44c",
+      "red": "7c3c62751af6862f67426a93b2a31137a638005ad33d441217d8828947231743",
+      "full_rows": "b25da3c86943c04b03b99de492c65a726f91f8fabf852795c90a76b785c964bf"
+    },
+    "witnesses_replayed": 6,
+    "timing_units": "seconds",
+    "v28": {
+      "cold_summary": 2.822149999992689,
+      "summary_hit": 1.422599598299712e-05,
+      "new_frame_sum": 5.287121270011994,
+      "frame_median": 0.4408493530063424,
+      "existing_frame_sum": 0.15253356199536938
+    },
+    "v29": {
+      "cold_summary": 2.63124036899535,
+      "summary_hit": 1.4558987459167838e-05,
+      "new_frame_sum": 4.420500964013627,
+      "frame_median": 0.3949396410025656,
+      "existing_frame_sum": 0.00018736004130914807
+    },
+    "method": "One cold project per checkout, same 14 requests including zero then 13 prescribed requests, followed by 14 reads of completed numerical frames. Same contact geometry and rules. No draw time in these timings."
+  },
+  "candidate_parallel_faces": {
+    "tested_pairs": 36578,
+    "called_after_prefilter": 1506
+  },
+  "reconstruction_x_only": {
+    "method": "All three DIE have X amplitudes 35 μm, Y and angle locked at zero. Timings exclude preparation of the nominal topology. All 27 full-grid IDs and worst line grades compared.",
+    "v28": {
+      "states": 27,
+      "scanned": 27,
+      "time_s": 51.25881196800037,
+      "indices": [
+        0,
+        1,
+        3,
+        4,
+        6,
+        7,
+        9,
+        10,
+        12,
+        13,
+        15,
+        16,
+        18,
+        19,
+        21,
+        22,
+        24,
+        25
+      ],
+      "lines": "c54c953e42dd3ba6fec7c42b3db9504f31552b4e8d23f25832dd9ff8f42f1644"
+    },
+    "v29": {
+      "states": 27,
+      "scanned": 3,
+      "time_s": 0.2948293410008773,
+      "indices": [
+        0,
+        1,
+        3,
+        4,
+        6,
+        7,
+        9,
+        10,
+        12,
+        13,
+        15,
+        16,
+        18,
+        19,
+        21,
+        22,
+        24,
+        25
+      ],
+      "lines": "c54c953e42dd3ba6fec7c42b3db9504f31552b4e8d23f25832dd9ff8f42f1644"
+    }
+  },
+  "reconstruction_xyz": {
+    "method": "V29 full mixed-radix catalogue; conservatively proven board-clearance sources removed, local combinations evaluated for remaining source geometries. Cross-check of 12 complete reconstructed frames. Full V28 elapsed time was not measured.",
+    "eligible_sources": 121,
+    "states": 19683,
+    "local_checks": 756,
+    "boundary_sources": 6,
+    "red_states": 19035,
+    "time_s": 38.396879477993934,
+    "compared": 12,
+    "red_samples": 9
+  },
+  "qt_selection": {
+    "method": "Five samples per revision; medians in seconds. Fresh scene draws, first selection immediately after redraw, then repeated selection in a stable viewport. V28 highlights only, V29 adds six independently placed witness labels.",
+    "v28": {
+      "nominal_redraw_median_s": 0.025273096005548723,
+      "select_all_risks_median_s": 0.014671664001070894,
+      "repeated_at_stable_view_s": 0.01162780899903737,
+      "selected": 6
+    },
+    "v29": {
+      "nominal_redraw_median_s": 0.022310148997348733,
+      "select_all_risks_median_s": 0.040074044998618774,
+      "repeated_at_stable_view_s": 0.0032705220073694363,
+      "selected": 6
+    }
+  },
+  "reproduce": "python3 tools/benchmark_v29.py --checkout <V28-or-V29-root> --gds <authorized-GD55-path> --out <result.json>; --graphics-only for selection, --coupled for 27 poses, --coupled-full for the V29 full catalogue. Use the same checkout-independent copy of the V29 benchmark script, headless Qt, and OPENBLAS_NUM_THREADS=1.",
+  "scope": "Linux CPU measurements vary with load. No Windows or CUDA execution, continuous wafer-yield or production signoff. The benchmark stores no drawing geometry."
+}

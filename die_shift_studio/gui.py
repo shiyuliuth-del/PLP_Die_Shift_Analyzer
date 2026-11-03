@@ -92,8 +92,8 @@ def label(text):
     x=W.QLabel(text);x.setWordWrap(True);return x
 
 
-def table(headers):
-    x=W.QTableWidget(0,len(headers));x.setHorizontalHeaderLabels(headers)
+def table(headers,widget=W.QTableWidget):
+    x=widget(0,len(headers));x.setHorizontalHeaderLabels(headers)
     x.setAlternatingRowColors(True);x.verticalHeader().hide()
     x.setEditTriggers(W.QAbstractItemView.EditTrigger.NoEditTriggers if hasattr(W.QAbstractItemView,'EditTrigger') else W.QAbstractItemView.NoEditTriggers)
     x.setSelectionBehavior(W.QAbstractItemView.SelectionBehavior.SelectRows if hasattr(W.QAbstractItemView,'SelectionBehavior') else W.QAbstractItemView.SelectRows)
@@ -113,12 +113,27 @@ class ExtremeRowDelegate(W.QStyledItemDelegate):
         selected=getattr(W.QStyle,'StateFlag',W.QStyle).State_Selected
         if not option.state & selected:
             super().paint(painter,option,index);return
-        neutral=W.QStyleOptionViewItem(option);neutral.state &= ~selected
+        flags=getattr(W.QStyle,'StateFlag',W.QStyle)
+        neutral=W.QStyleOptionViewItem(option);neutral.state &= ~(selected|flags.State_HasFocus)
         super().paint(painter,neutral,index)
-        painter.save();ink=QtGui.QColor('#366392');painter.setPen(ink)
-        rect=option.rect;painter.drawLine(rect.bottomLeft(),rect.bottomRight())
-        if index.column()==0:painter.fillRect(rect.left(),rect.top(),3,rect.height(),ink)
-        painter.restore()
+
+
+class ExtremeTable(W.QTableWidget):
+    """One continuous border for the current row, over the native cell grid."""
+    def paintEvent(self,event):
+        super().paintEvent(event)
+        row=self.currentRow()
+        if row<0 or not self.selectionModel().isSelected(self.currentIndex()):return
+        cols=[i for i in range(self.columnCount()) if not self.isColumnHidden(i)]
+        if not cols:return
+        left=max(0,min(self.columnViewportPosition(i) for i in cols))
+        right=min(self.viewport().width(),max(self.columnViewportPosition(i)+self.columnWidth(i) for i in cols))
+        y=self.rowViewportPosition(row)
+        rect=QtCore.QRectF(left+1,y+1,right-left-2,self.rowHeight(row)-2)
+        if not rect.isValid() or not rect.intersects(QtCore.QRectF(event.rect())):return
+        painter=QtGui.QPainter(self.viewport())
+        painter.setPen(QtGui.QPen(QtGui.QColor('#6185a4'),1.5))
+        painter.drawRect(rect);painter.end()
 
 
 from .gds_shapes import edited_snapshot
@@ -274,6 +289,10 @@ class MainWindow(W.QMainWindow):
         self.tabs=W.QTabWidget();split.addWidget(self.tabs);split.setSizes([445,1095])
         self.figure=Figure(figsize=(9,5));self.figure.subplots_adjust(left=.043,right=.993,bottom=.095,top=.99);self.canvas=FigureCanvasQTAgg(self.figure);self.ax=self.figure.add_subplot(111)
         page=W.QWidget();v=W.QVBoxLayout(page);v.setContentsMargins(0,0,0,0);self.toolbar=NavigationToolbar2QT(self.canvas,self);v.addWidget(self.toolbar)
+        self.width_label_overflow=W.QPlainTextEdit()
+        self.width_label_overflow.setReadOnly(True);self.width_label_overflow.setMaximumHeight(92)
+        self.width_label_overflow.setToolTip('图内空间不足的已选线路标记');self.width_label_overflow.hide()
+        v.addWidget(self.width_label_overflow)
         right_split=W.QSplitter(VERTICAL);right_split.addWidget(self.canvas);v.addWidget(right_split,1)
         bottom=W.QWidget();bv=W.QVBoxLayout(bottom);bv.setContentsMargins(5,3,5,3)
         self.preview_tabs=W.QTabWidget();bv.addWidget(self.preview_tabs)
@@ -311,7 +330,7 @@ class MainWindow(W.QMainWindow):
         self.page_prev.clicked.connect(lambda:self.show_extreme_page(self.preview_page-1))
         self.page_next.clicked.connect(lambda:self.show_extreme_page(self.preview_page+1))
         self.page_edit.returnPressed.connect(self.jump_extreme_page)
-        self.extreme_table=table(['极端情况','DX / μm','DY / μm','转角 / °','极值定义']);self.extreme_table.setRowCount(1)
+        self.extreme_table=table(['极端情况','DX / μm','DY / μm','转角 / °','极值定义'],ExtremeTable);self.extreme_table.setRowCount(1)
         self.extreme_table.setItemDelegate(ExtremeRowDelegate(self.extreme_table))
         self.extreme_table.currentCellChanged.connect(self.select_preview);ep.addWidget(self.extreme_table)
         manual=W.QHBoxLayout();self.manual_die=W.QComboBox();manual.addWidget(self.manual_die);self.manual_fields={}
@@ -769,6 +788,7 @@ class MainWindow(W.QMainWindow):
             native_backend.close();self._clear_native_when_idle=False
         for group_ in self.parked_groups:
             if group_ is self.cache_group:continue
+            group_.park_frames()
             for engine in group_.engines.values():
                 for deformer in engine.deformers.values():deformer.release_workers()
         self.parked_groups.clear()
@@ -994,6 +1014,7 @@ class MainWindow(W.QMainWindow):
         self.stop_animation()
         if hasattr(self,'mouse_die'):self.mouse_die.exit();self.mouse_die.pending=False;self.mouse_die.full_pending=False;self.mouse_die.timer.stop();self.mouse_die.idle.stop()
         if hasattr(self,'selection'):self.selection.reset()
+        if hasattr(self,'width_overlay'):self.width_overlay.reset_summary()
         self._legend_stamp=None
         self.clear_space_artists()
         for artist in list(self.ax.collections)+list(self.ax.texts)+list(self.ax.patches):artist.remove()
@@ -1295,7 +1316,8 @@ class MainWindow(W.QMainWindow):
             artist.set_facecolor(sty['color'] if sty['fill'] else 'none');artist.set_edgecolor(sty['color'] if not sty['fill'] else 'none')
             artist.set_alpha(sty['alpha']);artist.set_linewidth(sty['width']);artist.set_linestyle(sty.get('linestyle','-'));artist.set_visible(visible)
             artist.set_zorder(2+rank/max(1,len(order)) if role in PHYSICAL else sty['z'])
-            if default_motion(role)=='fixed':artist._static_preview=(geometry_stamp,str(sty),artist.get_zorder())
+            if default_motion(role)=='fixed' or frame is None or frame.get('nominal_global'):
+                artist._static_preview=(geometry_stamp,str(sty),artist.get_zorder())
             elif hasattr(artist,'_static_preview'):del artist._static_preview
             if visible:self.rendered_layers[key]=polys
             if key not in self.deformation_artists:
@@ -1384,7 +1406,6 @@ class MainWindow(W.QMainWindow):
         self.state_result=frame['checks'][scheme] if frame else None
         if self.failure_artist is not None:self.failure_artist.remove();self.failure_artist=None
         self.draw_probability();self.draw_space()
-        if hasattr(self,'width_overlay'):self.width_overlay.draw()
         self.footprint_overlay.draw()
         if hasattr(self,'repair_overlay'):self.repair_overlay.draw()
         if hasattr(self,'reconstruction_overlay'):self.reconstruction_overlay.draw()
@@ -1405,6 +1426,7 @@ class MainWindow(W.QMainWindow):
                 point=np.array([info['cx'],info['cy']]);point=rigid_transform(point,self.rotation_centers()[i],self.shown_states[i]) if self.shown_states is not None else point;label_.set_position(point)
         if not preserve or self._default_view is None:self.fit_plot()
         self.refresh_legend();self.update_die_label_visibility()
+        if hasattr(self,'width_overlay'):self.width_overlay.draw()
         if not getattr(self,'_in_animation',False):
             for i,key in enumerate(self._layer_keys):
                 sty=self.style_for(key);item=self.layer_table.item(i,1)
@@ -1419,6 +1441,8 @@ class MainWindow(W.QMainWindow):
             key=(tuple(self.ax.get_xlim()),tuple(self.ax.get_ylim()),tuple(self.ax.bbox.bounds),self._legend_stamp,self.space_stamp,
                  self.legend.get_visible() if self.legend is not None else False,tuple(a.get_visible() for a in self.space_artists))
             self.scene_renderer.draw(key,self.legend)
+            if not self.selection.selected and hasattr(self,'width_overlay') and self.width_overlay.shown_summary() is not None:
+                self.scene_renderer.unselected_key=self.scene_renderer.selection_key(self.legend)
         else:self.canvas.draw_idle()
     def update_die_label_visibility(self,*_):
         if not self._default_view:return
@@ -1456,7 +1480,7 @@ class MainWindow(W.QMainWindow):
                 if modes[key]!='hide':handles.append(Patch(facecolor=tint(color,modes[key],.65),label=label))
             if (self.current_frame or {}).get('width_summary') is not None and modes['描边']!='hide':
                 binary=self.params().target_nsigma in (0.,math.inf)
-                handles.extend([Line2D([],[],color='#af7780',lw=1.2,label='宽度不足'),Line2D([],[],color='#bf9c71',lw=1.2,label='需局部收窄')])
+                handles.extend([Line2D([],[],color='#af7780',lw=1.2,label='宽度不足 · 选中查看工况'),Line2D([],[],color='#bf9c71',lw=1.2,label='需局部收窄')])
                 if not binary:handles.extend([Line2D([],[],color='#7c8492',label='已证超限'),Line2D([],[],color='#aab0bb',ls='--',label='概率待定')])
             elif modes['截面']!='hide':
                 for title,color in [('宽度不足','#c44956'),('需局部收窄','#bd8127'),('宽度足够','#498d79')]:
@@ -2051,7 +2075,7 @@ class MainWindow(W.QMainWindow):
         signature=self.preview_identity(data,roles,order,motions,p,result)
         width=self.width_toggle.isChecked();deform=self.deformation_toggle.isChecked();rebuild=width and self.reconstruction_toggle.isChecked()
         focus=None if width or self.grid_mode.currentIndex()==0 else tuple(self.focus_extremes.indices)
-        key=('changed-extremes-v28',signature,cfg.deformation_key() if deform else (),cfg.reconstruction_key() if rebuild else (),
+        key=('changed-extremes-v29',signature,cfg.deformation_key() if deform else (),cfg.reconstruction_key() if rebuild else (),
              cfg.width_key() if width else (),focus)
         if key!=self._coupled_key:
             self._coupled_key=key;self._coupled_data=None;self._coupled_error=False
@@ -2121,7 +2145,7 @@ class MainWindow(W.QMainWindow):
             if facts is not None and (facts.get('complete') if width or changed else facts.get('checked')):
                 tag=(id(self.extremes),id(facts),width)
                 if getattr(self,'_problem_tag',None)!=tag:
-                    if changed:
+                    if changed and 'indices' in facts:
                         from .extreme_filter import ExplicitIndex
                         self._problem_index=ExplicitIndex(self.extremes,facts['indices'])
                     else:self._problem_index=ProblemIndex(self.extremes,facts['red_factors'] if width else contact_factors(facts))
@@ -2193,8 +2217,8 @@ class MainWindow(W.QMainWindow):
 
     @staticmethod
     def cache_row_color(count,safe):
-        light=(239,248,240) if safe else (242,248,253)
-        dark=(184,218,193) if safe else (187,214,237)
+        light=(248,252,249) if safe else (248,251,254)
+        dark=(223,238,228) if safe else (226,238,248)
         level=count/(count+6.) if count else 0.
         return QtGui.QColor(*(round(a+(b-a)*level) for a,b in zip(light,dark)))
     def restore_preview(self):
