@@ -40,6 +40,17 @@ jobs:
           & $py tools/package_release.py make-source --output "$out"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $zip = Get-Item "$out\*_Source.zip"
+          $expected = (Get-FileHash -LiteralPath $zip.FullName).Hash
+          $env:GIT_CONFIG_COUNT = '1'; $env:GIT_CONFIG_KEY_0 = 'core.autocrlf'
+          foreach ($mode in 'true','false') {
+            $env:GIT_CONFIG_VALUE_0 = $mode
+            & $py tools/package_release.py make-source --output "$out\$mode"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            if ((Get-FileHash -LiteralPath "$out\$mode\$($zip.Name)").Hash -ne $expected) {
+              throw "Source ZIP depends on Git line endings"
+            }
+          }
+          Remove-Item Env:GIT_CONFIG_COUNT,Env:GIT_CONFIG_KEY_0,Env:GIT_CONFIG_VALUE_0
           $expand = Join-Path $env:RUNNER_TEMP "目标 Windows"
           Expand-Archive -LiteralPath $zip.FullName -DestinationPath $expand
           $source = Join-Path $expand $zip.BaseName

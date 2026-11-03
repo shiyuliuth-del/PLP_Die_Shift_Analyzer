@@ -51,7 +51,8 @@ SOURCE_FILES={'main.py','RUN.bat','BUILD.bat','Die_Shift_Analyze.spec','requirem
 
 def tagged_sources(ref):
     # Read Git objects so checkout EOL settings cannot change the tested ZIP.
-    tree=subprocess.check_output(['git','archive','--format=tar',ref],cwd=ROOT)
+    tree=subprocess.check_output(['git','-c','core.autocrlf=false','-c','core.eol=lf',
+                                  'archive','--format=tar',ref],cwd=ROOT)
     with tarfile.open(fileobj=io.BytesIO(tree),mode='r:') as tar:
         files={info.name:tar.extractfile(info).read() for info in tar if info.isfile()}
     root_files={name for name in files if '/' not in name}
@@ -66,7 +67,9 @@ def tagged_sources(ref):
 
 def make_source(out):
     files=tagged_sources('HEAD')
-    if __version__ not in files['die_shift_studio/__init__.py'].decode():raise ValueError('Source version must be committed before packaging.')
+    version_file='die_shift_studio/__init__.py'
+    if files[version_file].decode().splitlines()!=(ROOT/version_file).read_text(encoding='utf8').splitlines():
+        raise ValueError('Source version must be committed before packaging.')
     out.mkdir(parents=True,exist_ok=True)
     target=out/f'Die_Shift_Analyze_{__version__}_Source.zip'
     with zipfile.ZipFile(target,'w',zipfile.ZIP_STORED,allowZip64=False) as z:
