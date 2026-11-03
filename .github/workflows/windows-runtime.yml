@@ -6,6 +6,9 @@ on:
       - 'tools/package_release.py'
       - 'tools/windows_acceptance.py'
       - 'tests/gui_v30.py'
+      - 'tests/gui_v32.py'
+      - 'tests/test_v32.py'
+      - 'tests/cuda_test_driver.cpp'
       - 'main.py'
       - 'BUILD.bat'
       - 'RUN.bat'
@@ -77,6 +80,9 @@ jobs:
         run: |
           call "%DSA_VCVARS%" >nul
           "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_v32.py -v
+      - name: Verify hardware preference and pending Qt worker shutdown
+        shell: cmd
+        run: '"%DIE_SHIFT_PYTHON%" tests/gui_v32.py'
       - name: Exercise the one-click BUILD.bat from the extracted source
         shell: cmd
         run: call "%DSA_TEST_SOURCE%\BUILD.bat"

@@ -84,9 +84,10 @@ def main():
         marker=install/'Jobs'/'用户文件.json';marker.write_bytes(b'{}')
         shutil.rmtree(install/'logs')
         records=[]
-        for i in range(2):
+        # Repeat short standalone launch/close cycles around the full layout run.
+        for i,with_fixtures in enumerate((False,True,False,False)):
             out=base/f'smoke-{i}.json';env=dict(os.environ);env.pop('DIE_SHIFT_SMOKE_EXAMPLES',None)
-            if i:env['DIE_SHIFT_SMOKE_EXAMPLES']=str(ROOT/'examples')
+            if with_fixtures:env['DIE_SHIFT_SMOKE_EXAMPLES']=str(ROOT/'examples')
             run=subprocess.run([str(exe),'--smoke-test',str(out)],env=env,cwd=cwd,timeout=300)
             if run.returncode:
                 evidence=[]
@@ -94,6 +95,7 @@ def main():
                     if f.is_file():evidence.append(f.name+'\n'+f.read_text(encoding='utf8',errors='replace')[-14000:])
                 raise RuntimeError(f'Frozen smoke {i} exited 0x{run.returncode & 0xffffffff:08x}\n'+'\n'.join(evidence))
             record=json.loads(out.read_text(encoding='utf8'));records.append(record)
+            if not with_fixtures:assert record.get('standalone'),record
             assert record['status']=='PASS' and record['frozen'] and record['platform']=='win32',record
             assert Path(record['jobs']).samefile(install/'Jobs') and (install/'logs').is_dir()
             assert marker.read_bytes()==b'{}' and not list(cwd.iterdir())
