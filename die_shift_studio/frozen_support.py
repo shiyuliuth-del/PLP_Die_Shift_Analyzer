@@ -104,5 +104,8 @@ def smoke(output):
         window.close();deadline=time.monotonic()+30
         while window._tasks and time.monotonic()<deadline:app.processEvents();time.sleep(.005)
         if window._tasks:record.update(status='FAIL',shutdown_error='Background workers did not stop within 30 seconds')
-        app.processEvents();Path(output).write_text(json.dumps(record,ensure_ascii=False,indent=2),encoding='utf-8')
+        app.processEvents()
+        if not window._tasks:
+            QtCore.QCoreApplication.sendPostedEvents(None,getattr(QtCore.QEvent,'Type',QtCore.QEvent).DeferredDelete)
+        Path(output).write_text(json.dumps(record,ensure_ascii=False,indent=2),encoding='utf-8')
     return 0 if record['status']=='PASS' else 1

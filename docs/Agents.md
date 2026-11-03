@@ -6,6 +6,9 @@
 
 基于 V31 主线 `a061ca3`。现场 Windows 检测到 RTX A5000 与 AMD 显卡，CuPy 导入缺少 `cupy_backends.cuda._softlink`。冻结程序改用 NVIDIA 驱动加载内置 PTX，区别设备枚举、四项数值自检与真实设备验收。构建时记录实际大小与最大输入文件，正式发布仍为源码 ZIP。工程继续使用 schema 5 与原有加速偏好。[使用说明](V32_使用说明.md)
 
+- 通过 [PR #12](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/pull/12) 集成。BUILD.bat 从源码 ZIP 在 Windows 单独打包，生成实际大小及最大输入清单。GPU 数值路径分别验收刚体、批量姿态、曲线和概率卷积。设备故障按算子回退，超显存预算仅该批次转 CPU。显示端保留旧工程已经选择的 CUDA 偏好。
+- 在 GD55 的 158 个接口上完整对照两次 V31/V32 CPU 栅格。Sobol 逐像素一致，确定性积分最大绝对误差 4.55×10⁻¹³。确定性积分从 12.54 s 降至 3.35 s，纯平移从 46.0 ms 降至 2.7 ms。[逐轮计时、坐标与栅格对照](../results/performance_V32.json)
+
 ## 2026-11-03 · V31 · 目标 Windows 电脑打包
 
 基于已合并的 V30 主线 `5e4719e`，通过 [PR #11](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/pull/11) 集成。按用户最终交付要求撤下 V30 的二进制发布草稿及其 CI 附件，保留原有 Git 标签。V31 只发布源码 ZIP 和独立校验值。
