@@ -2,6 +2,16 @@
 
 根目录的 `AGENTS.md` 是工具自动读取的入口，本文件记录本地与远端共同维护的变更。开始一轮工作时先同步唯一主线 `main`，依次阅读入口、设计规范和最近一轮记录。完成后更新本文件，将代码、工程兼容验证和关键结果一起提交 GitHub，通过 PR 集成。后续轮次在最上方追加日期、版本、变更、测试、已知限制与 PR 链接。[协作与提交规范](../Agent.md)
 
+## 2026-11-03 · V26 · 合并 wzh/1102 分支
+
+- 用户明确授权将当前两个分支合并。起始主线为 `2fd10402c6b162d6170d0c90edf953dcdbbb3196`，来源为 `wzh/1102` 的 `167fbedfdb7199699c1d51c8089d206a9b31f99f`，共同祖先为 `ad23c2395802a567097a3d5f4f1f2b7532820003`。来源有 2 个独有提交，主线有 18 个独有提交；普通合并保留双方历史。
+- 逐提交审阅确认来源只改动 `README.md`、`TEST_WINDOWS.bat` 和新增 `SHA256SUMS.json`，没有新增源码。README 回退到 V21，并描述了未随分支提交源码的自动切口搜索、拖动和间距标注；保留现行 V26 说明与设计合同，不将这些文字当作已实现功能。Windows 入口保留主线 V23–V26 核心及界面检查，避免合入旧上传造成的测试删减。
+- 不引入根目录的旧发布清单：205 项中 58 项与当前文件哈希不符，另有 1 项目标文件不存在。新发布清单仍由打包工具在源码 ZIP 内生成。最终相对起始主线仅新增本轮协作记录；运行源码、示例、工程 schema 5、默认值、缓存键与版本 V26 均保持原字节。
+- `python3 tools/check_contribution.py` 与源码空白检查通过。`python3 -m unittest discover -s tests -p 'test_*.py' -v` 实跑 258 项：256 项通过，1 项因未提供外部 GDS 跳过，1 项桌面后端检查报错。该报错发生在模拟无 KLayout Python 模块、启用已安装桌面后端时；当前沙箱连独立的 `socket.socket()` 都返回 `PermissionError(1, 'Operation not permitted')`，不能建立后端本地通信。保留原测试和断言，不缩小测试集合，不将完整套件记为通过。
+- Linux / offscreen 实跑 `tests/gui_v21.py`、`tests/gui_repair.py`、`tests/gui_v24.py`、`tests/gui_v25.py`、`tests/gui_v26.py` 全部通过，覆盖三档通道、独立显隐、Q 编辑与旧工程恢复、真实首行点击、低容量缓存双向回放、缩放后标签避让、729 状态分页、锁定轴、缓存只读色深及按归属足迹。`python3 main.py --smoke-test` 通过，使用 KLayout 0.30.8 Python 模块。
+- 本轮没有真实 GD55 输入，未重跑实图窄口审计；未做 Windows / CUDA 实机或受限的 KLayout 桌面通信验收。已知模型问题继续见 [KNOWN_ISSUES.md](KNOWN_ISSUES.md)。本轮为分支历史整合，不另发版本、改写标签或生成发布包。
+- 本地 Git fetch 因代理不可达、直连 DNS 不可用而失败；通过已连接的 GitHub 接口逐一核对远端分支 SHA。本地任务分支 `codex/merge-wzh-1102-20261103` 保存已审查、已测试的普通合并结果。远端创建 Git tree 和创建草稿 PR 均返回 `403 Resource not accessible by integration`；浏览器通道超时，故本轮截至交接时尚未推送、创建 PR 或合并远端 main，也未删除任何远端分支。恢复仓库内容及 PR 写入权限后，须再次核对双方远端头，再经 PR 集成该结果。
+
 ## 2026-11-02 · V26 · 三自由度离散组合、缓存色和计算资源
 
 本轮集成见 [GitHub PR #5](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/pull/5)。
