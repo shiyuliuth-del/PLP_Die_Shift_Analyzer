@@ -4,6 +4,12 @@ from matplotlib.colors import to_rgba
 
 from .settings import ELEMENTS,DEFAULTS
 
+def low_ink(color,low):
+    r,g,b,a=to_rgba(color)
+    if not low:return (r,g,b,a)
+    return (.58*r+.32,.58*g+.32,.58*b+.32,.30*a)
+
+
 def tint(color,mode,alpha=1.):
     r,g,b,_=to_rgba(color)
     if mode=='dim':

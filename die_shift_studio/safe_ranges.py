@@ -9,7 +9,7 @@ import math
 import time
 import numpy as np
 import shapely
-from shapely.geometry import Polygon, MultiPoint
+from shapely.geometry import Polygon
 from shapely.strtree import STRtree
 from .preview import rigid_transform
 from .statistics import mean_and_bounds
@@ -19,7 +19,7 @@ class BoxCertificate:
     def __init__(self,model,owner,p,budget=512):
         self.center=np.asarray(model.bound.centers[owner]);self.radius=p.annulus_um+p.line_space_um
         self.tol=max(1e-9,model.data.dbu_um*1e-3)
-        self.budget=budget;self.items=[];self.calls=0;self.boxes=0;self.unresolved=0;self.witnesses=[];self.memo={}
+        self.budget=budget;self.items=[];self.calls=0;self.boxes=0;self.unresolved=0;self.witnesses=[];self.memo={};self.arc_hulls={}
         mu,b=mean_and_bounds(p.for_die(owner),len(model.bound.centers))
         for r in model.records:
             if r['owner']!=owner or not r['foreign']:continue
@@ -40,15 +40,21 @@ class BoxCertificate:
         angle=float(hi[2]-lo[2])
         # A coarser envelope is still rigorously enclosed by its sagitta.
         # Refine only undecidable state cells instead of oversampling every arc.
-        segments=max(1,min(256,math.ceil(angle/math.radians(.25))))
-        ts=np.linspace(lo[2],hi[2],segments+1);local=vertices-self.center
-        co=np.cos(ts[:,None]);si=np.sin(ts[:,None])
-        xy=np.stack((co*local[:,0]-si*local[:,1],si*local[:,0]+co*local[:,1]),axis=-1).reshape(-1,2)+self.center
-        hull=MultiPoint(xy).convex_hull
-        points=shapely.get_coordinates(hull)
-        shifts=np.array(list(itertools.product((lo[0],hi[0]),(lo[1],hi[1]))))
-        envelope=MultiPoint((points[:,None,:]+shifts).reshape(-1,2)).convex_hull
-        sagitta=2*lever*math.sin(min(2*math.pi,angle/segments)/4)**2
+        key=(vertices.tobytes(),lo[2],hi[2])
+        stored=self.arc_hulls.get(key)
+        if stored is None:
+            segments=max(1,min(256,math.ceil(angle/math.radians(.25))))
+            ts=np.linspace(lo[2],hi[2],segments+1);local=vertices-self.center
+            co=np.cos(ts[:,None]);si=np.sin(ts[:,None])
+            xy=np.stack((co*local[:,0]-si*local[:,1],si*local[:,0]+co*local[:,1]),axis=-1).reshape(-1,2)+self.center
+            points=shapely.get_coordinates(shapely.convex_hull(shapely.multipoints(xy)))
+            unit_sagitta=2*math.sin(min(2*math.pi,angle/segments)/4)**2
+            if len(self.arc_hulls)>=256:self.arc_hulls.pop(next(iter(self.arc_hulls)))
+            self.arc_hulls[key]=(points,unit_sagitta)
+        else:points,unit_sagitta=stored
+        shifts=np.array([[lo[0],lo[1]],[lo[0],hi[1]],[hi[0],lo[1]],[hi[0],hi[1]]])
+        envelope=shapely.convex_hull(shapely.multipoints((points[:,None,:]+shifts).reshape(-1,2)))
+        sagitta=lever*unit_sagitta
         return envelope.buffer((sagitta+self.tol)/math.cos(math.pi/32),quad_segs=8)
 
     def check(self,lo,hi):

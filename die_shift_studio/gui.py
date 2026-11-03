@@ -100,6 +100,13 @@ def table(headers):
     return x
 
 
+COMPACT_PREVIEW_STYLE='''
+QWidget {font-size: 11px;}
+QHeaderView::section {padding: 2px 3px;}
+QPushButton, QComboBox, QLineEdit, QDoubleSpinBox {padding: 1px 4px; min-height: 16px;}
+'''
+
+
 class ExtremeRowDelegate(W.QStyledItemDelegate):
     """Keep cache colours visible even while Qt's current row is selected."""
     def paint(self,painter,option,index):
@@ -115,8 +122,8 @@ class ExtremeRowDelegate(W.QStyledItemDelegate):
 
 
 from .gds_shapes import edited_snapshot
-from .project import normalize_project, project_overlays, OVERLAY_DEFAULTS
-from .width_display import WidthDisplayEditor,tint
+from .project import normalize_project, project_overlays, OVERLAY_DEFAULTS,EXTREME_PAGE_SIZE
+from .width_display import WidthDisplayEditor,tint,low_ink
 from .width_overlay import ChannelTable, INTRO as WIDTH_INTRO
 from .preview import default_motion,extreme_cases,layer_owners,transformed_layers,PREVIEW_SCOPE
 from .navigation import Navigation
@@ -169,7 +176,7 @@ class MainWindow(W.QMainWindow):
         self.session_values=self.cache_group.values;self.session_engines=self.cache_group.engines;self.retired_sessions=[];self.parked_groups=[];self.cache_clear_worker=None
         self.fields={};self.role_boxes={};self.stage_hints={};self.visible_boxes={};self.motion_boxes={}
         self.loading=False;self.revision=0;self.extremes=None;self.active_preview=None;self.owner_cache=None;self.auto_values={}
-        self.preview_page=0;self._initial_extreme_page=0;self.page_items=[];self.state_result=None;self.issue_artists=[];self.shift_artist=None
+        self.preview_page=0;self._initial_extreme_page=0;self.page_items=[];self._extreme_paint={};self.state_result=None;self.issue_artists=[];self.shift_artist=None
         self.rendered_layers={};self.layer_artists={};self._layer_keys=[];self.geometry_cache=None;self.connections=None
         self.preview_worker=None;self.preview_workers=[];self.preview_pending=None;self.preview_ticket=0;self.engine=None;self.current_frame=None;self.shown_states=None
         self.die_labels=[];self._default_view=None;self._artist_frame=None;self.report_dirty=True;self._reordering=False
@@ -289,11 +296,11 @@ class MainWindow(W.QMainWindow):
         self.preview_tabs.setCornerWidget(corner)
         self.probability_toggle.toggled.connect(self.probability_changed);self.space_toggle.toggled.connect(self.space_changed)
         extreme_page=W.QWidget();ep=W.QVBoxLayout(extreme_page);ep.setContentsMargins(0,0,0,0)
-        self.page_summary=label('尚未评估');self.page_summary.setToolTip('绿色为已验证安全，其他已缓存的行为蓝色。缓存项目越多颜色越深；在行上停留可查看确切项数。');ep.addWidget(self.page_summary)
-        nav=W.QHBoxLayout();self.grid_mode=W.QComboBox();self.grid_mode.addItems(['全部组合','重点组合'])
+        self.page_summary=W.QLabel('尚未评估')
+        nav=W.QHBoxLayout();self.grid_mode=W.QComboBox();self.grid_mode.addItems(['全部组合','重点组合']);self.grid_mode.setCurrentIndex(1)
         self.page_prev=W.QPushButton('上一页');self.page_next=W.QPushButton('下一页');self.page_prev.setEnabled(False);self.page_next.setEnabled(False)
-        self.page_edit=W.QLineEdit('1');self.page_edit.setMaximumWidth(100);self.page_edit.setToolTip('输入页码并按回车')
-        for widget in (self.grid_mode,self.page_prev,self.page_edit,self.page_next):nav.addWidget(widget)
+        self.page_edit=W.QLineEdit('1');self.page_edit.setMaximumWidth(54);self.page_edit.setToolTip('输入页码并按回车')
+        for widget in (self.grid_mode,self.page_prev,self.page_edit,self.page_next,self.page_summary):nav.addWidget(widget)
         nav.addStretch();ep.addLayout(nav)
         self.grid_mode.currentIndexChanged.connect(lambda *_:self.show_extreme_page(0))
         self.page_prev.clicked.connect(lambda:self.show_extreme_page(self.preview_page-1))
@@ -305,7 +312,8 @@ class MainWindow(W.QMainWindow):
         manual=W.QHBoxLayout();self.manual_die=W.QComboBox();manual.addWidget(self.manual_die);self.manual_fields={}
         for key,title in [('dx','DX / μm'),('dy','DY / μm'),('angle','O / °')]:
             manual.addWidget(W.QLabel(key if key!='angle' else 'O/°'));spin=W.QDoubleSpinBox();spin.setRange(-100000,100000);spin.setDecimals(4);spin.setKeyboardTracking(False);spin.setMinimumWidth(60);spin.setMaximumWidth(105);self.manual_fields[key]=spin;manual.addWidget(spin)
-        self.manual_button=W.QPushButton('预览输入');self.manual_button.clicked.connect(self.apply_manual);manual.addWidget(self.manual_button);ep.addLayout(manual)
+        self.manual_button=W.QPushButton('预览输入');self.manual_button.clicked.connect(self.apply_manual);manual.addWidget(self.manual_button)
+        self.restore_button=W.QPushButton('复原');self.restore_button.setToolTip('回到空白首行，所有 DIE 恢复零偏移');self.restore_button.clicked.connect(self.restore_preview);manual.addWidget(self.restore_button);ep.addLayout(manual)
         self.motion_table=table(['层/类型','用途','运动方式','连接追溯结果'])
         self.state_table=table(['芯片','DX / μm','DY / μm','转角 / °','组合方向'])
         issue_page=W.QWidget();iv=W.QVBoxLayout(issue_page);iv.setContentsMargins(0,0,0,0);ir=W.QHBoxLayout()
@@ -316,6 +324,10 @@ class MainWindow(W.QMainWindow):
         self.issue_table=table(['接触判定','DIE','概率范围 / 二值','允许概率','控制距离 / μm','原间距 / μm','接触坐标 / μm']);iv.addWidget(self.issue_table)
         self.issue_table.currentCellChanged.connect(self.issue_row_changed);self.issue_table.cellClicked.connect(lambda *_:self.issue_navigation.start())
         self.issue_scheme.currentIndexChanged.connect(self.issue_filter_changed);self.show_issues.toggled.connect(lambda _:self.plot_layout(preserve=True))
+        for panel,grid,layout in ((extreme_page,self.extreme_table,ep),(issue_page,self.issue_table,iv)):
+            panel.setStyleSheet(COMPACT_PREVIEW_STYLE);layout.setSpacing(2)
+            grid.verticalHeader().setMinimumSectionSize(18);grid.verticalHeader().setDefaultSectionSize(21)
+        for line in (manual,nav,ir):line.setSpacing(3)
         self.extreme_split=W.QSplitter(HORIZONTAL);self.extreme_split.addWidget(extreme_page);self.extreme_split.addWidget(issue_page);self.extreme_split.setSizes([520,500])
         self.preview_tabs.addTab(self.extreme_split,'极端情况')
         self.die_table=table(['芯片','长 / μm','宽 / μm','接口过孔','边界接口','角点包络 / μm','方案1 U','方案2 U','方案3 U'])
@@ -406,7 +418,9 @@ class MainWindow(W.QMainWindow):
         def spin(form,key,title,low,high,decimals=0):
             widget=W.QDoubleSpinBox() if decimals else W.QSpinBox();widget.setRange(low,high)
             if decimals:widget.setDecimals(decimals)
-            widget.setKeyboardTracking(False);self.setting_fields[key]=widget;form.addRow(title,widget);widget.valueChanged.connect(self.settings_changed)
+            widget.setKeyboardTracking(False);self.setting_fields[key]=widget
+            if form is not None:form.addRow(title,widget)
+            widget.valueChanged.connect(self.settings_changed);return widget
         caches=group('缓存管理')
         spin(caches,'cache_max_entries','最大缓存个数 / 工程',10,100000)
         self.setting_fields['cache_max_entries'].setToolTip('数值结果和动画各自按此上限保留。命中只更新最近使用顺序，正反动画共用一项。无位移状态固定保留。')
@@ -480,7 +494,13 @@ class MainWindow(W.QMainWindow):
         channel=group('宽度分析 · 元素显示')
         drawing_modes=WidthDisplayEditor();self.setting_fields['width_display']=drawing_modes
         channel.addRow(drawing_modes);drawing_modes.valueChanged.connect(self.settings_changed)
-        spin(channel,'width_label_font_pt','标签字号 / pt',6,24,1)
+        text_row=W.QHBoxLayout();text_row.setContentsMargins(0,0,0,0)
+        text_row.addWidget(spin(None,'width_label_font_pt','',6,24,1))
+        text_row.addWidget(W.QLabel('标签小数位数'))
+        text_row.addWidget(spin(None,'width_label_decimals','',0,6))
+        channel.addRow('标签字号 / pt',text_row)
+        for form,key,title in ((probability,'show_low_contact','显示低概率接触位置'),(channel,'show_low_width','显示低概率宽度风险')):
+            box=W.QCheckBox(title);self.setting_fields[key]=box;form.addRow(box);box.toggled.connect(self.settings_changed)
         drc_group=group('DRC检查')
         spin(drc_group,'drc_tolerance_um','线宽/线距容差 ± / μm',-10000,10000,3)
         self.setting_fields['drc_tolerance_um'].setToolTip('有效最小值 = 工艺值 − 容差。正值放宽，负值收紧；默认0。只影响DRC与型变验收，不改变包围量或概率。')
@@ -539,8 +559,9 @@ class MainWindow(W.QMainWindow):
         if self.loading:return
         values={k:(w.currentData() if isinstance(w,W.QComboBox) else w.isChecked() if isinstance(w,W.QCheckBox) else w.value()) for k,w in self.setting_fields.items()}
         updated=ViewSettings.from_dict(values)
-        if all(getattr(updated,k)==getattr(self.view_settings,k) for k in values if k not in ('cache_max_entries','width_display','width_label_font_pt')):
-            display_change=(updated.width_display!=self.view_settings.width_display or updated.width_label_font_pt!=self.view_settings.width_label_font_pt)
+        presentation=('width_display','width_label_font_pt','width_label_decimals','show_low_contact','show_low_width')
+        if all(getattr(updated,k)==getattr(self.view_settings,k) for k in values if k not in (*presentation,'cache_max_entries')):
+            display_change=any(getattr(updated,k)!=getattr(self.view_settings,k) for k in presentation)
             self.view_settings=updated;self.cache_group.limit(updated.cache_max_entries);self.refresh_cache_status()
             if display_change and self.data:self._legend_stamp=None;self.plot_layout(preserve=True)
             return
@@ -735,12 +756,17 @@ class MainWindow(W.QMainWindow):
         self.parked_groups.clear()
     def assessment_identity(self,data,roles,order,p,settings):
         from .session_cache import logical_fingerprint
-        return ('assessment-v26',logical_fingerprint((data.geometry_id,data.top_name,roles,order,asdict(p),settings.numeric_key(),settings.drc_tolerance_um,settings.deformation_min_angle_deg)))
+        return ('assessment-v27',logical_fingerprint((data.geometry_id,data.top_name,roles,order,asdict(p),settings.numeric_key(),settings.drc_tolerance_um,settings.deformation_min_angle_deg)))
     def preview_identity(self,data,roles,order,motions,params,result):
         from .session_cache import logical_fingerprint
-        return logical_fingerprint((data.geometry_id,data.top_name,roles,order,motions,asdict(params),result is not None,(result or {}).get('parameters'),(result or {}).get('contact_analysis'),(result or {}).get('issues')))
+        digest=None
+        if result is not None:
+            if result is self.result and getattr(self,'_assessment_digest',None) is not None:
+                digest=self._assessment_digest
+            else:digest=logical_fingerprint((result.get('parameters'),result.get('contact_analysis'),result.get('issues')))
+        return logical_fingerprint((data.geometry_id,data.top_name,roles,order,motions,asdict(params),digest))
     def clear_preview(self):
-        self.extremes=None;self.active_preview=None;self.owner_cache=None;self.page_items=[];self.preview_page=0;self.state_result=None
+        self.extremes=None;self.active_preview=None;self.owner_cache=None;self.page_items=[];self._extreme_paint={};self.preview_page=0;self.state_result=None
         self.preview_ticket+=1;self.preview_pending=None;self._prepared_motion=None;self.engine=None;self.current_frame=None;self.shown_states=None;self.report_dirty=True;self.repair_data=None
         self.extreme_table.blockSignals(True);self.extreme_table.clearContents();self.extreme_table.setRowCount(1);self.extreme_table.setCurrentCell(0,0);self.extreme_table.blockSignals(False)
         self.state_table.setRowCount(0);self.issue_table.setRowCount(0);self._issue_table_stamp=None;self.page_summary.setText('尚未评估');self.page_prev.setEnabled(False);self.page_next.setEnabled(False);self.page_edit.setText('1')
@@ -830,7 +856,7 @@ class MainWindow(W.QMainWindow):
         self.loading=True
         try:
             self.data=data;self.gds_label.setText(Path(data.path).name+'\n'+str(Path(data.path).resolve()));self.gds_label.setToolTip(str(Path(data.path).resolve()))
-            view=project.get('extreme_view',{'mode':'all','page':1})
+            view=project.get('extreme_view',{'mode':'focus','page':1})
             self.grid_mode.blockSignals(True);self.grid_mode.setCurrentIndex(int(view['mode']=='focus'));self.grid_mode.blockSignals(False)
             self._initial_extreme_page=view['page']-1
             for title,header in self.setting_sections.items():header.setChecked(title in project.get('expanded_settings',[]))
@@ -1078,9 +1104,9 @@ class MainWindow(W.QMainWindow):
         if self.result is None or not data or not self.width_toggle.isChecked():return
         show=self.width_sufficient_toggle.isChecked()
         visible=[r for r in data['rows'] if show or r['status']!='宽度足够']
-        keys=('status','pair','refs','original','required','current','point','plane','gap_um','nominal_gap_um','slots_um','widths_um','minimum_um','keep_um','split','locked','unresolved','narrowing_um')
+        keys=('status','pair','refs','original','required','current','point','plane','gap_um','nominal_gap_um','slots_um','widths_um','minimum_um','keep_um','split','locked','unresolved','narrowing_um','event_probability')
         self.result['preview_width_analysis']=dict(states=frame['states'].tolist(),counts=data['counts'],scope=data['scope'],parameters=data['parameters'],examined=data['examined'],
-                                                   displayed=len(visible),edge_violations=[{k:e[k] for k in ('layer','indices','point','gap_um','required_um')} for e in data.get('edge_violations',[])],rows=[{k:r[k] for k in keys} for r in visible[:100]])
+                                                   displayed=len(visible),edge_violations=[{k:e[k] for k in ('layer','indices','point','gap_um','required_um','event_probability') if k in e} for e in data.get('edge_violations',[])],rows=[{k:r[k] for k in keys if k in r} for r in visible[:100]])
         self.report_dirty=True
 
     def width_filter_changed(self,*_):
@@ -1268,7 +1294,7 @@ class MainWindow(W.QMainWindow):
         for name,artist in zip(('annulus','spacing'),self.zone_artists):
             paths=[np.asarray(q[name].exterior.coords) for q in frame['contact']['regions'] if self.visible_boxes[q['key']].isChecked() and overlaps(q['bounds'] if 'bounds' in q else q[name].bounds,self.view_bounds)] if frame else []
             artist.set_segments(paths);artist.set_visible(bool(paths))
-        entries=frame['contact']['issues'] if frame else (self.result or {}).get('issues',[])
+        entries=self.contact_entries(frame)
         self.display_issues=[q for q in entries if q['scheme']==scheme and self.visible_boxes.get(q.get('source_layer')) is not None and self.visible_boxes[q['source_layer']].isChecked() and self.visible_boxes.get(q.get('target_layer')) is not None and self.visible_boxes[q['target_layer']].isChecked()]
         if not self.issue_artists:
             area=PatchCollection([],facecolor='#e32e43',edgecolor='#ba2535',linewidth=.45,zorder=8.7);area._intrusion=True;self.ax.add_collection(area,autolim=False)
@@ -1276,16 +1302,30 @@ class MainWindow(W.QMainWindow):
             lines=LineCollection([],colors='#6c747d',linestyles=(0,(4,3)),linewidths=1.05,zorder=9,path_effects=[patheffects.withStroke(linewidth=2.3,foreground='white',alpha=.7)]);self.ax.add_collection(lines)
             self.issue_artists=[area,circles,lines]
         area,circles,lines=self.issue_artists
-        patches=[self.geometry_patch(q['geometry']) for q in frame['contact'].get('intrusions',[]) if self.visible_boxes[q['key']].isChecked() and self.visible_boxes[q['target_layer']].isChecked() and overlaps(q['geometry'].bounds,self.view_bounds)] if frame else []
-        area.set_paths(patches);area.set_alpha(self.view_settings.intrusion_alpha);area.set_visible(self.show_issues.isChecked() and bool(patches))
+        lows={(q['source_layer'],q['source_index'],q['target_layer'],q['target_index']):q.get('low_probability',False) for q in self.display_issues}
+        intrusions=[]
+        for q in frame['contact'].get('intrusions',[]) if frame else ():
+            key=(q['key'],q['index'],q['target_layer'],q['target_index'])
+            if key in lows and overlaps(q['geometry'].bounds,self.view_bounds):intrusions.append((q['geometry'],lows[key]))
+        area.set_paths([self.geometry_patch(g) for g,_ in intrusions]);alpha=self.view_settings.intrusion_alpha
+        mixed=any(low for _,low in intrusions);area.set_alpha(None if mixed else alpha)
+        for method,ink in ((area.set_facecolor,'#e32e43'),(area.set_edgecolor,'#ba2535')):
+            method([low_ink(matplotlib.colors.to_rgba(ink,alpha),low) for _,low in intrusions] if mixed else ink)
+        area.set_visible(self.show_issues.isChecked() and bool(intrusions))
         # Tables retain every issue; only in-view markers/connectors are drawn.
         marker_area=self.marker_size('contact')
         marker_radius=math.sqrt(marker_area)*self.figure.dpi/144*np.ptp(self.ax.get_xlim())/max(1,self.ax.bbox.width)
         self.rendered_issues=[q for q in self.display_issues if overlaps((*np.asarray(q['point'])-marker_radius,*np.asarray(q['point'])+marker_radius),self.view_bounds)]
-        segments=[np.array([self.issue_origin(q),q['point']]) for q in self.display_issues]
-        segments=[a for a in segments if overlaps((*a.min(axis=0),*a.max(axis=0)),self.view_bounds)]
-        circles.set_sizes([marker_area]);circles.set_edgecolor(self.view_settings.contact_marker_color);circles.set_offsets(np.asarray([q['point'] for q in self.rendered_issues]).reshape(-1,2));circles.set_visible(self.show_issues.isChecked() and bool(self.rendered_issues))
-        lines.set_segments(segments);lines.set_visible(self.show_issues.isChecked() and bool(segments))
+        segments=[];line_colors=[]
+        for q in self.display_issues:
+            a=np.array([self.issue_origin(q),q['point']])
+            if overlaps((*a.min(axis=0),*a.max(axis=0)),self.view_bounds):
+                segments.append(a);line_colors.append(low_ink('#6c747d',q.get('low_probability')))
+        ring_colors=[low_ink(self.view_settings.contact_marker_color,q.get('low_probability')) for q in self.rendered_issues]
+        for artist,width,inks in ((circles,3.,ring_colors),(lines,2.3,line_colors)):
+            artist.set_path_effects([] if any(c[3]<1 for c in inks) else [patheffects.withStroke(linewidth=width,foreground='white',alpha=.75)])
+        circles.set_sizes([marker_area]);circles.set_edgecolor(ring_colors);circles.set_offsets(np.asarray([q['point'] for q in self.rendered_issues]).reshape(-1,2));circles.set_visible(self.show_issues.isChecked() and bool(self.rendered_issues))
+        lines.set_segments(segments);lines.set_color(line_colors);lines.set_visible(self.show_issues.isChecked() and bool(segments))
         if not hasattr(self,'violation_artist') or self.violation_artist.axes is None:
             self.violation_artist=PatchCollection([],facecolor='#e956b5',edgecolor='#ca398f',linewidth=.5,alpha=.48,zorder=10.2);self.ax.add_collection(self.violation_artist)
         # Repair mode replaces the DRC source, so the two never disagree on screen.
@@ -1820,6 +1860,10 @@ class MainWindow(W.QMainWindow):
     def display_result(self,r,catalog=None,preserve=False):
         saved=(self.active_preview,self.manual_states,self.issue_scheme.currentIndex(),self.preview_page)
         self.cache_group.last_assessment=(self.assessment_identity(self.data,self.roles(),self.ordered_layers(),self.params(),self.view_settings),r)
+        from .session_cache import logical_fingerprint
+        # The published assessment is immutable. Preview/report fields appended
+        # later are deliberately outside its numerical identity.
+        self._assessment_digest=logical_fingerprint((r.get('parameters'),r.get('contact_analysis'),r.get('issues')))
         self.result=r;self.dirty=False;self.evaluation_motions=r.get('motions',self.motions());self.manual_states=None
         if self.case is None:self.case=build_case(self.data,self.roles(),layer_order=self.ordered_layers())
         self.extremes=catalog if catalog is not None else ExtremeCatalog(self.case,self.params())
@@ -1895,10 +1939,13 @@ class MainWindow(W.QMainWindow):
     def show_extreme_page(self,page=0,redraw=True):
         if self.extremes is None:return
         catalogue=self.focus_extremes if self.grid_mode.currentIndex()==1 else self.extremes
-        pages=max(1,(catalogue.total+63)//64);page=max(0,min(page,pages-1))
-        self.preview_page=page;self.page_items=catalogue.page(page);self.active_preview=None
+        pages=max(1,(catalogue.total+EXTREME_PAGE_SIZE-1)//EXTREME_PAGE_SIZE);page=max(0,min(page,pages-1))
+        self.preview_page=page;self.page_items=catalogue.page(page,EXTREME_PAGE_SIZE);self.active_preview=None;self._extreme_paint={};self._paint_pass=None
         self.page_edit.setText(str(page+1));self.page_prev.setEnabled(page>0);self.page_next.setEnabled(page+1<pages)
-        self.page_summary.setText(f'整包 {self.extremes.total+1:,} 种（含首行不动） · {self.grid_mode.currentText()}第 {page+1:,}/{pages:,} 页')
+        count=f'共 {catalogue.total+1:,} 种'
+        if catalogue is not self.extremes:count+=f' / 整包 {self.extremes.total+1:,}'
+        self.page_summary.setText(f'{count} · 第 {page+1:,}/{pages:,} 页')
+        self.page_summary.setToolTip('种数均含全包零位；每页最多 256 个非零姿态。绿色为通过，其他已缓存行为蓝色。')
         self.extreme_table.blockSignals(True);self.extreme_table.clearContents();self.extreme_table.setRowCount(len(self.page_items)+1)
         for col in range(self.extreme_table.columnCount()):self.extreme_table.setItem(0,col,W.QTableWidgetItem(''))
         for i,(index,e) in enumerate(self.page_items,1):
@@ -1911,7 +1958,7 @@ class MainWindow(W.QMainWindow):
             for j,value in enumerate(values):
                 item=W.QTableWidgetItem(value);item.setToolTip(detail);self.extreme_table.setItem(i,j,item)
         self.extreme_table.setCurrentCell(0,0);self.extreme_table.blockSignals(False)
-        for j,width in enumerate([125,135,135,125]):self.extreme_table.setColumnWidth(j,width)
+        for j,width in enumerate([99,94,94,81]):self.extreme_table.setColumnWidth(j,width)
         self.extreme_table.horizontalHeader().setStretchLastSection(True);self.state_table.setRowCount(0)
         self.refresh_extreme_colors()
         if redraw:self.select_preview(0,0)
@@ -1922,22 +1969,29 @@ class MainWindow(W.QMainWindow):
         if self.extremes is None:return
         self._cache_colors_changed()
         rows=[(0,None),*[(i,item) for i,(_,item) in enumerate(self.page_items,1)]]
+        current_key=(frame['states'].tobytes() if frame is not None and not frame.get('nominal_global') else None)
+        current=frame_status(frame) if current_key is not None else {}
+        version=(self._cache_color_context,self._cache_color_epoch,id(self.result),self.dirty,current_key,tuple(current.items()))
+        if getattr(self,'_paint_pass',None)==version:return
+        self._paint_pass=version
         for row,item in rows:
             key=item['states'].tobytes() if item else bytes(24*len(self.extremes.locals))
             status=status_for(factors,item['choices']) if item else {}
             known=self._cached_row_checks.get(key) if item else None
             if known and (known['checked'] or known['safe'] is False or known.get('width_pending') or self.deformation_toggle.isChecked() or self.dirty):status=known
-            if item and frame is not None and not frame.get('nominal_global') and np.array_equal(frame['states'],item['states']):
-                current=frame_status(frame)
+            if item and key==current_key:
                 if current.get('checked') or current.get('safe') is False:status=current
                 elif current.get('width_pending') or self.deformation_toggle.isChecked() or self.dirty:status=current
             count=self._cached_pose_counts.get(key,0);safe=status.get('safe') is True
-            brush=QtGui.QBrush() if not count and not safe else QtGui.QBrush(self.cache_row_color(count,safe))
             check=('通过已检查规则' if safe else '存在已检查的问题' if status.get('safe') is False else '未作完整校验') if item else '名义位置 / 全局判定'
             if not item:
                 zero=(self.result or {}).get('nominal_discrete_check',{}) if not self.dirty else {}
                 if zero.get('checked'):check+=' · 零位几何'+('通过' if zero['safe'] else '存在问题')
             if status.get('reason'):check+=' · '+status['reason']
+            signature=(check,count,safe)
+            if self._extreme_paint.get(row)==signature:continue
+            self._extreme_paint[row]=signature
+            brush=QtGui.QBrush() if not count and not safe else QtGui.QBrush(self.cache_row_color(count,safe))
             detail=f'{check}；当前工程同一评估输入下可复用缓存 {count} 项。绿色表示通过，蓝色表示其他已有缓存；颜色越深，缓存越多。'
             for col in range(self.extreme_table.columnCount()):
                 cell=self.extreme_table.item(row,col)
@@ -1948,10 +2002,17 @@ class MainWindow(W.QMainWindow):
 
     @staticmethod
     def cache_row_color(count,safe):
-        light=(227,242,229) if safe else (235,245,255)
-        dark=(88,164,119) if safe else (99,158,211)
-        level=count/(count+3.) if count else 0.
+        light=(239,248,240) if safe else (242,248,253)
+        dark=(184,218,193) if safe else (187,214,237)
+        level=count/(count+6.) if count else 0.
         return QtGui.QColor(*(round(a+(b-a)*level) for a,b in zip(light,dark)))
+    def restore_preview(self):
+        if self.data is None:return
+        # Manual preview may have no selection; selecting an already current
+        # zero row does not emit currentCellChanged. Dispatch exactly once.
+        self.extreme_table.blockSignals(True);self.extreme_table.setCurrentCell(0,0);self.extreme_table.blockSignals(False)
+        self.extreme_table.scrollToTop();self.select_preview(0,0)
+
     def select_preview(self,row,column,*_):
         if self.loading:return
         if hasattr(self,'mouse_die'):
@@ -1967,8 +2028,39 @@ class MainWindow(W.QMainWindow):
                     self.state_table.setItem(i,j,W.QTableWidgetItem(str(value)))
             self.state_table.resizeColumnsToContents()
         self.request_preview()
+    def contact_entries(self,frame):
+        result=self.result or {};stats=result.get('contact_analysis')
+        entries=frame['contact']['issues'] if frame else result.get('issues',[])
+        if stats is None or self.dirty or stats.get('location_threshold') is None or self.deformation_toggle.isChecked() or (frame and frame.get('global_deformation')):
+            return entries
+        inputs=(id(entries),id(stats),bool(not frame or frame.get('nominal_global')),self.view_settings.show_low_contact)
+        if getattr(self,'_contact_display_key',None)==inputs:return self._contact_display_rows
+        if getattr(self,'_contact_stats',None) is not stats:
+            self._contact_stats=stats
+            self._contact_locations={(q['source_layer'],q['source_index'],q['target_layer'],q['target_index']):q for q in stats['locations']}
+        rows=[]
+        if inputs[2]:
+            rows.extend(entries)
+            if self.view_settings.show_low_contact:
+                # The joint event may exceed the budget even when its witness
+                # belongs to a rare single target. Keep the two decisions distinct.
+                rows.extend(stats.get('low_issues',()))
+        else:
+            for q in entries:
+                key=(q['source_layer'],q['source_index'],q['target_layer'],q['target_index'])
+                loc=self._contact_locations.get(key)
+                # Absent targets were excluded over the entire hard input support.
+                upper=loc['upper'] if loc else 0.;limit=stats['location_threshold']
+                low=upper<=limit
+                if low and not self.view_settings.show_low_contact:continue
+                rows.append(dict(q,low_probability=low,location_upper=upper,location_threshold=limit,
+                                 detail=q.get('detail','')+f' 此姿态为二值实测。此孔对该异网图形的事件概率上界 {upper:.3g}，门限 {limit:.3g}。'))
+        self._contact_display_source=entries  # retain identity until the next frame
+        self._contact_display_key=inputs;self._contact_display_rows=rows
+        return rows
+
     def fill_issues(self):
-        entries=self.current_frame['contact']['issues'] if self.current_frame else (self.result or {}).get('issues',[])
+        entries=self.contact_entries(self.current_frame)
         stamp=(id(entries),self.issue_scheme.currentData(),id(self.result))
         if stamp==self._issue_table_stamp:return
         self._issue_table_stamp=stamp
@@ -1978,9 +2070,11 @@ class MainWindow(W.QMainWindow):
         for i,q in enumerate(self.filtered_issues):
             point=q['point'];probability='型变后概率待细化' if q.get('adaptive_unresolved') else f"{q['probability_lower']:.3g} ～ {q['probability_upper']:.3g}" if 'probability_lower' in q else '100%（当前接触）'
             allowed=f"{q['threshold']:.3g}" if 'threshold' in q else '二值'
-            values=[q['kind'],q['die'],probability,allowed,fmt(q['need']),fmt(q['allow']),f'{fmt(point[0])}, {fmt(point[1])}']
+            values=[q['kind']+(' · 低概率' if q.get('low_probability') and q['kind']!='低概率接触' else ''),q['die'],probability,allowed,fmt(q['need']),fmt(q['allow']),f'{fmt(point[0])}, {fmt(point[1])}']
             for j,value in enumerate(values):
-                item=W.QTableWidgetItem(str(value));item.setToolTip(q.get('detail',''));self.issue_table.setItem(i,j,item)
+                item=W.QTableWidgetItem(str(value));item.setToolTip(q.get('detail',''))
+                if q.get('low_probability'):item.setForeground(QtGui.QColor('#82919e'))
+                self.issue_table.setItem(i,j,item)
         self.issue_table.resizeColumnsToContents();self.issue_table.blockSignals(False)
         status=self.result['schemes'][self.issue_scheme.currentData()-1]['status'] if self.result else '尚未评估'
         scope='全局型变：代表状态已迭代；连续概率待细化' if self.current_frame and self.current_frame.get('nominal_global') and self.current_frame.get('global_deformation') else '当前预演' if self.current_frame and not self.current_frame.get('nominal_global') else '评估包络'
@@ -2034,7 +2128,7 @@ class MainWindow(W.QMainWindow):
     def project_settings(self):
         return dict(schema_version=5,app_version=__version__,sha256=self.data.sha256,top_cell=self.data.top_name,
                     roles=self.roles(),parameters=asdict(self.params()),settings=asdict(self.view_settings),node_edits=list(self.data.node_edits),
-                    extreme_view=dict(mode='focus' if self.grid_mode.currentIndex() else 'all',page=(self.preview_page if self.extremes is not None else self._initial_extreme_page)+1),
+                    extreme_view=dict(mode='focus' if self.grid_mode.currentIndex() else 'all',page_size=EXTREME_PAGE_SIZE,page=(self.preview_page if self.extremes is not None else self._initial_extreme_page)+1),
                     expanded_settings=[title for title,header in self.setting_sections.items() if header.isChecked()],
                     overlays={name:getattr(self,name+'_toggle').isChecked() for name in OVERLAY_DEFAULTS},layer_styles=self.layer_styles,
                     visibility={k:w.isChecked() for k,w in self.visible_boxes.items()},motions=self.motions(),layer_order=self.ordered_layers())

@@ -164,7 +164,7 @@ class ContactModel:
     def screen(self,p,settings=None,progress=lambda *_:None):
         self.configure_parameters(p)
         from .settings import ViewSettings
-        from .contact_probability import contact_probability
+        from .contact_probability import contact_probability,reachable_targets,location_witness
         from .resources import parallel_map
         cfg=settings or ViewSettings();ratios={s:0. for s in (1,2,3)}
         common=dict(network_count=self.network_count,
@@ -176,9 +176,41 @@ class ContactModel:
             for issue in current['issues']:
                 issue['states']=None;ratios[issue['scheme']]=max(ratios[issue['scheme']],issue['ratio'])
             return dict(**common,issues=current['issues'],ratios=ratios,unresolved=[],probabilities=[],mode='binary',scope='∞：名义位置二值接触；具体预演始终二值判定')
-        values=parallel_map(lambda r:contact_probability(self,r,p,cfg.contact_box_budget),self.records,progress=lambda done,total:progress(72+round(23*done/max(1,total)),f'接触概率积分 {done}/{total}'))
-        issues=[];unresolved=[];probabilities=[]
-        for record,value in zip(self.records,values):
+        def solve(record):
+            ids=reachable_targets(self,record,p)
+            joint=contact_probability(self,record,p,cfg.contact_box_budget,ids)
+            locations=[]
+            if p.target_nsigma>0:
+                for node in ids:
+                    if len(ids)==1:event=joint
+                    elif joint['upper']<=p.failure_threshold:
+                        # A subset inherits the union upper bound, but never its lower bound
+                        # or a different target's witness.
+                        w=joint['witness']
+                        event=dict(lower=0.,upper=joint['upper'],witness=w if w and w['node']==node else None)
+                    else:event=contact_probability(self,record,p,cfg.contact_box_budget,[node])
+                    low=event['upper']<=p.failure_threshold
+                    witness=event['witness']
+                    if low and witness is None and event['upper']>0:
+                        witness=location_witness(self,record,p,node)
+                    target=self.nodes[node]
+                    locations.append(dict(source_layer=record['key'],source_index=record['index'],
+                        target_layer=target['key'],target_index=target['index'],low=low,
+                        lower=event['lower'],upper=event['upper'],threshold=p.failure_threshold,witness=witness))
+            return joint,locations
+        values=parallel_map(solve,self.records,progress=lambda done,total:progress(72+round(23*done/max(1,total)),f'接触概率积分 {done}/{total}'))
+        issues=[];unresolved=[];probabilities=[];locations=[];low_issues=[]
+        for record,(value,items) in zip(self.records,values):
+            locations.extend(items)
+            for loc in items:
+                witness=loc['witness']
+                if not loc['low'] or witness is None:continue
+                node=self.nodes[witness['node']]
+                for scheme in record['schemes']:
+                    row=self.issue(record,node,witness['point'],record['poly'].distance(node['poly']),p.annulus_um+p.line_space_um,p.line_space_um,scheme,'低概率接触')
+                    row.update(low_probability=True,probability_lower=loc['lower'],probability_upper=loc['upper'],threshold=loc['threshold'],
+                               detail='该孔与这一处异网固定铜的接触概率上界低于或等于良率门限。坐标来自可达接触姿态。')
+                    low_issues.append(row)
             q=dict(value,source_layer=record['key'],source_index=record['index'],die=record['owner']+1)
             probabilities.append(q)
             if value['verdict']=='概率待细化':unresolved.append(q)
@@ -191,7 +223,7 @@ class ContactModel:
                 row.update(probability_lower=value['lower'],probability_upper=value['upper'],threshold=value['threshold'],positive_probability_proven=value.get('positive_probability_proven',False))
                 row['detail']=f"接触概率区间 [{value['lower']:.6g}, {value['upper']:.6g}]，允许上限 {value['threshold']:.6g}；接口与全部其他网络的联合事件。"
                 issues.append(row)
-        return dict(**common,issues=issues,ratios=ratios,unresolved=unresolved,probabilities=probabilities,mode='probability',
+        return dict(**common,issues=issues,low_issues=low_issues,locations=locations,location_threshold=p.failure_threshold if p.target_nsigma else None,ratios=ratios,unresolved=unresolved,probabilities=probabilities,mode='probability',
             scope='名义行：每接口联合接触概率与2Φ(−k)比较；上下界未能决定则待细化，不输出虚假不足或通过')
 
 

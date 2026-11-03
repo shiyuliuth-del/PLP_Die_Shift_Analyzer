@@ -203,11 +203,26 @@ def _crossings(ends, plane, tol):
              shapely.covers(clipped,shapely.points(middle[ids[source]])))
     use=np.zeros(len(ids),bool)
     use[source[through]]=True
-    for idx,width in zip(ids[use],widths[use]):
-        sources = plane['route_sources'][int(ri[idx])]
-        refs = ((sources[0][0],) if len(sources)==1 else
-                tuple(ref for ref,geometry in sources if geometry.intersection(parts[idx]).length>tol))
-        answers[ci[idx]].append((float((lo[idx]+hi[idx])/2),float(width),refs))
+    hits=ids[use]
+    refs_by_part={}
+    # One net may contain many source polygons. Query its local index once
+    # for all crossing chords, preserving source order and the length rule.
+    for route in np.unique(ri[hits]):
+        relevant=hits[ri[hits]==route]
+        sources=plane['route_sources'][route]
+        if len(sources)==1:
+            for idx in relevant:refs_by_part[idx]=(sources[0][0],)
+            continue
+        indices=plane.setdefault('source_trees',{})
+        if route not in indices:indices[route]=STRtree([g for _,g in sources])
+        tree=indices[route]
+        i,j=tree.query(parts[relevant])
+        lengths=shapely.length(shapely.intersection(parts[relevant[i]],tree.geometries[j]))
+        found=defaultdict(list)
+        for idx,src in zip(relevant[i[lengths>tol]],j[lengths>tol]):found[idx].append(src)
+        for idx in relevant:refs_by_part[idx]=tuple(sources[j][0] for j in sorted(found[idx]))
+    for idx,width in zip(hits,widths[use]):
+        answers[ci[idx]].append((float((lo[idx]+hi[idx])/2),float(width),refs_by_part[idx]))
     for group in answers:
         group.sort(key=lambda item:item[0])
     return answers
@@ -266,6 +281,8 @@ class WidthAnalyzer:
         shapely.prepare(self.inside)
         self.cache = SessionCache(group=cache_group)
         self.planes = self._planes()
+        from .width_probability import ChannelProbability
+        self.probability=ChannelProbability(model,parameters,self.board,self.tol) if 0<parameters.target_nsigma<math.inf else None
 
     def close(self):
         self.cache.close()
@@ -470,13 +487,30 @@ class WidthAnalyzer:
                             progress=lambda done,total:progress(done/max(1,total),'识别名义线路穿越'))
         return [gate for group in groups for gate in group]
 
+    @staticmethod
+    def _templates(shapes,owners):
+        owners=np.asarray(owners)
+        indices=np.flatnonzero(owners>=0)
+        xy,source=shapely.get_coordinates(shapes[indices],return_index=True)
+        return shapes,indices,xy,owners[indices][source]
+
+    def _placed(self,template,states,nominal):
+        shapes,indices,xy,vertex_owners=template
+        if nominal or not len(indices):return shapes
+        placed=shapes.copy()
+        coordinates=self.model.bound.transform_points(xy,vertex_owners,states)
+        placed[indices]=shapely.set_coordinates(shapes[indices],coordinates)
+        return placed
+
     def _measure(self, name, plane, states, progress):
         if plane['gates'] is None:
             plane['gates'] = self._catalogue(plane,lambda n,t:progress(.65*n,t))
         gates, walls = plane['gates'], plane['walls']
         nominal = not np.any(states)
-        geometries = np.array([w.geometry if nominal or w.owner<0 else self.model.moved(w.geometry,w.owner,states)
-                               for w in walls],object)
+        if 'wall_templates' not in plane:
+            shapes=np.asarray([w.geometry for w in walls],object)
+            plane['wall_templates']=self._templates(shapes,[w.owner for w in walls])
+        geometries=self._placed(plane['wall_templates'],states,nominal)
         retained = [dict(plane=name,name=w.name,layers=w.layers or plane['keys'],refs=w.refs,kind=w.kind,geometry=g)
                     for w,g in zip(walls[:plane['metal_count']],geometries)]
         if not gates:
@@ -491,8 +525,9 @@ class WidthAnalyzer:
         pieces=plane['pieces'];lines=shapely.linestrings(orig)
         anchored=np.empty(0,int)
         if not nominal:
-            pieces=np.array([geometries[parent] if piece is walls[parent].geometry else
-                             self.model.moved(piece,walls[parent].owner,states) for piece,parent in zip(pieces,plane['parents'])],object)
+            if 'piece_templates' not in plane:
+                plane['piece_templates']=self._templates(pieces,owners[plane['parents']])
+            pieces=self._placed(plane['piece_templates'],states,False)
             # Only recompute truly changed feature pairs. Many parallel samples
             # share two features; their feature minimum is the same operation.
             is_moving=(owners>=0)&np.any(states[np.maximum(owners,0)]!=0,axis=1)
@@ -571,6 +606,11 @@ class WidthAnalyzer:
             row['nominal_witness_um']=g.ends.tolist()
             rows.append((g,row))
         rows=self._distinct_throats(rows,half_depth)
+        if self.probability is not None:
+            by_name={w.name:w for w in walls}
+            for row in rows:
+                if row['status']!=ADEQUATE:
+                    row['event_probability']=self.probability.classify(row,[by_name[name] for name in row['pair']])
         progress(1.,'通道容量检查完成')
         return rows,retained
 
