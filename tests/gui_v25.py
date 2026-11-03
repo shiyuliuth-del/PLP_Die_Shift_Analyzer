@@ -101,7 +101,11 @@ with patch.object(PreviewEngine,'frame',side_effect=AssertionError('replayed cac
             for key,value in [('dx',35),('dy',0),('angle',0)]:w.manual_fields[key].setValue(value)
             w.apply_manual()
         wait();assert w._prepared_motion['cached'] and seen
-        seen.clear();first();assert w._prepared_motion['cached'] and seen
+        seen.clear()
+        if i%2:
+            QTest.mouseClick(w.restore_button,left);wait()
+        else:first()
+        assert w._prepared_motion['cached'] and seen
 assert disk()==baseline and ordinary==len(group.recent) and replays==len(group.replays)
 # A click during a new M request must cancel pointer intent and reject any
 # worker that finishes after the first row has taken ownership of the view.

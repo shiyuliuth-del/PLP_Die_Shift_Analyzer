@@ -248,6 +248,15 @@ class PreviewEngine:
                 for (k,i),q in by_ref.items():
                     if i==q['indices'][0]:changed.setdefault(k,[]).append(q)
                 edges=edge_violations(self.contact,states,self.p,cfg,changed)
+            probability=self.width_analyzer.probability
+            changed_copper=bool(overrides or frame.get('reconstruction',{}).get('replacements'))
+            if probability is not None and edges and not changed_copper:
+                annotated=[]
+                for q in edges:
+                    layer=q['layer'];index=q['indices'][0];node=self.contact.nodes[self.contact.ids[layer,index]]
+                    event=probability.edge(layer,index,node['poly'],node['owner'],q['required_um'])
+                    annotated.append(dict(q,event_probability=event))
+                edges=annotated
             frame['width_analysis']=dict(self.width_analyzer.frame(frame,progress,quick=quick),edge_violations=edges)
         if quick:self.intermediate.put(key,frame)
         else:

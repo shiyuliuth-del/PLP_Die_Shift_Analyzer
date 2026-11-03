@@ -53,8 +53,9 @@ class DieEvent:
     def __init__(self,model,p,owner,backend='auto'):
         self.backend=backend
         self.center=np.asarray(model.bound.centers[owner]);self.radius=p.annulus_um+p.line_space_um
-        self.tol=max(1e-9,model.data.dbu_um*1e-6);self.polys=[];self.obstacles=[];self.levers=[]
+        self.tol=max(1e-9,model.data.dbu_um*1e-6);self.polys=[];self.obstacles=[];self.levers=[];self.projections=[]
         count=len(model.bound.centers);mu,cov,_=statistical_state(p,count);_,b=mean_and_bounds(p,count)
+        self.mean_angle=mu[2]
         if math.isinf(p.target_nsigma):b=np.zeros(3)
         for r in model.records:
             if r['owner']!=owner or not r['foreign']:continue
@@ -72,6 +73,20 @@ class DieEvent:
                 local=shapely.union_all(shapely.intersection(others,domain))
                 if not local.is_empty:
                     self.polys.append(r['poly']);self.obstacles.append(local);self.levers.append(lever)
+                    ends=shapely.get_coordinates(shapely.shortest_line(via,local))
+                    axis=ends[-1]-ends[0];length=np.linalg.norm(axis)
+                    projection=None
+                    if length>self.tol:
+                        axis/=length
+                        center=np.asarray(r['poly'].centroid.coords[0])
+                        offset=center-self.center
+                        co,si=math.cos(mu[2]),math.sin(mu[2])
+                        n0=np.array([co*axis[0]+si*axis[1],-si*axis[0]+co*axis[1]])
+                        support=float(np.max((vertices-center)@n0))
+                        extent=float(np.linalg.norm(vertices-center,axis=1).max())
+                        limit=float((shapely.get_coordinates(local)@axis).min()-self.radius-2*self.tol)
+                        projection=(axis,offset,support,extent,limit)
+                    self.projections.append(projection)
         self.polys=np.array(self.polys,object);self.obstacles=np.array(self.obstacles,object);self.levers=np.array(self.levers)
 
     def move(self,polys,state):
@@ -92,11 +107,23 @@ class DieEvent:
     def no_contact(self,states):
         """Exact full-polygon distances; early exit for already contacting poses."""
         safe=np.ones(len(states),bool)
-        for poly,obstacle in zip(self.polys,self.obstacles):
+        for poly,obstacle,projection in zip(self.polys,self.obstacles,self.projections):
             indices=np.flatnonzero(safe)
             if not len(indices):break
+            pose=states[indices]
+            if projection is not None:
+                # One separating axis proves safety cheaply for a subset of
+                # poses. Every other pose still runs the full polygon predicate.
+                n,offset,support,extent,limit=projection
+                theta=pose[:,2]
+                cx=offset[0]*np.cos(theta)-offset[1]*np.sin(theta)+self.center[0]+pose[:,0]
+                cy=offset[0]*np.sin(theta)+offset[1]*np.cos(theta)+self.center[1]+pose[:,1]
+                extra=2*extent*np.abs(np.sin((theta-self.mean_angle)/2))
+                keep=cx*n[0]+cy*n[1]+np.minimum(extent,support+extra)>=limit
+                indices=indices[keep];pose=pose[keep]
+                if not len(indices):continue
             from .acceleration import rigid_pose_batch
-            pose=states[indices];xy=shapely.get_coordinates(poly)
+            xy=shapely.get_coordinates(poly)
             moved=shapely.set_coordinates(np.full(len(pose),poly,object),
                     rigid_pose_batch(xy,self.center,pose,self.backend).reshape(-1,2))
             safe[indices]=~shapely.dwithin(moved,obstacle,self.radius+self.tol)

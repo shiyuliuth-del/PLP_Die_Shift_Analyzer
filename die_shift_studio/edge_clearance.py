@@ -24,10 +24,32 @@ def edge_violations(model,states,parameters,settings,replacements=None,owners=No
             model._edge_interiors[rule]=inner
         inner=model._edge_interiors[rule]
         items=[];hidden={i for q in replacements.get(key,[]) for i in q['indices']}
-        for i,poly in enumerate(model.cache.layers[key]['geometry']):
+        geos=model.cache.layers[key]['geometry']
+        if not hasattr(model,'_edge_templates'):model._edge_templates={}
+        pivots=getattr(getattr(model,'bound',None),'centers',None)
+        stamp=(key,pivots.tobytes() if pivots is not None else None)
+        if stamp not in model._edge_templates:
+            own=np.array([model.nodes[model.ids[key,i]]['owner'] for i in range(len(geos))],int)
+            radii=np.zeros(len(geos))
+            xy,indices=shapely.get_coordinates(geos,return_index=True)
+            moving=own[indices]>=0
+            if pivots is not None:
+                np.maximum.at(radii,indices[moving],np.linalg.norm(xy[moving]-pivots[own[indices[moving]]],axis=1))
+            gap=np.where(shapely.covers(board,geos),shapely.distance(geos,board.boundary),-np.inf)
+            model._edge_templates[stamp]=(own,radii,gap)
+        own,radii,gap=model._edge_templates[stamp]
+        motion=np.zeros(len(own));moving=own>=0
+        if np.any(moving):
+            pose=np.asarray(states)[own[moving]]
+            delta=np.hypot(pose[:,0],pose[:,1])+2*radii[moving]*np.abs(np.sin(pose[:,2]/2))
+            if pivots is None:delta[pose[:,2]!=0]=math.inf
+            motion[moving]=delta
+        mask=gap<=rule+motion+max(1.e-9,model.data.dbu_um*1.e-6)
+        if owners is not None:mask &= np.isin(own,list(owners))
+        for i in np.flatnonzero(mask):
+            i=int(i);poly=geos[i]
             if i in hidden:continue
             node=model.nodes[model.ids[key,i]]
-            if owners is not None and node['owner'] not in owners:continue
             geo=model.moved(poly,node['owner'],states) if node['owner']>=0 and np.any(states[node['owner']]) else poly
             items.append(((i,),geo,node['net']))
         for q in replacements.get(key,[]):

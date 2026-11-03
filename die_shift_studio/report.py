@@ -67,6 +67,19 @@ def report_document(r,motions=None,progress=lambda *_:None):
           r'p_L=\frac{\sum_{b\in\mathcal{B}_{\mathrm{hit}}}m_b}{Z+\epsilon_Z},\quad p_U=\min\!\left(1,\frac{\sum_{b\in\mathcal{B}_{\mathrm{hit}}\cup\mathcal{B}_{?}}m_b+\epsilon_t}{Z-\epsilon_Z}\right)'],
          'pL>α才列不足；pU≤α才通过概率检查；其余显示“概率待细化”，可提高积分预算复算',
          'b为标准状态盒，l/h为各独立标准正态维的上下端点；mb为盒概率质量。盒经L变换后与硬输入边界相交，ex/ey/eθ为物理各维半宽；rV为该孔顶点到所属DIE中心最大距离；db为盒中间状态的过孔到其他网络最短距离。Δb是该盒所有状态的Hausdorff位移上界；仅整盒在H内且必接触才累计下界，部分越界/不能分类的盒保留上界。εt为未积分标准正态尾部的并集上界，εZ为归一化数值容差。按最大未定质量分裂状态盒，达到设置预算即停止。概率区间用于证明阈值关系，未声称给出收敛点估计；零采样命中不等于通过。')
+    locations=analysis.get('locations',[])
+    if analysis.get('location_threshold') is not None:
+        step('位置事件与低概率标记',f'当前良率级别 {p.target_nsigma:g}，可进入运动范围的过孔与异网图形共 {len(locations)} 对。',
+             [r'E_{ij}=\{d(T_Z V_i,C_j)\leq a+s\},\quad p_{ij}=\Pr(E_{ij}\mid H)',
+              r'\alpha_k=2\Phi(-k),\qquad p_{ij}\leq U_{ij}\leq\alpha_k'],
+             f"已证明低概率 {sum(q['low'] for q in locations)} 对，名义图仅标出有实际接触坐标的低概率事件。",
+             'Vᵢ 为运动过孔实体，Cⱼ 为单个异网固定铜图形，T 是所属芯片姿态 Z 的刚体变换，d 是实体最短距离。a 是包围量，s 是固定线距，H 是硬输入边界。U 是积分上界，Φ 是标准正态分布函数。具体姿态仍显示二值接触，淡色仅表示事件在输入分布中的频度。')
+    low_rows=[q for q in locations if q['low'] and q.get('witness')]
+    if low_rows:
+        blocks.append(grid(['运动过孔','固定铜图形','概率下界','上界','门限','可达接触坐标 / μm'],
+                           [[f"{q['source_layer']} #{q['source_index']+1}",f"{q['target_layer']} #{q['target_index']+1}",
+                             f"{q['lower']:.4g}",f"{q['upper']:.4g}",f"{q['threshold']:.4g}",
+                             ', '.join(fmt(v) for v in q['witness']['point'])] for q in low_rows[:100]]))
     probabilities=analysis.get('probabilities',[])
     if probabilities:
         blocks.append('<h3>接口概率结果</h3>'+grid(['层/图形','DIE','下界','上界','允许上限','判定','积分盒数'],[[f"{q['source_layer']} #{q['source_index']+1}",q['die'],f"{q['lower']:.7g}",f"{q['upper']:.7g}",f"{q['threshold']:.7g}",q['verdict'],q['boxes']] for q in probabilities]))
@@ -250,9 +263,15 @@ def report_document(r,motions=None,progress=lambda *_:None):
              'W_keep 是原宽和工艺下限取大后所需的总宽。只计该对相邻壁间原有的自由线路，连接本地孔盘的部分已经由实体占用。原宽可放入时为绿色。原宽放不下而 Cₜ ≥ N 时为琥珀色。Cₜ < N 时为红色。'
              '矩形中心和角度由本对实体的实际最近边界点确定。只有同一片原始线路铜贯穿矩形的两端面才登记，空通道不输出。同一实体对及相同有序线路的连续等距截面归并，保留最紧的一处。ΔW 是线路合计需要收窄的宽度。红色表示即使全部达到工艺下限仍不能通过。整体布通仍需复核绕行侧别。封装外缘和内孔对线路均预留本层的一道有效线距。')
         blocks.append(grid(['DIE','DX / μm','DY / μm','O / °'],[[i+1,fmt(z[0]),fmt(z[1]),fmt(math.degrees(z[2]))] for i,z in enumerate(width['states'])]))
-        blocks.append(grid(['固定 RDL','状态','通道','原可通','必须通过','现可通','预期收窄 / μm','位置 / μm'],
+        if 0<p.target_nsigma<math.inf:
+            step('通道风险的概率上界','该截面两壁、原始穿越线路、各芯片独立或共享的真实运动与当前良率级别。',
+                 [r'L_{\min}=Nw+(N+1)s,\quad L_{\rm keep}=\sum_{i=1}^N\max(w,w_i)+(N+1)s',
+                  r'd(A,B)\geq\min_{b\in B}n^Tb-\max_{a\in A}n^Ta,\quad \Pr(d<L\mid H)\leq U'],
+                 '仅在 U 不超过门限时淡显。收窄用保宽需求，宽度不足用工艺最小需求。',
+                 'A、B 为两侧真实实体，n 是名义截面从 A 指向 B 的单位向量。N 是必过线路根数，wᵢ 是第 i 根的原始线宽。沿 n 计算旋转区间内的最小投影间距及截断正态平移尾概率，再按角度质量相加。无法证明或发生分段的位置保留正常颜色。')
+        blocks.append(grid(['固定 RDL','状态','通道','原可通','必须通过','现可通','预期收窄 / μm','位置 / μm','位置事件上界'],
                            [[q['plane'],q['status'],' ↔ '.join(q['pair']),q['original'],q['required'],q['current'],fmt(q.get('narrowing_um',0)),
-                             str([round(x,3) for x in q['point']])] for q in width['rows'][:100]]))
+                             str([round(x,3) for x in q['point']]),f"{q['event_probability']['upper']:.4g}" if q.get('event_probability') else '—'] for q in width['rows'][:100]]))
         if width.get('displayed',len(width['rows']))>100:blocks.append('<p>报告列出前 100 个选定类别的截面。完整清单见图形下方的宽度分析表。</p>')
         edge=width.get('edge_violations',[])
         step('线路到封装边框的实际净距',f'当前姿态下的运动和固定 RDL 以及封装边框，共 {len(edge)} 个不足图形。',

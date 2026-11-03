@@ -4,6 +4,8 @@ from .core import Parameters
 
 # Optional schema-5 fields. Older GDS-backed jobs use the same view defaults
 # as a newly opened drawing, independent of the previously open project.
+EXTREME_PAGE_SIZE=256
+
 OVERLAY_DEFAULTS = dict(drc=False, probability=False, space=False, deformation=False,
                         width=False, width_sufficient=False, repair=False, reconstruction=False, footprint=False)
 
@@ -45,9 +47,11 @@ def normalize_project(project):
         raise ValueError('工程设置栏目列表必须由标题字符串组成')
     view=p.get('extreme_view',{})
     if not isinstance(view,dict):raise ValueError('工程极端情况视图必须是对象')
-    view=p['extreme_view']={'mode':'all','page':1,**view}
-    if view.get('mode') not in ('all','focus') or type(view.get('page')) is not int or view['page']<1:
-        raise ValueError('工程极端情况视图须包含有效目录类型及正整数页码')
+    view={'mode':'focus','page':1,'page_size':64,**view}
+    if view['mode'] not in ('all','focus') or any(type(view[k]) is not int or view[k]<1 for k in ('page','page_size')):
+        raise ValueError('工程极端情况视图须包含有效目录类型、正整数页码及页大小')
+    # Keep the old first pose on screen when the larger pages absorb a V26 page.
+    p['extreme_view']=dict(mode=view['mode'],page=1+(view['page']-1)*view['page_size']//EXTREME_PAGE_SIZE,page_size=EXTREME_PAGE_SIZE)
     p['overlays']=project_overlays(p)
     p['settings']=asdict(ViewSettings.from_dict(p.get('settings')))
     p['schema_version']=5;p.pop('geometry',None)

@@ -9,7 +9,7 @@ import math
 import time
 import numpy as np
 import shapely
-from shapely.geometry import Polygon, MultiPoint
+from shapely.geometry import Polygon
 from shapely.strtree import STRtree
 from .preview import rigid_transform
 from .statistics import mean_and_bounds
@@ -19,17 +19,21 @@ class BoxCertificate:
     def __init__(self,model,owner,p,budget=512):
         self.center=np.asarray(model.bound.centers[owner]);self.radius=p.annulus_um+p.line_space_um
         self.tol=max(1e-9,model.data.dbu_um*1e-3)
-        self.budget=budget;self.items=[];self.calls=0;self.boxes=0;self.unresolved=0;self.witnesses=[];self.memo={}
-        mu,b=mean_and_bounds(p.for_die(owner),len(model.bound.centers))
+        self.budget=budget;self.items=[];self.calls=0;self.boxes=0;self.unresolved=0;self.witnesses=[];self.memo={};self.arc_hulls={}
+        mu,b=mean_and_bounds(p.for_die(owner),len(model.bound.centers));self.mean=mu
         for r in model.records:
             if r['owner']!=owner or not r['foreign']:continue
-            vertices=np.asarray(r['poly'].exterior.coords);lever=float(np.linalg.norm(vertices-self.center,axis=1).max())
+            shape=r['poly'];vertices=shapely.get_coordinates(shape);lever=float(np.linalg.norm(vertices-self.center,axis=1).max())
             reach=np.linalg.norm(b[:2])+2*lever*math.sin(min(math.pi,b[2])/2)
-            mean=Polygon(rigid_transform(vertices,self.center,mu))
+            mean=shapely.set_coordinates(shape,rigid_transform(vertices,self.center,mu))
             from .contact import nearby_foreign
             others=model.node_geometry[nearby_foreign(model,r,mean,self.radius+reach+self.tol)]
-            if len(others):self.items.append((vertices,lever,others,STRtree(others)))
-        self.items.sort(key=lambda item:(Polygon(rigid_transform(item[0],self.center,mu)).distance(item[2][item[3].nearest(Polygon(rigid_transform(item[0],self.center,mu)))])-self.radius)/max(np.linalg.norm(b[:2])+item[1]*b[2],1e-12))
+            if len(others):
+                tree=STRtree(others);distance=mean.distance(others[tree.nearest(mean)])
+                self.items.append((vertices,lever,others,tree,distance,shape))
+        self.items.sort(key=lambda item:(item[4]-self.radius)/max(np.linalg.norm(b[:2])+item[1]*b[2],1e-12))
+        self.nominal_gap=np.array([item[4] for item in self.items])
+        self.levers=np.array([item[1] for item in self.items])
 
     def swept(self,vertices,lever,lo,hi):
         """Convex hull of sampled rotation arcs plus translation rectangle.
@@ -40,15 +44,21 @@ class BoxCertificate:
         angle=float(hi[2]-lo[2])
         # A coarser envelope is still rigorously enclosed by its sagitta.
         # Refine only undecidable state cells instead of oversampling every arc.
-        segments=max(1,min(256,math.ceil(angle/math.radians(.25))))
-        ts=np.linspace(lo[2],hi[2],segments+1);local=vertices-self.center
-        co=np.cos(ts[:,None]);si=np.sin(ts[:,None])
-        xy=np.stack((co*local[:,0]-si*local[:,1],si*local[:,0]+co*local[:,1]),axis=-1).reshape(-1,2)+self.center
-        hull=MultiPoint(xy).convex_hull
-        points=shapely.get_coordinates(hull)
-        shifts=np.array(list(itertools.product((lo[0],hi[0]),(lo[1],hi[1]))))
-        envelope=MultiPoint((points[:,None,:]+shifts).reshape(-1,2)).convex_hull
-        sagitta=2*lever*math.sin(min(2*math.pi,angle/segments)/4)**2
+        key=(vertices.tobytes(),lo[2],hi[2])
+        stored=self.arc_hulls.get(key)
+        if stored is None:
+            segments=max(1,min(256,math.ceil(angle/math.radians(.25))))
+            ts=np.linspace(lo[2],hi[2],segments+1);local=vertices-self.center
+            co=np.cos(ts[:,None]);si=np.sin(ts[:,None])
+            xy=np.stack((co*local[:,0]-si*local[:,1],si*local[:,0]+co*local[:,1]),axis=-1).reshape(-1,2)+self.center
+            points=shapely.get_coordinates(shapely.convex_hull(shapely.multipoints(xy)))
+            unit_sagitta=2*math.sin(min(2*math.pi,angle/segments)/4)**2
+            if len(self.arc_hulls)>=256:self.arc_hulls.pop(next(iter(self.arc_hulls)))
+            self.arc_hulls[key]=(points,unit_sagitta)
+        else:points,unit_sagitta=stored
+        shifts=np.array([[lo[0],lo[1]],[lo[0],hi[1]],[hi[0],lo[1]],[hi[0],hi[1]]])
+        envelope=shapely.convex_hull(shapely.multipoints((points[:,None,:]+shifts).reshape(-1,2)))
+        sagitta=lever*unit_sagitta
         return envelope.buffer((sagitta+self.tol)/math.cos(math.pi/32),quad_segs=8)
 
     def check(self,lo,hi):
@@ -60,11 +70,17 @@ class BoxCertificate:
             known=np.asarray(self.witnesses)
             if np.any(np.all(known>=lo,axis=1)&np.all(known<=hi,axis=1)):return 'contact'
         tested=0
-        for vertices,lever,others,tree in self.items:
+        # A rigid displacement from the input mean cannot close a larger
+        # nominal margin. The exact subdivision below sees all remaining vias.
+        reach=np.maximum(np.abs(lo-self.mean),np.abs(hi-self.mean))
+        travel=np.linalg.norm(reach[:2])+2*self.levers*math.sin(min(math.pi,reach[2])/2)
+        for index in np.flatnonzero(self.nominal_gap<=self.radius+travel+self.tol):
+            vertices,lever,others,tree,_,shape=self.items[index]
             queue=[(lo,hi)]
             while queue:
                 a,b=queue.pop();mid=(a+b)/2;half=(b-a)/2
-                via=Polygon(rigid_transform(vertices,self.center,mid))
+                xy=rigid_transform(vertices,self.center,mid)
+                via=shapely.set_coordinates(shape,xy) if shape.interiors else Polygon(xy)
                 distance=(via.distance(others[0]) if len(others)==1 else tree.query_nearest(via,all_matches=False,return_distance=True)[1][0])
                 tested+=1;self.boxes+=1
                 if distance<=self.radius+self.tol:
@@ -75,7 +91,8 @@ class BoxCertificate:
                     corners=np.array(list(itertools.product(*zip(a,b))))
                     local=vertices-self.center;co=np.cos(corners[:,2,None]);si=np.sin(corners[:,2,None])
                     xy=np.stack((co*local[:,0]-si*local[:,1],si*local[:,0]+co*local[:,1]),axis=-1)+self.center+corners[:,None,:2]
-                    hits=tree.query(shapely.polygons(xy),predicate='dwithin',distance=self.radius+self.tol)
+                    shapes=shapely.set_coordinates(np.full(len(corners),shape,object),xy.reshape(-1,2)) if shape.interiors else shapely.polygons(xy)
+                    hits=tree.query(shapes,predicate='dwithin',distance=self.radius+self.tol)
                     if hits.size:
                         self.witnesses.append(corners[int(hits[0,0])]);self.memo[key]='contact';return 'contact'
                 envelope=self.swept(vertices,lever,a,b)
