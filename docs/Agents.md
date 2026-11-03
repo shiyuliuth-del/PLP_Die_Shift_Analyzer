@@ -2,6 +2,14 @@
 
 根目录的 `AGENTS.md` 是工具自动读取的入口，本文件记录本地与远端共同维护的变更。开始一轮工作时先同步唯一主线 `main`，依次阅读入口、设计规范和最近一轮记录。完成后更新本文件，将代码、工程兼容验证和关键结果一起提交 GitHub，通过 PR 集成。后续轮次在最上方追加日期、版本、变更、测试、已知限制与 PR 链接。[协作与提交规范](../Agent.md)
 
+## 2026-11-03 · V30 · Windows 单文件交付与图形交互
+
+基于 V29 主线 `c9f6f02`，通过 [PR #10](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/pull/10) 集成。[V30 使用说明](V30_使用说明.md) · [交互测量](../results/performance_V30.json)
+
+- Windows 源码统一为 RUN.bat，开发环境运行 `RUN.bat build`。包版本不设上下限。原生 Windows 构建并启动单文件 EXE，检验七档图标、窗口、不同工作目录、已有工程保留、目录重建、KLayout 几何和概率计算。Release ZIP 只放 EXE。开发者继续使用完整 Git 检出。
+- 接触标记的两个独立显示字段为 `show_annulus_range` 和 `show_spacing_range`。schema 5 可缺省，两者默认开启。保持源层显隐、当前姿态和数值结论。
+- 预留视野的索引、批量轮廓、局部选择重绘和持续输入刷新已做实图对照。保留低概率样式、复杂轮廓及孔洞。不同运行环境的证据分开记录。
+
 ## 2026-11-03 · V29 · 零位风险详情、截面复用与极端表底色
 
 基于 V28 主线 `725f166`，通过 [GitHub PR #9](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/pull/9) 集成。操作和见证规则见[V29 使用说明](V29_使用说明.md)，实图对照见[运行记录](../results/performance_V29.json)。
