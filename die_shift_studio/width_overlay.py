@@ -258,6 +258,9 @@ class WidthOverlay:
             w.width_summary.setText(f"检查 {data['examined']} 个相邻截面。宽度足够 {q[ADEQUATE]} 个，"
                                     f"需局部收窄 {q[NARROW]} 个，宽度不足 {q[BLOCKED]} 个。表中 {len(rows)} 行。")
 
+        if data and any(r.get('event_probability') for r in data['rows']):
+            rare=sum(low_risk(r) for r in data['rows'])
+            w.width_summary.setText(w.width_summary.text()+f" 已确认低概率通道 {rare} 个。")
         if data and data.get('edge_violations'):
             w.width_summary.setText(w.width_summary.text()+f" 封装边距不足 {len(data['edge_violations'])} 个图形。")
     def hover(self,event):

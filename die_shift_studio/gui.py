@@ -503,6 +503,7 @@ class MainWindow(W.QMainWindow):
         channel.addRow('标签字号 / pt',text_row)
         for form,key,title in ((probability,'show_low_contact','显示低概率接触位置'),(channel,'show_low_width','显示低概率宽度风险')):
             box=W.QCheckBox(title);self.setting_fields[key]=box;form.addRow(box);box.toggled.connect(self.settings_changed)
+            box.setToolTip('有限正良率级别下，仅淡显或隐藏已证明事件概率上界不超过门限的位置。未定位置保留，全量计算结果可查。')
         drc_group=group('DRC检查')
         spin(drc_group,'drc_tolerance_um','线宽/线距容差 ± / μm',-10000,10000,3)
         self.setting_fields['drc_tolerance_um'].setToolTip('有效最小值 = 工艺值 − 容差。正值放宽，负值收紧；默认0。只影响DRC与型变验收，不改变包围量或概率。')
