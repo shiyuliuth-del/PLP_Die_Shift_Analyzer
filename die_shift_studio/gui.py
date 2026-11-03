@@ -642,8 +642,14 @@ class MainWindow(W.QMainWindow):
     def task_progress(self,worker,n,text):
         self._tasks[id(worker)]=(n,text);self.progress.show();self.progress.setRange(0,100);self.progress.setValue(n);self.progress.setFormat(f'{n}% · '+text[:36]);self.statusBar().showMessage(text)
         self.log_bus.emit(text)
-    def watch_worker(self,worker,name):
+    def watch_worker(self,worker,name,quiet=False):
         import time
+        if quiet:
+            # Interactive edits (dragging a cut line) must not flash the header
+            # progress bar on every release; keep only the status hint.
+            worker.progress.connect(lambda n,t:self.statusBar().showMessage(t))
+            worker.failed.connect(lambda text:self.log_bus.emit(name+'：'+text,'ERROR'))
+            return
         start=time.perf_counter();self.task_progress(worker,0,name+'：开始')
         worker.progress.connect(lambda n,t:self.task_progress(worker,n,t))
         worker.failed.connect(lambda text:self.log_bus.emit(name+'：'+text,'ERROR'))
@@ -1578,7 +1584,8 @@ class MainWindow(W.QMainWindow):
              float(self.view_settings.repair_patch_width_um))
         self.repair_data=self.session_values.get(key)
         return self.repair_data is not None
-    def request_preview(self,direct=False,settle=False):
+    def request_preview(self,direct=False,settle=False,quiet=False):
+        self._preview_quiet=bool(quiet)
         if not self.data:return
         self.stop_animation()
         self.preview_ticket+=1;ticket=self.preview_ticket;self._prepared_motion=None
@@ -1725,7 +1732,7 @@ class MainWindow(W.QMainWindow):
             from .scheduling import job_budget
             with job_budget(admitted['threads'],admitted['processes']):return solve(progress)
         worker=Worker(work,self);worker.interactive_refinement=bool(direct and settle);worker.transient=bool(direct);worker.request_key=request_key;worker.view_ticket=ticket
-        self.preview_workers.append(worker);self.preview_worker=worker;self.watch_worker(worker,'预演计算')
+        self.preview_workers.append(worker);self.preview_worker=worker;self.watch_worker(worker,'预演计算',quiet=bool(getattr(self,'_preview_quiet',False)))
         self.log_bus.emit(admitted['reason']+f" · 活跃预演 {len(self.preview_workers)} · CPU {admitted['load'].get('cpu_percent')}% · 可用内存 {admitted['load']['available_memory_mb']} MiB")
         def partial(_):
             value=worker.take_partial()
