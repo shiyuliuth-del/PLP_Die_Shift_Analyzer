@@ -121,6 +121,7 @@ class Reconstructor:
         # A plane pins that chain's cut; the rest of the rule (perpendicular to
         # the route, movable side, cover, spacing check) still applies.
         self.cuts={}
+        self._last_planes={}
         for row in getattr(settings,'reconstruction_cuts',()) or ():
             layer,index,vias,nx,ny,ox,oy=row
             self.cuts[(str(layer),int(index),tuple(sorted(int(v) for v in vias)))]=(
@@ -224,6 +225,10 @@ class Reconstructor:
             if d<best:best=d;which=int(i)
         return which,best
 
+    @staticmethod
+    def _box_gap(a,b):
+        return float(np.hypot(max(b[0]-a[2],a[0]-b[2],0.),max(b[1]-a[3],a[1]-b[3],0.)))
+
     def _candidate_conflict(self,movable,faces,center,state,foreign):
         """Whether the shifted piece (plus its cover) reaches another net."""
         if foreign is None:return False,None,None
@@ -243,7 +248,13 @@ class Reconstructor:
         threshold=self.rule_space-self.tol
         probes=[(probe,probe.bounds) for probe in [moved]+quads]
         best=float('inf');which=None
-        for i in np.asarray(hits,dtype=int).ravel():
+        # On a dense layer the tree can return dozens of neighbours for one
+        # candidate; only the nearest few can be the minimum, so rank them by
+        # box distance and measure those.
+        box=moved.bounds
+        ranked=sorted((int(i) for i in np.asarray(hits,dtype=int).ravel()),
+                      key=lambda i:self._box_gap(box,nets[i][1].bounds))[:8]
+        for i in ranked:
             geometry=nets[int(i)][1]
             x0,y0,x1,y1=geometry.bounds
             for probe,(a0,b0,a1,b1) in probes:
@@ -592,12 +603,17 @@ class Reconstructor:
                     if groups and q['width']<=groups[-1][0]['width']*1.05+self.tol:
                         groups[-1].append(q)
                     else:groups.append([q])
-                best=None
+                best=None;evaluated=0
                 for group in groups:
                     safe=[q for q in group if check(q)]
+                    evaluated+=len(group)
                     if safe:
                         best=min(safe,key=lambda q:(-round(straight(q),3),q['distance']))
                         break
+                    # A big pour yields dozens of width groups and each check
+                    # costs a few GEOS predicates; stop early and fall back to
+                    # the best clearance that was actually measured.
+                    if evaluated>=8:break
                 if best is None:
                     # No position can avoid the short (the motion itself brings
                     # the copper too close), so keep the best clearance and mark
@@ -630,7 +646,8 @@ class Reconstructor:
             if movable.is_empty or movable.area<=self.tol**2:return None
             conflict,gap,_=self._candidate_conflict(movable,[],center,states[owner],foreign)
             return dict(movable=movable,faces=[],distance=default,span=extent,quality=None,
-                        conflict=conflict,gap=gap)
+                        conflict=conflict,gap=gap,
+                        plane=(float(normal[0]),float(normal[1]),float(origin[0]),float(origin[1])))
         # The cut goes on the side the network LEAVES the landing: the plane
         # normal must point into the feature mass, otherwise the movable block
         # would swallow the whole route and leave the landing on the far side.
@@ -643,6 +660,8 @@ class Reconstructor:
             best['movable']=shapely.intersection(
                 polygon,half_plane(best['origin'],best['normal'],size))
         return dict(movable=best['movable'],faces=best['faces'],distance=best['distance'],
+                    plane=(float(best['normal'][0]),float(best['normal'][1]),
+                           float(best['origin'][0]),float(best['origin'][1])),
                     span=best['span'],conflict=bool(best.get('conflict')),gap=best.get('gap'),
                     manual=bool(best.get('manual')),clamped=bool(best.get('clamped')),
                     window=dict(pivot=[float(best['pivot'][0]),float(best['pivot'][1])],
@@ -691,12 +710,18 @@ class Reconstructor:
                 # the same net: cutting past it would put that landing on the far
                 # side of a seam it does not belong to.
                 others=[v['land'] for other in chains if other is not cluster for v in other]
-                plane=self.cuts.get((layer,index,tuple(sorted(int(v['index']) for v in cluster))))
+                chain=tuple(sorted(int(v['index']) for v in cluster))
+                plane=self.cuts.get((layer,index,chain))
+                if plane is None and quick:
+                    # While the pose animates, keep the cut where the last full
+                    # frame put it: re-running the safety search for every
+                    # animation step is what made the preview crawl.
+                    plane=self._last_planes.get((layer,index,chain))
                 # Dragging one chain's cut must not re-run the (expensive)
                 # search for every other chain: cache each chain's block by
                 # everything that can change its result.
                 cache_key=(id(self.model),layer,int(index),int(owner),
-                           tuple(sorted(int(v['index']) for v in cluster)),plane,
+                           chain,plane,
                            round(float(states[owner][0]),6),
                            round(float(states[owner][1]),6),
                            round(float(states[owner][2]),9),
@@ -713,6 +738,8 @@ class Reconstructor:
                                             if v[0] is self.model}
                     self._blocks_cache[cache_key]=(self.model,None if block is None else dict(block))
                 if block is None:continue
+                if not quick and block.get('plane'):
+                    self._last_planes[(layer,index,chain)]=block['plane']
                 block.update(owner=owner,cluster=cluster)
                 blocks.append(block)
             if not blocks:continue
