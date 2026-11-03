@@ -2456,7 +2456,9 @@ class MainWindow(W.QMainWindow):
     def write_project(self,path):
         import os
         path=Path(path).resolve();gds=Path(self.data.path).resolve()
-        source=os.path.relpath(gds,path.parent) if gds.is_relative_to(installation_root()) else str(gds)
+        # Windows cannot express a relative path between different volumes or UNC shares.
+        portable=gds.anchor.casefold()==path.anchor.casefold() and gds.is_relative_to(installation_root())
+        source=os.path.relpath(gds,path.parent) if portable else str(gds)
         project=dict(self.project_settings(),gds_path=source)
         from .core import clean_json
         atomic_save(path,clean_json(project));self.project_path=path

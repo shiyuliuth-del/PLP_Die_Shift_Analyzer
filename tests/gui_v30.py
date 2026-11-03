@@ -14,6 +14,8 @@ from die_shift_studio.contact_ranges import RANGES
 def main():
     if os.name=='nt':os.environ['QT_QPA_PLATFORM']='windows'
     app=W.QApplication([]);tmp=tempfile.TemporaryDirectory();w=MainWindow(jobs_dir=Path(tmp.name)/'Jobs')
+    def fail_dialog(message):raise AssertionError(str(message))
+    w.error=fail_dialog
     w.show();app.processEvents()
     path=ROOT/'examples/示例D_芯片外扇出.gds';q=json.loads(path.with_suffix('.json').read_text(encoding='utf8'))
     q['gds_path']=str(path);w.set_data(read_gds(path),q);cache=GeometryCache(w.data)
@@ -45,6 +47,7 @@ def main():
     with patch.object(W.QInputDialog,'getText',return_value=('显示偏好',True)):w.save_project()
     print('Checking saved and legacy Jobs',file=sys.__stdout__,flush=True)
     saved=w.project_path;doc=json.loads(saved.read_text(encoding='utf8'));assert doc['settings']['show_spacing_range'] is False
+    assert (saved.parent/Path(doc['gds_path'])).resolve()==path.resolve()
     for cfg in (doc,q):
         w.set_data(w.data,cfg)
         expected=cfg.get('settings',{}).get('show_spacing_range',True)
