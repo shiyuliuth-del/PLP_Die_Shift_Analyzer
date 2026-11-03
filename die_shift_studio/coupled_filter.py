@@ -11,8 +11,10 @@ def scan(engine,grid,settings,width,focused,progress):
     base=engine.width_summary(progress) if width else None
     channels=ProblemIndex(grid,base['channel_factors']) if base else None
     lines=dict(base['channel_lines']) if base else {}
-    visits=range(-1,grid.total) if width or focused is None else (-1,*focused)
-    red=[];count=len(visits);zero=np.zeros((grid.count,3));binary=engine.p.target_nsigma in (0.,math.inf)
+    whole=width or focused is None
+    visits=range(-1,grid.total) if whole else (-1,*focused)
+    count=grid.total+1 if whole else len(visits)
+    red=[];zero=np.zeros((grid.count,3));binary=engine.p.target_nsigma in (0.,math.inf)
     for n,index in enumerate(visits):
         title=f'逐姿态核实型变后'+('宽度' if width else '接触')+f' {n+1}/{count}'
         update=lambda *_:progress(round(100*n/count),title)

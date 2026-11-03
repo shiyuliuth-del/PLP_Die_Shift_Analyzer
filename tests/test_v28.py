@@ -111,6 +111,18 @@ class V28(unittest.TestCase):
             j=np.array([[1,0,-row['by']],[0,1,row['bx']]])
             self.assertAlmostEqual(np.linalg.eigvalsh(j@cov@j.T)[-1],row['lambda_max'])
 
+    def test_other_results_do_not_evict_zero_width_summary(self):
+        from die_shift_studio.session_cache import ProjectCacheRegistry
+        registry=ProjectCacheRegistry();group=registry.get('one',1)
+        stub=SimpleNamespace(signature='one',width_key=(True,),cache_group=group,width_analyzer=None,p=None)
+        try:
+            with patch('die_shift_studio.width_summary.summarize',return_value={'lines':{}}) as solve:
+                first=PreviewEngine.width_summary(stub,lambda *_:None)
+                for i in range(5):group.values[('ordinary',i)]=i
+                self.assertEqual(first,PreviewEngine.width_summary(stub,lambda *_:None));solve.assert_called_once()
+                group.clear();PreviewEngine.width_summary(stub,lambda *_:None);self.assertEqual(solve.call_count,2)
+        finally:registry.close()
+
     def test_saved_filter_and_legacy_default(self):
         for value in (True,False):
             old={'schema_version':5,'extreme_view':dict(mode='all',page=2,page_size=256,filter_problems=value)}

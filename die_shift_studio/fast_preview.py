@@ -179,6 +179,9 @@ class PreviewEngine:
         key=('width-extremes-v28',self.signature,self.width_key)
         if self.cache_group is None:return summarize(self.width_analyzer,self.p,progress)
         values=self.cache_group.values
+        # The all-pose index belongs to the pinned zero view. Switching
+        # ordinary rows must never evict it, even with a one-entry cache.
+        values.pin(key)
         return values.get_or_compute(key,lambda:summarize(self.width_analyzer,self.p,progress))
 
     def configure_reconstruction(self,enabled,settings):
