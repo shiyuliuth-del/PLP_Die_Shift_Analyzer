@@ -1,7 +1,7 @@
 """Check the development tree or independently verify a Windows-built release ZIP."""
 import argparse
 from datetime import datetime,timezone
-import hashlib,json,os,shutil,subprocess,sys,tempfile,zipfile
+import hashlib,json,os,shutil,struct,subprocess,sys,tempfile,zipfile
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -51,7 +51,8 @@ def check_artifact(archive,verification):
     meta=json.loads(verification.read_text(encoding='utf8'))
     if not meta.get('single_file') or meta['version']!=__version__ or not meta['existing_job_preserved']:
         raise ValueError('Incorrect Windows build report.')
-    if not all(x['platform']=='win32' and x['frozen'] and x['status']=='PASS' for x in meta['checks']):
+    if (len(meta['checks'])!=2 or not meta.get('source_bat_smoke') or meta['icons']<6 or
+            not all(x['platform']=='win32' and x['frozen'] and x['status']=='PASS' for x in meta['checks'])):
         raise ValueError('Incomplete native Windows validation.')
     digest=hashlib.sha256(archive.read_bytes()).hexdigest()
     if digest!=meta['zip_sha256'] or archive.with_suffix('.zip.sha256').read_text().split()[0]!=digest:
@@ -62,6 +63,10 @@ def check_artifact(archive,verification):
         exe=bundle.read('Die_Shift_Analyze.exe')
         if exe[:2]!=b'MZ' or hashlib.sha256(exe).hexdigest()!=meta['exe_sha256']:
             raise ValueError('Executable differs from the Windows-tested build.')
+        pe=struct.unpack_from('<I',exe,60)[0]
+        if (exe[pe:pe+4]!=b'PE\0\0' or struct.unpack_from('<H',exe,pe+4)[0]!=0x8664 or
+                struct.unpack_from('<H',exe,pe+24+68)[0]!=2):
+            raise ValueError('Expected a Windows x64 GUI executable.')
     print('RELEASE_PASS',archive.name,digest)
 
 if __name__=='__main__':
