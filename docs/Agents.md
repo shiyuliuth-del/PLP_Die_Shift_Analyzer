@@ -9,7 +9,9 @@
 - 通过 [PR #12](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/pull/12) 集成。BUILD.bat 从源码 ZIP 在 Windows 单独打包，生成实际大小及最大输入清单。GPU 数值路径分别验收刚体、批量姿态、曲线和概率卷积。设备故障按算子回退，超显存预算仅该批次转 CPU。显示端保留旧工程已经选择的 CUDA 偏好。
 - 在 GD55 的 158 个接口上完整对照两次 V31/V32 CPU 栅格。Sobol 逐像素一致，确定性积分最大绝对误差 4.55×10⁻¹³。确定性积分从 12.54 s 降至 3.35 s，纯平移从 46.0 ms 降至 2.7 ms。[逐轮计时、坐标与栅格对照](../results/performance_V32.json)
 
-- Windows 3.13 构建机中，普通环境与已安装 CuPy 的环境均通过源包解压、BUILD.bat、图标、真实窗口、RUN.bat、原生几何和实体概率冒烟。真实 GPU 不在构建机上。快速关闭时保持窗口至线程已排队的完成通知处理完毕；覆盖“线程已退出、通知仍待送达”的实际 Qt 时序。正式源包有 91 个文件、997,754 字节，SHA-256 为 `eb599ddf10fa31edaca9ba9f155a0f48e6225c34df976e3bf3ad28085a1e172a`。[Windows 双环境验收](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/actions/runs/41602314876)
+- Windows 3.13 构建机中，普通环境与已安装 CuPy 的环境均通过源包解压、BUILD.bat、图标、真实窗口、RUN.bat、原生几何和实体概率冒烟。真实 GPU 不在构建机上。快速关闭时保持窗口至线程已排队的完成通知处理完毕；覆盖“线程已退出、通知仍待送达”的实际 Qt 时序。正式源包有 91 个文件、997,754 字节，SHA-256 为 `eb599ddf10fa31edaca9ba9f155a0f48e6225c34df976e3bf3ad28085a1e172a`。[Windows 双环境验收](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/actions/runs/41603355474)
+
+- 干净检出的 Linux 验收通过 293 项核心测试、14 组 Qt 界面回归、两种 KLayout 后端启动和 16 个既有工程。另将正式 ZIP 解压至含中文和空格的新目录，确认源码入口能创建 Jobs/logs、执行原生 DRC 并保存 GPU 诊断。两组 Windows 均通过三次独立启动退出与一次含图纸的完整冒烟。[本轮全部源码验收](package_verification.json)
 
 ## 2026-11-03 · V31 · 目标 Windows 电脑打包
 

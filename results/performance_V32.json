@@ -260,18 +260,18 @@
     }
   ],
   "windows_build_acceptance": {
-    "ci_run": "https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/actions/runs/41602314876",
-    "commit": "cb6133cb3fce2a1c8532a402eb6e88766b861454",
+    "ci_run": "https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/actions/runs/41603355474",
+    "commit": "1a6697a707e2dbb8de91c764b109552be2d12543",
     "windows": "2025 Server x64",
     "python": "3.13",
     "measured_exe_bytes": {
-      "clean": 115358688,
-      "cupy_cuda12x_installed": 115358894
+      "clean": 115360007,
+      "cupy_cuda12x_installed": 115358180
     },
     "bundle_cuda_sdk_dlls": [],
     "system_adapter": "Microsoft Hyper-V Video",
     "actual_nvidia_compute_tested": false,
     "target_reported_v31_exe_size": "3.8 GB (user report; previous executable unavailable for inventory)",
-    "validation": "standalone window, RUN.bat, user Jobs retained, native DRC, probability overlay, 7 icon sizes; independent CPU driver arithmetic on Windows x64"
+    "validation": "standalone window, RUN.bat, user Jobs retained, native DRC, probability overlay, 7 icon sizes, three standalone launch/close cycles and one layout smoke; independent CPU driver arithmetic on Windows x64"
   }
 }
