@@ -1,0 +1,47 @@
+name: Windows one-file release
+on:
+  pull_request:
+    paths:
+      - 'die_shift_studio/**'
+      - 'tools/windows_acceptance.py'
+      - 'tests/gui_v30.py'
+      - 'main.py'
+      - 'RUN.bat'
+      - 'requirements.txt'
+      - 'Die_Shift_Analyze.spec'
+      - '.github/workflows/windows-runtime.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      PYTHONUTF8: '1'
+      OPENBLAS_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Prepare builder
+        run: |
+          python --version
+          python -m venv .venv
+          .\.venv\Scripts\python -m pip install -r requirements.txt PyInstaller klayout
+      - name: Build the single GUI executable
+        shell: cmd
+        run: call RUN.bat build
+      - name: Verify normal window, icon, geometry and isolated EXE
+        run: .\.venv\Scripts\python tools/windows_acceptance.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-windows-runtime
+          path: |
+            dist/*_Windows_x64.zip
+            dist/*.zip.sha256
+            dist/windows_verification.json
+          compression-level: 0
+          if-no-files-found: error

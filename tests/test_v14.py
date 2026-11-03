@@ -108,7 +108,7 @@ class V14Tests(unittest.TestCase):
     def test_installed_desktop_backend_matches_module_without_dependency_install(self):
         from die_shift_studio import native_backend as nb
         exe=shutil.which('klayout') or next(iter(nb.executable_candidates()),None)
-        if exe is None:self.skipTest('Installed KLayout unavailable; run TEST_WINDOWS.bat on target')
+        if exe is None:self.skipTest('Installed KLayout unavailable on this target')
         shapes=[box(0,0,100,10),Polygon([(0,0),(100,0),(100,100),(0,100)],holes=[[(10,10),(90,10),(90,90),(10,90)]])]
         nb.close()
         with patch.dict(os.environ,{'DIE_SHIFT_NATIVE_BACKEND':'module'}):
@@ -127,7 +127,7 @@ class V14Tests(unittest.TestCase):
                 self.assertLess(actual.symmetric_difference(g).area,1e-8);self.assertAlmostEqual(aa,area)
             self.assertEqual(nb.backend().process.pid,pid)
         nb.close()
-        for name in ('RUN.bat','BUILD_WINDOWS.bat','SELECT_PYTHON.bat'):
+        for name in ('RUN.bat',):
             text=(Path(__file__).resolve().parents[1]/name).read_text()
             self.assertNotIn('pip install',text);self.assertNotIn('-m venv',text)
 

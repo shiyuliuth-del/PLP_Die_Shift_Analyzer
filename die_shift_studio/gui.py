@@ -175,6 +175,8 @@ class NoWheelValues(QtCore.QObject):
 class MainWindow(W.QMainWindow):
     def __init__(self,jobs_dir=None):
         super().__init__();self.setWindowTitle(f'Die Shift Analyze {__version__}')
+        from .app_icon import window_icon
+        self.setWindowIcon(window_icon())
         self.setAttribute(getattr(Qt,'WidgetAttribute',Qt).WA_DeleteOnClose)
         self.jobs_dir=Path(jobs_dir) if jobs_dir is not None else installation_root()/'Jobs'
         self.jobs_dir.mkdir(parents=True,exist_ok=True)
