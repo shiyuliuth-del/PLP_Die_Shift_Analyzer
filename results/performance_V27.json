@@ -1,0 +1,324 @@
+{
+  "version": "V27",
+  "baseline_main": "eee712cc81510db04e1943c745f222989baa4e6f",
+  "system": "Linux",
+  "cpu_threads": 8,
+  "memory_mb": 15708,
+  "cuda_backend": "cpu",
+  "gds_sha256": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+  "shapes": 1225,
+  "dies": 3,
+  "rules_um": [
+    15,
+    15,
+    15
+  ],
+  "shift": [
+    -35,
+    -35,
+    -1
+  ],
+  "catalogue": {
+    "local_states": 81,
+    "batches": 27,
+    "pair_states": 0,
+    "package_states": 19683
+  },
+  "source_witnesses": {
+    "contact_pairs": 195,
+    "low_pairs": 68,
+    "witnessed_low_pairs": 67
+  },
+  "geometry_regression": {
+    "rows": 16022,
+    "positive": 16022,
+    "max_absolute_numeric_difference": 0.0,
+    "per_pose_low": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "same_safe_ranges_and_scheme_yield": true
+  },
+  "gui_run_order": [
+    "V27",
+    "merged V26",
+    "V27",
+    "merged V26",
+    "V27",
+    "merged V26"
+  ],
+  "core_run_order": "B1, B2, N3, B3, N4, extra B4, N5; intermediate development N1/N2 are excluded. B4 is a repeatability control, not in the prespecified baseline median.",
+  "core": {
+    "unit": "s",
+    "medians": {
+      "import": {
+        "merged_V26": 0.137598,
+        "V27": 0.350441
+      },
+      "width_cold_nominal": {
+        "merged_V26": 10.005372,
+        "V27": 15.217469
+      },
+      "width_first_shift": {
+        "merged_V26": 1.009923,
+        "V27": 1.65551
+      },
+      "width_repeat": {
+        "merged_V26": 9.6e-05,
+        "V27": 0.000154
+      },
+      "width_animation_cold": {
+        "merged_V26": 4.631217,
+        "V27": 8.440883
+      },
+      "width_animation_replay": {
+        "merged_V26": 0.000225,
+        "V27": 0.000322
+      },
+      "agg_full_draw": {
+        "merged_V26": 0.03892,
+        "V27": 0.036704
+      },
+      "scheme_core": {
+        "merged_V26": 19.705324,
+        "V27": 32.441955
+      },
+      "extreme_checks": {
+        "merged_V26": 1.77562,
+        "V27": 1.592172
+      }
+    },
+    "three_runs": {
+      "b": [
+        {
+          "import": 0.137598,
+          "width_cold_nominal": 8.557296,
+          "width_first_shift": 1.00902,
+          "width_repeat": 9.4e-05,
+          "width_animation_cold": 4.252443,
+          "width_animation_replay": 0.000212,
+          "agg_full_draw": 0.027992,
+          "scheme_core": 15.511394,
+          "extreme_checks": 1.321912
+        },
+        {
+          "import": 0.117702,
+          "width_cold_nominal": 12.952913,
+          "width_first_shift": 2.318895,
+          "width_repeat": 0.000272,
+          "width_animation_cold": 9.50135,
+          "width_animation_replay": 0.000346,
+          "agg_full_draw": 0.045446,
+          "scheme_core": 24.686081,
+          "extreme_checks": 2.16212
+        },
+        {
+          "import": 0.175345,
+          "width_cold_nominal": 10.005372,
+          "width_first_shift": 1.009923,
+          "width_repeat": 9.6e-05,
+          "width_animation_cold": 4.631217,
+          "width_animation_replay": 0.000225,
+          "agg_full_draw": 0.03892,
+          "scheme_core": 19.705324,
+          "extreme_checks": 1.77562
+        }
+      ],
+      "n": [
+        {
+          "import": 0.264767,
+          "width_cold_nominal": 15.818118,
+          "width_first_shift": 2.196558,
+          "width_repeat": 0.000204,
+          "width_animation_cold": 8.798657,
+          "width_animation_replay": 0.000322,
+          "agg_full_draw": 0.036049,
+          "scheme_core": 28.658417,
+          "extreme_checks": 1.509327
+        },
+        {
+          "import": 0.44061,
+          "width_cold_nominal": 14.988981,
+          "width_first_shift": 1.65551,
+          "width_repeat": 0.000154,
+          "width_animation_cold": 8.440883,
+          "width_animation_replay": 0.000686,
+          "agg_full_draw": 0.106866,
+          "scheme_core": 33.799875,
+          "extreme_checks": 1.592172
+        },
+        {
+          "import": 0.350441,
+          "width_cold_nominal": 15.217469,
+          "width_first_shift": 1.296923,
+          "width_repeat": 0.000148,
+          "width_animation_cold": 6.7735,
+          "width_animation_replay": 0.000309,
+          "agg_full_draw": 0.036704,
+          "scheme_core": 32.441955,
+          "extreme_checks": 1.611943
+        }
+      ]
+    }
+  },
+  "gui": {
+    "unit": "ms",
+    "medians": {
+      "signature_ms": {
+        "merged_V26": 29.651461998582818,
+        "V27": 0.11675099085550755
+      },
+      "cache_color_ms": {
+        "merged_V26": 2.5119729980360717,
+        "V27": 0.045563996536657214
+      },
+      "cached_round_trip_ms": {
+        "merged_V26": 605.6642390030902,
+        "V27": 374.6168990037404
+      }
+    },
+    "three_runs": {
+      "b": [
+        {
+          "signature_ms": 21.66524500353262,
+          "cache_color_ms": 1.5683840028941631,
+          "cached_round_trip_ms": 605.5460579955252
+        },
+        {
+          "signature_ms": 29.651461998582818,
+          "cache_color_ms": 2.601027998025529,
+          "cached_round_trip_ms": 605.6642390030902
+        },
+        {
+          "signature_ms": 30.568984002457,
+          "cache_color_ms": 2.5119729980360717,
+          "cached_round_trip_ms": 698.1025810091523
+        }
+      ],
+      "n": [
+        {
+          "signature_ms": 0.11675099085550755,
+          "cache_color_ms": 0.04505801189225167,
+          "cached_round_trip_ms": 374.6168990037404
+        },
+        {
+          "signature_ms": 0.11470199387986213,
+          "cache_color_ms": 0.045563996536657214,
+          "cached_round_trip_ms": 367.1813669934636
+        },
+        {
+          "signature_ms": 0.1823579950723797,
+          "cache_color_ms": 0.06885899347253144,
+          "cached_round_trip_ms": 576.7708390048938
+        }
+      ]
+    }
+  },
+  "method": "Three fresh measured runs per checkout. Results are selected by code revision; development runs are excluded. A separate baseline control preceded the last V27 run. For each core run the independent direct-pose checks and scheme scores ran normally. Each subsequent offscreen Qt run measured 31 hot reads and 7 two-way cached selections with animation disabled. The full GUI shows 65 rows on V26 and 257 on V27. Current V27 assesses individual target events in addition to the original union. Times include desktop load variability and are not Windows/CUDA benchmarks. Programmatic cold width timings start without a Jobs cache. Level-change reuse is timed separately on the same V27 classifier. GDS import, whose algorithm has not changed, also differed across runs on this shared host.",
+  "reproduction": [
+    "tools/benchmark_v26.py --gds <GD55> --checkout <checkout> --out <fresh.json>",
+    "tools/benchmark_preview_v27.py --gds <GD55> --checkout <checkout> --out <fresh.json>",
+    "tools/audit_gd55_v27.py --gds <GD55> --base <merged-V26-checkout> --out <aggregate.json>",
+    "tools/audit_gd55_v27.py --sample-proof --gds <GD55> --out <sample-proof.json>",
+    "tools/audit_gd55_v27.py --catalogue-proof --gds <GD55> --out <catalogue-proof.json>"
+  ],
+  "extra_baseline_control_s": {
+    "import": 0.50816,
+    "width_cold_nominal": 13.740721,
+    "width_first_shift": 2.183915,
+    "width_repeat": 0.000171,
+    "width_animation_cold": 10.940644,
+    "width_animation_replay": 0.000295,
+    "agg_full_draw": 0.040289,
+    "scheme_core": 38.427985,
+    "extreme_checks": 2.550779
+  },
+  "paired_sample_proof": {
+    "dies": [
+      {
+        "die": 1,
+        "samples": 1024,
+        "runs": [
+          {
+            "mode": "full",
+            "polygons": 6076,
+            "seconds": 0.18552112999896053,
+            "safe_samples": 998
+          },
+          {
+            "mode": "projected",
+            "polygons": 6075,
+            "seconds": 0.17950364699936472,
+            "safe_samples": 998
+          }
+        ]
+      },
+      {
+        "die": 2,
+        "samples": 1024,
+        "runs": [
+          {
+            "mode": "full",
+            "polygons": 38518,
+            "seconds": 1.3655006600019988,
+            "safe_samples": 930
+          },
+          {
+            "mode": "projected",
+            "polygons": 34732,
+            "seconds": 1.3538889360061148,
+            "safe_samples": 930
+          }
+        ]
+      },
+      {
+        "die": 3,
+        "samples": 1024,
+        "runs": [
+          {
+            "mode": "full",
+            "polygons": 75080,
+            "seconds": 1.3878693540027598,
+            "safe_samples": 936
+          },
+          {
+            "mode": "projected",
+            "polygons": 45419,
+            "seconds": 0.9338901280134451,
+            "safe_samples": 936
+          }
+        ]
+      }
+    ],
+    "full": 119674,
+    "projected": 86226,
+    "all_samples_identical": true
+  },
+  "catalogue_reuse_same_V27": {
+    "one_run": {
+      "initial_6sigma": {
+        "seconds": 17.20096400300099,
+        "catalogue_builds": 1,
+        "confirmed_low": 0
+      },
+      "new_2sigma_reuse": {
+        "seconds": 2.5150813709915383,
+        "catalogue_builds": 0,
+        "confirmed_low": 0
+      },
+      "new_2sigma_cold": {
+        "seconds": 15.790924327011453,
+        "catalogue_builds": 1,
+        "confirmed_low": 0
+      }
+    },
+    "all_2sigma_rows_identical": true
+  }
+}
