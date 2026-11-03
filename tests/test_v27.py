@@ -46,6 +46,20 @@ class YieldDisplayTests(unittest.TestCase):
         for level in (0,math.inf):
             out=model.screen(replace(p,target_nsigma=level));self.assertFalse(out.get('low_issues'))
 
+    def test_projected_yield_acceleration_matches_full_polygons_at_every_pose(self):
+        from die_shift_studio.model_yield import DieEvent
+        from die_shift_studio.preview import rigid_transform
+        import shapely
+        model,p=contact_fixture();p=replace(p,bound_angle_deg=120,single_bound_y_um=18)
+        event=DieEvent(model,p,0);source=model.records[0]['poly'];xy=shapely.get_coordinates(source)
+        poses=np.array([[x,y,math.radians(angle)] for x in (-35,-12,0,6,30,35) for y in (-18,0,18)
+                        for angle in (-120,-45,0,35,120)])
+        geos=shapely.set_coordinates(np.full(len(poses),source,object),np.vstack([rigid_transform(xy,model.bound.centers[0],z) for z in poses]))
+        obstacles=model.node_geometry[model.records[0]['foreign']]
+        truth=~np.any(shapely.dwithin(geos[:,None],obstacles,p.line_space_um+p.annulus_um+event.tol),axis=1)
+        np.testing.assert_array_equal(event.no_contact(poses),truth)
+        self.assertTrue(truth.any() and not truth.all())
+
     def test_foreign_copper_inside_a_via_hole_is_not_contact(self):
         from die_shift_studio.contact_probability import contact_probability
         model,p=contact_fixture();source=dict(model.records[0]);source['poly']=box(20,-45,100,45).difference(box(35,-30,85,30))
