@@ -1,7 +1,7 @@
-"""Check the development tree or independently verify a Windows-built release ZIP."""
+"""Build reproducible source-only Windows release archives and validate the source tree."""
 import argparse
 from datetime import datetime,timezone
-import hashlib,json,os,shutil,struct,subprocess,sys,tempfile,zipfile
+import hashlib,io,json,os,shutil,subprocess,sys,tarfile,tempfile,zipfile
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -18,7 +18,7 @@ def check_source():
     with tempfile.TemporaryDirectory(prefix='die-shift-source-qa-') as name:
         stage=Path(name)
         selected=subprocess.check_output(['git','ls-files','-z','--','die_shift_studio','tests','tools','Jobs','examples',
-                   'main.py','die_shift_model.py','RUN.bat','requirements.txt','Die_Shift_Analyze.spec'],cwd=ROOT)
+                   'main.py','die_shift_model.py','RUN.bat','BUILD.bat','requirements.txt','Die_Shift_Analyze.spec'],cwd=ROOT)
         for value in selected.split(b'\0'):
             if not value:continue
             relative=Path(os.fsdecode(value));dst=stage/relative;dst.parent.mkdir(parents=True,exist_ok=True)
@@ -47,32 +47,44 @@ def check_source():
              platform=sys.platform,gui_suites=len(gui),runs=records)
     (ROOT/'docs/package_verification.json').write_text(json.dumps(out,ensure_ascii=False,indent=2)+'\n',encoding='utf8')
 
-def check_artifact(archive,verification):
-    meta=json.loads(verification.read_text(encoding='utf8'))
-    if not meta.get('single_file') or meta['version']!=__version__ or not meta['existing_job_preserved']:
-        raise ValueError('Incorrect Windows build report.')
-    if (len(meta['checks'])!=2 or not meta.get('source_bat_smoke') or meta['icons']<6 or
-            not all(x['platform']=='win32' and x['frozen'] and x['status']=='PASS' for x in meta['checks'])):
-        raise ValueError('Incomplete native Windows validation.')
-    digest=hashlib.sha256(archive.read_bytes()).hexdigest()
-    if digest!=meta['zip_sha256'] or archive.with_suffix('.zip.sha256').read_text().split()[0]!=digest:
-        raise ValueError('Unexpected release ZIP digest.')
-    with zipfile.ZipFile(archive) as bundle:
-        if bundle.namelist()!=['Die_Shift_Analyze.exe'] or bundle.testzip() is not None:
-            raise ValueError('Only the standalone application belongs in the release.')
-        exe=bundle.read('Die_Shift_Analyze.exe')
-        if exe[:2]!=b'MZ' or hashlib.sha256(exe).hexdigest()!=meta['exe_sha256']:
-            raise ValueError('Executable differs from the Windows-tested build.')
-        pe=struct.unpack_from('<I',exe,60)[0]
-        if (exe[pe:pe+4]!=b'PE\0\0' or struct.unpack_from('<H',exe,pe+4)[0]!=0x8664 or
-                struct.unpack_from('<H',exe,pe+24+68)[0]!=2):
-            raise ValueError('Expected a Windows x64 GUI executable.')
-    print('RELEASE_PASS',archive.name,digest)
+SOURCE_FILES={'main.py','RUN.bat','BUILD.bat','Die_Shift_Analyze.spec','requirements.txt'}
+
+def tagged_sources(ref):
+    # Read Git objects so checkout EOL settings cannot change the tested ZIP.
+    tree=subprocess.check_output(['git','archive','--format=tar',ref],cwd=ROOT)
+    with tarfile.open(fileobj=io.BytesIO(tree),mode='r:') as tar:
+        files={info.name:tar.extractfile(info).read() for info in tar if info.isfile()}
+    root_files={name for name in files if '/' not in name}
+    if root_files!=SOURCE_FILES or any(
+            name not in SOURCE_FILES and not (name.startswith('die_shift_studio/') and name.endswith('.py'))
+            for name in files):
+        raise ValueError('The source export must contain only the application and the two Windows entry points.')
+    required={'die_shift_studio/__init__.py','die_shift_studio/gui.py','die_shift_studio/app_icon.py',
+              'die_shift_studio/native_ops.py','die_shift_studio/klayout_worker.py'}
+    if not required.issubset(files):raise ValueError('A required runtime module is missing')
+    return files
+
+def make_source(out):
+    files=tagged_sources('HEAD')
+    if __version__ not in files['die_shift_studio/__init__.py'].decode():raise ValueError('Source version must be committed before packaging.')
+    out.mkdir(parents=True,exist_ok=True)
+    target=out/f'Die_Shift_Analyze_{__version__}_Source.zip'
+    with zipfile.ZipFile(target,'w',zipfile.ZIP_STORED,allowZip64=False) as z:
+        for rel,data in sorted(files.items()):
+            info=zipfile.ZipInfo(target.stem+'/'+rel,date_time=(1980,1,1,0,0,0))
+            info.create_system=3;info.external_attr=(0o100644<<16)|0x20
+            z.writestr(info,data)
+    with zipfile.ZipFile(target) as z:
+        assert z.testzip() is None and z.namelist()==[target.stem+'/'+p for p in sorted(files)]
+        for rel,data in files.items():assert z.read(target.stem+'/'+rel)==data,rel
+    digest=hashlib.sha256(target.read_bytes()).hexdigest()
+    target.with_suffix('.zip.sha256').write_bytes(f'{digest}  {target.name}\n'.encode())
+    print('SOURCE_RELEASE_PASS',target,len(files),'files',digest)
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__);sub=parser.add_subparsers(dest='mode',required=True)
     sub.add_parser('verify-source')
-    test=sub.add_parser('verify-windows');test.add_argument('zip',type=Path);test.add_argument('validation',type=Path)
+    build=sub.add_parser('make-source');build.add_argument('--output',type=Path,default=ROOT/'dist')
     args=parser.parse_args()
     if args.mode=='verify-source':check_source()
-    else:check_artifact(args.zip,args.validation)
+    else:make_source(args.output)

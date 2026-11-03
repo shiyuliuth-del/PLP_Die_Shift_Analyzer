@@ -23,9 +23,11 @@ class V30Tests(unittest.TestCase):
                 (root/'logs').rmdir();prepare_runtime();self.assertEqual(marker.read_text(),'keep')
                 self.assertEqual({p.name for p in root.iterdir()},{exe.name,'Jobs','logs'})
 
-    def test_one_launcher_unpinned_requirements_and_icon_sizes(self):
+    def test_one_launcher_one_builder_unpinned_requirements_and_icon_sizes(self):
         root=Path(__file__).resolve().parents[1]
-        self.assertEqual(sorted(p.name for p in root.glob('*.bat')),['RUN.bat'])
+        self.assertEqual(sorted(p.name for p in root.glob('*.bat')),['BUILD.bat','RUN.bat'])
+        batch=(root/'BUILD.bat').read_text().lower();self.assertIn('run.bat" build',batch)
+        self.assertNotIn('pip install',batch);self.assertNotIn('-m venv',batch)
         self.assertFalse((root/'RUN.vbs').exists());self.assertFalse((root/'main.pyw').exists())
         for requirement in (root/'requirements.txt').read_text().splitlines():self.assertRegex(requirement,r'^[a-zA-Z0-9_-]+$')
         with TemporaryDirectory() as d:

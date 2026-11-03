@@ -16,10 +16,12 @@ if not defined DSA_PYTHON for /f "delims=" %%P in ('py -c "import sys; print(sys
 :selected
 if not exist "%DSA_PYTHON%" (
     echo Python was not found. Set DIE_SHIFT_PYTHON to the existing python.exe.
-    pause
+    if /i not "%~1"=="build" if not defined CI pause
     exit /b 1
 )
 if /i "%~1"=="build" (
+    "%DSA_PYTHON%" -m die_shift_studio.dependencies
+    if errorlevel 1 exit /b 1
     "%DSA_PYTHON%" -m PyInstaller --clean --noconfirm "%~dp0Die_Shift_Analyze.spec"
     if errorlevel 1 exit /b 1
     exit /b 0

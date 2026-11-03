@@ -1,6 +1,6 @@
 # 多 Agent 协作与 GitHub 提交规范
 
-适用范围：本仓库全部源码、文档、示例和发布物。维护日期：2026-11-03。本文以 **V30（Windows 单文件应用与交互绘制）**编制；当前软件版本以`__init__.py`和README为准。原附件自身仍标记为V21，不能把它与此前已发布的V21标签混为一谈。
+适用范围：本仓库全部源码、文档、示例和发布物。维护日期：2026-11-03。本文以 **V31（源码交付与目标电脑一键打包）**编制；当前软件版本以`__init__.py`和README为准。原附件自身仍标记为V21，不能把它与此前已发布的V21标签混为一谈。
 
 ## 1. 唯一可信主线与需求优先级
 
@@ -56,7 +56,7 @@ QT_QPA_PLATFORM=offscreen python3 tests/gui_repair.py
 | 几何型变/DRC | V12–V20相关核心测试；失败保留源铜、原材料随动、固定端、连通、最终全局复核 |
 | 概率/安全盒/良率 | 解析或独立积分对照；0/有限k/∞、最大幅度、共同DIE状态与误差范围 |
 | GUI/缓存/调度 | `gui_smoke.py`、`gui_v14.py`、`gui_v20.py`、`gui_scheduler_v20.py`，再测当前界面、低容量缓存正反向复用、设置折叠、标签避让与极端表缓存色 |
-| 依赖/打包/后端 | `main.py --smoke-test`、安装的KLayout桌面后端、Windows `RUN.bat build`、启动 EXE 和验证首次创建目录 |
+| 依赖/打包/后端 | `main.py --smoke-test`、安装的KLayout桌面后端、Windows 双击 BUILD.bat、源码 RUN.bat、在新目录验证目标机生成的 EXE |
 
 使用 `python3 tools/package_release.py verify-source` 在干净源码目录运行完整回归。Windows 端单独执行 `tools/windows_acceptance.py`，核对真实结论后才能发布。实际GUI、KLayout、Windows、GPU或真实GD55未验证时，必须写明未验证/跳过原因。不得把“没有数据”“没有标记”“样本未命中”写成通过。
 
@@ -82,10 +82,10 @@ QT_QPA_PLATFORM=offscreen python3 tests/gui_repair.py
 
 ## 7. 版本、Windows 软件包与发布
 
-- 1102 接入标签为 V22，本轮为 V30，后续每轮依次递增。由集成者统一分配发布号；并行Agent不要各自占用同一个号。
+- 1102 接入标签为 V22，本轮为 V31，后续每轮依次递增。由集成者统一分配发布号；并行Agent不要各自占用同一个号。
 - 更新 `die_shift_studio/__init__.py`、README、当前使用说明、`AGENTS.md`入口链接及发布记录；旧tag及历史证据不改写。
-- Windows Release ZIP 只包含 `Die_Shift_Analyze.exe`。图标嵌入程序，校验文件独立分发。协作材料、示例和测试在完整 Git 检出；GitHub 自动源码归档只保留程序源码、RUN.bat、依赖清单和构建规范。
-- Windows 构建后将唯一的 EXE 放进全新目录，用另一工作目录启动并检查实际窗口、工程保留和目录重建。下载后的资产核对 CRC、SHA-256 和 7-Zip。
+- 正式 Release ZIP 使用 `python3 tools/package_release.py make-source` 生成，包含应用源码、RUN.bat、BUILD.bat、依赖清单及 PyInstaller 规范。图标在目标电脑打包时从源码生成。校验值独立发布。完整 Git 检出保留开发资料和示例，自动源码归档与正式 ZIP 的源文件逐字节相同。
+- Windows 验收从正式源码 ZIP 解压后运行 BUILD.bat，验证窗口、工程保留、目录重建和源码启动，临时 EXE 不上传。下载后的源码资产核对文件清单、CRC、SHA-256 和 7-Zip。
 - 发布经任务授权后上传版本化ZIP与SHA-256文件。重新下载远端asset核对字节/哈希，检查GitHub自动zip/tar内容；不能只验证本地ZIP。
 - Windows 构建须使用 Windows 原生执行环境。源码运行阶段不联网安装，不锁定 Python 或包版本；在 Linux 运行源码回归单独记录。
 

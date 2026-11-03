@@ -1,14 +1,17 @@
-name: Windows one-file release
+name: Windows source build verification
 on:
   pull_request:
     paths:
       - 'die_shift_studio/**'
+      - 'tools/package_release.py'
       - 'tools/windows_acceptance.py'
       - 'tests/gui_v30.py'
       - 'main.py'
+      - 'BUILD.bat'
       - 'RUN.bat'
       - 'requirements.txt'
       - 'Die_Shift_Analyze.spec'
+      - '.gitattributes'
       - '.github/workflows/windows-runtime.yml'
   workflow_dispatch:
 
@@ -17,7 +20,7 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 35
     env:
       PYTHONUTF8: '1'
       OPENBLAS_NUM_THREADS: '1'
@@ -26,25 +29,30 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - name: Prepare builder
+      - name: Prepare the Windows test environment
         run: |
-          python --version
           python -m venv .venv
-          .\.venv\Scripts\python -m pip install -r requirements.txt PyInstaller klayout
-      - name: Exercise saved contact marker settings on Windows
-        timeout-minutes: 4
-        run: .\.venv\Scripts\python tests/gui_v30.py
-      - name: Build the single GUI executable
+          .\.venv\Scripts\python -m pip install -r requirements.txt
+      - name: Generate and expand the actual source-only ZIP
+        run: |
+          $py = (Get-Item .\.venv\Scripts\python.exe).FullName
+          $out = Join-Path $env:RUNNER_TEMP "源码 package"
+          & $py tools/package_release.py make-source --output "$out"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $zip = Get-Item "$out\*_Source.zip"
+          $expand = Join-Path $env:RUNNER_TEMP "目标 Windows"
+          Expand-Archive -LiteralPath $zip.FullName -DestinationPath $expand
+          $source = Join-Path $expand $zip.BaseName
+          "DSA_TEST_SOURCE=$source" >> $env:GITHUB_ENV
+          "DIE_SHIFT_PYTHON=$py" >> $env:GITHUB_ENV
+      - name: Exercise the one-click BUILD.bat from the extracted source
         shell: cmd
-        run: call RUN.bat build
-      - name: Verify normal window, icon, geometry and isolated EXE
-        run: .\.venv\Scripts\python tools/windows_acceptance.py
-      - uses: actions/upload-artifact@v4
-        with:
-          name: verified-windows-runtime
-          path: |
-            dist/*_Windows_x64.zip
-            dist/*.zip.sha256
-            dist/windows_verification.json
-          compression-level: 0
-          if-no-files-found: error
+        run: call "%DSA_TEST_SOURCE%\BUILD.bat"
+      - name: Verify the startup and clean up the temporary executable
+        run: |
+          try {
+            & $env:DIE_SHIFT_PYTHON tools/windows_acceptance.py --source-root "$env:DSA_TEST_SOURCE"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            Remove-Item -LiteralPath "$env:DSA_TEST_SOURCE\dist" -Recurse -Force -ErrorAction SilentlyContinue
+          }
