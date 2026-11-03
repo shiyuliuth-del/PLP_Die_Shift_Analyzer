@@ -41,6 +41,26 @@ def reachable_targets(model,record,params):
     return ids
 
 
+def local_obstacles(model,record,params,ids):
+    # For every allowed pose all copper that can be contacted lies inside
+    # this rectangle. Clip long foreign nets once for both union and pair tests.
+    others=model.node_geometry[ids]
+    heavy=np.flatnonzero(shapely.get_num_coordinates(others)>96)
+    if not len(heavy):return others
+    owner=record['owner'];center=model.bound.centers[owner]
+    p=params.for_die(owner);mu,b=mean_and_bounds(p,len(model.bound.centers))
+    xy=shapely.get_coordinates(record['poly']);at_mean=rigid_transform(xy,center,mu)
+    lever=np.linalg.norm(xy-center,axis=1).max()
+    padding=b[:2]+2*lever*math.sin(min(math.pi,b[2])/2)+p.annulus_um+p.line_space_um+2*max(1e-9,model.data.dbu_um*1e-6)
+    lo=at_mean.min(axis=0)-padding;hi=at_mean.max(axis=0)+padding
+    domain=shapely.box(*lo,*hi)
+    clipped=shapely.intersection(others[heavy],domain)
+    local=others.copy()
+    for i,g in zip(heavy,clipped):
+        if not g.is_empty:local[i]=g
+    return local
+
+
 def location_witness(model,record,params,node):
     """Find an attained interior contact; an unsuccessful probe is never a pass."""
     owner=record['owner'];p=params.for_die(owner);center=model.bound.centers[owner]
@@ -67,10 +87,11 @@ def location_witness(model,record,params,node):
     return None
 
 
-def contact_probability(model,record,p,budget=2048,candidates=None):
+def contact_probability(model,record,p,budget=2048,candidates=None,obstacles=None):
     model.configure_parameters(p)
     foreign=reachable_targets(model,record,p) if candidates is None else np.asarray(candidates,int)
     if not len(foreign):return dict(lower=0.,upper=0.,estimate=0.,verdict='通过',boxes=0,threshold=p.failure_threshold,witness=None)
+    others=local_obstacles(model,record,p,foreign) if obstacles is None else obstacles
     p=p.for_die(record['owner']);count=len(model.bound.centers);mu,cov,_=statistical_state(p,count)
     sx,sy,st=np.sqrt(np.diag(cov));rho=p.rho_xy
     root=np.array([[sx,0.,0.],[rho*sy,sy*math.sqrt(max(0.,1-rho*rho)),0.],[0.,0.,st]])
@@ -80,7 +101,7 @@ def contact_probability(model,record,p,budget=2048,candidates=None):
     tol=max(1e-9,model.data.dbu_um*1e-6)
     center=model.bound.centers[record['owner']];shape=record['poly'];vertices=shapely.get_coordinates(shape)
     lever=float(np.linalg.norm(vertices-center,axis=1).max())
-    others=model.node_geometry[foreign];tree=STRtree(others)
+    tree=STRtree(others)
     def distance(state):
         via=shapely.set_coordinates(shape,rigid_transform(vertices,center,state));index=int(tree.nearest(via))
         return float(via.distance(others[index])),via,int(foreign[index])

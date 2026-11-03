@@ -46,6 +46,32 @@ class YieldDisplayTests(unittest.TestCase):
         for level in (0,math.inf):
             out=model.screen(replace(p,target_nsigma=level));self.assertFalse(out.get('low_issues'))
 
+    def test_foreign_copper_inside_a_via_hole_is_not_contact(self):
+        from die_shift_studio.contact_probability import contact_probability
+        model,p=contact_fixture();source=dict(model.records[0]);source['poly']=box(20,-45,100,45).difference(box(35,-30,85,30))
+        foreign=model.ids['40/0',1];p=replace(p,single_bound_x_um=.2,annulus_um=.5,line_space_um=.5)
+        outcome=contact_probability(model,source,p,candidates=[foreign]);self.assertEqual(outcome['verdict'],'通过')
+        self.assertIsNone(outcome['witness']);self.assertLess(outcome['upper'],outcome['threshold'])
+
+    def test_edge_cull_matches_actual_rigid_geometry_even_after_large_rotations(self):
+        from die_shift_studio.edge_clearance import edge_violations
+        from die_shift_studio.preview import rigid_transform
+        import shapely
+        board=box(-100,-70,100,70).difference(box(4,-8,12,7))
+        copper=np.array([box(-85,-25,-79,-19),box(18,27,24,34),box(-9,-8,-1,7),box(48,32,55,41)],object)
+        center=np.array([[25.,30.]])
+        model=SimpleNamespace(case={'board':board},data=SimpleNamespace(dbu_um=.001),bound=SimpleNamespace(centers=center),
+          roles={'3/0':'运动RDL'},cache=SimpleNamespace(layers={'3/0':dict(geometry=copper)}),
+          nodes=[dict(net=i,owner=0) for i in range(len(copper))],ids={('3/0',i):i for i in range(len(copper))})
+        model.moved=lambda poly,owner,states:shapely.set_coordinates(poly,rigid_transform(shapely.get_coordinates(poly),center[owner],states[owner]))
+        p=Parameters(wafer_line_space_um=10)
+        for z in ((0.,0.,0.),(63.,-22.,.4),(3.,5.,3.7),(0.,0.,-2.1)):
+            state=np.array([z]);actual=edge_violations(model,state,p,ViewSettings());expected=set()
+            for i,poly in enumerate(copper):
+                g=model.moved(poly,0,state)
+                if not board.covers(g) or board.boundary.distance(g)<10-1e-9:expected.add(i)
+            self.assertEqual({q['indices'][0] for q in actual},expected)
+
     def test_width_rare_bound_contains_closed_form_and_updates_at_six_sigma(self):
         model,p=contact_fixture();board=box(-1500,-1500,1500,1500)
         left=Wall('L','运动过孔孔盘',box(-5,-5,5,5),(),0);right=Wall('R','固定过孔孔盘',box(65,-5,75,5),())

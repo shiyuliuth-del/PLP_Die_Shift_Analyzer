@@ -164,7 +164,7 @@ class ContactModel:
     def screen(self,p,settings=None,progress=lambda *_:None):
         self.configure_parameters(p)
         from .settings import ViewSettings
-        from .contact_probability import contact_probability,reachable_targets,location_witness
+        from .contact_probability import contact_probability,reachable_targets,location_witness,local_obstacles
         from .resources import parallel_map
         cfg=settings or ViewSettings();ratios={s:0. for s in (1,2,3)}
         common=dict(network_count=self.network_count,
@@ -178,17 +178,18 @@ class ContactModel:
             return dict(**common,issues=current['issues'],ratios=ratios,unresolved=[],probabilities=[],mode='binary',scope='∞：名义位置二值接触；具体预演始终二值判定')
         def solve(record):
             ids=reachable_targets(self,record,p)
-            joint=contact_probability(self,record,p,cfg.contact_box_budget,ids)
+            copper=local_obstacles(self,record,p,ids)
+            joint=contact_probability(self,record,p,cfg.contact_box_budget,ids,copper)
             locations=[]
             if p.target_nsigma>0:
-                for node in ids:
+                for i,node in enumerate(ids):
                     if len(ids)==1:event=joint
                     elif joint['upper']<=p.failure_threshold:
                         # A subset inherits the union upper bound, but never its lower bound
                         # or a different target's witness.
                         w=joint['witness']
                         event=dict(lower=0.,upper=joint['upper'],witness=w if w and w['node']==node else None)
-                    else:event=contact_probability(self,record,p,cfg.contact_box_budget,[node])
+                    else:event=contact_probability(self,record,p,cfg.contact_box_budget,[node],copper[i:i+1])
                     low=event['upper']<=p.failure_threshold
                     witness=event['witness']
                     if low and witness is None and event['upper']>0:

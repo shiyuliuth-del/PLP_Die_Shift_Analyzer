@@ -322,6 +322,8 @@ class MainWindow(W.QMainWindow):
         self.show_issues=W.QCheckBox('显示接触位置');self.show_issues.setChecked(True)
         ir.addWidget(self.issue_scheme);ir.addWidget(self.show_issues);self.issue_summary=label('');ir.addWidget(self.issue_summary,1);iv.addLayout(ir)
         self.issue_table=table(['接触判定','DIE','概率范围 / 二值','允许概率','控制距离 / μm','原间距 / μm','接触坐标 / μm']);iv.addWidget(self.issue_table)
+        for col,width in enumerate((108,36,143,76,79,72,110)):self.issue_table.setColumnWidth(col,width)
+        self.issue_table.horizontalHeader().setStretchLastSection(True)
         self.issue_table.currentCellChanged.connect(self.issue_row_changed);self.issue_table.cellClicked.connect(lambda *_:self.issue_navigation.start())
         self.issue_scheme.currentIndexChanged.connect(self.issue_filter_changed);self.show_issues.toggled.connect(lambda _:self.plot_layout(preserve=True))
         for panel,grid,layout in ((extreme_page,self.extreme_table,ep),(issue_page,self.issue_table,iv)):
@@ -2070,12 +2072,15 @@ class MainWindow(W.QMainWindow):
         for i,q in enumerate(self.filtered_issues):
             point=q['point'];probability='型变后概率待细化' if q.get('adaptive_unresolved') else f"{q['probability_lower']:.3g} ～ {q['probability_upper']:.3g}" if 'probability_lower' in q else '100%（当前接触）'
             allowed=f"{q['threshold']:.3g}" if 'threshold' in q else '二值'
+            if 'location_upper' in q:
+                probability=f"当前接触 · 位置≤{q['location_upper']:.3g}"
+                allowed=f"{q['location_threshold']:.3g}"
             values=[q['kind']+(' · 低概率' if q.get('low_probability') and q['kind']!='低概率接触' else ''),q['die'],probability,allowed,fmt(q['need']),fmt(q['allow']),f'{fmt(point[0])}, {fmt(point[1])}']
             for j,value in enumerate(values):
                 item=W.QTableWidgetItem(str(value));item.setToolTip(q.get('detail',''))
                 if q.get('low_probability'):item.setForeground(QtGui.QColor('#82919e'))
                 self.issue_table.setItem(i,j,item)
-        self.issue_table.resizeColumnsToContents();self.issue_table.blockSignals(False)
+        self.issue_table.blockSignals(False)
         status=self.result['schemes'][self.issue_scheme.currentData()-1]['status'] if self.result else '尚未评估'
         scope='全局型变：代表状态已迭代；连续概率待细化' if self.current_frame and self.current_frame.get('nominal_global') and self.current_frame.get('global_deformation') else '当前预演' if self.current_frame and not self.current_frame.get('nominal_global') else '评估包络'
         if self.current_frame and self.current_frame.get('deformation'):
