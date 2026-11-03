@@ -11,6 +11,7 @@
 - Linux / offscreen 实跑 `tests/gui_v21.py`、`tests/gui_repair.py`、`tests/gui_v24.py`、`tests/gui_v25.py`、`tests/gui_v26.py` 全部通过，覆盖三档通道、独立显隐、Q 编辑与旧工程恢复、真实首行点击、低容量缓存双向回放、缩放后标签避让、729 状态分页、锁定轴、缓存只读色深及按归属足迹。`python3 main.py --smoke-test` 通过，使用 KLayout 0.30.8 Python 模块。
 - 本轮没有真实 GD55 输入，未重跑实图窄口审计；未做 Windows / CUDA 实机或受限的 KLayout 桌面通信验收。已知模型问题继续见 [KNOWN_ISSUES.md](KNOWN_ISSUES.md)。本轮为分支历史整合，不另发版本、改写标签或生成发布包。
 - 本地 Git fetch 因代理不可达、直连 DNS 不可用而失败；通过已连接的 GitHub 接口逐一核对远端分支 SHA。本地任务分支 `codex/merge-wzh-1102-20261103` 保存已审查、已测试的普通合并结果。远端创建 Git tree 和创建草稿 PR 均返回 `403 Resource not accessible by integration`；浏览器通道超时，故本轮截至交接时尚未推送、创建 PR 或合并远端 main，也未删除任何远端分支。恢复仓库内容及 PR 写入权限后，须再次核对双方远端头，再经 PR 集成该结果。
+- 同日续办：用户已在本机完成 `gh` 授权，当前会话确认 `/usr/bin/gh` 和账号配置存在。但会话内仍无法连接本机代理，移除代理后的 `gh api user` 也返回网络连接错误，故不能据 `gh auth status` 的失败判定用户凭据无效。GitHub 只读接口再次确认 main 与来源 SHA 均未变化；合并源码仍与上述已测试提交相同。已准备主线及来源头校验、任务分支推送和按准确头提交合并 PR 的系统终端交接步骤，远端完成状态须在实际执行后核验。
 
 ## 2026-11-02 · V26 · 三自由度离散组合、缓存色和计算资源
 
