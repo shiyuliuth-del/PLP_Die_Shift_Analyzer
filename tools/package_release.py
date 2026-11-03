@@ -11,7 +11,7 @@ from die_shift_studio import __version__
 def check_source():
     """Stage a clean test checkout. Test helpers and projects do not enter the release."""
     gui=['gui_smoke','gui_v14','gui_v20','gui_scheduler_v20','gui_v21','gui_repair',
-         'gui_v24','gui_v25','gui_v26','gui_v27','gui_v28','gui_v29','gui_v30']
+         'gui_v24','gui_v25','gui_v26','gui_v27','gui_v28','gui_v29','gui_v30','gui_v32']
     env=dict(os.environ,QT_QPA_PLATFORM='offscreen',OPENBLAS_NUM_THREADS='1',PYTHONUTF8='1')
     subprocess.run([sys.executable,'tools/check_contribution.py'],cwd=ROOT,env=env,check=True)
     records=[]
@@ -55,14 +55,15 @@ def tagged_sources(ref):
                                   'archive','--format=tar',ref],cwd=ROOT)
     with tarfile.open(fileobj=io.BytesIO(tree),mode='r:') as tar:
         files={info.name:tar.extractfile(info).read() for info in tar if info.isfile()}
+    kernels={'die_shift_studio/cuda_kernels.cu','die_shift_studio/cuda_kernels.ptx'}
     root_files={name for name in files if '/' not in name}
     if root_files!=SOURCE_FILES or any(
-            name not in SOURCE_FILES and not (name.startswith('die_shift_studio/') and name.endswith('.py'))
+            name not in SOURCE_FILES|kernels and not (name.startswith('die_shift_studio/') and name.endswith('.py'))
             for name in files):
         raise ValueError('The source export must contain only the application and the two Windows entry points.')
     required={'die_shift_studio/__init__.py','die_shift_studio/gui.py','die_shift_studio/app_icon.py',
               'die_shift_studio/native_ops.py','die_shift_studio/klayout_worker.py'}
-    if not required.issubset(files):raise ValueError('A required runtime module is missing')
+    if not (required|kernels).issubset(files):raise ValueError('A required runtime module is missing')
     return files
 
 def make_source(out):

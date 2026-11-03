@@ -69,7 +69,8 @@ class V18Tests(unittest.TestCase):
             asnumpy=staticmethod(np.asarray)
             def __getattr__(self,key):return getattr(np,key)
         device=Device();xy=np.array([[3.,7.],[100,200]]);w=np.array([.3,.8]);center=np.array([10.,-5]);z=np.array([-35.,-35.,-.017])
-        with patch.dict('sys.modules',{'cupy':device}),patch('die_shift_studio.acceleration.capabilities',return_value={'backend':'cuda'}):
+        from die_shift_studio.acceleration import _CuPy
+        with patch('die_shift_studio.acceleration._runtime',_CuPy(device,0)),patch('die_shift_studio.acceleration.capabilities',return_value={'backend':'cuda'}):
             for method in ('bezier','arc'):
                 expected=blend_points(xy,w,center,z,method,30,'cpu')
                 np.testing.assert_allclose(blend_points(xy,w,center,z,method,30,'cuda'),expected)

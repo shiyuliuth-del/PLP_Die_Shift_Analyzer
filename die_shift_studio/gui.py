@@ -430,7 +430,7 @@ class MainWindow(W.QMainWindow):
         hardware=group('硬件与计算资源')
         profile=resource_profile()
         self.hardware_label=label(f"{profile['cpu']} 逻辑CPU · 可用内存 {profile['available_memory_mb']} MB · 最多 {profile['workers']} 线程 / {profile['process_workers']} 进程\n显卡检测中…");hardware.addRow(self.hardware_label)
-        accel=W.QComboBox();accel.addItem('自动（按任务大小）','auto');accel.addItem('CPU','cpu')
+        accel=W.QComboBox();accel.addItem('自动（按任务大小）','auto');accel.addItem('CPU','cpu');accel.addItem('CUDA（等待设备自检）','cuda')
         self.setting_fields['acceleration']=accel;hardware.addRow('显卡加速',accel);accel.currentIndexChanged.connect(self.settings_changed)
         accel.setToolTip('可用CUDA用于概率卷积、良率采样、大型刚体与型变坐标批次；小批次优先使用CPU。所有拓扑与最终DRC仍用CPU检查；不会联网安装依赖。')
         probability=group('过孔实体覆盖概率')
@@ -556,16 +556,19 @@ class MainWindow(W.QMainWindow):
         space.addRow(label('平滑只改变热图显示，不改变线距需求、连接归属和接触判定。资源由CPU/内存自动限额，多线程计算几何和概率，切换预演复用数值结果。'))
         page.addStretch();self.load_view_settings()
     def discover_hardware(self):
+        if self._closing:return
         from .acceleration import capabilities,graphics_inventory
         def work(progress):
             progress(5,'检测显卡与计算运行时');cap=capabilities();inventory=graphics_inventory();progress(100,'硬件检测完成');return cap,inventory
         worker=Worker(work,self);self.hardware_worker=worker;self.watch_worker(worker,'硬件检测')
         def accepted(value):
+            if self._closing:return
             cap,adapters=value;profile=resource_profile()
-            self.hardware_label.setText(f"{profile['cpu']} 逻辑CPU · 可用内存 {profile['available_memory_mb']} MB · 最多 {profile['workers']} 线程 / {profile['process_workers']} 进程\n"+('; '.join(d['name'] for d in (cap['devices'] or adapters)) or '未检出显卡')+'\n'+cap['reason'])
+            self.hardware_label.setText(f"{profile['cpu']} 逻辑CPU · 可用内存 {profile['available_memory_mb']} MB · 最多 {profile['workers']} 线程 / {profile['process_workers']} 进程\n"+('; '.join(dict.fromkeys(d['name'] for d in (*adapters,*cap['devices']))) or '未检出显卡')+'\n'+cap['reason'])
             self.log_bus.emit(self.hardware_label.text())
             combo=self.setting_fields['acceleration'];combo.blockSignals(True)
-            if cap['backend']=='cuda' and combo.findData('cuda')<0:combo.addItem('CUDA · '+cap['devices'][0]['name'],'cuda')
+            title='CUDA · '+cap['selected']['name'] if cap['backend']=='cuda' else 'CUDA（未通过自检，使用 CPU）'
+            combo.setItemText(combo.findData('cuda'),title)
             combo.setCurrentIndex(max(0,combo.findData(self.view_settings.acceleration)));combo.blockSignals(False)
         def finished():self.hardware_worker=None;worker.deleteLater()
         worker.done.connect(accepted);worker.finished.connect(finished);worker.start()
@@ -2480,8 +2483,11 @@ class MainWindow(W.QMainWindow):
         self.stop_animation()
         if hasattr(self,'mouse_die'):self.mouse_die.pending=False;self.mouse_die.full_pending=False;self.mouse_die.timer.stop();self.mouse_die.idle.stop()
         running=[w for w in [self.worker,self.motion_worker,self.hardware_worker,self.cache_clear_worker,self.filter_job,*self.preview_workers] if w is not None and w.isRunning()]
-        if running:
+        # The physical thread may have returned before Qt delivers its queued
+        # finished handlers. Keep their QObject parent alive through delivery.
+        if running or self._tasks:
             self._closing=True
+            if not self._tasks:QtCore.QTimer.singleShot(10,self.close)
             self.preview_pending=None;self.preview_ticket+=1;self.motion_pending=None;self.motion_generation+=1;self.coverage_timer.stop();self._coverage_pending=False
             for w in running:w.cancelled.set()
             event.ignore();return

@@ -9,7 +9,6 @@ from functools import lru_cache
 import numpy as np
 import shapely
 from scipy.special import ndtri,ndtr,roots_legendre
-from scipy.signal import fftconvolve
 from .acceleration import convolve
 from .statistics import statistical_state,mean_and_bounds
 from .distribution import normal_interval,normalization,bounded_poses
@@ -96,6 +95,21 @@ def _deposit(shape,points,weights,origin,cell):
     return out
 
 
+def _add_footprint(grid,footprint,center,origin,cell,weight):
+    """A single bilinearly deposited centre has at most four nonzero pixels."""
+    uv=(center-origin)/cell;base=np.floor(uv).astype(int);fx,fy=uv-base
+    h,w=footprint.shape;ny,nx=grid.shape
+    for dy,wy in ((0,1-fy),(1,fy)):
+        for dx,wx in ((0,1-fx),(1,fx)):
+            mass=weight*wy*wx
+            if not mass:continue
+            x,y=base[0]+dx,base[1]+dy
+            if not (0<=x<nx and 0<=y<ny):raise ValueError('概率中心网格越界')
+            left=x-(w-1)//2;bottom=y-(h-1)//2
+            x0,x1=max(0,left),min(nx,left+w);y0,y1=max(0,bottom),min(ny,bottom+h)
+            if x0<x1 and y0<y1:
+                grid[y0:y1,x0:x1]+=mass*footprint[y0-bottom:y1-bottom,x0-left:x1-left]
+
 def probability_maps(cache,bound,roles,p,exponent=12,masks=None,settings=None,progress=lambda *_:None):
     if math.isinf(p.target_nsigma):
         maps=[]
@@ -126,9 +140,10 @@ def _probability_maps(cache,bound,roles,p,exponent=12,masks=None,settings=None,p
     cfg=settings or ViewSettings(sample_exponent=exponent)
     mu,cov,_=statistical_state(p,len(bound.centers));eligible=[];radii=[];sizes=[]
     for key in bound.keys:
-        if roles.get(key)!='运动过孔':continue
-        for index,(point,owner) in enumerate(zip(cache.layers[key]['centers'],bound.owners[key])):
-            if owner<0 or masks is None or not masks.get(key,np.zeros(len(bound.owners[key]),bool))[index]:continue
+        if roles.get(key)!='运动过孔' or masks is None or key not in masks:continue
+        eligible_ids=np.flatnonzero(np.asarray(masks[key]) & (bound.owners[key]>=0))
+        for index in eligible_ids:
+            index=int(index);point=cache.layers[key]['centers'][index];owner=bound.owners[key][index]
             poly=cache.layers[key]['geometry'][index];radius=np.linalg.norm(np.asarray(poly.exterior.coords)-point,axis=1).max()
             eligible.append((key,index,point,owner,poly,radius));radii.append(np.linalg.norm(point-bound.centers[owner]));sizes.append(radius*2)
     # Resolution follows physical input support and via size, not k-dependent
@@ -150,6 +165,7 @@ def _probability_maps(cache,bound,roles,p,exponent=12,masks=None,settings=None,p
         zxy,_=normalization(p.scale_nsigma,p.rho_xy,cov[0,0]>0,cov[1,1]>0,False);translation/=zxy
         offsets=np.array([translation.shape[1]//2,translation.shape[0]//2])*cell
         groups=[(float(angle),float(weight)) for angle,weight in zip(angles,weights)]
+        cosine,sine=np.cos(angles),np.sin(angles)
     else:
         samples=2**cfg.sample_exponent
         poses=bounded_poses(p,len(bound.centers),cfg)
@@ -158,22 +174,23 @@ def _probability_maps(cache,bound,roles,p,exponent=12,masks=None,settings=None,p
             bins=min(cfg.angle_bins,max(1,int(math.ceil(span*max_radius*4/cell))))
             edges=np.linspace(poses[:,2].min(),poses[:,2].max(),bins+1);ids=np.clip(np.searchsorted(edges,poses[:,2],side='right')-1,0,bins-1)
         else:ids=np.zeros(samples,int)
+        cosine,sine=np.cos(poses[:,2]),np.sin(poses[:,2])
         groups=[]
         for i in np.unique(ids):
             mask=ids==i;angle=float(np.mean(poses[mask,2]));angle_error=max(angle_error,float(np.max(abs(poses[mask,2]-angle))))
-            groups.append((angle,mask))
+            groups.append((angle,np.flatnonzero(mask)))
     @lru_cache(maxsize=128)
     def kernel(shape_bytes,angle):
         local=shapely.from_wkb(shape_bytes)
         result=_footprint(local,angle,cell,cfg.footprint_samples)
-        return fftconvolve(result,translation,mode='full') if deterministic else result
+        return convolve(result,translation,mode='full',backend=cfg.acceleration) if deterministic else result
     def one(item):
         key,index,point,owner,poly,radius=item;c=bound.centers[owner];a=point-c
         if deterministic:
-            centers=c+mu[:2]+np.column_stack((a[0]*np.cos(angles)-a[1]*np.sin(angles),a[0]*np.sin(angles)+a[1]*np.cos(angles)))
+            centers=c+mu[:2]+np.column_stack((a[0]*cosine-a[1]*sine,a[0]*sine+a[1]*cosine))
             low=centers.min(axis=0)-offsets-radius-3*cell;high=centers.max(axis=0)+offsets+radius+3*cell
         else:
-            angles_sample=poses[:,2];centers=c+poses[:,:2]+np.column_stack((a[0]*np.cos(angles_sample)-a[1]*np.sin(angles_sample),a[0]*np.sin(angles_sample)+a[1]*np.cos(angles_sample)))
+            centers=c+poses[:,:2]+np.column_stack((a[0]*cosine-a[1]*sine,a[0]*sine+a[1]*cosine))
             low=centers.min(axis=0)-radius-3*cell;high=centers.max(axis=0)+radius+3*cell
         envelope=input_envelope(poly,c,p,len(bound.centers))
         x0,y0,x1,y1=envelope.bounds;low=np.minimum(low,[x0-cell,y0-cell]);high=np.maximum(high,[x1+cell,y1+cell])
@@ -185,15 +202,12 @@ def _probability_maps(cache,bound,roles,p,exponent=12,masks=None,settings=None,p
         for g,(angle,weight) in enumerate(groups):
             footprint=kernel(shape_bytes,angle)
             if deterministic:
-                hist=_deposit(shape,centers[g:g+1],np.ones(1),origin,cell)
-                hist*=weight
+                _add_footprint(grid,footprint,centers[g],origin,cell,weight)
                 area_integral+=float(weight)*float(footprint.sum())*cell*cell
             else:
-                hist=_deposit(shape,centers[weight],np.full(int(weight.sum()),1/samples),origin,cell)
-                area_integral+=float(weight.sum())/samples*float(footprint.sum())*cell*cell
-            # Linear, zero-padded convolution: no periodic wrap into the
-            # opposite edge. Domain includes support + footprint + raster guards.
-            grid+=convolve(hist,footprint,mode='same',backend=cfg.acceleration)
+                hist=_deposit(shape,centers[weight],np.full(len(weight),1/samples),origin,cell)
+                area_integral+=len(weight)/samples*float(footprint.sum())*cell*cell
+                grid+=convolve(hist,footprint,mode='same',backend=cfg.acceleration)
         numerical_mass=float(grid.sum()*cell*cell)
         if abs(numerical_mass-area_integral)>max(1e-7,area_integral*1e-8):
             raise ValueError(f'{key} 图形{index+1}概率云边界质量丢失，已停止显示并保留旧结果')

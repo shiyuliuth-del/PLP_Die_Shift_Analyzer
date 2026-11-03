@@ -3,6 +3,8 @@ from pathlib import Path
 import json,os,sys,traceback
 from .jobs import installation_root
 
+_fault_stream=None
+
 def hide_owned_console():
     """Hide only a private Python launcher console, never the caller's terminal."""
     if sys.platform!='win32':return
@@ -19,8 +21,16 @@ def prepare_runtime():
     # Both pythonw and the windowed EXE can start without console streams.
     for name in ('stdout','stderr'):
         if getattr(sys,name,None) is None:setattr(sys,name,open(os.devnull,'w',encoding='utf-8'))
+    root=installation_root()
     for name in ('Jobs','logs'):
-        (installation_root()/name).mkdir(parents=True,exist_ok=True)
+        (root/name).mkdir(parents=True,exist_ok=True)
+    global _fault_stream
+    if sys.platform=='win32' and _fault_stream is None:
+        # A windowed binary has no stderr. Keep native faults diagnosable even
+        # if the vendor DLL exits before Python can write startup-error.log.
+        import faulthandler
+        _fault_stream=(root/'logs'/'native-fault.log').open('a',encoding='utf8')
+        faulthandler.enable(_fault_stream,all_threads=True)
 
 def smoke(output):
     from .gui import MainWindow,W,QtCore
@@ -94,5 +104,8 @@ def smoke(output):
         window.close();deadline=time.monotonic()+30
         while window._tasks and time.monotonic()<deadline:app.processEvents();time.sleep(.005)
         if window._tasks:record.update(status='FAIL',shutdown_error='Background workers did not stop within 30 seconds')
-        app.processEvents();Path(output).write_text(json.dumps(record,ensure_ascii=False,indent=2),encoding='utf-8')
+        app.processEvents()
+        if not window._tasks:
+            QtCore.QCoreApplication.sendPostedEvents(None,getattr(QtCore.QEvent,'Type',QtCore.QEvent).DeferredDelete)
+        Path(output).write_text(json.dumps(record,ensure_ascii=False,indent=2),encoding='utf-8')
     return 0 if record['status']=='PASS' else 1
