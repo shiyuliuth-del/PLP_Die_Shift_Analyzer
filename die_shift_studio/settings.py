@@ -78,8 +78,12 @@ class ViewSettings:
     repair_landing_pad:bool=False
     repair_patch_width_um:float=0.
     reconstruction_overlap_um:float=0.
+    reconstruction_enabled:bool=False
     reconstruction_length_um:float=0.
     reconstruction_width_um:float=0.
+    # Manual cut planes, one per chain, written as
+    # (layer, feature index, (via indices,), nx, ny, ox, oy).
+    reconstruction_cuts:tuple=()
     yield_method:str='monte_carlo'
     yield_sample_exponent:int=12
     yield_box_budget:int=4096
@@ -89,9 +93,23 @@ class ViewSettings:
     safe_box_starts:int=3
     safe_box_passes:int=2
 
+    @staticmethod
+    def _normalize_cuts(rows):
+        cuts=[]
+        for row in rows or ():
+            try:layer,index,vias,nx,ny,ox,oy=row
+            except (TypeError,ValueError):continue
+            normal=math.hypot(float(nx),float(ny))
+            if not normal:continue
+            cuts.append((str(layer),int(index),tuple(sorted(int(v) for v in vias)),
+                         float(nx)/normal,float(ny)/normal,float(ox),float(oy)))
+        return tuple(cuts)
+
     @classmethod
     def from_dict(cls,values=None):
         values=dict(values or {})
+        if 'reconstruction_cuts' in values:
+            values['reconstruction_cuts']=cls._normalize_cuts(values['reconstruction_cuts'])
         values['width_display']=normalize_display(values.get('width_display',{}))
         if 'reconstruction_overlap_um' not in values and 'width_overlap_um' in values:
             values['reconstruction_overlap_um']=values['width_overlap_um']
@@ -144,6 +162,7 @@ class ViewSettings:
     def reconstruction_key(self):
         """Everything the reconstruction result depends on besides the pose."""
         return (True,self.reconstruction_length_um,self.reconstruction_width_um,
-                self.reconstruction_overlap_um,self.drc_tolerance_um)
+                self.reconstruction_overlap_um,self.drc_tolerance_um,
+                tuple(self.reconstruction_cuts))
     def deformation_key(self):
         return (self.drc_tolerance_um,self.acceleration)+tuple(getattr(self,f.name) for f in fields(self) if f.name.startswith('deformation_'))

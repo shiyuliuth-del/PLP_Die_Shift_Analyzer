@@ -39,6 +39,7 @@ import numpy as np
 import shapely
 from .session_cache import SessionCache
 from .preview import rigid_transform
+from .drc_rules import effective_rules
 
 # Distance from the farthest landing of a chain to the cut when no explicit
 # distance is set.
@@ -47,11 +48,14 @@ AUTO_LANDING_DIAMETERS=2.5
 SCOPE=('重构预演：软件自动把“运动过孔下方的固定RDL铜”划为可移动区——切分线垂直于该过孔下方那段铜的走向'
        '（与走线两侧都成90度）；同一块固定RDL上属于同一DIE、彼此相距不远的多个落盘视为一条串，'
        '切口不会落在两个相邻落盘之间，而是从这条串里最远的那一端再向外'
-       f'{AUTO_LANDING_DIAMETERS:g}个落盘直径（可在设置中改成具体距离），网络那一侧保持不动，'
+       '一段距离（默认自动搜索：从落盘边缘沿走线向外，止于同网络汇合节点或下一个同网络落盘，'
+       '取横向最窄、附近最直处；也可在设置里写死“切口距离 D”），网络那一侧保持不动，'
        '含落盘的那一段为移动区；'
        '移动区按所属DIE的刚体变换移动到过孔新位置，'
        '两个切口面的4个端点围成的多边形作为补线盖住裂隙——不论裂隙大小（是否短路）都会补，'
        '只有两个切口面完全重合、或缝隙已被铜盖住时才不重复补。'
+       '切口位置以“重构后的整条链路不与其他网络短路”为约束搜索：每个候选位置都量一次移动后的铜和补线到同层其它网络铜的距离，'
+       '优先取满足有效线距的位置；当前姿态下无论切在哪里都避不开时，取间距最大的位置并标注“间距不足”。'
        '同一块固定RDL若跨多个芯片，移动区只取本DIE芯片边框（128/0）以内的铜，边框外的铜留在原位归相邻DIE，'
        '边框线本身也是一条切口并按同样的4端点补线；只有落盘允许跨出边框，以免过孔失去落盘。'
        '自动划分可能与人工划分不同，移动区面积与补线面积都列在表中供核对；'
@@ -99,14 +103,28 @@ def line_parts(geometry):
 
 
 class Reconstructor:
+    # Chain blocks are reusable across frames: only the dragged chain's key
+    # changes when a cut is pinned, so a drag recomputes one chain, not all.
+    _blocks_cache = {}
     def __init__(self,model,parameters,settings,cache_group=None):
         self.model=model;self.p=parameters;self.settings=settings;self.cache=SessionCache(group=cache_group)
         self.tol=max(1e-9,model.data.dbu_um)
+        # Line spacing the reconstruction must keep to other nets (the same
+        # effective rule the DRC and the air-gap analysis use).
+        self._rule_width,self.rule_space=effective_rules(parameters,settings)
         self.length_um=max(0.,float(getattr(settings,'reconstruction_length_um',0.)))
         # Outward expansion of the cover polygon: 0 = exactly the four cut-face
         # corners, which is the default reconstruction.
         self.width_um=max(0.,float(getattr(settings,'reconstruction_width_um',0.)))
-        self.overlap_um=max(0.,float(getattr(settings,'reconstruction_overlap_um',0.)))
+        self.overlap_um=max(0.,float(getattr(settings,'reconstruction_overlap_um',getattr(settings,'width_overlap_um',0.))))
+        # Manual cut planes drawn by the user: (layer, feature, vias) -> plane.
+        # A plane pins that chain's cut; the rest of the rule (perpendicular to
+        # the route, movable side, cover, spacing check) still applies.
+        self.cuts={}
+        for row in getattr(settings,'reconstruction_cuts',()) or ():
+            layer,index,vias,nx,ny,ox,oy=row
+            self.cuts[(str(layer),int(index),tuple(sorted(int(v) for v in vias)))]=(
+                float(nx),float(ny),float(ox),float(oy))
         self.vias=[]
         for key,role in model.roles.items():
             if role!='运动过孔':continue
@@ -147,9 +165,101 @@ class Reconstructor:
         span=float(np.linalg.norm(edge))
         return edge/span if span>self.tol else np.array([1.,0.])
 
+    def _aspect(self,polygon,land):
+        """Length/width ratio of the copper right around one landing.
+
+        A trace is long and thin (the cut has a clear direction to be square to);
+        a landing pad is compact, and then the motion direction decides the cut
+        instead, because a cut across a pad would slide along the motion and leave
+        the two pieces touching however narrow it is.
+        """
+        window=shapely.buffer(land,1.5*self._diameter(land),quad_segs=16)
+        patch=shapely.intersection(polygon,window)
+        if patch.is_empty or patch.area<=self.tol**2:return 1.
+        rect=shapely.minimum_rotated_rectangle(patch)
+        coordinates=shapely.get_coordinates(rect)
+        if len(coordinates)<4:return 1.
+        edges=np.diff(np.vstack([coordinates[:4],coordinates[:1]]),axis=0)
+        lengths=np.sort(np.linalg.norm(edges,axis=1))
+        short=float(lengths[0]);long=float(lengths[-1])
+        return long/short if short>self.tol else 1.
+
+    def _local_direction(self,polygon,point,radius):
+        """Direction of the copper right around a point (None when there is none)."""
+        window=shapely.buffer(shapely.Point(point),max(radius,self.tol*8.),quad_segs=8)
+        patch=shapely.intersection(polygon,window)
+        if patch.is_empty or patch.area<=self.tol**2:return None
+        rect=shapely.minimum_rotated_rectangle(patch)
+        coordinates=shapely.get_coordinates(rect)
+        if len(coordinates)<4:return None
+        edges=np.diff(np.vstack([coordinates[:4],coordinates[:1]]),axis=0)
+        lengths=np.linalg.norm(edges,axis=1)
+        edge=edges[int(np.argmax(lengths))];span=float(np.linalg.norm(edge))
+        return edge/span if span>self.tol else None
+
     @staticmethod
     def _diameter(geometry):
         return 2.*float(np.sqrt(max(geometry.area,0.)/np.pi))
+
+    def _conflict_limit(self):
+        """How far away a candidate is still "close" for the safety test."""
+        return max(2.*self.rule_space,10.)
+
+    def _foreign_gap(self,geometry,tree,nets,limit):
+        """Nearest copper of another net, or (None,None) when there is none.
+
+        ``nets`` is a list of (net, geometry); the returned index refers to it,
+        ``limit`` caps the search so a far-away net does not cost a distance
+        computation per candidate.
+        """
+        if geometry is None or geometry.is_empty or tree is None or not nets:
+            return None,None
+        bounds=geometry.bounds
+        near=shapely.box(bounds[0]-limit,bounds[1]-limit,bounds[2]+limit,bounds[3]+limit)
+        hits=tree.query(near)
+        if not len(hits):return None,float(limit)
+        best=float('inf');which=None
+        for i in np.asarray(hits,dtype=int).ravel():
+            d=float(shapely.distance(geometry,nets[int(i)][1]))
+            if d<best:best=d;which=int(i)
+        return which,best
+
+    def _candidate_conflict(self,movable,faces,center,state,foreign):
+        """Whether the shifted piece (plus its cover) reaches another net."""
+        if foreign is None:return False,None,None
+        tree,nets=foreign
+        limit=self._conflict_limit()
+        # Cheap test first: the shifted BOUNDING BOX against the neighbours'
+        # boxes.  Most candidates sit far from every other net, and transforming
+        # a large polygon just to prove that is what makes a full drawing slow.
+        corners=shapely.get_coordinates(shapely.box(*movable.bounds))
+        corners=rigid_transform(corners,center,state)
+        hits=tree.query(shapely.box(corners[:,0].min()-limit,corners[:,1].min()-limit,
+                                    corners[:,0].max()+limit,corners[:,1].max()+limit),
+                        predicate='dwithin',distance=limit)
+        if not len(hits):return False,float(limit),None
+        moved=transform(movable,center,state)
+        quads=bridge_quads(faces,center,state,self.width_um) if faces else []
+        threshold=self.rule_space-self.tol
+        probes=[(probe,probe.bounds) for probe in [moved]+quads]
+        best=float('inf');which=None
+        for i in np.asarray(hits,dtype=int).ravel():
+            geometry=nets[int(i)][1]
+            x0,y0,x1,y1=geometry.bounds
+            for probe,(a0,b0,a1,b1) in probes:
+                # Numeric box distance first: on a dense layer the tree still
+                # returns dozens of neighbours, and a GEOS predicate call each
+                # is what made the search slow.
+                dx=max(x0-a1,a0-x1,0.);dy=max(y0-b1,b0-y1,0.)
+                if dx*dx+dy*dy>threshold*threshold:continue
+                if not shapely.dwithin(probe,geometry,threshold):continue
+                d=float(shapely.distance(probe,geometry))
+                if d<best:best=d;which=int(i)
+        if best==float('inf'):
+            nearest=min(float(shapely.distance(moved,nets[int(i)][1]))
+                        for i in np.asarray(hits,dtype=int).ravel())
+            return False,max(nearest,threshold),None
+        return True,best,which
 
     def _frames(self):
         """Chip frames (芯片边框) by layer, for clipping the movable blocks."""
@@ -229,6 +339,12 @@ class Reconstructor:
                                distance=max(q['distance'] for q in items),
                                span=max(q['span'] for q in items),
                                owner=items[0]['owner'],frame=items[0].get('frame'),
+                               conflict=any(bool(q.get('conflict')) for q in items),
+                               manual=any(bool(q.get('manual')) for q in items),
+                               clamped=any(bool(q.get('clamped')) for q in items),
+                               window=next((q['window'] for q in items if q.get('window')),None),
+                               gap=min((q['gap'] for q in items if q.get('gap') is not None),
+                                       default=None),
                                cluster=[v for q in items for v in q['cluster']]))
         return merged
 
@@ -268,7 +384,76 @@ class Reconstructor:
         for i in range(count):grouped.setdefault(root(i),[]).append(vias[i])
         return [sorted(q,key=lambda v:v['index']) for _,q in sorted(grouped.items())]
 
-    def _block(self,polygon,cluster,states,owner,others=()):
+    def _faces_at(self,polygon,origin,normal,tangent,size):
+        """Cut face: where the plane really crosses copper.
+
+        It cannot be taken from the half-plane polygon: that polygon's own
+        boundary IS this plane, and intersecting a line with the edge it lies on
+        keeps only float slivers (a 25 μm trace came back as a 3 μm stub). So the
+        line is crossed with the untouched copper and only the parts that have
+        copper on both sides of the plane are kept.
+        """
+        probe=max(self.tol*4.,.01)
+        line=shapely.LineString([origin-tangent*size,origin+tangent*size])
+        faces=[]
+        for piece in line_parts(shapely.intersection(line,polygon)):
+            if piece.length<=self.tol:continue
+            mid=np.asarray(piece.interpolate(.5,normalized=True).coords[0],float)
+            if (shapely.contains(polygon,shapely.Point(mid-normal*probe))
+                    and shapely.contains(polygon,shapely.Point(mid+normal*probe))):
+                faces.append(piece)
+        return faces
+
+    def _plane_candidate(self,polygon,pivot,coordinates,others,size,tangent,plane):
+        """Candidate cut built from a plane the user dragged.
+
+        The plane is clamped to the same stretch the search may use (outside the
+        landings, before the next landing of the same net), so a stale or far
+        drag cannot put the cut inside a landing or past a junction. The direction
+        is kept exactly as given: only its position moves.
+        """
+        nx,ny,ox,oy=plane
+        normal=np.array([float(nx),float(ny)],float)
+        norm=float(np.linalg.norm(normal))
+        if norm<=0.:return None
+        normal=normal/norm
+        origin=np.array([float(ox),float(oy)],float)
+        extent=float(np.max((coordinates-pivot)@normal))
+        copper=shapely.get_coordinates(polygon)
+        far=float(np.max((copper-pivot)@normal))
+        # A hand-placed cut may use the whole stretch of its own copper. The
+        # automatic search stops before the next same-net landing, but the user
+        # asked for the cut explicitly, so only the landing itself and the end
+        # of the copper are hard limits here.
+        low=extent+self.tol*4.
+        high=far-self.tol*4.
+        along=float(np.dot(origin-pivot,normal))
+        wanted=along
+        if high>low:
+            along=min(max(along,low),high)
+        else:
+            along=low
+        # The user asked for a place the cut cannot reach: flag it so the table
+        # can say 已到极限 instead of silently pinning something else.
+        clamped=abs(along-wanted)>self.tol
+        origin=pivot+normal*along
+        faces=self._faces_at(polygon,origin,normal,tangent,size)
+        if not faces and high>low:
+            # The drag went past the last place the plane still crosses copper
+            # (or landed exactly on the feature's end): walk back until the
+            # plane really cuts the trace, so a far drag pins the cut as far as
+            # it can go instead of quietly reverting to the automatic choice.
+            for value in np.linspace(along,low,12):
+                origin=pivot+normal*value
+                faces=self._faces_at(polygon,origin,normal,tangent,size)
+                if faces:along=float(value);break
+        if not faces:return None
+        nearest=min(float(shapely.distance(shapely.Point(pivot),q)) for q in faces)
+        return dict(origin=origin,faces=faces,distance=float(along-extent),span=extent,
+                    nearest=nearest,normal=normal,manual=True,clamped=clamped,
+                    pivot=pivot,low=low,high=high)
+
+    def _block(self,polygon,cluster,states,owner,others=(),axis_override=None,foreign=None,plane=None):
         """Movable block of one chain: the best single cut beyond its landings.
 
         The landings of one chain travel together with their die, so the cut is
@@ -292,7 +477,8 @@ class Reconstructor:
         landing — so only the near crossings become the cut face the seam is
         covered along.
         """
-        axis=self._chain_axis(polygon,cluster)
+        route=self._chain_axis(polygon,cluster)
+        axis=axis_override if axis_override is not None else route
         centres=np.array([v['center'] for v in cluster],float)
         pivot=centres.mean(axis=0)
         coordinates=np.vstack([shapely.get_coordinates(v['land']) for v in cluster])
@@ -303,14 +489,17 @@ class Reconstructor:
         move=moved_center-np.asarray(cluster[0]['center'],float)
         shift=float(np.linalg.norm(move))
         span=float(np.hypot(polygon.bounds[2]-polygon.bounds[0],polygon.bounds[3]-polygon.bounds[1]))
-        size=2.*span+shift+3.*diameter+1.
+        size=2.*span+shift+3.*diameter+1.+default
         tangent=np.array([-axis[1],axis[0]])
         towards=float(np.dot(np.asarray(polygon.centroid.coords[0],float)-pivot,axis))
         copper=shapely.get_coordinates(polygon)
         center=self.model.bound.centers[owner]
         probe=max(self.tol*4.,.01)
-        ends=[]
-        for sign in (1.,-1.):
+        manual=None
+        if plane is not None:
+            manual=self._plane_candidate(polygon,pivot,coordinates,others,size,tangent,plane)
+        ends=[manual] if manual is not None else []
+        for sign in ((1.,-1.) if manual is None else ()):
             normal=sign*axis
             extent=float(np.max((coordinates-pivot)@normal))
             far=float(np.max((copper-pivot)@normal))
@@ -325,30 +514,110 @@ class Reconstructor:
                 origin=pivot+normal*(extent+distance)
                 forward=shapely.intersection(polygon,half_plane(origin,-normal,size))
                 if forward.is_empty or forward.area<=self.tol**2:return None
-                behind=shapely.intersection(polygon,half_plane(origin,normal,size))
-                if behind.is_empty or behind.area<=self.tol**2:return None
-                line=shapely.LineString([origin-tangent*size,origin+tangent*size])
-                # The cut face is where the plane really crosses copper. It cannot
-                # be taken from `behind`: that polygon's own boundary IS this plane,
-                # and intersecting a line with the edge it lies on keeps only float
-                # slivers (a 25 μm trace came back as a 3 μm stub). So cross the
-                # line with the untouched copper and keep the parts that have
-                # copper on both sides of the plane.
-                faces=[]
-                for piece in line_parts(shapely.intersection(line,polygon)):
-                    if piece.length<=self.tol:continue
-                    mid=np.asarray(piece.interpolate(.5,normalized=True).coords[0],float)
-                    if (shapely.contains(polygon,shapely.Point(mid-normal*probe))
-                            and shapely.contains(polygon,shapely.Point(mid+normal*probe))):
-                        faces.append(piece)
+                faces=self._faces_at(polygon,origin,normal,tangent,size)
                 if not faces:return None
                 nearest=min(float(shapely.distance(shapely.Point(pivot),q)) for q in faces)
-                return dict(movable=behind,faces=faces,distance=distance,span=extent,
-                            nearest=nearest,normal=normal)
-            # The stated distance is the cut: not searched, applied to both ends
-            # of the chain, and the end whose seam is nearer the landings wins.
-            best=probe_at(default) if low<default<high else None
-            if best is not None:ends.append(best)
+                return dict(origin=origin,faces=faces,distance=distance,span=extent,
+                            nearest=nearest,normal=normal,pivot=pivot,
+                            low=extent+self.tol*4.,high=far-self.tol*4.)
+            # Search the cut outward from the landing edge (the overlap) to the
+            # next same-net landing or branch node. Among the planes that really
+            # cross the copper, take the one where the trace is NARROWEST and
+            # locally STRAIGHT: a narrow, square cross-section gives a short seam
+            # and a clean cover, and a straight stretch keeps the cut square to
+            # both sides of the route.
+            candidates=[]
+            if high>low:
+                width_span=high-low
+                sample=max(self.tol*8.,min(diameter*.5,width_span/40.))
+                count=int(np.clip(np.ceil(width_span/sample),8,20))
+                # An explicit D (the 切口距离 setting) pins the cut; only with
+                # D = 0 does the cut search for its own place along the route.
+                if self.length_um>self.tol:
+                    steps=[default] if low<default<high else []
+                else:
+                    steps=np.linspace(low,high,count)
+                for distance in steps:
+                    found=probe_at(float(distance))
+                    if found is None:continue
+                    found['width']=float(sum(q.length for q in found['faces']))
+                    # Shorting another net is a hard failure.  The conflict is
+                    # measured lazily in check() below: only the candidates that
+                    # can still win are measured, which keeps a big drawing usable.
+                    candidates.append(found)
+            # Stop at a junction: a branch or a merge with the same-net network
+            # doubles the cross-section. Everything past it belongs to the node,
+            # not to this route, so the search never cuts beyond that point.
+            kept=[];narrow=float('inf')
+            for found in sorted(candidates,key=lambda q:q['distance']):
+                if found['width']>1.7*narrow+self.tol and kept:break
+                narrow=min(narrow,found['width'])
+                kept.append(found)
+            if kept:
+                # The purpose of searching the cut is that the reconstructed
+                # chain does not short against another net: only cut positions
+                # whose shifted copper and cover keep the spacing rule are
+                # acceptable. Among those the narrowest cross-section is the
+                # cleanest seam, but it can sit far down a long wide run and drag
+                # a huge block along, so the nearest place that already reaches
+                # the narrowest width is taken, and among those the straightest.
+                # When no position is safe the one with the largest clearance is
+                # used anyway and the piece is flagged, because the motion itself
+                # brings the copper too close.
+                def straight(q):
+                    if 'straight' not in q:
+                        face=max(q['faces'],key=lambda r:r.length)
+                        mid=np.asarray(face.interpolate(.5,normalized=True).coords[0],float)
+                        direction=self._local_direction(
+                            polygon,mid,max(2.*diameter,float(face.length)))
+                        q['straight']=(float(abs(np.dot(direction,axis)))
+                                       if direction is not None else 0.)
+                    return q['straight']
+                def check(q):
+                    if 'conflict' not in q:
+                        if 'movable' not in q:
+                            q['movable']=shapely.intersection(
+                                polygon,half_plane(q['origin'],q['normal'],size))
+                        q['conflict'],q['gap'],q['foreign']=self._candidate_conflict(
+                            q['movable'],q['faces'],center,states[owner],foreign)
+                    return not q['conflict']
+                # Narrowest cross-section first, but only positions that keep the
+                # spacing are eligible: walk the width groups from the narrowest
+                # and stop at the first group that has a safe member. Checking a
+                # group at a time keeps the cost low — a drawing has hundreds of
+                # chains and each candidate otherwise costs a distance query.
+                ordered=sorted(kept,key=lambda q:(q['width'],q['distance']))
+                groups=[]
+                for q in ordered:
+                    if groups and q['width']<=groups[-1][0]['width']*1.05+self.tol:
+                        groups[-1].append(q)
+                    else:groups.append([q])
+                best=None
+                for group in groups:
+                    safe=[q for q in group if check(q)]
+                    if safe:
+                        best=min(safe,key=lambda q:(-round(straight(q),3),q['distance']))
+                        break
+                if best is None:
+                    # No position can avoid the short (the motion itself brings
+                    # the copper too close), so keep the best clearance and mark
+                    # the piece; the seam geometry rule still applies.
+                    evaluated=0
+                    for group in groups:
+                        for q in group:check(q)
+                        evaluated+=len(group)
+                        # A big feature has many candidates; stop once enough of
+                        # them are measured, so a drawing stays interactive.
+                        if evaluated>=10:break
+                    kept=[q for q in kept if 'conflict' in q]
+                    best_gap=max(q['gap'] if q['gap'] is not None else float('inf') for q in kept)
+                    pool=[q for q in kept
+                          if q['gap'] is None or best_gap-float(q['gap'])<=.05]
+                    for q in pool:q['conflict']=True
+                    target=min(q['width'] for q in pool)
+                    waist=[q for q in pool if q['width']<=target*1.05+self.tol]
+                    best=min(waist,key=lambda q:(-round(straight(q),3),q['distance']))
+                ends.append(best)
         if not ends:
             # No plane along the copper keeps the two pieces apart (a landing
             # larger than the surrounding copper, or a motion that runs straight
@@ -359,15 +628,26 @@ class Reconstructor:
             origin=pivot+normal*(extent+default)
             movable=shapely.intersection(polygon,half_plane(origin,normal,size))
             if movable.is_empty or movable.area<=self.tol**2:return None
-            return dict(movable=movable,faces=[],distance=default,span=extent,quality=None)
+            conflict,gap,_=self._candidate_conflict(movable,[],center,states[owner],foreign)
+            return dict(movable=movable,faces=[],distance=default,span=extent,quality=None,
+                        conflict=conflict,gap=gap)
+        # The cut goes on the side the network LEAVES the landing: the plane
+        # normal must point into the feature mass, otherwise the movable block
+        # would swallow the whole route and leave the landing on the far side.
+        if manual is None:
+            facing=[q for q in ends if np.dot(q['normal'],axis)*towards>=0]
+            if facing:ends=facing
         ends.sort(key=lambda q:q['nearest'])
         best=ends[0]
-        if len(ends)>1 and abs(ends[0]['nearest']-ends[1]['nearest'])<=self.tol:
-            # Both ends cross the copper equally well: the network is the side
-            # the feature mass lies on.
-            best=ends[0] if np.dot(best['normal'],axis)*towards>=0 else ends[1]
+        if 'movable' not in best:
+            best['movable']=shapely.intersection(
+                polygon,half_plane(best['origin'],best['normal'],size))
         return dict(movable=best['movable'],faces=best['faces'],distance=best['distance'],
-                    span=best['span'])
+                    span=best['span'],conflict=bool(best.get('conflict')),gap=best.get('gap'),
+                    manual=bool(best.get('manual')),clamped=bool(best.get('clamped')),
+                    window=dict(pivot=[float(best['pivot'][0]),float(best['pivot'][1])],
+                                normal=[float(best['normal'][0]),float(best['normal'][1])],
+                                low=float(best['low']),high=float(best['high'])))
 
     def frame(self,states,deformation=None,progress=lambda *_:None,quick=False):
         states=np.asarray(states,float)
@@ -385,9 +665,23 @@ class Reconstructor:
             for layer,index in via['targets']:
                 groups.setdefault((owner,layer,index),[]).append(via)
         features={}
+        layer_items={};foreign_trees={}
         for order,((owner,layer,index),vias) in enumerate(sorted(groups.items())):
             polygon=self._copper(layer,index,replacements)
             if polygon is None or polygon.is_empty:continue
+            net=int(self.model.nodes[self.model.ids[layer,index]]['net'])
+            if layer not in layer_items:
+                items=[]
+                for i in range(len(self.model.cache.layers[layer]['geometry'])):
+                    geometry=self._copper(layer,i,replacements)
+                    if geometry is None or geometry.is_empty:continue
+                    items.append((int(self.model.nodes[self.model.ids[layer,i]]['net']),i,geometry))
+                layer_items[layer]=items
+            if (layer,net) not in foreign_trees:
+                other=[(n,g) for n,i,g in layer_items[layer] if n!=net]
+                foreign_trees[(layer,net)]=(shapely.STRtree([g for n,g in other]),other) if other else (None,[])
+            tree,other=foreign_trees[(layer,net)]
+            neighbours=(tree,other) if tree is not None else None
             threshold=self._step(max(v['land_diameter'] for v in vias))
             frame=self._own_frame(owner)
             chains=self._clusters(threshold,vias)
@@ -397,7 +691,27 @@ class Reconstructor:
                 # the same net: cutting past it would put that landing on the far
                 # side of a seam it does not belong to.
                 others=[v['land'] for other in chains if other is not cluster for v in other]
-                block=self._block(polygon,cluster,states,owner,others)
+                plane=self.cuts.get((layer,index,tuple(sorted(int(v['index']) for v in cluster))))
+                # Dragging one chain's cut must not re-run the (expensive)
+                # search for every other chain: cache each chain's block by
+                # everything that can change its result.
+                cache_key=(id(self.model),layer,int(index),int(owner),
+                           tuple(sorted(int(v['index']) for v in cluster)),plane,
+                           round(float(states[owner][0]),6),
+                           round(float(states[owner][1]),6),
+                           round(float(states[owner][2]),9),
+                           float(self.length_um),float(self.width_um),float(self.rule_space),
+                           float(self.tol),hash(fingerprint))
+                entry=self._blocks_cache.get(cache_key)
+                if entry is not None and entry[0] is self.model:
+                    block=None if entry[1] is None else dict(entry[1])
+                else:
+                    block=self._block(polygon,cluster,states,owner,others,
+                                      foreign=neighbours,plane=plane)
+                    if len(self._blocks_cache)>1200:
+                        self._blocks_cache={k:v for k,v in self._blocks_cache.items()
+                                            if v[0] is self.model}
+                    self._blocks_cache[cache_key]=(self.model,None if block is None else dict(block))
                 if block is None:continue
                 block.update(owner=owner,cluster=cluster)
                 blocks.append(block)
@@ -422,14 +736,15 @@ class Reconstructor:
             blocks=self._merge(blocks)
             # One fixed-RDL polygon can carry vias of several dies; every die's
             # blocks belong to that feature, so accumulate instead of replacing.
-            feature=features.setdefault((layer,index),dict(original=polygon,blocks=[]))
+            feature=features.setdefault((layer,index),dict(original=polygon,blocks=[],foreign=neighbours))
             feature['blocks'].extend(blocks)
             if order%64==0:progress(round(60*order/max(1,len(groups))),f'重构预演：划分移动区 {order}/{len(groups)}')
         pieces=[];out={}
-        bridges=0;orphans=0;moved_area=0.;cover_area=0.;max_shift=0.;flush=0
+        bridges=0;orphans=0;moved_area=0.;cover_area=0.;max_shift=0.;flush=0;fixed_area=0.;conflicts=0
         for (layer,index),feature in sorted(features.items()):
             original=feature['original'];blocks=feature['blocks']
             net=int(self.model.nodes[self.model.ids[layer,index]]['net'])
+            tree,other=feature.get('foreign') or (None,[])
             stay={}
             for owner in sorted({q['owner'] for q in blocks}):
                 own=[q['movable'] for q in blocks if q['owner']==owner]
@@ -439,6 +754,12 @@ class Reconstructor:
                 elsewhere=[q['movable'] for q in blocks if q['owner']!=owner]
                 stay[owner]=shapely.difference(original,shapely.union_all(own+elsewhere))
             feature_moved=[];feature_covers=[]
+            # Copper of this trace that stays where it is: the whole network
+            # minus every part that follows a die. Drawn warm together with the
+            # moved copper and the cover, so the warm colour shows one complete
+            # trace (fixed part + shifted part + bridge).
+            fixed_part=shapely.difference(original,shapely.union_all([q['movable'] for q in blocks]))
+            fixed_area+=float(fixed_part.area)
             for block in blocks:
                 owner=block['owner'];center=self.model.bound.centers[owner]
                 movable=block['movable'];moved=transform(movable,center,states[owner])
@@ -469,19 +790,42 @@ class Reconstructor:
                             anchor=np.asarray(face.interpolate(.5,normalized=True).coords[0],float)
                             moved_anchor=np.asarray(rigid_transform(anchor[None,:],center,states[owner])[0],float)
                             length=float(face.length)
+                # Spacing of the reconstructed copper against every other net on
+                # the same fixed-RDL layer: the moved block and the cover are new
+                # copper, so a distance below the spacing rule (or an overlap) is
+                # a short the reconstruction would create.
+                clearance=None;conflict=False;conflict_link=None;conflict_net=None
+                if tree is not None and other:
+                    probe_geometry=shapely.union_all([moved]+([bridge] if bridge is not None else []))
+                    which,gap_foreign=self._foreign_gap(probe_geometry,tree,other,self._conflict_limit())
+                    if gap_foreign is not None:
+                        clearance=float(gap_foreign)
+                        conflict=bool(clearance<self.rule_space-self.tol)
+                        if which is not None:
+                            conflict_net=int(other[which][0])
+                            line=shapely.shortest_line(probe_geometry,other[which][1])
+                            conflict_link=[[round(float(x),6),round(float(y),6)]
+                                           for x,y in shapely.get_coordinates(line)][:2]
+                    if conflict:conflicts+=1
                 feature_moved.append(moved)
                 shift_distance=float(np.linalg.norm(
                     np.asarray(moved.centroid.coords[0])-np.asarray(movable.centroid.coords[0])))
                 max_shift=max(max_shift,shift_distance);moved_area+=float(movable.area)
                 pieces.append(dict(die=owner,layer=layer,index=index,net=net,movable=movable,moved=moved,
-                                   immovable=stationary,bridge=bridge,cut=shapely.union_all(faces),
+                                   fixed=fixed_part,immovable=stationary,bridge=bridge,cut=shapely.union_all(faces),
                                    vias=[int(v['index']) for v in block['cluster']],
                                    seam=[None if anchor is None else [float(anchor[0]),float(anchor[1])],
                                          None if moved_anchor is None else [float(moved_anchor[0]),float(moved_anchor[1])]],
                                    movable_area_um2=float(movable.area),moved_area_um2=float(moved.area),
+                                   fixed_area_um2=float(fixed_part.area),
                                    shift_um=shift_distance,cut_distance_um=block['distance'],
                                    chain_span_um=block['span'],
                                    gap_um=gap,bridge_length_um=length,bridge_area_um2=bridge_area,
+                                   clearance_um=clearance,conflict=conflict,
+                                   conflict_net=conflict_net,conflict_link=conflict_link,
+                                   manual=bool(block.get('manual')),
+                                   cut_clamped=bool(block.get('clamped')),
+                                   cut_window=block.get('window'),
                                    orphan=stationary.is_empty))
             geometry=shapely.union_all([shapely.difference(original,
                                                           shapely.union_all([q['movable'] for q in blocks])),
@@ -493,11 +837,13 @@ class Reconstructor:
         result=dict(complete=True,pieces=pieces,replacements=out,scope=SCOPE,
                     parameters=dict(length_um=self.length_um,width_um=self.width_um,overlap_um=self.overlap_um,
                                     landing_diameters=AUTO_LANDING_DIAMETERS),
-                    summary=dict(pieces=len(pieces),bridges=bridges,orphans=orphans,flush=flush,
-                                 movable_area_um2=moved_area,cover_area_um2=cover_area,max_shift_um=max_shift,
+                    summary=dict(pieces=len(pieces),bridges=bridges,orphans=orphans,flush=flush,conflicts=conflicts,
+                                 manual_cuts=len(self.cuts),
+                                 rule_space_um=self.rule_space,
+                                 movable_area_um2=moved_area,cover_area_um2=cover_area,
+                                 fixed_area_um2=fixed_area,max_shift_um=max_shift,
                                  width_um=self.width_um,length_um=self.length_um,
                                  landing_diameters=AUTO_LANDING_DIAMETERS))
         if not np.any(states) and not fingerprint:self.cache.pin(key)
-        if not quick:self.cache[key]=result
-        progress(100,'重构预演完成')
+        self.cache[key]=result;progress(100,'重构预演完成')
         return result
