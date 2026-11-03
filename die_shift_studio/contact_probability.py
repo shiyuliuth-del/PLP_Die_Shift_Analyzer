@@ -11,7 +11,6 @@ import numpy as np
 import shapely
 from scipy.special import ndtr
 from scipy.stats import norm
-from shapely.geometry import Polygon
 from shapely.strtree import STRtree
 from shapely.ops import nearest_points
 from .statistics import statistical_state,mean_and_bounds

@@ -38,9 +38,12 @@ def edge_violations(model,states,parameters,settings,replacements=None,owners=No
             gap=np.where(shapely.covers(board,geos),shapely.distance(geos,board.boundary),-np.inf)
             model._edge_templates[stamp]=(own,radii,gap)
         own,radii,gap=model._edge_templates[stamp]
-        pose=np.asarray(states)[np.maximum(own,0)]
-        motion=np.where(own>=0,np.hypot(pose[:,0],pose[:,1])+2*radii*np.abs(np.sin(pose[:,2]/2)),0.)
-        if pivots is None:motion[(own>=0)&(pose[:,2]!=0)]=math.inf
+        motion=np.zeros(len(own));moving=own>=0
+        if np.any(moving):
+            pose=np.asarray(states)[own[moving]]
+            delta=np.hypot(pose[:,0],pose[:,1])+2*radii[moving]*np.abs(np.sin(pose[:,2]/2))
+            if pivots is None:delta[pose[:,2]!=0]=math.inf
+            motion[moving]=delta
         mask=gap<=rule+motion+max(1.e-9,model.data.dbu_um*1.e-6)
         if owners is not None:mask &= np.isin(own,list(owners))
         for i in np.flatnonzero(mask):
