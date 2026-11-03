@@ -86,5 +86,15 @@ assert entries and w.current_frame['contact']['issues']==entries
 w.setting_fields['show_low_contact'].setChecked(True);w.target_sigma.setCurrentText('6');wait()
 assert w.filtered_issues and all(not r.get('low_probability') for r in w.filtered_issues)
 assert w.issue_artists[1].get_edgecolors()[0,3]==1
+# Both single-target events are below the budget although their union fails.
+lib=gdstk.Library();cell=lib.new_cell('TOP')
+for layer,b in [(1,(-1500,-1500,1500,1500)),(2,(-1000,-1000,1000,1000)),(10,(-5,-5,5,5)),
+                (40,(-20,-10,20,10)),(40,(48,-10,70,10)),(40,(-70,-10,-48,10))]:
+    cell.add(gdstk.rectangle(b[:2],b[2:],layer=layer))
+paired=root/'paired.gds';lib.write_gds(paired);record['gds_path']=str(paired);job.write_text(json.dumps(record))
+w.load_project(job);wait();w.run_evaluation();wait()
+assert w.result['issues'] and len(w.filtered_issues)==2 and all(q['low_probability'] for q in w.filtered_issues)
+w.setting_fields['show_low_contact'].setChecked(False);wait()
+assert not w.filtered_issues and w.result['issues'] and not w.issue_artists[1].get_visible()
 w.close();app.processEvents();tmp.cleanup()
 print('GUI_V27_PASS focused pages, compact controls, manual/M restore, Job migration, 2/6 sigma independent contact/width styles and retained binary outcomes')

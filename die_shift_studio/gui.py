@@ -2042,11 +2042,19 @@ class MainWindow(W.QMainWindow):
             self._contact_locations={(q['source_layer'],q['source_index'],q['target_layer'],q['target_index']):q for q in stats['locations']}
         rows=[]
         if inputs[2]:
-            rows.extend(entries)
+            represented=set()
+            for q in entries:
+                target=(q['source_layer'],q['source_index'],q['target_layer'],q['target_index'])
+                represented.add((*target,q['scheme']))
+                event=self._contact_locations.get(target)
+                if event and event['low']:
+                    if not self.view_settings.show_low_contact:continue
+                    q=dict(q,low_probability=True,detail=q.get('detail','')+
+                           f" 整孔联合事件超限，此目标的位置上界为 {event['upper']:.3g}，低于或等于门限。")
+                rows.append(q)
             if self.view_settings.show_low_contact:
-                # The joint event may exceed the budget even when its witness
-                # belongs to a rare single target. Keep the two decisions distinct.
-                rows.extend(stats.get('low_issues',()))
+                rows.extend(q for q in stats.get('low_issues',()) if
+                            (q['source_layer'],q['source_index'],q['target_layer'],q['target_index'],q['scheme']) not in represented)
         else:
             for q in entries:
                 key=(q['source_layer'],q['source_index'],q['target_layer'],q['target_index'])

@@ -20,16 +20,20 @@ class BoxCertificate:
         self.center=np.asarray(model.bound.centers[owner]);self.radius=p.annulus_um+p.line_space_um
         self.tol=max(1e-9,model.data.dbu_um*1e-3)
         self.budget=budget;self.items=[];self.calls=0;self.boxes=0;self.unresolved=0;self.witnesses=[];self.memo={};self.arc_hulls={}
-        mu,b=mean_and_bounds(p.for_die(owner),len(model.bound.centers))
+        mu,b=mean_and_bounds(p.for_die(owner),len(model.bound.centers));self.mean=mu
         for r in model.records:
             if r['owner']!=owner or not r['foreign']:continue
-            vertices=np.asarray(r['poly'].exterior.coords);lever=float(np.linalg.norm(vertices-self.center,axis=1).max())
+            shape=r['poly'];vertices=shapely.get_coordinates(shape);lever=float(np.linalg.norm(vertices-self.center,axis=1).max())
             reach=np.linalg.norm(b[:2])+2*lever*math.sin(min(math.pi,b[2])/2)
-            mean=Polygon(rigid_transform(vertices,self.center,mu))
+            mean=shapely.set_coordinates(shape,rigid_transform(vertices,self.center,mu))
             from .contact import nearby_foreign
             others=model.node_geometry[nearby_foreign(model,r,mean,self.radius+reach+self.tol)]
-            if len(others):self.items.append((vertices,lever,others,STRtree(others)))
-        self.items.sort(key=lambda item:(Polygon(rigid_transform(item[0],self.center,mu)).distance(item[2][item[3].nearest(Polygon(rigid_transform(item[0],self.center,mu)))])-self.radius)/max(np.linalg.norm(b[:2])+item[1]*b[2],1e-12))
+            if len(others):
+                tree=STRtree(others);distance=mean.distance(others[tree.nearest(mean)])
+                self.items.append((vertices,lever,others,tree,distance,shape))
+        self.items.sort(key=lambda item:(item[4]-self.radius)/max(np.linalg.norm(b[:2])+item[1]*b[2],1e-12))
+        self.nominal_gap=np.array([item[4] for item in self.items])
+        self.levers=np.array([item[1] for item in self.items])
 
     def swept(self,vertices,lever,lo,hi):
         """Convex hull of sampled rotation arcs plus translation rectangle.
@@ -66,11 +70,17 @@ class BoxCertificate:
             known=np.asarray(self.witnesses)
             if np.any(np.all(known>=lo,axis=1)&np.all(known<=hi,axis=1)):return 'contact'
         tested=0
-        for vertices,lever,others,tree in self.items:
+        # A rigid displacement from the input mean cannot close a larger
+        # nominal margin. The exact subdivision below sees all remaining vias.
+        reach=np.maximum(np.abs(lo-self.mean),np.abs(hi-self.mean))
+        travel=np.linalg.norm(reach[:2])+2*self.levers*math.sin(min(math.pi,reach[2])/2)
+        for index in np.flatnonzero(self.nominal_gap<=self.radius+travel+self.tol):
+            vertices,lever,others,tree,_,shape=self.items[index]
             queue=[(lo,hi)]
             while queue:
                 a,b=queue.pop();mid=(a+b)/2;half=(b-a)/2
-                via=Polygon(rigid_transform(vertices,self.center,mid))
+                xy=rigid_transform(vertices,self.center,mid)
+                via=shapely.set_coordinates(shape,xy) if shape.interiors else Polygon(xy)
                 distance=(via.distance(others[0]) if len(others)==1 else tree.query_nearest(via,all_matches=False,return_distance=True)[1][0])
                 tested+=1;self.boxes+=1
                 if distance<=self.radius+self.tol:
@@ -81,7 +91,8 @@ class BoxCertificate:
                     corners=np.array(list(itertools.product(*zip(a,b))))
                     local=vertices-self.center;co=np.cos(corners[:,2,None]);si=np.sin(corners[:,2,None])
                     xy=np.stack((co*local[:,0]-si*local[:,1],si*local[:,0]+co*local[:,1]),axis=-1)+self.center+corners[:,None,:2]
-                    hits=tree.query(shapely.polygons(xy),predicate='dwithin',distance=self.radius+self.tol)
+                    shapes=shapely.set_coordinates(np.full(len(corners),shape,object),xy.reshape(-1,2)) if shape.interiors else shapely.polygons(xy)
+                    hits=tree.query(shapes,predicate='dwithin',distance=self.radius+self.tol)
                     if hits.size:
                         self.witnesses.append(corners[int(hits[0,0])]);self.memo[key]='contact';return 'contact'
                 envelope=self.swept(vertices,lever,a,b)
