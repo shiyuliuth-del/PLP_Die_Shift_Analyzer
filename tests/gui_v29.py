@@ -56,6 +56,12 @@ with patch('die_shift_studio.width_analysis.WidthAnalyzer._measure',side_effect=
         assert pose_text(summary['grid_key'],item['index']) in labels()
     assert w.extreme_table.currentRow()==0 and not np.any(w.shown_states)
     if os.environ.get('DSA_V29_SCREENSHOT'):w.grab().save(os.environ['DSA_V29_SCREENSHOT'])
+    # A multi-selection persists when panning its source lines out of view.
+    w.set_view((4000,4000),350,180);w.viewport_changed(force=True);settle()
+    assert set(w.selection.selected)==set(refs) and w.width_label_overflow.isVisible()
+    assert w.width_label_overflow.toPlainText().count('线路在当前视野外')==len(refs)
+    for ref in refs:assert f'{ref[0]} #{ref[1]+1} ·' in w.width_label_overflow.toPlainText()
+    w.set_view((0,0),380,170);w.viewport_changed(force=True);settle()
     # A small viewport must still expose every selected label without overlap.
     w.width_overlay.layouts.clear()
     with patch('die_shift_studio.width_labels.LabelLayout.place_selected',return_value=None):

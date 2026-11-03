@@ -110,6 +110,18 @@ class WidthOverlay:
         a.get_bbox_patch().set_edgecolor(color);a.get_bbox_patch().set_alpha(.33 if low else .94)
         a.set_zorder(15 if summary else 12.6);a.set_visible(True)
 
+    def summary_entry(self,ref,item,summary):
+        places=self.w.view_settings.width_label_decimals
+        if item['kind']=='channel':
+            body=self.label_text(item,places)
+        else:
+            body=(f"封装边距 {item['gap_um']:.{places}f} μm · 要求 {item['required_um']:.{places}f} μm"
+                  f"\n不足 {item['shortfall_um']:.{places}f} μm")
+        pose=item['index']
+        if pose not in self.pose_texts:self.pose_texts[pose]=pose_text(summary['grid_key'],pose)
+        status=summary['lines'][ref][0]
+        return status,f"{ref[0]} #{ref[1]+1} · {status}\n{body}\n"+self.pose_texts[pose]
+
     def summary_labels(self,summary,selected,visible,modes):
         w=self.w;items=[];boxes=[];overflow=[]
         if modes['描边']!='hide' and modes['标注']!='hide' and selected:
@@ -124,36 +136,29 @@ class WidthOverlay:
             for key,index in selected:
                 ref=(key,index);item=summary.get('witnesses',{}).get(ref)
                 if key not in visible or item is None:continue
-                if ref in self.label_rows:
-                    rect,entry=self.label_rows[ref];boxes.append(rect);items.append(entry);continue
-                geo=w.geometry_cache.layers[key]['geometry'][index]
-                if not view.intersects(geo):continue
-                # Aim at actual source copper, even for a multi-strand channel,
-                # a bent trace, a polygon hole, or a partially visible fan-out.
-                copper=geo if view.covers(geo) else geo.intersection(view)
-                if item['kind']=='channel':
-                    section=shapely.LineString(item['nominal_ends'])
-                    crossed=copper.intersection(section)
-                    target=section.centroid
-                    if not crossed.is_empty:copper=crossed
-                    body=self.label_text(item,w.view_settings.width_label_decimals)
-                else:
-                    target=Point(item['nominal_point'])
-                    places=w.view_settings.width_label_decimals
-                    body=(f"封装边距 {item['gap_um']:.{places}f} μm · 要求 {item['required_um']:.{places}f} μm"
-                          f"\n不足 {item['shortfall_um']:.{places}f} μm")
-                anchor=nearest_points(target,copper)[1]
-                xy=w.ax.transData.transform((anchor.x,anchor.y))
-                rect=shapely.box(*inv.transform(xy-scale),*inv.transform(xy+scale))
-                pose=item['index']
-                if pose not in self.pose_texts:self.pose_texts[pose]=pose_text(summary['grid_key'],pose)
-                status=summary['lines'][ref][0]
-                entry=(status,f"{key} #{index+1} · {status}\n{body}\n"+self.pose_texts[pose])
-                self.label_rows[ref]=(rect,entry);boxes.append(rect);items.append(entry)
-        count=0
+                if ref not in self.label_rows:
+                    entry=self.summary_entry(ref,item,summary);rect=None
+                    geo=w.geometry_cache.layers[key]['geometry'][index]
+                    if view.intersects(geo):
+                        # Anchor on visible source copper, including branches and holes.
+                        copper=geo if view.covers(geo) else geo.intersection(view)
+                        if item['kind']=='channel':
+                            section=shapely.LineString(item['nominal_ends'])
+                            crossed=copper.intersection(section);target=section.centroid
+                            if not crossed.is_empty:copper=crossed
+                        else:target=Point(item['nominal_point'])
+                        anchor=nearest_points(target,copper)[1]
+                        xy=w.ax.transData.transform((anchor.x,anchor.y))
+                        rect=shapely.box(*inv.transform(xy-scale),*inv.transform(xy+scale))
+                    self.label_rows[ref]=(rect,entry)
+                rect,entry=self.label_rows[ref]
+                if rect is None:overflow.append(entry[1]+'\n线路在当前视野外');continue
+                boxes.append(rect);items.append(entry)
+        count=0;size=w.view_settings.width_label_font_pt
+        if items or overflow:
+            font=w.width_label_overflow.font()
+            if font.pointSizeF()!=size:font.setPointSizeF(size);w.width_label_overflow.setFont(font)
         if items:
-            size=w.view_settings.width_label_font_pt
-            font=w.width_label_overflow.font();font.setPointSizeF(size);w.width_label_overflow.setFont(font)
             token=tuple(text for _,text in items)
             positions=self.layouts.get(token)
             if positions is None:
