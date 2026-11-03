@@ -4,7 +4,7 @@ Lengths are in micrometres. A gate retains its nominal demand and source polygon
 references at every pose. The nominal catalogue is built once per engine.
 """
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass,replace
 import math
 import threading
 import numpy as np
@@ -12,7 +12,7 @@ import shapely
 from shapely.geometry import LineString, Point, Polygon
 from shapely.strtree import STRtree
 from .drc_rules import effective_rules
-from .session_cache import SessionCache
+from .session_cache import SessionCache,EphemeralCache
 from .resources import parallel_map,resource_profile,geometry_budget
 from .stack import UnionFind
 from .neighbor_channels import occupied_batches, local_openings
@@ -83,6 +83,19 @@ class Gate:
     band: tuple | None = None
 
 
+def section_subset(plane,ids,wall_ids):
+    """Compact indices keep a local solve proportional to participating geometry."""
+    walls=plane['walls'];wall_ids=sorted(wall_ids)
+    wall_map={v:i for i,v in enumerate(wall_ids)}
+    features=sorted({f for k in ids for f in plane['gates'][k].features})
+    fmap={v:i for i,v in enumerate(features)}
+    gates=[replace(plane['gates'][k],pair=tuple(wall_map[i] for i in plane['gates'][k].pair),
+                   features=tuple(fmap[i] for i in plane['gates'][k].features)) for k in ids]
+    return dict(gates=gates,walls=[walls[i] for i in wall_ids],keys=plane['keys'],
+                metal_count=sum(i<plane['metal_count'] for i in wall_ids),pieces=plane['pieces'][features],
+                parents=np.array([wall_map[plane['parents'][i]] for i in features],int),local=plane['local'][features])
+
+
 def _faces(geometry):
     """Index parallel boundary segments once per wall for tied-distance sweeps."""
     rings = ([geometry] if geometry.geom_type=='LineString' else [geometry.exterior,*geometry.interiors])
@@ -95,6 +108,22 @@ def _faces(geometry):
             if np.any(delta[j]):
                 result[key].append(xy[j:j+2])
     return {key:np.asarray(v) for key,v in result.items()}
+
+
+def compatible_faces(i,js,ends,angle_index):
+    """A tied station requires both features to have an edge along the tangent.
+
+    Use an inclusive two-bin guard around the micro-radian key (including the
+    0/π seam); the original alignment and supporting-line checks decide ties.
+    """
+    delta=ends[:,1]-ends[:,0];period=round(math.pi*1e6)
+    tangent=np.rint(np.mod(np.arctan2(delta[:,0],-delta[:,1]),math.pi)*1e6).astype(np.int64)
+    nearby=(tangent[:,None]+np.arange(-2,3))%period
+    def present(ids):
+        keys=np.asarray(ids,dtype=np.int64)*period+nearby
+        where=np.searchsorted(angle_index,keys)
+        return np.any(angle_index[np.minimum(where,len(angle_index)-1)]==keys,axis=1)
+    return present(i)&present(js[:,None]) if len(angle_index) else np.zeros(len(js),bool)
 
 
 def _parallel_stations(a, b, ends, tree, tol):
@@ -280,6 +309,7 @@ class WidthAnalyzer:
         self.inside = self.board.buffer(self.tol)
         shapely.prepare(self.inside)
         self.cache = SessionCache(group=cache_group)
+        self.section_cache=EphemeralCache();self.demands={}
         self.catalogue_store=cache_group.values if cache_group is not None else None
         if self.catalogue_store is not None:
             self.catalogue_key=('width-catalogue-v27',model.data.geometry_id,model.data.top_name,
@@ -290,7 +320,7 @@ class WidthAnalyzer:
         self.probability=ChannelProbability(model,parameters,self.board,self.tol) if 0<parameters.target_nsigma<math.inf else None
 
     def close(self):
-        self.cache.close()
+        self.section_cache.clear();self.cache.close()
 
     def _planes(self):
         m = self.model
@@ -411,6 +441,8 @@ class WidthAnalyzer:
         local = np.fromiter((g is not geometries[j] for g,j in zip(pieces,parent)),bool)
         plane['local'] = local
         faces = [_faces(g) for g in pieces]
+        period=round(math.pi*1e6)
+        angle_index=np.asarray(sorted(i*period+k%period for i,face in enumerate(faces) for k in face),np.int64)
         metals=int(np.count_nonzero(parent<plane['metal_count']))
         profile=resource_profile()
         if metals<64:profile=dict(profile,workers=1)
@@ -436,7 +468,6 @@ class WidthAnalyzer:
             for offset in range(i+1,len(pieces),CHUNK):
                 js = np.arange(offset,min(offset+CHUNK,len(pieces)))
                 lines = shapely.shortest_line(pieces[i],pieces[js])
-                candidates, ends, anchored = [], [], []
                 coordinates = shapely.get_coordinates(lines).reshape(-1,2,2)
                 valid = shapely.length(lines)>self.tol
                 for side,incident in ((0,neighbours[i:i+1]),(1,neighbours[js])):
@@ -449,10 +480,11 @@ class WidthAnalyzer:
                         tangent=incident[:,adjacent]-incident[:,vertex]
                         closer=np.einsum('ij,ij->i',delta,tangent)>self.tol*np.linalg.norm(tangent,axis=1)
                         valid &= ~(touching & closer)
-                for j,xy in zip(js[valid],coordinates[valid]):
-                    sections = [xy,*_parallel_stations(faces[i],faces[j],xy,events,self.tol)]
-                    for k,section in enumerate(sections):
-                        candidates.append((i,j)); ends.append(section); anchored.append(k>0)
+                js=js[valid];xy=coordinates[valid]
+                candidates=[(i,j) for j in js];ends=list(xy);anchored=[False]*len(js)
+                for n in np.flatnonzero(compatible_faces(i,js,xy,angle_index)):
+                    j=js[n];extra=_parallel_stations(faces[i],faces[j],xy[n],events,self.tol)
+                    candidates.extend([(i,j)]*len(extra));ends.extend(extra);anchored.extend([True]*len(extra))
                 if not ends:
                     continue
                 ends = np.asarray(ends)
@@ -488,9 +520,15 @@ class WidthAnalyzer:
                         gates.append(Gate(tuple(pairs[k]),feature,ends[k],anchored[k],tuple(w for _,w,_ in strands),
                                           tuple(t for t,_,_ in strands),refs,gap,(*feature,run,ordinal)))
             return gates
-        groups=parallel_map(candidates_for_wall,range(metals),profile,
+        # Interleave long and short strips of the triangular search. Many
+        # tiny futures add contention after vectorized tangent rejection.
+        batches=min(metals,max(1,4*profile['workers']))
+        def solve_batch(start):
+            return [(i,candidates_for_wall(i)) for i in range(start,metals,batches)]
+        groups=parallel_map(solve_batch,range(batches),profile,
                             progress=lambda done,total:progress(done/max(1,total),'识别名义线路穿越'))
-        return [gate for group in groups for gate in group]
+        ordered=sorted((i,gates) for group in groups for i,gates in group)
+        return [gate for _,gates in ordered for gate in gates]
 
     @staticmethod
     def _templates(shapes,owners):
@@ -508,6 +546,34 @@ class WidthAnalyzer:
         return placed
 
     def sections(self,plane,states,geometries,nominal):
+        gates=plane['gates']
+        if 'routes' not in plane or len(gates)<256:
+            return self._sections(plane,states,geometries,nominal)
+        if 'section_groups' not in plane:
+            split=defaultdict(list);walls=plane['walls']
+            for i,g in enumerate(gates):
+                owners=tuple(sorted({walls[k].owner for k in g.pair if walls[k].owner>=0}))
+                split[owners].append(i)
+            groups=[]
+            for owners,ids in split.items():
+                wids=sorted({k for i in ids for k in gates[i].pair})
+                groups.append((owners,np.array(ids),wids,section_subset(plane,ids,wids)))
+            plane['section_groups']=groups
+            plane['section_constants']=(np.asarray([g.ends for g in gates]),np.asarray([g.pair for g in gates]),
+                                       [frozenset(v for lane in g.strand_refs for v in lane) for g in gates])
+        orig,pairs,sources=plane['section_constants'];n=len(gates)
+        ends=np.empty_like(orig);gaps=np.empty(n);inside=np.empty(n,bool);ref=np.empty((n,2));order=np.empty(n,bool)
+        arrays=(ends,gaps,inside,ref,order)
+        for owners,ids,wids,sub in plane['section_groups']:
+            token=(id(plane),owners,nominal,states[list(owners)].tobytes())
+            values=self.section_cache.get(token)
+            if values is None:
+                values=self._sections(sub,states,geometries[wids],nominal)[2:7]
+                self.section_cache.put(token,values,size=sum(v.nbytes for v in values)+512)
+            for dest,v in zip(arrays,values):dest[ids]=v
+        return orig,pairs,ends,gaps,inside,ref,order,sources
+
+    def _sections(self,plane,states,geometries,nominal):
         gates,walls=plane['gates'],plane['walls']
         if 'arrays' not in plane:
             orig=np.array([g.ends for g in gates]);pairs=np.array([g.pair for g in gates])
@@ -603,14 +669,14 @@ class WidthAnalyzer:
         # cross-sections of the new pair. Draw that pair only at its own measured
         # throat with its own nominal through-routes, never on the parent axis.
         splits=defaultdict(list)
-        direct=[]
+        direct=[];projections=plane.setdefault('nominal_projections',{})
         for k,g in enumerate(gates):
             spans=obstacles.get(k,[])
             if not spans:
                 direct.append(k)
                 continue
             if not any(walls[w].contacts.intersection(sources[k]) for w,_,_ in spans):continue
-            for sub in local_openings(g,ends[k],spans,plane['occupied'].get(k,[]),walls,self.tol,evidence_only=True):
+            for sub in local_openings(g,ends[k],spans,plane['occupied'].get(k,[]),walls,self.tol,evidence_only=True,projections=projections.setdefault(k,{})):
                 pair=tuple(sorted(sub['pair']))
                 refs=frozenset(ref for t in sub['indices'] for ref in g.strand_refs[t])
                 if refs:splits[pair].append((sub['point'],refs,sub['locked']))
@@ -639,19 +705,30 @@ class WidthAnalyzer:
         return rows,retained
 
     def _row(self,name,plane,a,b,original,gap,point,axis,widths,refs,locked,split,unresolved):
-        required=len(widths)
+        required=len(widths);key=(original,widths)
+        demand=self.demands.get(key)
+        if demand is None:
+            keep=tuple(max(self.width,v) for v in widths)
+            keep_um=sum(keep)+(required+1)*self.space
+            # Match the sequential additions in holds_original, including
+            # its roundoff rule at exact design-rule equality.
+            used=self.space;threshold=0.
+            for w in keep:
+                threshold=used+w+self.space;used+=w+self.space
+            demand=(capacity(original,self.width,self.space),keep_um,required*self.width+(required+1)*self.space,threshold)
+            self.demands[key]=demand
+        before,keep_um,min_um,threshold=demand
         current=capacity(gap,self.width,self.space)
-        keep=tuple(max(self.width,v) for v in widths)
         fits=(gap+self.tol>=self.space if not widths else current>=required)
-        status=BLOCKED if not fits else ADEQUATE if holds_original([gap],keep,self.space) else NARROW
+        status=BLOCKED if not fits else ADEQUATE if threshold<=gap+8*math.ulp(max(1.,gap)) else NARROW
         return dict(plane=name,layers=plane['keys'],pair=(a.name,b.name),ends=(a.kind,b.kind),
                     boundary_refs=(a.refs,b.refs),boundary_layers=(a.layers,b.layers),refs=refs,
                     point=point.tolist(),direction=axis.tolist(),gap_um=gap,nominal_gap_um=original,
-                    original=capacity(original,self.width,self.space),required=required,current=current,
-                    widths_um=widths,keep_um=sum(keep)+(required+1)*self.space,
-                    minimum_um=required*self.width+(required+1)*self.space,status=status,slots_um=[gap] if gap else [],
+                    original=before,required=required,current=current,
+                    widths_um=widths,keep_um=keep_um,
+                    minimum_um=min_um,status=status,slots_um=[gap] if gap else [],
                     locked=locked,split=split,unresolved=unresolved,
-                    narrowing_um=max(0.,sum(keep)+(required+1)*self.space-gap) if required else 0.)
+                    narrowing_um=max(0.,keep_um-gap) if required else 0.)
 
     def _distinct_throats(self,candidates,half_depth):
         """Collapse tied/overlapping samples of the same physical crossing.

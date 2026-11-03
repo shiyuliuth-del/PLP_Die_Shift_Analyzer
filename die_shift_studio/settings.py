@@ -138,7 +138,7 @@ class ViewSettings:
         return cls(**data)
 
     def width_key(self):
-        return (True,'nominal-physical-throat-v28',self.drc_tolerance_um)
+        return (True,'nominal-physical-throat-v29',self.drc_tolerance_um)
 
     def numeric_key(self):
         return tuple(getattr(self,k) for k in ('acceleration','probability_method','sample_exponent','random_seed',

@@ -134,9 +134,11 @@ class PreviewEngine:
         self.bound=cache.bind(case,motions,[k for k in cache.layers if roles.get(k,'不参与')!='不参与'],p)
         self.roles=roles;self.p=p;self.result=result;self.connections=connections;self.cache_group=cache_group
         from .session_cache import SessionCache
-        if cache_group is not None and cache_identity is not None:
+        self.shared_frames=cache_group is not None and cache_identity is not None
+        if self.shared_frames:
             with cache_group.lock:
-                if cache_identity not in cache_group.frame_stores:cache_group.frame_stores[cache_identity]=SessionCache(group=cache_group)
+                if cache_identity not in cache_group.frame_stores:
+                    cache_group.frame_stores[cache_identity]=SessionCache(group=cache_group,frame_ram=cache_group.shared_frame_ram())
                 self.frames=cache_group.frame_stores[cache_identity]
                 self.frames.pose_source=(cache_identity,'预演帧',None)
         else:self.frames=SessionCache(group=cache_group)
@@ -176,7 +178,7 @@ class PreviewEngine:
         self.width_key=key
     def width_summary(self,progress):
         from .width_summary import summarize
-        key=('width-extremes-v28',self.signature,self.width_key)
+        key=('width-extremes-v29',self.signature,self.width_key)
         if self.cache_group is None:return summarize(self.width_analyzer,self.p,progress)
         values=self.cache_group.values
         # The all-pose index belongs to the pinned zero view. Switching
@@ -199,7 +201,8 @@ class PreviewEngine:
         return (getattr(self,'deformation_key',None),getattr(self,'drc_key',None),getattr(self,'width_key',(False,)),
                 getattr(self,'reconstruction_config',(False,)))
     def close(self):
-        self.frames.close();self.intermediate.clear()
+        if not self.shared_frames:self.frames.close()
+        self.intermediate.clear()
         for d in self.deformers.values():d.close()
         self.deformers.clear()
         for analyzer in getattr(self,'width_analyzers',{}).values():analyzer.close()

@@ -48,12 +48,15 @@ class GeometrySelection:
         self.indexed();found=[];roles=w.roles()
         replacements=self.replacements()
         hidden={(k,i) for k,items in replacements.items() for q in items for i in q['indices']}
+        summary=w.width_overlay.shown_summary() if hasattr(w,'width_overlay') else None
+        marked=summary['lines'] if summary and w.view_settings.width_display['描边']!='hide' else {}
         locals_by_owner={};centers=w.rotation_centers() if w.shown_states is not None else None
         order={k:i for i,k in enumerate(w.ordered_layers())}
         for key,groups in self.groups.items():
-            if not w.visible_boxes[key].isChecked() or key in getattr(w,'width_hidden_sources',()) or roles.get(key) in ('芯片边框','封装边框'):
-                continue
-            filled=not point or w.style_for(key)['fill']
+            if not w.visible_boxes[key].isChecked() or roles.get(key) in ('芯片边框','封装边框'):continue
+            only_marked=key in getattr(w,'width_hidden_sources',())
+            if only_marked and not marked:continue
+            filled=only_marked or not point or w.style_for(key)['fill']
             for owner,ids,tree in groups:
                 if owner not in locals_by_owner:
                     local=inverse_geometry(shape,centers[owner],w.shown_states[owner]) if centers is not None and owner>=0 else shape
@@ -62,12 +65,18 @@ class GeometrySelection:
                 probe=center if point and filled else local
                 matches=tree.query(probe,predicate='covers' if contained else 'intersects')
                 if point and not filled and len(matches):
-                    matches=matches[shapely.intersects(local,shapely.boundary(tree.geometries[matches]))]
-                found.extend((key,int(i)) for i in ids[matches] if (key,i) not in hidden)
+                    geos=tree.geometries[matches]
+                    hit=shapely.intersects(local,shapely.boundary(geos))
+                    if marked:
+                        tinted=np.fromiter(((key,i) in marked for i in ids[matches]),bool)
+                        hit[tinted] |= shapely.intersects(center,geos[tinted])
+                    matches=matches[hit]
+                found.extend((key,int(i)) for i in ids[matches] if (key,i) not in hidden and (not only_marked or (key,i) in marked))
             for item in replacements.get(key,()):
                 poly=item['geometry']
                 hit=poly.covers(shape.centroid) if point and filled else shape.intersects(poly.boundary) if point else shape.covers(poly) if contained else shape.intersects(poly)
-                if hit:found.append((key,item['indices'][0]))
+                ref=(key,item['indices'][0])
+                if hit and (not only_marked or ref in marked):found.append(ref)
         return sorted(found,key=lambda ref:(w.layer_artists[ref[0]].get_zorder(),order[ref[0]],ref[1]),reverse=True)
 
     def apply_hits(self,hits,mode):
@@ -138,8 +147,20 @@ class GeometrySelection:
         self.artist.set_verts(polys)
         if self.deformed_artist is None:
             self.deformed_artist=PatchCollection([],facecolors=(.13,.60,.88,.18),edgecolors='#1769ac',linewidths=1.5,zorder=14);w.ax.add_collection(self.deformed_artist)
-        self.deformed_artist.set_paths([PathPatch(geometry_path(q['geometry'])) for k,items in replacements.items() if w.visible_boxes[k].isChecked() and k not in getattr(w,'width_hidden_sources',()) for q in items if any((k,i) in refs for i in q['indices'])])
+        paths=[PathPatch(geometry_path(q['geometry'])) for k,items in replacements.items() if w.visible_boxes[k].isChecked()
+               and k not in getattr(w,'width_hidden_sources',()) for q in items if any((k,i) in refs for i in q['indices'])]
+        hidden_sources=getattr(w,'width_hidden_sources',())
+        if refs and hidden_sources and w.view_settings.width_display['描边']!='hide':
+            summary=w.width_overlay.shown_summary()
+            for k,i in refs:
+                if k in hidden_sources and w.visible_boxes[k].isChecked() and (k,i) in (summary or {}).get('lines',{}):
+                    paths.append(w.geometry_patch(w.geometry_cache.layers[k]['geometry'][i]))
+        self.deformed_artist.set_paths(paths)
         if redraw:
+            summary=w.width_overlay.shown_summary() if hasattr(w,'width_overlay') else None
             if self.selected:w.statusBar().showMessage(f'选中 {len(self.selected)} 个图形；'+', '.join(f'{k} #{i+1}' for k,i in self.selected[:6]))
             else:w.statusBar().showMessage('已取消图形选择')
-            w.render_scene()
+            if summary is not None and w.tabs.currentIndex()==0:
+                w.width_overlay.draw()
+                w.scene_renderer.draw_selection([self.artist,self.deformed_artist,*w.width_overlay.labels],w.legend,w.width_overlay.stamp)
+            else:w.render_scene()

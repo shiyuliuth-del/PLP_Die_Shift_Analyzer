@@ -32,7 +32,17 @@ class ProjectCacheGroup:
     def __init__(self,key,max_entries=2000):
         self.key=key;self.max_entries=max_entries;self.lock=threading.RLock()
         self.caches={};self.recent=OrderedDict();self.pinned=set();self.bytes=0;self.enabled=True;self.revision=0
-        self.values=None;self.motions=None;self.replays=OrderedDict();self.engines={};self.frame_stores={};self.last_assessment=None;self.nominal={}
+        self.values=None;self.motions=None;self.replays=OrderedDict();self.engines={};self.frame_stores={};self.last_assessment=None;self.nominal={};self.frame_ram=None
+    def shared_frame_ram(self):
+        with self.lock:
+            if self.frame_ram is None:
+                from .resources import resource_profile
+                mib=max(8,min(256,resource_profile()['available_memory_mb']//32))
+                self.frame_ram=EphemeralCache(mib*1024**2,max_entries=256)
+            return self.frame_ram
+    def park_frames(self):
+        with self.lock:
+            if self.frame_ram is not None:self.frame_ram.clear()
     def register(self,cache):
         with self.lock:self.caches[id(cache)]=cache
     def entries(self,cache):
@@ -90,12 +100,12 @@ class ProjectCacheGroup:
     def clear(self):
         with self.lock:
             for cache in list(self.caches.values()):cache.clear()
-            self.nominal.clear();self.last_assessment=None
+            self.park_frames();self.nominal.clear();self.last_assessment=None
     def close(self):
         self.enabled=False
         for engine in list(self.engines.values()):engine.close()
         for cache in list(self.caches.values()):cache.close()
-        self.engines.clear();self.nominal.clear();self.last_assessment=None
+        self.park_frames();self.engines.clear();self.nominal.clear();self.last_assessment=None
 
 
 class ProjectCacheRegistry:
@@ -130,24 +140,29 @@ class ProjectCacheRegistry:
 
 class EphemeralCache:
     """Intermediate poses live in animation bundles; do not evict real results."""
-    def __init__(self,budget=32*1024**2):self.budget=budget;self.memory=OrderedDict();self.used=0
+    def __init__(self,budget=32*1024**2,max_entries=64):
+        self.budget=budget;self.max_entries=max_entries;self.memory=OrderedDict();self.used=0
     def get(self,key):
         entry=self.memory.get(key)
         if entry is None:return None
         self.memory.move_to_end(key);return entry[0]
-    def put(self,key,value):
-        size=2*len(pickle.dumps(value,protocol=5))
+    def put(self,key,value,size=None):
+        if size is None:size=2*len(pickle.dumps(value,protocol=5))
         old=self.memory.pop(key,None)
         if old is not None:self.used-=old[1]
         if size>self.budget:return
         self.memory[key]=(value,size);self.used+=size
-        while self.used>self.budget or len(self.memory)>64:
+        while self.used>self.budget or len(self.memory)>self.max_entries:
             _,(_,amount)=self.memory.popitem(last=False);self.used-=amount
+    def discard(self,key):
+        old=self.memory.pop(key,None)
+        if old is not None:self.used-=old[1]
     def clear(self):self.memory.clear();self.used=0
 
 
 class SessionCache(MutableMapping):
-    def __init__(self, budget_bytes=32 * 1024**2, group=None):
+    def __init__(self, budget_bytes=32 * 1024**2, group=None, frame_ram=None):
+        self.frame_ram=frame_ram
         self.budget=max(0,budget_bytes);self.memory=OrderedDict();self.sizes={};self.paths={};self.used=0
         self.directory=tempfile.TemporaryDirectory(prefix='die_shift_cache_')
         self.root=Path(self.directory.name);self.group=group;self.lock=group.lock if group is not None else threading.RLock();self.pinned=set()
@@ -161,10 +176,16 @@ class SessionCache(MutableMapping):
             if self.group is not None:self.group.touch(self,key)
             if key in self.memory:
                 self.memory.move_to_end(key);return self.memory[key]
+            if self.frame_ram is not None:
+                hot=self.frame_ram.get((id(self),key))
+                if hot is not None:return hot
             value=pickle.loads((self.root/self.paths[key]).read_bytes())
             self._remember(key,value);return value
 
     def _remember(self,key,value):
+        if self.frame_ram is not None and key not in self.pinned:
+            self.frame_ram.put((id(self),key),value,size=2*self.sizes[key]+512)
+            return
         if self.sizes[key]>self.budget and key not in self.pinned:return
         self.memory[key]=value;self.used+=self.sizes[key]
         while self.used>self.budget:
@@ -194,6 +215,9 @@ class SessionCache(MutableMapping):
     def pin(self,key):
         with self.lock:
             self.pinned.add(key)
+            if self.frame_ram is not None:
+                token=(id(self),key);value=self.frame_ram.get(token)
+                if value is not None:self.frame_ram.discard(token);self._remember(key,value)
             if self.group is not None and key in self.sizes:self.group.pinned.add((id(self),key))
 
     def __contains__(self,key):return key in self.sizes
@@ -202,6 +226,7 @@ class SessionCache(MutableMapping):
     def __delitem__(self,key):
         with self.lock:
             size=self.sizes.pop(key)
+            if self.frame_ram is not None:self.frame_ram.discard((id(self),key))
             if key in self.memory:self.memory.pop(key);self.used-=size
             (self.root/self.paths.pop(key)).unlink(missing_ok=True)
             self.pinned.discard(key);self.completed.discard(key);self.row_status.pop(key,None)

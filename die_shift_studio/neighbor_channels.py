@@ -105,7 +105,7 @@ def occupied_batches(ends,pairs,walls,geometries,half_depth,tol,source_refs=None
     return result
 
 
-def local_openings(gate,ends,spans,nominal_spans,walls,tol,evidence_only=False):
+def local_openings(gate,ends,spans,nominal_spans,walls,tol,evidence_only=False,projections=None):
     """Keep each nominal strand between its original neighbours, in order.
 
     For an arriving pad, use its own nominal projection to find the side of
@@ -115,15 +115,27 @@ def local_openings(gate,ends,spans,nominal_spans,walls,tol,evidence_only=False):
     axis=(gate.ends[1]-gate.ends[0])/g0
     gap=np.linalg.norm(ends[1]-ends[0])
     direction=(ends[1]-ends[0])/gap if gap>tol else axis
-    nodes=[]
-    for w,l,r in sorted(spans,key=lambda item:(item[1],-item[2],item[0])):
-        originals=[(a,b) for ref,a,b in nominal_spans if ref==w]
-        if originals:
-            l0,r0=min(originals,key=lambda s:abs((s[0]+s[1])*.5-(l+r)*.5))
-        else:
-            x=(shapely.get_coordinates(walls[w].geometry)-gate.ends[0])@axis
-            l0,r0=float(x.min()),float(x.max())
-        nodes.append((w,l,r,l0,r0))
+    nodes=[];locked=set()
+    projections={} if projections is None else projections
+    for w,l,r in spans:
+        options=projections.get(w)
+        if options is None:
+            originals=[(a,b) for ref,a,b in nominal_spans if ref==w]
+            if not originals:
+                x=(shapely.get_coordinates(walls[w].geometry)-gate.ends[0])@axis
+                originals=[(float(x.min()),float(x.max()))]
+            options=[]
+            for a,b in originals:
+                candidates=[k for k,(t,refs) in enumerate(zip(gate.positions,gate.strand_refs))
+                            if not walls[w].contacts.isdisjoint(refs) and a-gate.widths[k]/2-tol<=t<=b+gate.widths[k]/2+tol]
+                strand=min(candidates,key=lambda k:abs(gate.positions[k]-(a+b)/2)) if candidates else None
+                options.append((a,b,strand))
+            if len(projections)<64:projections[w]=options
+        a,b,strand=options[0] if len(options)==1 else min(options,key=lambda v:abs((v[0]+v[1])*.5-(l+r)*.5))
+        if strand is not None:locked.add(strand)
+        nodes.append((w,l,r,a,b))
+    if evidence_only and not locked:return
+    nodes.sort(key=lambda n:(n[1],-n[2],n[0]))
     # Overlap forms a continuous solid. Keep its two actual boundary owners.
     blocks=[]
     for n in nodes:
@@ -132,17 +144,10 @@ def local_openings(gate,ends,spans,nominal_spans,walls,tol,evidence_only=False):
         else:blocks.append([n,n])
     a=(i,0.,0.,0.,0.);b=(j,gap,gap,g0,g0)
     intervals=list(zip([a,*[v[1] for v in blocks]],[*[v[0] for v in blocks],b]))
-    lanes=[[] for _ in intervals];closed=set();locked=set()
-    for n in nodes:
-        # Local connectivity matters. A remote pad on the same net cannot
-        # lock another parallel pass of that net.
-        candidates=[i for i,(t,refs) in enumerate(zip(gate.positions,gate.strand_refs))
-                    if walls[n[0]].contacts.intersection(refs) and n[3]-gate.widths[i]/2-tol<=t<=n[4]+gate.widths[i]/2+tol]
-        if candidates:locked.add(min(candidates,key=lambda i:abs(gate.positions[i]-(n[3]+n[4])/2)))
-    if evidence_only and not locked:return
+    lanes=[[] for _ in intervals];closed=set()
+    centres=[(left[3]+left[4])/2 for left,_ in blocks]
     for index,t in enumerate(gate.positions):
         if index in locked:continue
-        centres=[(n[3]+n[4])/2 for block in blocks for n in block[:1]]
         slot=sum(t>center for center in centres)
         lanes[slot].append(index)
         # If the two original sides exchanged places, the original assignment
