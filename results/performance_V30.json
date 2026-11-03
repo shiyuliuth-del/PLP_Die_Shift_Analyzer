@@ -1,0 +1,195 @@
+{
+  "method": "Paired baseline–candidate, then candidate–baseline. GD55 1,225 shapes, same 2 completed physical frames, +/-35 µm X/Y and +/-1 degree, 15/15/15 µm, 1440x900 Qt offscreen on Linux CPU. Whole GUI dispatch, draw and pending Qt events measured, numeric solves excluded. CPU load varied. Timings in ms, not production FPS.",
+  "gds_sha256": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+  "measurements": {
+    "V29": [
+      {
+        "version": "V29",
+        "gds_sha": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+        "shapes": 1225,
+        "logical_cpus": 8,
+        "bounds_um": [
+          35,
+          35
+        ],
+        "angle_deg": 1,
+        "process_um": [
+          15,
+          15,
+          15
+        ],
+        "surface": "1440 x 900 Linux Qt offscreen",
+        "timings": {
+          "pan_zoom": {
+            "median_ms": 99.4410209968919,
+            "p95_ms": 184.764672399615,
+            "samples": 20
+          },
+          "select_clear": {
+            "median_ms": 161.55343299760716,
+            "p95_ms": 196.1451486931765,
+            "samples": 20
+          },
+          "cached_pose_draw": {
+            "median_ms": 123.32813400280429,
+            "p95_ms": 305.40346349516767,
+            "samples": 16
+          }
+        },
+        "display_counts_sha256": "706aba20f61b52b1c4d45024560cd055a3764747795af26322737572ab7edfce",
+        "drawn_coordinates_sha256": "d20786916a042fcd9e37c9b0996dd9bfd79be215a1294f1f92d26e776d7bd284",
+        "first_view_counts": [
+          158,
+          158,
+          56,
+          168,
+          158
+        ]
+      },
+      {
+        "version": "V29",
+        "gds_sha": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+        "shapes": 1225,
+        "logical_cpus": 8,
+        "bounds_um": [
+          35,
+          35
+        ],
+        "angle_deg": 1,
+        "process_um": [
+          15,
+          15,
+          15
+        ],
+        "surface": "1440 x 900 Linux Qt offscreen",
+        "timings": {
+          "pan_zoom": {
+            "median_ms": 137.48135499918135,
+            "p95_ms": 157.17848449930898,
+            "samples": 20
+          },
+          "select_clear": {
+            "median_ms": 80.98144199175294,
+            "p95_ms": 104.9524210437085,
+            "samples": 20
+          },
+          "cached_pose_draw": {
+            "median_ms": 113.22254550032085,
+            "p95_ms": 137.6491947521572,
+            "samples": 16
+          }
+        },
+        "display_counts_sha256": "706aba20f61b52b1c4d45024560cd055a3764747795af26322737572ab7edfce",
+        "drawn_coordinates_sha256": "d20786916a042fcd9e37c9b0996dd9bfd79be215a1294f1f92d26e776d7bd284",
+        "first_view_counts": [
+          158,
+          158,
+          56,
+          168,
+          158
+        ]
+      }
+    ],
+    "V30": [
+      {
+        "version": "V30",
+        "gds_sha": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+        "shapes": 1225,
+        "logical_cpus": 8,
+        "bounds_um": [
+          35,
+          35
+        ],
+        "angle_deg": 1,
+        "process_um": [
+          15,
+          15,
+          15
+        ],
+        "surface": "1440 x 900 Linux Qt offscreen",
+        "timings": {
+          "pan_zoom": {
+            "median_ms": 124.4692730033421,
+            "p95_ms": 206.61412535264398,
+            "samples": 20
+          },
+          "select_clear": {
+            "median_ms": 12.864495998655912,
+            "p95_ms": 31.039099903864557,
+            "samples": 20
+          },
+          "cached_pose_draw": {
+            "median_ms": 86.38963900011731,
+            "p95_ms": 148.9132487513416,
+            "samples": 16
+          }
+        },
+        "display_counts_sha256": "706aba20f61b52b1c4d45024560cd055a3764747795af26322737572ab7edfce",
+        "drawn_coordinates_sha256": "d20786916a042fcd9e37c9b0996dd9bfd79be215a1294f1f92d26e776d7bd284",
+        "first_view_counts": [
+          158,
+          158,
+          56,
+          168,
+          158
+        ]
+      },
+      {
+        "version": "V30",
+        "gds_sha": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+        "shapes": 1225,
+        "logical_cpus": 8,
+        "bounds_um": [
+          35,
+          35
+        ],
+        "angle_deg": 1,
+        "process_um": [
+          15,
+          15,
+          15
+        ],
+        "surface": "1440 x 900 Linux Qt offscreen",
+        "timings": {
+          "pan_zoom": {
+            "median_ms": 113.1520620037918,
+            "p95_ms": 137.3705661535496,
+            "samples": 20
+          },
+          "select_clear": {
+            "median_ms": 5.9539004942053,
+            "p95_ms": 16.474960297637157,
+            "samples": 20
+          },
+          "cached_pose_draw": {
+            "median_ms": 102.27977649628883,
+            "p95_ms": 126.69850799647975,
+            "samples": 16
+          }
+        },
+        "display_counts_sha256": "706aba20f61b52b1c4d45024560cd055a3764747795af26322737572ab7edfce",
+        "drawn_coordinates_sha256": "d20786916a042fcd9e37c9b0996dd9bfd79be215a1294f1f92d26e776d7bd284",
+        "first_view_counts": [
+          158,
+          158,
+          56,
+          168,
+          158
+        ]
+      }
+    ]
+  },
+  "median_of_run_medians_ms": {
+    "V29": {
+      "pan_zoom": 118.461,
+      "select_clear": 121.267,
+      "cached_pose_draw": 118.275
+    },
+    "V30": {
+      "pan_zoom": 118.811,
+      "select_clear": 9.409,
+      "cached_pose_draw": 94.335
+    }
+  },
+  "coordinates": "For every sampled view, checked all enclosure/clearance vertices, rendered contact points and via displacement segments. The two SHA-256 digests match across both versions and both runs."
+}

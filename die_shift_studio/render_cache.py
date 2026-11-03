@@ -20,7 +20,7 @@ class SceneRenderer:
                 id(legend),bool(legend and legend.get_visible()))
 
     def draw_selection(self,artists,legend,signature):
-        """At a stable zero pose only selection and callouts can change."""
+        """A stable scene needs only the selected outlines and their callouts repainted."""
         key=self.selection_key(legend)
         if self.selection_background is None or self.selection_background[0]!=key:
             visible=[a for a in artists if a is not None and a.get_visible()]

@@ -1,7 +1,7 @@
 """Offline preflight; desktop KLayout can supply the native DRC engine."""
 import importlib
 import sys
-MODULES=('numpy','scipy','matplotlib','shapely','gdstk','PyQt5.QtCore','psutil','PIL')
+MODULES=('numpy','scipy','matplotlib','shapely','gdstk','die_shift_studio.qt_compat','psutil','PIL')
 
 def verify():
     failures=[]

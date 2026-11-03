@@ -1,126 +1,78 @@
-"""Package the deliverable and verify its actual extracted contents locally."""
+"""Check the development tree or independently verify a Windows-built release ZIP."""
+import argparse
+from datetime import datetime,timezone
+import hashlib,json,os,shutil,struct,subprocess,sys,tempfile,zipfile
 from pathlib import Path
-from datetime import datetime, timezone
-import hashlib
-import json
-import os
-import re
-import subprocess
-import sys
-import tempfile
-import zipfile
-import stat
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT))
 from die_shift_studio import __version__
 
+def check_source():
+    """Stage a clean test checkout. Test helpers and projects do not enter the release."""
+    gui=['gui_smoke','gui_v14','gui_v20','gui_scheduler_v20','gui_v21','gui_repair',
+         'gui_v24','gui_v25','gui_v26','gui_v27','gui_v28','gui_v29','gui_v30']
+    env=dict(os.environ,QT_QPA_PLATFORM='offscreen',OPENBLAS_NUM_THREADS='1',PYTHONUTF8='1')
+    subprocess.run([sys.executable,'tools/check_contribution.py'],cwd=ROOT,env=env,check=True)
+    records=[]
+    with tempfile.TemporaryDirectory(prefix='die-shift-source-qa-') as name:
+        stage=Path(name)
+        selected=subprocess.check_output(['git','ls-files','-z','--','die_shift_studio','tests','tools','Jobs','examples',
+                   'main.py','die_shift_model.py','RUN.bat','requirements.txt','Die_Shift_Analyze.spec'],cwd=ROOT)
+        for value in selected.split(b'\0'):
+            if not value:continue
+            relative=Path(os.fsdecode(value));dst=stage/relative;dst.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copy2(ROOT/relative,dst)
+        (stage/'results').mkdir();(stage/'figures').mkdir()
+        commands=[(['-m','unittest','discover','-s','tests','-p','test_*.py','-v'],{})]
+        commands.extend(([f'tests/{fn}.py'],{}) for fn in gui)
+        commands.extend([(['main.py','--smoke-test','results/default.json'],{}),
+                         (['main.py','--smoke-test','results/desktop.json'],{'DIE_SHIFT_NATIVE_BACKEND':'desktop'})])
+        for job in sorted((stage/'Jobs').glob('示例*.dshift.json')):
+            commands.append((['-m','die_shift_studio','--project','Jobs/'+job.name,'--json','results/'+job.stem+'.json'],{}))
+        for args,extra in commands:
+            result=subprocess.run([sys.executable,*args],cwd=stage,env={**env,**extra},encoding='utf8',errors='replace',
+                                  stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=600)
+            print(result.stdout,flush=True)
+            if result.returncode or 'Traceback (most recent call last)' in result.stdout or '未处理异常' in result.stdout:
+                raise RuntimeError('Source regression failed: '+str(args))
+            record=dict(args=args,env=extra,status='PASS',summary=result.stdout.strip().splitlines()[-3:])
+            if '--project' in args:
+                data=json.loads((stage/args[-1]).read_text(encoding='utf8'))
+                assert data['extreme_factors']['checked'] and data['extreme_factors']['package_states']==data['discrete_states']
+                record['discrete_states']=data['discrete_states']
+            records.append(record)
+    out=dict(version=__version__,status='PASS',tested_at_utc=datetime.now(timezone.utc).isoformat(),
+             scope='Clean source checkout, local platform. Windows executable verification is recorded separately.',
+             platform=sys.platform,gui_suites=len(gui),runs=records)
+    (ROOT/'docs/package_verification.json').write_text(json.dumps(out,ensure_ascii=False,indent=2)+'\n',encoding='utf8')
 
-def main():
-    revision=0
-    name = f'Die_Shift_Analyze_{__version__}_Source'
-    target = ROOT / 'dist' / (name + '.zip')
-    target.parent.mkdir(exist_ok=True)
-    files = [ROOT / p for p in ['README.md','main.py','main.pyw','die_shift_model.py','requirements.txt','run.sh','RUN.bat','RUN.vbs','SELECT_PYTHON.bat','BUILD_WINDOWS.bat','TEST_WINDOWS.bat','Die_Shift_Analyze.spec',f'docs/{__version__}_使用说明.md','AGENTS.md','Agent.md','CONTRIBUTING.md','.gitignore','.gitattributes','.github/pull_request_template.md','docs/DESIGN_REQUIREMENTS.md','docs/Agents.md','results/width_V23.json','results/width_V24.json','results/width_V25.json','results/performance_V26.json','results/performance_V27.json','results/performance_V28.json','results/performance_V29.json','docs/V28_使用说明.md','docs/V27_使用说明.md','docs/V26_使用说明.md','docs/V25_使用说明.md','docs/V24_使用说明.md','docs/V23_使用说明.md','docs/BASELINE_1102.md','docs/KNOWN_ISSUES.md','docs/imports/1102_source_manifest.json','results/1102_edge_audit.json']]
-    # Explicit source/data whitelist. No images, screenshots, old archives,
-    # generated cache, user jobs or large historical report assets.
-    for folder in ('die_shift_studio','examples','tests','tools'):
-        files += [p for p in (ROOT/folder).rglob('*') if p.is_file() and p.suffix.lower() in {'.py','.json','.gds','.lym'} and '__pycache__' not in p.parts and p.name!='revision_figures.py']
-    files += [ROOT/'Jobs'/(p.stem+'.dshift.json') for p in sorted((ROOT/'examples').glob('*.json'))]
-    files += [ROOT/'results/baseline_interfaces_V19.json']
-    files=sorted(set(files))
-    image_suffixes={'.png','.jpg','.jpeg','.gif','.webp','.bmp','.tif','.tiff','.svg','.ico','.pdf'}
-    assert not any(p.suffix.lower() in image_suffixes for p in files)
-    manifest = {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
-                for p in sorted(files)}
-    def entry(path,directory=False):
-        info=zipfile.ZipInfo(path,datetime.now().timetuple()[:6]);info.create_system=3
-        info.external_attr=((stat.S_IFDIR|0o755)<<16)|0x10 if directory else ((stat.S_IFREG|0o644)<<16)|0x20
-        info.compress_type=zipfile.ZIP_STORED;return info
-    with zipfile.ZipFile(target,'w',zipfile.ZIP_STORED,allowZip64=False) as archive:
-        folders={name+'/'}
-        for p in files:
-            parent=Path(name)/p.relative_to(ROOT).parent
-            while str(parent)!='.':folders.add(parent.as_posix()+'/');parent=parent.parent
-        for folder in sorted(folders):archive.writestr(entry(folder,True),b'')
-        for p in files:archive.writestr(entry(f'{name}/{p.relative_to(ROOT)}'),p.read_bytes())
-        archive.writestr(entry(name+'/SHA256SUMS.json'),json.dumps(manifest,ensure_ascii=False,indent=2))
-    commands = [
-        [sys.executable,'tools/check_contribution.py'],
-        [sys.executable,'-m','unittest','discover','-s','tests','-p','test_*.py','-v'],
-        [sys.executable,'tests/gui_smoke.py'],
-        [sys.executable,'tests/gui_v14.py'],
-        [sys.executable,'tests/gui_v20.py'],
-        [sys.executable,'tests/gui_scheduler_v20.py'],
-        [sys.executable,'tests/gui_v21.py'],
-        [sys.executable,'tests/gui_repair.py'],
-        [sys.executable,'tests/gui_v24.py'],
-        [sys.executable,'tests/gui_v25.py'],
-        [sys.executable,'tests/gui_v26.py'],
-        [sys.executable,'tests/gui_v27.py'],
-        [sys.executable,'tests/gui_v28.py'],
-        [sys.executable,'tests/gui_v29.py'],
-        [sys.executable,'main.py','--smoke-test','results/package_source_smoke.json'],
-        [sys.executable,'-c',"import os,runpy,sys; os.environ['DIE_SHIFT_NATIVE_BACKEND']='desktop'; sys.argv=['main.py','--smoke-test','results/package_desktop_smoke.json']; runpy.run_path('main.py',run_name='__main__')"],
-    ]
-    for sample in sorted((ROOT/'Jobs').glob('示例*.dshift.json')):
-        commands.append([sys.executable,'-m','die_shift_studio','--project','Jobs/'+sample.name,
-                         '--json','results/'+sample.stem+'.verified.json'])
-    records = []
-    with tempfile.TemporaryDirectory(prefix='die_shift_release_') as temp:
-        with zipfile.ZipFile(target) as archive:
-            assert archive.testzip() is None
-            archive.extractall(temp)
-        extracted = Path(temp) / name
-        for rel, expected in manifest.items():
-            assert hashlib.sha256((extracted / rel).read_bytes()).hexdigest() == expected, rel
-        (extracted/'figures').mkdir(exist_ok=True);(extracted/'results').mkdir(exist_ok=True)
-        env = dict(os.environ, QT_QPA_PLATFORM='offscreen', OPENBLAS_NUM_THREADS='1',PYTHONUTF8='1')
-        for command in commands:
-            run = subprocess.run(command, cwd=extracted, env=env, text=True,encoding='utf-8',errors='replace',
-                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=600)
-            records.append({'command': command, 'returncode': run.returncode, 'output': run.stdout})
-            print(run.stdout, end='', flush=True)
-            if run.returncode:
-                raise SystemExit('Extracted archive validation failed: '+str(command)+' returncode='+str(run.returncode))
-            if 'Traceback (most recent call last)' in run.stdout or '未处理异常' in run.stdout:
-                raise SystemExit('Unhandled exception in extracted archive: '+str(command))
-            if '--project' in command:
-                result=json.loads((extracted/command[-1]).read_text(encoding='utf-8'))
-                factors=result['extreme_factors']
-                if not factors['checked'] or factors['package_states']!=result['discrete_states']:
-                    raise SystemExit('Incomplete discrete evaluation for '+command[command.index('--project')+1])
-                records[-1]['verified_discrete_states']=factors['package_states']
-    record = {'version': __version__, 'package_revision':revision,'verified_at_utc': datetime.now(timezone.utc).isoformat(),
-              'method': 'Image-free source ZIP; fresh extraction, file hashes, all core tests, twelve Qt suites, actual installed KLayout desktop backend, source startup and sample CLI; no frozen build',
-              'environment': 'Existing Linux Python environment; not a clean dependency-install or Windows test',
-              'file_count_before_record': len(manifest), 'status': 'PASS', 'runs': records,
-              'validation_scope':'Source/archive integrity and the executed checks; not a defect-free model or manufacturing signoff',
-              'known_issues_document':'docs/KNOWN_ISSUES.md',
-              'historical_v22_boundary_audit':json.loads((ROOT/'results/1102_edge_audit.json').read_text(encoding='utf-8'))}
-    record_text = json.dumps(record, ensure_ascii=False, indent=2)
-    (ROOT / 'docs' / 'package_verification.json').write_text(record_text, encoding='utf-8')
-    # Only add the verification record; the verified implementation stays byte-identical.
-    with zipfile.ZipFile(target,'a',zipfile.ZIP_STORED,allowZip64=False) as archive:
-        archive.writestr(entry(name+'/docs/package_verification.json'),record_text)
-    with zipfile.ZipFile(target) as archive:
-        assert archive.testzip() is None
-        for item in archive.infolist():
-            assert item.compress_type==zipfile.ZIP_STORED
-            assert Path(item.filename).suffix.lower() not in image_suffixes,item.filename
-        for rel, expected in manifest.items():
-            assert hashlib.sha256(archive.read(name + '/' + rel)).hexdigest() == expected
-        import posixpath
-        for rel in manifest:
-            if not rel.endswith('.md'):continue
-            for link in re.findall(r'\]\(([^)]+)\)',archive.read(name+'/'+rel).decode('utf-8')):
-                if link.startswith(('http:','https:','#')):continue
-                dependency=posixpath.normpath(posixpath.join(name,posixpath.dirname(rel),link))
-                assert dependency in archive.namelist(),dependency
-    digest = hashlib.sha256(target.read_bytes()).hexdigest()
-    target.with_suffix('.zip.sha256').write_text(digest + '  ' + target.name + '\n')
-    print(f'PACKAGE_PASS: {target} ({target.stat().st_size:,} bytes)\nSHA256 {digest}')
+def check_artifact(archive,verification):
+    meta=json.loads(verification.read_text(encoding='utf8'))
+    if not meta.get('single_file') or meta['version']!=__version__ or not meta['existing_job_preserved']:
+        raise ValueError('Incorrect Windows build report.')
+    if (len(meta['checks'])!=2 or not meta.get('source_bat_smoke') or meta['icons']<6 or
+            not all(x['platform']=='win32' and x['frozen'] and x['status']=='PASS' for x in meta['checks'])):
+        raise ValueError('Incomplete native Windows validation.')
+    digest=hashlib.sha256(archive.read_bytes()).hexdigest()
+    if digest!=meta['zip_sha256'] or archive.with_suffix('.zip.sha256').read_text().split()[0]!=digest:
+        raise ValueError('Unexpected release ZIP digest.')
+    with zipfile.ZipFile(archive) as bundle:
+        if bundle.namelist()!=['Die_Shift_Analyze.exe'] or bundle.testzip() is not None:
+            raise ValueError('Only the standalone application belongs in the release.')
+        exe=bundle.read('Die_Shift_Analyze.exe')
+        if exe[:2]!=b'MZ' or hashlib.sha256(exe).hexdigest()!=meta['exe_sha256']:
+            raise ValueError('Executable differs from the Windows-tested build.')
+        pe=struct.unpack_from('<I',exe,60)[0]
+        if (exe[pe:pe+4]!=b'PE\0\0' or struct.unpack_from('<H',exe,pe+4)[0]!=0x8664 or
+                struct.unpack_from('<H',exe,pe+24+68)[0]!=2):
+            raise ValueError('Expected a Windows x64 GUI executable.')
+    print('RELEASE_PASS',archive.name,digest)
 
-
-if __name__ == '__main__':
-    main()
+if __name__=='__main__':
+    parser=argparse.ArgumentParser(description=__doc__);sub=parser.add_subparsers(dest='mode',required=True)
+    sub.add_parser('verify-source')
+    test=sub.add_parser('verify-windows');test.add_argument('zip',type=Path);test.add_argument('validation',type=Path)
+    args=parser.parse_args()
+    if args.mode=='verify-source':check_source()
+    else:check_artifact(args.zip,args.validation)

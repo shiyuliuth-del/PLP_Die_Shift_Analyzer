@@ -151,6 +151,7 @@ from .stack import stack_order,resolve_stages,Connections,PHYSICAL
 from .statistics import ExtremeCatalog
 from .representatives import RepresentativeExtremes
 from .jobs import installation_root,list_jobs,job_path,atomic_save
+from .contact_ranges import RANGES,ContactRanges
 from .recognition import automatic_parameters
 from .resources import resource_profile
 
@@ -175,6 +176,8 @@ class NoWheelValues(QtCore.QObject):
 class MainWindow(W.QMainWindow):
     def __init__(self,jobs_dir=None):
         super().__init__();self.setWindowTitle(f'Die Shift Analyze {__version__}')
+        from .app_icon import window_icon
+        self.setWindowIcon(window_icon())
         self.setAttribute(getattr(Qt,'WidgetAttribute',Qt).WA_DeleteOnClose)
         self.jobs_dir=Path(jobs_dir) if jobs_dir is not None else installation_root()/'Jobs'
         self.jobs_dir.mkdir(parents=True,exist_ok=True)
@@ -542,6 +545,10 @@ class MainWindow(W.QMainWindow):
         spin(recon,'reconstruction_width_um','补线外扩 / μm（0=只覆盖切口）',0,10000,3)
         self.setting_fields['reconstruction_width_um'].setToolTip('补线多边形向外扩张的量；0 表示补线正好是两面切口的 4 个端点围成的多边形。补线不论裂隙大小都会生成，只有两面完全重合或缝隙已被铜盖住时才不重复补。')
         drawing=group('接触标记');spin(drawing,'intrusion_alpha','侵入面积不透明度',.05,.85,2)
+        for _,key,title,_,_ in RANGES:
+            check=W.QCheckBox('显示'+title+'虚线');self.setting_fields[key]=check;drawing.addRow(check)
+            check.setToolTip('只控制结果图形中的范围轮廓，接触、侵入面积和评估仍按工艺规则计算。')
+            check.toggled.connect(self.settings_changed)
         for prefix,title in [('contact','接触空心圆'),('unadapted','未适配叉号')]:
             color=ColorButton();self.setting_fields[prefix+'_marker_color']=color;drawing.addRow(title+'颜色',color);color.valueChanged.connect(self.settings_changed)
             spin(drawing,prefix+'_marker_size',title+'直径 / pt 或 μm',.1,10000,2)
@@ -593,7 +600,16 @@ class MainWindow(W.QMainWindow):
         if self.loading:return
         values={k:(w.currentData() if isinstance(w,W.QComboBox) else w.isChecked() if isinstance(w,W.QCheckBox) else w.value()) for k,w in self.setting_fields.items()}
         updated=ViewSettings.from_dict(values)
-        presentation=('width_display','width_label_font_pt','width_label_decimals','show_low_contact','show_low_width')
+        ranges=('show_annulus_range','show_spacing_range')
+        if all(getattr(updated,k)==getattr(self.view_settings,k) for k in values if k not in ranges):
+            changed=any(getattr(updated,k)!=getattr(self.view_settings,k) for k in ranges)
+            self.view_settings=updated
+            if changed and self.data:
+                if self.tabs.currentIndex()==0:
+                    self.draw_contact_ranges();self.refresh_legend();self.update_die_label_visibility();self.render_scene()
+                else:self._layout_pending=True
+            return
+        presentation=('width_display','width_label_font_pt','width_label_decimals','show_low_contact','show_low_width',*ranges)
         if all(getattr(updated,k)==getattr(self.view_settings,k) for k in values if k not in (*presentation,'cache_max_entries')):
             display_change=any(getattr(updated,k)!=getattr(self.view_settings,k) for k in presentation)
             self.view_settings=updated;self.cache_group.limit(updated.cache_max_entries);self.refresh_cache_status()
@@ -620,8 +636,11 @@ class MainWindow(W.QMainWindow):
             if intent[0]=='frame':self.present_frame(intent[1])
             else:self.animate_view(*intent[1:])
         elif self.data:self.plot_layout(preserve=True)
-    def style_for(self,key):
-        style=layer_style(self.roles().get(key,'不参与'));saved=self.layer_styles.get(key,{})
+    def style_for(self,key,role=None):
+        if role is None:
+            from .layer_roles import ALIASES
+            role=self.role_boxes[key].currentText() if key in self.role_boxes else '不参与';role=ALIASES.get(role,role)
+        style=layer_style(role);saved=self.layer_styles.get(key,{})
         if isinstance(saved,dict):
             if QtGui.QColor(str(saved.get('color',''))).isValid():style['color']=saved['color']
             for field,low,high in [('alpha',0,1),('width',.1,5)]:
@@ -1230,7 +1249,7 @@ class MainWindow(W.QMainWindow):
             self.update_die_label_visibility();self.canvas.draw_idle()
         finally:self._resizing=False
     def queue_viewport(self,*_):
-        if not self._plotting and self.data and self.tabs.currentIndex()==0:self.viewport_timer.start()
+        if not self._plotting and self.data and self.tabs.currentIndex()==0 and not self.viewport_timer.isActive():self.viewport_timer.start()
     def viewport_changed(self,force=False):
         if self._plotting or not self.data:return
         self._in_viewport=True
@@ -1264,6 +1283,24 @@ class MainWindow(W.QMainWindow):
         self.all_connector_segments=np.concatenate(segments) if segments else np.empty((0,2,2))
         self.connector_segments=np.concatenate(display) if display else np.empty((0,2,2))
 
+    def draw_contact_ranges(self):
+        if not self.zone_artists:
+            for _,_,_,color,alpha in RANGES:
+                artist=LineCollection([],colors=color,alpha=alpha,linestyles=(0,(4,3)),linewidths=.85,zorder=7)
+                self.ax.add_collection(artist,autolim=False);self.zone_artists.append(artist)
+            self._contact_ranges=None
+        regions=self.current_frame['contact']['regions'] if self.current_frame else None
+        if not regions:
+            self._contact_ranges=None
+            for artist in self.zone_artists:
+                if artist.get_visible():artist.set_segments([]);artist.set_visible(False)
+            return
+        if not (self.view_settings.show_annulus_range or self.view_settings.show_spacing_range):
+            for artist in self.zone_artists:artist.set_visible(False)
+            return
+        if self._contact_ranges is None or self._contact_ranges.regions is not regions:self._contact_ranges=ContactRanges(regions)
+        self._contact_ranges.draw(self.zone_artists,self.view_settings,{k for k,c in self.visible_boxes.items() if c.isChecked()},self.view_bounds)
+
     def geometry_patch(self,geometry):
         if not hasattr(self,'_path_cache'):self._path_cache={}
         key=id(geometry)
@@ -1296,30 +1333,34 @@ class MainWindow(W.QMainWindow):
         self.width_hidden_sources={k for k,r in roles.items() if modes.get(r if r in modes else '其他')=='hide'}
         for rank,key in enumerate(order):
             values=frame['layers'][key]['polygons'] if frame and key in frame['layers'] else self.data.layers[key]
-            role=roles[key];sty=self.style_for(key);visible=self.visible_boxes[key].isChecked()
+            role=roles[key];sty=self.style_for(key,role);visible=self.visible_boxes[key].isChecked()
             polys=values
             ids=self.viewport_index.query(key,self.view_bounds,states) if visible else np.empty(0,int)
             deformation=frame.get('deformation',{}) if frame and self.deformation_toggle.isChecked() else {}
             replacements=deformation.get('replacements',{}).get(key,[])
             hidden=set() if analysis is not None else {i for q in replacements for i in q['indices']}
-            ids=np.array([i for i in ids if i not in hidden],int)
+            if hidden:ids=np.array([i for i in ids if i not in hidden],int)
             mode=modes.get(role,modes.get('其他','show'))
             if mode!='show':
                 rgb=tint(sty['color'],mode,sty['alpha']);sty=dict(sty,color=rgb[:3],alpha=rgb[3])
             visible=visible and mode!='hide'
-            drawn=[polys[i] for i in ids] if visible else []
             if key not in self.layer_artists:
                 self.layer_artists[key]=PolyCollection([]);self.ax.add_collection(self.layer_artists[key])
             artist=self.layer_artists[key]
             geometry_stamp=(id(values),ids.tobytes(),visible)
-            if getattr(artist,'_geometry_stamp',None)!=geometry_stamp:artist.set_verts(drawn);artist._visible_ids=ids.tobytes();artist._geometry_stamp=geometry_stamp
-            artist.set_facecolor(sty['color'] if sty['fill'] else 'none');artist.set_edgecolor(sty['color'] if not sty['fill'] else 'none')
-            artist.set_alpha(sty['alpha']);artist.set_linewidth(sty['width']);artist.set_linestyle(sty.get('linestyle','-'));artist.set_visible(visible)
-            artist.set_zorder(2+rank/max(1,len(order)) if role in PHYSICAL else sty['z'])
+            if getattr(artist,'_geometry_stamp',None)!=geometry_stamp:
+                artist.set_verts([polys[i] for i in ids] if visible else []);artist._visible_ids=geometry_stamp[1];artist._geometry_stamp=geometry_stamp
+            zorder=2+rank/max(1,len(order)) if role in PHYSICAL else sty['z']
+            paint=(sty['color'],sty['fill'],sty['alpha'],sty['width'],sty.get('linestyle','-'),visible,zorder)
+            if getattr(artist,'_paint_stamp',None)!=paint:
+                artist.set_facecolor(sty['color'] if sty['fill'] else 'none');artist.set_edgecolor(sty['color'] if not sty['fill'] else 'none')
+                artist.set_alpha(sty['alpha']);artist.set_linewidth(sty['width']);artist.set_linestyle(paint[4]);artist.set_visible(visible)
+                artist.set_zorder(zorder);artist._paint_stamp=paint
             if default_motion(role)=='fixed' or frame is None or frame.get('nominal_global'):
                 artist._static_preview=(geometry_stamp,str(sty),artist.get_zorder())
             elif hasattr(artist,'_static_preview'):del artist._static_preview
             if visible:self.rendered_layers[key]=polys
+            if not replacements and key not in self.deformation_artists:continue
             if key not in self.deformation_artists:
                 base=PatchCollection([],linewidth=0);dark=PatchCollection([],linewidth=0);adapt=PatchCollection([],facecolor='none',edgecolor='#38536f',linestyle=(0,(4,3)),linewidth=.9)
                 self.ax.add_collection(base);self.ax.add_collection(dark);self.ax.add_collection(adapt);self.deformation_artists[key]=(base,dark,adapt)
@@ -1346,20 +1387,16 @@ class MainWindow(W.QMainWindow):
         if self.shift_artist is None:self.shift_artist=LineCollection([],colors='#d9893e',linestyles=(0,(4,3)),linewidths=1.05,zorder=8);self.ax.add_collection(self.shift_artist)
         self.shift_artist.set_segments(self.connector_segments)
         scheme=self.issue_scheme.currentData()
-        # Reuse collections across animation frames: no Qt table churn or Matplotlib allocation.
-        if not self.zone_artists:
-            for color in ('#3c9995','#aa78ab'):
-                artist=LineCollection([],colors=color,linestyles=(0,(4,3)),linewidths=.85,zorder=7)
-                self.ax.add_collection(artist);self.zone_artists.append(artist)
-        for name,artist in zip(('annulus','spacing'),self.zone_artists):
-            paths=[np.asarray(q[name].exterior.coords) for q in frame['contact']['regions'] if self.visible_boxes[q['key']].isChecked() and overlaps(q['bounds'] if 'bounds' in q else q[name].bounds,self.view_bounds)] if frame else []
-            artist.set_segments(paths);artist.set_visible(bool(paths))
+        self.draw_contact_ranges()
         entries=self.contact_entries(frame)
         self.display_issues=[q for q in entries if q['scheme']==scheme and self.visible_boxes.get(q.get('source_layer')) is not None and self.visible_boxes[q['source_layer']].isChecked() and self.visible_boxes.get(q.get('target_layer')) is not None and self.visible_boxes[q['target_layer']].isChecked()]
         if not self.issue_artists:
             area=PatchCollection([],facecolor='#e32e43',edgecolor='#ba2535',linewidth=.45,zorder=8.7);area._intrusion=True;self.ax.add_collection(area,autolim=False)
-            circles=self.ax.scatter([],[],s=66,facecolors='none',edgecolors='#bc243e',linewidths=1.6,zorder=11,path_effects=[patheffects.withStroke(linewidth=3,foreground='white',alpha=.85)])
-            lines=LineCollection([],colors='#6c747d',linestyles=(0,(4,3)),linewidths=1.05,zorder=9,path_effects=[patheffects.withStroke(linewidth=2.3,foreground='white',alpha=.7)]);self.ax.add_collection(lines)
+            circles=self.ax.scatter([],[],s=66,facecolors='none',edgecolors='#bc243e',linewidths=1.6,zorder=11)
+            lines=LineCollection([],colors='#6c747d',linestyles=(0,(4,3)),linewidths=1.05,zorder=9);self.ax.add_collection(lines)
+            halo_circles=self.ax.scatter([],[],facecolors='none',edgecolors='white',alpha=.75,linewidths=3.,zorder=10.99)
+            halo_lines=LineCollection([],colors='white',alpha=.75,linestyles=(0,(4*1.05/2.3,3*1.05/2.3)),linewidths=2.3,zorder=8.99)
+            self.ax.add_collection(halo_lines,autolim=False);self.issue_halos=(halo_circles,halo_lines)
             self.issue_artists=[area,circles,lines]
         area,circles,lines=self.issue_artists
         lows={(q['source_layer'],q['source_index'],q['target_layer'],q['target_index']):q.get('low_probability',False) for q in self.display_issues}
@@ -1382,10 +1419,15 @@ class MainWindow(W.QMainWindow):
             if overlaps((*a.min(axis=0),*a.max(axis=0)),self.view_bounds):
                 segments.append(a);line_colors.append(low_ink('#6c747d',q.get('low_probability')))
         ring_colors=[low_ink(self.view_settings.contact_marker_color,q.get('low_probability')) for q in self.rendered_issues]
-        for artist,width,inks in ((circles,3.,ring_colors),(lines,2.3,line_colors)):
-            artist.set_path_effects([] if any(c[3]<1 for c in inks) else [patheffects.withStroke(linewidth=width,foreground='white',alpha=.75)])
-        circles.set_sizes([marker_area]);circles.set_edgecolor(ring_colors);circles.set_offsets(np.asarray([q['point'] for q in self.rendered_issues]).reshape(-1,2));circles.set_visible(self.show_issues.isChecked() and bool(self.rendered_issues))
+        offsets=np.asarray([q['point'] for q in self.rendered_issues]).reshape(-1,2)
+        circles.set_sizes([marker_area]);circles.set_edgecolor(ring_colors);circles.set_offsets(offsets);circles.set_visible(self.show_issues.isChecked() and bool(self.rendered_issues))
         lines.set_segments(segments);lines.set_color(line_colors);lines.set_visible(self.show_issues.isChecked() and bool(segments))
+        # Native batched halos avoid Python path effects for each marker.
+        hc,hl=self.issue_halos
+        hc.set_visible(circles.get_visible() and all(c[3]>=1 for c in ring_colors))
+        hl.set_visible(lines.get_visible() and all(c[3]>=1 for c in line_colors))
+        if hc.get_visible():hc.set_sizes([marker_area]);hc.set_offsets(offsets)
+        if hl.get_visible():hl.set_segments(segments)
         if not hasattr(self,'violation_artist') or self.violation_artist.axes is None:
             self.violation_artist=PatchCollection([],facecolor='#e956b5',edgecolor='#ca398f',linewidth=.5,alpha=.48,zorder=10.2);self.ax.add_collection(self.violation_artist)
         # Repair mode replaces the DRC source, so the two never disagree on screen.
@@ -1441,7 +1483,7 @@ class MainWindow(W.QMainWindow):
             key=(tuple(self.ax.get_xlim()),tuple(self.ax.get_ylim()),tuple(self.ax.bbox.bounds),self._legend_stamp,self.space_stamp,
                  self.legend.get_visible() if self.legend is not None else False,tuple(a.get_visible() for a in self.space_artists))
             self.scene_renderer.draw(key,self.legend)
-            if not self.selection.selected and hasattr(self,'width_overlay') and self.width_overlay.shown_summary() is not None:
+            if not self.selection.selected:
                 self.scene_renderer.unselected_key=self.scene_renderer.selection_key(self.legend)
         else:self.canvas.draw_idle()
     def update_die_label_visibility(self,*_):
@@ -1459,7 +1501,7 @@ class MainWindow(W.QMainWindow):
         return origin
     def refresh_legend(self):
         stamp=(tuple((k,self.visible_boxes[k].isChecked(),str(self.style_for(k))) for k in self.ordered_layers()),
-               self.current_frame is not None,(self.current_frame or {}).get('width_summary') is not None,self.target_sigma.currentText(),bool(getattr(self,'deformation_diagnostics',[])),self.probability_toggle.isChecked(),id(self.probability_data),self.view_settings.probability_cmap,self.view_settings.probability_alpha,self.view_settings.probability_gamma,self.view_settings.probability_show_ranges,self.view_settings.probability_ranges,self.view_settings.probability_target_color,self.view_settings.contact_marker_color,self.view_settings.unadapted_marker_color,self.width_toggle.isChecked(),self.width_sufficient_toggle.isChecked(),self.repair_toggle.isChecked(),self.reconstruction_toggle.isChecked(),bool(self.current_frame and self.current_frame.get('motion_issues')))
+               self.view_settings.show_annulus_range,self.view_settings.show_spacing_range,self.current_frame is not None,(self.current_frame or {}).get('width_summary') is not None,self.target_sigma.currentText(),bool(getattr(self,'deformation_diagnostics',[])),self.probability_toggle.isChecked(),id(self.probability_data),self.view_settings.probability_cmap,self.view_settings.probability_alpha,self.view_settings.probability_gamma,self.view_settings.probability_show_ranges,self.view_settings.probability_ranges,self.view_settings.probability_target_color,self.view_settings.contact_marker_color,self.view_settings.unadapted_marker_color,self.width_toggle.isChecked(),self.width_sufficient_toggle.isChecked(),self.repair_toggle.isChecked(),self.reconstruction_toggle.isChecked(),bool(self.current_frame and self.current_frame.get('motion_issues')))
         if stamp==self._legend_stamp:return
         self._legend_stamp=stamp
         if self.legend is not None:self.legend.remove()
@@ -1494,7 +1536,9 @@ class MainWindow(W.QMainWindow):
         if self.current_frame and self.current_frame.get('motion_issues'):handles.append(Line2D([],[],color='#bf862c',ls='--',label='运动归属未定：保持名义位置'))
         if getattr(self.data,'ignored_geometry',[]):handles.append(Line2D([],[],color='#d72b91',ls='--',lw=.7,label='忽略的无效图形'))
         if self.current_frame is not None:
-            handles += [Line2D([],[],color='#3c9995',ls='--',label='最小包围区域'),Line2D([],[],color='#aa78ab',ls='--',label='线距控制区域'),Line2D([],[],color='#92979e',ls='--',label='当前孔中心→接触位置')]
+            for _,option,title,color,alpha in RANGES:
+                if getattr(self.view_settings,option):handles.append(Line2D([],[],color=color,alpha=alpha,ls='--',label=title))
+            handles.append(Line2D([],[],color='#92979e',ls='--',label='当前孔中心→接触位置'))
         binary=bool(self.probability_data and self.probability_data.get('binary'))
         if self.probability_toggle.isChecked() and binary:
             handles.append(Patch(facecolor=self.probability_colormap()(1.),alpha=self.view_settings.probability_alpha,label='当前姿态过孔实体覆盖 100%'))
@@ -2412,7 +2456,9 @@ class MainWindow(W.QMainWindow):
     def write_project(self,path):
         import os
         path=Path(path).resolve();gds=Path(self.data.path).resolve()
-        source=os.path.relpath(gds,path.parent) if gds.is_relative_to(installation_root()) else str(gds)
+        # Windows cannot express a relative path between different volumes or UNC shares.
+        portable=gds.anchor.casefold()==path.anchor.casefold() and gds.is_relative_to(installation_root())
+        source=os.path.relpath(gds,path.parent) if portable else str(gds)
         project=dict(self.project_settings(),gds_path=source)
         from .core import clean_json
         atomic_save(path,clean_json(project));self.project_path=path
