@@ -860,6 +860,42 @@ class Reconstructor:
             out.setdefault(layer,[]).append(dict(indices=(index,),geometry=geometry,net=net,
                                                  movable=shapely.union_all([q['movable'] for q in blocks]),
                                                  moved=shapely.union_all(feature_moved)))
+        # The spacing annotation must describe the RECONSTRUCTED layout, not the
+        # nominal one: another net's movable copper travels with its die too, so
+        # measuring against where it used to be would put a dimension between two
+        # traces that no longer exist. Re-measure every piece against the final
+        # geometry of the other nets on its own layer.
+        final={}
+        for layer,items in layer_items.items():
+            replaced={}
+            for q in out.get(layer,[]):
+                for i in q['indices']:replaced[int(i)]=q['geometry']
+            # Every feature of the layer participates, moved or not: a net whose
+            # copper nobody moves is still a neighbour that the spacing has to be
+            # measured against.
+            final[layer]=[(int(n),int(i),replaced.get(int(i),g)) for n,i,g in items]
+        trees={}
+        for layer,items in final.items():
+            for net in {n for n,i,g in items}:
+                other=[(n,g) for n,i,g in items if n!=net]
+                trees[(layer,net)]=(shapely.STRtree([g for n,g in other]),other) if other else (None,[])
+        conflicts=0
+        for piece in pieces:
+            tree,others=trees.get((piece['layer'],piece['net']),(None,[]))
+            piece['clearance_um']=None;piece['conflict']=False
+            piece['conflict_net']=None;piece['conflict_link']=None
+            if not others or tree is None:continue
+            probe=shapely.union_all([piece['moved']]+([piece['bridge']] if piece['bridge'] is not None else []))
+            which,gap_foreign=self._foreign_gap(probe,tree,others,self._conflict_limit())
+            if gap_foreign is None:continue
+            piece['clearance_um']=float(gap_foreign)
+            piece['conflict']=bool(gap_foreign<self.rule_space-self.tol)
+            if which is not None:
+                piece['conflict_net']=int(others[which][0])
+                line=shapely.shortest_line(probe,others[which][1])
+                piece['conflict_link']=[[round(float(x),6),round(float(y),6)]
+                                        for x,y in shapely.get_coordinates(line)][:2]
+            if piece['conflict']:conflicts+=1
         pieces.sort(key=lambda q:(q['layer'],-q['movable_area_um2'],q['index'],q['die']))
         result=dict(complete=True,pieces=pieces,replacements=out,scope=SCOPE,
                     parameters=dict(length_um=self.length_um,width_um=self.width_um,overlap_um=self.overlap_um,

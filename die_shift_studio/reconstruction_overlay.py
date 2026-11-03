@@ -299,10 +299,10 @@ class ReconstructionOverlay:
             f"（由两面切口的 4 个端点围成多边形，补线面积合计 {detail.get('cover_area_um2', 0.):.1f} μm²，"
             f"外扩 {detail['width_um']:.3f} μm），"
             f"整块随动、无不动铜可接 {detail['orphans']} 块；"
-            f"与其他网络间距检查：有效线距 {detail.get('rule_space_um', 0.):.2f} μm，",
+            f"重构后与其它网络（暖色走线）的间距检查：有效线距 {detail.get('rule_space_um', 0.):.2f} μm，",
         ]
         if detail.get('conflicts'):
-            parts.append(f"间距不足 {detail.get('conflicts', 0)} 段"
+            parts.append(f"重构后间距不足 {detail.get('conflicts', 0)} 段"
                          "（已用尺寸箭头标出，是当前姿态下任何切口位置都避免不了的那几段）；")
         else:
             parts.append("各段都满足有效线距；")

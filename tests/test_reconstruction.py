@@ -331,6 +331,28 @@ class ReconstructionTests(unittest.TestCase):
         finally:
             engine.close()
 
+    def test_spacing_follows_the_reconstructed_neighbour(self):
+        """The dimension must describe the reconstructed layout, not the nominal one.
+
+        At the mixed pose the two pads travel toward each other, so the copper
+        that used to be 5 um away now overlaps. A nominal measurement would keep
+        reporting 5 um; the reconstruction has to report the overlap.
+        """
+        engine,_,_=example()
+        try:
+            frame=engine.frame(np.array([[35.,0.,0.],[-35.,0.,0.]]),lambda a,b:None,quick=True)
+            recon=frame['reconstruction']
+            self.assertTrue(recon['pieces'])
+            toler=engine.reconstructor.tol*2
+            for piece in recon['pieces']:
+                self.assertIsNotNone(piece['clearance_um'])
+                self.assertLessEqual(piece['clearance_um'],toler)
+                self.assertTrue(piece['conflict'])
+                self.assertIsNotNone(piece['conflict_link'])
+            self.assertGreaterEqual(recon['summary']['conflicts'],1)
+        finally:
+            engine.close()
+
     def test_a_safe_piece_is_not_marked(self):
         # Example L sits 15 um from the next net, exactly on the rule, so the
         # piece is not marked — the mark is for a real violation of the rule.

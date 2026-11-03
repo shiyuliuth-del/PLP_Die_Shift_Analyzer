@@ -212,7 +212,7 @@ def report_document(r,motions=None,progress=lambda *_:None):
               r'Q=\mathrm{conv}\{F_{0},F_{1},F^{\prime}_{1},F^{\prime}_{0}\}'],
              f"移动区{detail['pieces']}段；补线{detail['bridges']}处；整块随动{detail['orphans']}块；"
              f"贴合（裂隙为0）{detail.get('flush',0)}段；"
-             f"与其他网络间距不足{detail.get('conflicts',0)}段（有效线距{fmt(detail.get('rule_space_um',0))} μm）；"
+             f"重构后与其他网络间距不足{detail.get('conflicts',0)}段（有效线距{fmt(detail.get('rule_space_um',0))} μm）；"
              + (f"手动固定切口{detail.get('manual_cuts',0)}条串；" if detail.get('manual_cuts') else "")
              + f"移动面积合计{fmt(detail['movable_area_um2'])} μm²；补线面积合计{fmt(detail.get('cover_area_um2',0))} μm²；"
              f"最大位移{fmt(detail['max_shift_um'])} μm",
