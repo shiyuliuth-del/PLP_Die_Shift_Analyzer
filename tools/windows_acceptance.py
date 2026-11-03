@@ -80,6 +80,15 @@ def main():
             assert record['status']=='PASS' and record['frozen'] and record['platform']=='win32',record
             assert Path(record['jobs']).samefile(install/'Jobs') and (install/'logs').is_dir()
             assert marker.read_bytes()==b'{}' and not list(cwd.iterdir())
+        # Exercise the single BAT through cmd.exe with a spaced, Unicode argument.
+        source_out=base/'源码 launch.json'
+        no_samples=base/'no samples'
+        env=dict(os.environ,DIE_SHIFT_SMOKE_EXAMPLES=str(no_samples),DIE_SHIFT_PYTHON=sys.executable)
+        subprocess.run(['cmd','/d','/c','call','RUN.bat','--smoke-test',str(source_out)],cwd=ROOT,env=env,check=True,timeout=30)
+        until=time.monotonic()+90
+        while not source_out.is_file() and time.monotonic()<until:time.sleep(.15)
+        source_report=json.loads(source_out.read_text(encoding='utf8'))
+        assert source_report['status']=='PASS' and not source_report['frozen']
         assert records[0]['standalone'] and records[1]['deformation_routes']==2
     target=dist/f'Die_Shift_Analyze_{__version__}_Windows_x64.zip'
     with zipfile.ZipFile(target,'w',compression=zipfile.ZIP_STORED,allowZip64=False) as z:z.write(binary,binary.name)
@@ -89,7 +98,7 @@ def main():
     target.with_suffix('.zip.sha256').write_bytes(f'{digest}  {target.name}\n'.encode())
     info=dict(version=__version__,os=platform.platform(),python=platform.python_version(),commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
               icons=icons,visible_native_window_seconds=elapsed,exe_sha256=file_hash(binary),zip_sha256=digest,
-              single_file=True,existing_job_preserved=True,checks=records)
+              single_file=True,existing_job_preserved=True,source_bat_smoke=True,checks=records)
     (dist/'windows_verification.json').write_text(json.dumps(info,indent=2,ensure_ascii=False),encoding='utf8')
     print('WINDOWS_RELEASE_PASS',target.name,digest,f'normal GUI ready in {elapsed:.2f}s, {icons} icon sizes',flush=True)
 
