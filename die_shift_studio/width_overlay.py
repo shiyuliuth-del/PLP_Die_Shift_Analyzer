@@ -78,6 +78,24 @@ class WidthOverlay:
         self.label_sides={};self.text_sizes={}
         window.canvas.mpl_connect('motion_notify_event',self.hover)
 
+    def draw_summary(self,summary,visible,mode):
+        w=self.w;paths=[];colors=[];dashes=[]
+        for (key,index),(severity,evidence) in summary['lines'].items():
+            if key not in visible or mode=='hide':continue
+            geometry=w.geometry_cache.layers[key]['geometry'][index]
+            if not overlaps(geometry.bounds,w.view_bounds):continue
+            paths.append(w.geometry_patch(geometry))
+            uncertain=evidence=='undetermined'
+            ink=np.asarray(to_rgb(COLORS[severity]))
+            # Mix the dark local outline with white, even for proved risks.
+            ink=.46*ink+.28 if not uncertain else .45*ink+.43
+            colors.append((*ink,(.82 if not uncertain else .61)*(.62 if mode=='dim' else 1.)))
+            dashes.append((0,(4,2.4)) if uncertain else 'solid')
+        self.outlines.set_paths(paths);self.outlines.set_edgecolors(colors)
+        self.outlines.set_linestyles(dashes or ['solid']);self.outlines.set_visible(bool(paths))
+        for a in (self.boxes,self.edges,self.barriers,*self.inset.values(),*self.labels):a.set_visible(False)
+        self.rows=[];self.tree=None
+
     def draw(self):
         w = self.w
         data = (w.current_frame or {}).get('width_analysis') if w.width_toggle.isChecked() else None
@@ -94,7 +112,7 @@ class WidthOverlay:
         visible = frozenset(k for k,check in w.visible_boxes.items() if check.isChecked())
         flags = (id(data),w.width_sufficient_toggle.isChecked(),w.view_settings.show_low_width)
         modes=w.view_settings.width_display
-        stamp = (flags,visible,tuple(modes.items()),w.view_settings.width_label_font_pt,w.view_settings.width_label_decimals,tuple(w.ax.bbox.bounds),w.figure.dpi,w.view_bounds,self.selected,id(w.current_frame),w.reconstruction_toggle.isChecked(),w.deformation_toggle.isChecked())
+        stamp = (flags,id(w._coupled_data),visible,tuple(modes.items()),w.view_settings.width_label_font_pt,w.view_settings.width_label_decimals,tuple(w.ax.bbox.bounds),w.figure.dpi,w.view_bounds,self.selected,id(w.current_frame),w.reconstruction_toggle.isChecked(),w.deformation_toggle.isChecked())
         if self.stamp == stamp and (getattr(w,'_in_animation',False) or self.table_stamp==flags):
             return
         self.stamp = stamp
@@ -111,6 +129,13 @@ class WidthOverlay:
                 reach=np.array([max(r['gap_um']/2,rules['width_um']) for r in self.active_rows])+(.65*(rules['width_um']+rules['space_um']))
                 self.row_boxes=np.column_stack((points-reach[:,None],points+reach[:,None]))
         rows=self.table_rows;active=self.active_rows
+        summary=(w.current_frame or {}).get('width_summary') if w.width_toggle.isChecked() else None
+        if summary is not None and (w.current_frame or {}).get('nominal_global'):
+            if w.coupled_view():summary=w._coupled_data or {'lines':{}}
+            self.draw_summary(summary,visible,modes['描边'])
+            if self.table_stamp!=flags:self.table_stamp=flags;self.fill_table(rows,data)
+            return
+        self.outlines.set_linestyles('solid')
         if getattr(self,'geometry_data',None) is not data:
             self.geometry_data = data
             self.rectangles = {}

@@ -150,9 +150,9 @@ class YieldDisplayTests(unittest.TestCase):
 
     def test_old_pages_and_label_precision_are_display_only(self):
         p={'schema_version':5,'parameters':{},'roles':{}}
-        defaults=normalize_project(p);self.assertEqual(defaults['extreme_view'],dict(mode='focus',page=1,page_size=256))
+        defaults=normalize_project(p);self.assertEqual(defaults['extreme_view'],dict(mode='focus',page=1,page_size=256,filter_problems=True))
         migrated=normalize_project(dict(p,extreme_view=dict(mode='all',page=9)))
-        self.assertEqual(migrated['extreme_view'],dict(mode='all',page=3,page_size=256))
+        self.assertEqual(migrated['extreme_view'],dict(mode='all',page=3,page_size=256,filter_problems=True))
         self.assertEqual(normalize_project(migrated)['extreme_view'],migrated['extreme_view'])
         base=ViewSettings();changed=replace(base,width_label_decimals=0,show_low_width=False,show_low_contact=False)
         self.assertEqual(changed.width_key(),base.width_key());self.assertEqual(changed.numeric_key(),base.numeric_key())

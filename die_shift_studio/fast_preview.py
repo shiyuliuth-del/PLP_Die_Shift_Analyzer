@@ -174,6 +174,16 @@ class PreviewEngine:
             self.width_analyzer=self.width_analyzers[key]
             self.width_analyzer.cache.pose_source=(getattr(self,'signature',None),'宽度',key)
         self.width_key=key
+    def width_summary(self,progress):
+        from .width_summary import summarize
+        key=('width-extremes-v28',self.signature,self.width_key)
+        if self.cache_group is None:return summarize(self.width_analyzer,self.p,progress)
+        values=self.cache_group.values
+        # The all-pose index belongs to the pinned zero view. Switching
+        # ordinary rows must never evict it, even with a one-entry cache.
+        values.pin(key)
+        return values.get_or_compute(key,lambda:summarize(self.width_analyzer,self.p,progress))
+
     def configure_reconstruction(self,enabled,settings):
         key=settings.reconstruction_key() if enabled else (False,)
         if getattr(self,'reconstruction_config',(False,))==key:return
@@ -194,6 +204,19 @@ class PreviewEngine:
         self.deformers.clear()
         for analyzer in getattr(self,'width_analyzers',{}).values():analyzer.close()
         for reconstructor in getattr(self,'reconstructors',{}).values():reconstructor.close()
+    @staticmethod
+    def final_copper(deformation,reconstruction):
+        if not reconstruction:return deformation
+        by_ref={}
+        for source in (deformation,reconstruction):
+            for layer,items in source.items():
+                for q in items:
+                    for i in q['indices']:by_ref[layer,i]=q
+        changed={}
+        for (layer,i),q in by_ref.items():
+            if i==q['indices'][0]:changed.setdefault(layer,[]).append(q)
+        return changed
+
     def frame(self,states,progress=lambda *_:None,quick=False):
         states=np.array(states,dtype=float,copy=True);states[states==0]=0.
         if not np.any(states):quick=False
@@ -239,14 +262,7 @@ class PreviewEngine:
             if edges:check['problem_percent']=100
         if getattr(self,'width_key',(False,))[0]:
             if frame.get('reconstruction',{}).get('replacements'):
-                by_ref={}
-                for source in (overrides,frame['reconstruction']['replacements']):
-                    for k,items in source.items():
-                        for q in items:
-                            for i in q['indices']:by_ref[k,i]=q
-                changed={}
-                for (k,i),q in by_ref.items():
-                    if i==q['indices'][0]:changed.setdefault(k,[]).append(q)
+                changed=self.final_copper(overrides,frame['reconstruction']['replacements'])
                 edges=edge_violations(self.contact,states,self.p,cfg,changed)
             probability=self.width_analyzer.probability
             changed_copper=bool(overrides or frame.get('reconstruction',{}).get('replacements'))

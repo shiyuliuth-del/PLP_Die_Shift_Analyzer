@@ -1,0 +1,40 @@
+{
+  "version": "V28",
+  "source_sha256": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+  "shapes": 1225,
+  "platform": "linux",
+  "resource_profile": {
+    "cpu": 8,
+    "total_memory_mb": 15708,
+    "available_memory_mb": 8480,
+    "workers": 6,
+    "worker_capacity": 6,
+    "process_workers": 3,
+    "policy": "预留至少2个逻辑CPU（大机器约10%）与65%可用内存；原生几何/FFT使用线程；大型独立原图DRC与RDL候选搜索使用spawn进程；小任务串行"
+  },
+  "dies": 3,
+  "rules_um": [
+    15,
+    15,
+    15
+  ],
+  "single_sided": [
+    35,
+    35,
+    1
+  ],
+  "sigma": 6,
+  "package_states": 19683,
+  "red_shifted_states": 2835,
+  "risk_lines": 6,
+  "eligible_endpoint_poses": 243,
+  "sampled_rows": 24,
+  "red_samples": 8,
+  "other_samples": 16,
+  "first_page_nonzero": 256,
+  "times_s": {
+    "cold_full_summary": 13.370179399003973,
+    "cache_lookup": 2.1262007066980004e-05,
+    "build_index_and_first_page": 0.0015626910026185215
+  }
+}

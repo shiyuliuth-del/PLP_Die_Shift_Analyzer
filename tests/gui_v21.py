@@ -26,7 +26,8 @@ def check_pad(i):
 
 w.load_project(ROOT/'Jobs/示例M_不同芯片底层与Pad随动.dshift.json');wait();w.run_evaluation();wait()
 assert not w.width_toggle.isChecked()
-w.extreme_table.setCurrentCell(1,0);wait()
+# This ownership regression deliberately selects a contact-free pose.
+w.problem_filter.setChecked(False);wait();w.extreme_table.setCurrentCell(1,0);wait()
 for i in range(2):check_pad(i)
 with patch.object(W.QInputDialog,'getItem',return_value=('DIE 2',True)):
  w.mouse_die.key(SimpleNamespace(key='m'))

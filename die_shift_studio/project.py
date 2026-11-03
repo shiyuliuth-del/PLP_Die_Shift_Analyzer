@@ -51,7 +51,9 @@ def normalize_project(project):
     if view['mode'] not in ('all','focus') or any(type(view[k]) is not int or view[k]<1 for k in ('page','page_size')):
         raise ValueError('工程极端情况视图须包含有效目录类型、正整数页码及页大小')
     # Keep the old first pose on screen when the larger pages absorb a V26 page.
-    p['extreme_view']=dict(mode=view['mode'],page=1+(view['page']-1)*view['page_size']//EXTREME_PAGE_SIZE,page_size=EXTREME_PAGE_SIZE)
+    filtered=view.get('filter_problems',True)
+    if type(filtered) is not bool:raise ValueError('过滤无问题情况必须为布尔值')
+    p['extreme_view']=dict(filter_problems=filtered,mode=view['mode'],page=1+(view['page']-1)*view['page_size']//EXTREME_PAGE_SIZE,page_size=EXTREME_PAGE_SIZE)
     p['overlays']=project_overlays(p)
     p['settings']=asdict(ViewSettings.from_dict(p.get('settings')))
     p['schema_version']=5;p.pop('geometry',None)

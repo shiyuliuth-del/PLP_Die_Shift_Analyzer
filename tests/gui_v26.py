@@ -28,6 +28,7 @@ def row_info(row):
 name='示例O_运动网络三线路通道';src=ROOT/'Jobs'/(name+'.dshift.json')
 w.load_project(src);wait();w.setting_fields['animation_enabled'].setChecked(False);w.width_toggle.setChecked(False);wait()
 w.run_evaluation();wait();assert w.extremes.total+1==729 and w.grid_mode.currentText()=='重点组合'
+w.problem_filter.setChecked(False);wait()
 assert w.extreme_table.rowCount()==w.focus_extremes.total+1
 w.grid_mode.setCurrentIndex(0);wait();assert w.extreme_table.rowCount()==257
 assert w.result['extreme_factors']['checked'] and all(w.extreme_table.item(0,j).text()=='' for j in range(5))
@@ -47,12 +48,12 @@ w.visible_boxes['4/0'].setChecked(False);wait();assert not w.footprint_overlay.a
 w.visible_boxes['4/0'].setChecked(True);wait();assert w.footprint_overlay.artist.get_visible()
 w.grid_mode.setCurrentIndex(1);w.show_extreme_page(1);wait();page=w.preview_page
 saved=w.jobs_dir/'footprints.dshift.json';w.write_project(saved);record=json.loads(saved.read_text())
-assert record['overlays']['footprint'] and record['extreme_view']=={'mode':'focus','page':page+1,'page_size':256}
+assert record['overlays']['footprint'] and record['extreme_view']=={'mode':'focus','page':page+1,'page_size':256,'filter_problems':False}
 w.load_project(saved);wait();assert w.footprint_toggle.isChecked() and w.grid_mode.currentIndex()==1 and w.preview_page==page
 w.load_project(src);wait();assert not w.footprint_toggle.isChecked()
 q=json.loads(src.read_text());q['parameters'].update(per_die_enabled=True,die_bounds=[[0,0,0],[0,7,0]],mean_x_um=5,mean_angle_deg=.1)
 q['gds_path']=str(ROOT/'examples'/(name+'.gds'));path=w.jobs_dir/'mixed.dshift.json';path.write_text(json.dumps(q))
-w.load_project(path);wait();w.run_evaluation();wait();assert w.result['discrete_states']==3 and w.extreme_table.rowCount()==3
+w.load_project(path);wait();w.problem_filter.setChecked(False);w.run_evaluation();wait();assert w.result['discrete_states']==3 and w.extreme_table.rowCount()==3
 assert all(not e['states'][0].any() and e['states'][1,0]==e['states'][1,2]==0 for e in w.extremes)
 w.extreme_table.setCurrentCell(1,0);wait();assert row_info(1)[0]>0
 w.clear_cached_results(False);wait()
