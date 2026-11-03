@@ -1,5 +1,5 @@
 """Native ABI simulation, independent convolution/reference checks and no-driver fallback."""
-import concurrent.futures,ctypes,hashlib,os,shutil,subprocess,sys,tempfile,unittest
+import concurrent.futures,ctypes,hashlib,io,logging,os,shutil,subprocess,sys,tempfile,unittest
 from pathlib import Path
 from unittest.mock import patch
 import numpy as np
@@ -71,6 +71,12 @@ class DriverABITests(unittest.TestCase):
                 cap=acc.capabilities();rt=acc._runtime
             self.assertEqual(cap['provider'],'NVIDIA Driver');self.assertEqual(cap['selected']['index'],1)
             self.assertEqual(set(cap['operations']),{'rigid','poses','blend','convolution'})
+            messages=io.StringIO();handler=logging.StreamHandler(messages);acc._log.addHandler(handler)
+            try:
+                for _ in range(2):acc.convolve(np.ones((3,3)),np.ones((2,2)),backend='cuda')
+            finally:acc._log.removeHandler(handler)
+            self.assertEqual(messages.getvalue().count('GPU 已执行 convolution'),1)
+            self.assertIn(cap['selected']['name'],messages.getvalue())
             rng=np.random.default_rng(32)
             for shape,other in [((1,1),(1,1)),((1,23),(1,4)),((11,1),(4,1)),((31,15),(4,8)),((3,5),(16,17))]:
                 a=rng.normal(size=shape);b=rng.normal(size=other)

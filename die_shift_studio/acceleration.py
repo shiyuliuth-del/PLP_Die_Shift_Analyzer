@@ -5,6 +5,11 @@ from threading import Lock,RLock
 import numpy as np
 from scipy.signal import fftconvolve
 
+_log=logging.getLogger(__name__)
+# The GUI attaches a handler to the root logger. Enable just this module’s
+# device and fallback messages even when the root threshold is WARNING.
+_log.setLevel(logging.INFO)
+
 _probe_lock=Lock();_gpu_lock=RLock();_runtime=None
 
 def _blend_kernel(xp,xy,w,center,state,method,arc_angle):
@@ -149,18 +154,18 @@ def _device_call(name,backend,eligible,args,check=None):
             used=cap.setdefault('used_operations',[])
             if name not in used:
                 used.append(name)
-                logging.getLogger(__name__).info('GPU 已执行 %s · %s',name,cap.get('selected',{}).get('name','CUDA'))
+                _log.info('GPU 已执行 %s · %s',name,cap.get('selected',{}).get('name','CUDA'))
         return result
     except MemoryError as exc:
         with _probe_lock:
             fallback=cap.setdefault('capacity_fallback',{})
-            if name not in fallback:logging.getLogger(__name__).info('%s 本批次转 CPU：%s',name,exc)
+            if name not in fallback:_log.info('%s 本批次转 CPU：%s',name,exc)
             fallback[name]=str(exc)
         return None
     except Exception as exc:
         with _probe_lock:
             if 'operations' not in cap or name in cap['operations']:
-                logging.getLogger(__name__).error('%s GPU 运算失败，使用 CPU 重算：%s',name,exc)
+                _log.error('%s GPU 运算失败，使用 CPU 重算：%s',name,exc)
             if 'operations' in cap and name in cap['operations']:
                 cap['operations']=[op for op in cap['operations'] if op!=name]
                 cap.setdefault('operation_errors',{})[name]=str(exc)
@@ -222,5 +227,5 @@ def graphics_inventory():
             result=subprocess.run(['lspci','-mm'],stdout=subprocess.PIPE,**options)
             return [dict(name=line,source='PCI adapter') for line in result.stdout.splitlines() if any(t in line.lower() for t in ('vga','3d controller','display controller'))]
     except (OSError,ValueError,subprocess.TimeoutExpired) as exc:
-        logging.getLogger(__name__).warning('显卡信息读取失败：%s',exc)
+        _log.warning('显卡信息读取失败：%s',exc)
     return []
