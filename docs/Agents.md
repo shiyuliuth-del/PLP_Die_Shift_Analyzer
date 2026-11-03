@@ -2,11 +2,19 @@
 
 根目录的 `AGENTS.md` 是工具自动读取的入口，本文件记录本地与远端共同维护的变更。开始一轮工作时先同步唯一主线 `main`，依次阅读入口、设计规范和最近一轮记录。完成后更新本文件，将代码、工程兼容验证和关键结果一起提交 GitHub，通过 PR 集成。后续轮次在最上方追加日期、版本、变更、测试、已知限制与 PR 链接。[协作与提交规范](../Agent.md)
 
+## 2026-11-03 · V31 · 目标 Windows 电脑打包
+
+基于已合并的 V30 主线 `5e4719e`，通过 [PR #11](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/pull/11) 集成。按用户最终交付要求撤下 V30 的二进制发布草稿及其 CI 附件，保留原有 Git 标签。V31 只发布源码 ZIP 和独立校验值。
+
+- RUN.bat 仍为源码启动入口。新增 BUILD.bat 作为双击打包入口，使用现有 Windows 环境、无版本锁及离线依赖检查。图标由源码在打包时生成，运行时在 EXE 目录补建 Jobs 和 logs。
+- GitHub 自动源码归档与正式源包使用相同源文件。Windows 验证从实际源码 ZIP 解压，临时构建并检查两个入口，不上传二进制产物。几何、项目格式和接触标记规则沿用 V30。
+- 正式源包有 88 个文件、944,943 字节，通过 7-Zip 测试。源码逐项匹配 Git 导出的文件，在含中文和空格的新目录成功启动。SHA-256 为 `e10ac60859664118f88abdbe915ae899a27fc6190fab2676554e0141badf07b6`。验证 Windows 构建期间发现 Git 自动换行会改变 ZIP 字节，归档工具现显式固定换行策略；本地在两种 Git 配置下的输出相同。Windows 执行解压后的 BUILD.bat 和 RUN.bat，并清理临时 EXE。干净源码检出通过 287 项核心测试、13 组 Qt 回归、两种启动方式及 16 个示例工程。[目标电脑操作说明](V31_使用说明.md) · [详细验证记录](package_verification.json)
+
 ## 2026-11-03 · V30 · Windows 单文件交付与图形交互
 
 基于 V29 主线 `c9f6f02`，通过 [PR #10](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/pull/10) 集成。[V30 使用说明](V30_使用说明.md) · [交互测量](../results/performance_V30.json)
 
-- Windows 源码统一为 RUN.bat，开发环境运行 `RUN.bat build`。包版本不设上下限。原生 Windows 构建并启动单文件 EXE，检验七档图标、窗口、不同工作目录、已有工程保留、目录重建、KLayout 几何和概率计算。Release ZIP 只放 EXE。开发者继续使用完整 Git 检出。
+- Windows 源码统一为 RUN.bat，开发环境运行 `RUN.bat build`。包版本不设上下限。原生 Windows 构建并启动单文件 EXE，检验七档图标、窗口、不同工作目录、已有工程保留、目录重建、KLayout 几何和概率计算。当时验证的二进制草稿已按 V31 的源码交付要求撤下。开发者继续使用完整 Git 检出。
 - 接触标记的两个独立显示字段为 `show_annulus_range` 和 `show_spacing_range`。schema 5 可缺省，两者默认开启。保持源层显隐、当前姿态和数值结论。
 - 预留视野的索引、批量轮廓、局部选择重绘和持续输入刷新已做实图对照。保留低概率样式、复杂轮廓及孔洞。GD55 同机两次交叉对照，选中再取消 121.3 → 9.4 ms，已算姿态切换 118.3 → 94.3 ms，平移缩放整帧约 118–119 ms。Windows 工程文件与 GDS 位于不同盘符或共享卷时保留绝对路径。
 - 干净源码目录实跑 287 项核心测试、13 组 Qt 界面回归、源码默认与桌面 KLayout 两种启动方式以及 16 个示例工程，全部通过。[源码验证记录](package_verification.json) Windows 构建使用 Python 3.12.10，完成原生窗口、单批处理启动、七档图标和跨卷工程路径验证。[Windows 构建记录](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/actions/runs/41594251253)

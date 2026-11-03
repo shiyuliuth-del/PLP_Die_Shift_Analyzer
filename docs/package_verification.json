@@ -1,7 +1,7 @@
 {
-  "version": "V30",
+  "version": "V31",
   "status": "PASS",
-  "tested_at_utc": "2026-11-03T07:20:38.271433+00:00",
+  "tested_at_utc": "2026-11-03T07:41:12.929129+00:00",
   "scope": "Clean source checkout, local platform. Windows executable verification is recorded separately.",
   "platform": "linux",
   "gui_suites": 13,
@@ -20,7 +20,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "Ran 287 tests in 124.296s",
+        "Ran 287 tests in 74.516s",
         "",
         "OK"
       ]
@@ -52,7 +52,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "GUI_V20_PASS {'status': 'PASS', 'accepted': 2, 'modes': ['axial', 'axial'], 'animation_enabled_during_revisits': True, 'dashed_middle_band': True, 'first_animation_frames': 2, 'cached_animation_frames': 3, 'hidden_layer_hides_deformation': True, 'report_formula_rendered': True, 'repeated_pose_switches': 18, 'repeated_switch_median_ms': 698.8923364988295, 'project_switch_keeps_results': True, 'zero_restore_ms': 34.085720995790325, 'clear_all_projects_bytes': 0}"
+        "GUI_V20_PASS {'status': 'PASS', 'accepted': 2, 'modes': ['axial', 'axial'], 'animation_enabled_during_revisits': True, 'dashed_middle_band': True, 'first_animation_frames': 3, 'cached_animation_frames': 3, 'hidden_layer_hides_deformation': True, 'report_formula_rendered': True, 'repeated_pose_switches': 18, 'repeated_switch_median_ms': 717.1764754966716, 'project_switch_keeps_results': True, 'zero_restore_ms': 27.280909998808056, 'clear_all_projects_bytes': 0}"
       ]
     },
     {
@@ -72,7 +72,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "GUI_V23_CHANNEL_PASS {'status': 'PASS', 'extreme_and_m_key_pad_motion': True, 'independent_die_stacks': True, 'channel_counts': [3, 3, 2], 'three_risk_classes': True, 'project_roundtrip': True, 'legacy_defaults': True, 'reconstruction_gap_um': 35.0, 'reconstruction_seam_um': 32.0, 'reconstruction_cover_area_um2': 1120.0, 'animation_frames_seen': 48, 'cached_replay': True, 'layer_visibility': True, 'table_focus': True, 'report_formulas': True}"
+        "GUI_V23_CHANNEL_PASS {'status': 'PASS', 'extreme_and_m_key_pad_motion': True, 'independent_die_stacks': True, 'channel_counts': [3, 3, 2], 'three_risk_classes': True, 'project_roundtrip': True, 'legacy_defaults': True, 'reconstruction_gap_um': 35.0, 'reconstruction_seam_um': 32.0, 'reconstruction_cover_area_um2': 1120.0, 'animation_frames_seen': 53, 'cached_replay': True, 'layer_visibility': True, 'table_focus': True, 'report_formulas': True}"
       ]
     },
     {

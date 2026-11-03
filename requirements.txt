@@ -6,3 +6,5 @@ gdstk
 PyQt5
 psutil
 Pillow
+PyInstaller
+klayout
