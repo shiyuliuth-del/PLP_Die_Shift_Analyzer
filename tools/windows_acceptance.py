@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import sys
 import shutil
 import subprocess
 import tempfile
@@ -56,7 +57,6 @@ def normal_launch(exe,cwd,title):
 def main():
     if os.name!='nt':raise SystemExit('The release acceptance must run on Windows.')
     import pefile
-    import sys
     sys.path.insert(0,str(ROOT))
     from die_shift_studio import __version__
     dist=ROOT/'dist';binary=dist/'Die_Shift_Analyze.exe'
@@ -87,10 +87,10 @@ def main():
         assert z.namelist()==[binary.name] and z.testzip() is None
     digest=file_hash(target)
     target.with_suffix('.zip.sha256').write_bytes(f'{digest}  {target.name}\n'.encode())
-    info=dict(version=__version__,os=platform.platform(),python=platform.python_version(),commit=os.environ.get('GITHUB_SHA'),
+    info=dict(version=__version__,os=platform.platform(),python=platform.python_version(),commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
               icons=icons,visible_native_window_seconds=elapsed,exe_sha256=file_hash(binary),zip_sha256=digest,
               single_file=True,existing_job_preserved=True,checks=records)
     (dist/'windows_verification.json').write_text(json.dumps(info,indent=2,ensure_ascii=False),encoding='utf8')
-    print('WINDOWS_RELEASE_PASS',target.name,digest,flush=True)
+    print('WINDOWS_RELEASE_PASS',target.name,digest,f'normal GUI ready in {elapsed:.2f}s, {icons} icon sizes',flush=True)
 
 if __name__=='__main__':main()

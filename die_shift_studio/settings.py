@@ -39,6 +39,8 @@ class ViewSettings:
     probability_show_ranges:bool=False
     probability_ranges:tuple=()
     probability_target_color:str="#bf526d"
+    show_annulus_range:bool=True
+    show_spacing_range:bool=True
     contact_marker_color:str="#bc243e"
     contact_marker_size:float=5.0
     contact_marker_absolute:bool=False
@@ -125,7 +127,7 @@ class ViewSettings:
             v=getattr(q,key)
             if not isinstance(v,(int,float)) or not math.isfinite(v) or not lo<=v<=hi or (key in integers and int(v)!=v):
                 raise ValueError(f'设置 {key} 超出范围 {lo}—{hi}')
-        for key in ('show_low_contact','show_low_width','animation_enabled','animation_return_zero','probability_show_ranges','contact_marker_absolute','unadapted_marker_absolute','deformation_route_enabled','deformation_general_bands','repair_landing_pad'):
+        for key in ('show_annulus_range','show_spacing_range','show_low_contact','show_low_width','animation_enabled','animation_return_zero','probability_show_ranges','contact_marker_absolute','unadapted_marker_absolute','deformation_route_enabled','deformation_general_bands','repair_landing_pad'):
             if not isinstance(getattr(q,key),bool):raise ValueError(key+'必须为布尔值')
         import re
         color=lambda v:isinstance(v,str) and re.fullmatch(r'#[0-9a-fA-F]{6}',v)

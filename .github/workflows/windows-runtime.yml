@@ -31,6 +31,8 @@ jobs:
           python --version
           python -m venv .venv
           .\.venv\Scripts\python -m pip install -r requirements.txt PyInstaller klayout
+      - name: Exercise saved contact marker settings on Windows
+        run: .\.venv\Scripts\python tests/gui_v30.py
       - name: Build the single GUI executable
         shell: cmd
         run: call RUN.bat build

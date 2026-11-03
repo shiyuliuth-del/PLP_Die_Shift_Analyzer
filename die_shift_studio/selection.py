@@ -20,7 +20,9 @@ class GeometrySelection:
         for name,fn in [('button_press_event',self.down),('motion_notify_event',self.move),('button_release_event',self.up)]:window.canvas.mpl_connect(name,fn)
     def clear(self):
         self.selected=[];self.cycle=[];self.last_pixel=None;self.press=None
-        if self.rubber is not None:self.rubber.remove();self.rubber=None
+        if self.rubber is not None:
+            self.rubber.remove();self.rubber=None
+            if self.background is not None:self.w.canvas.restore_region(self.background);self.background=None
         self.draw()
     def reset(self):
         self.index_stamp=None;self.groups={};self.last_pixel=None;self.selected=[];self.artist=None;self.deformed_artist=None;self.rubber=None;self.press=None;self.cycle=[]
@@ -123,7 +125,9 @@ class GeometrySelection:
     def up(self,event):
         if event.button!=1 or self.press is None:return
         pixel,start,mode=self.press;self.press=None
-        if self.rubber is not None:self.rubber.remove();self.rubber=None
+        if self.rubber is not None:
+            self.rubber.remove();self.rubber=None
+            if self.background is not None:self.w.canvas.restore_region(self.background);self.background=None
         end=self.w.ax.transData.inverted().transform((event.x,event.y))
         if np.linalg.norm(np.array([event.x,event.y])-pixel)<4:self.click(end,[event.x,event.y],mode)
         else:self.rectangle(start,end,mode)
@@ -160,7 +164,9 @@ class GeometrySelection:
             summary=w.width_overlay.shown_summary() if hasattr(w,'width_overlay') else None
             if self.selected:w.statusBar().showMessage(f'选中 {len(self.selected)} 个图形；'+', '.join(f'{k} #{i+1}' for k,i in self.selected[:6]))
             else:w.statusBar().showMessage('已取消图形选择')
-            if summary is not None and w.tabs.currentIndex()==0:
-                w.width_overlay.draw()
-                w.scene_renderer.draw_selection([self.artist,self.deformed_artist,*w.width_overlay.labels],w.legend,w.width_overlay.stamp)
-            else:w.render_scene()
+            if w.tabs.currentIndex()!=0:return
+            artists=[self.artist,self.deformed_artist]
+            if summary is not None:
+                w.width_overlay.draw();artists.extend(w.width_overlay.labels)
+            signature=(tuple(self.selected),w.width_overlay.stamp if summary is not None else None)
+            w.scene_renderer.draw_selection(artists,w.legend,signature)
