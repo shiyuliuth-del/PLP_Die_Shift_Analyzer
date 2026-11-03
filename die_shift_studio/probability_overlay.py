@@ -97,6 +97,16 @@ def _deposit(shape,points,weights,origin,cell):
 
 
 def probability_maps(cache,bound,roles,p,exponent=12,masks=None,settings=None,progress=lambda *_:None):
+    if math.isinf(p.target_nsigma):
+        maps=[]
+        for key,mask in (masks or {}).items():
+            if roles.get(key)!='运动过孔':continue
+            for index in np.flatnonzero(mask):
+                owner=int(bound.owners[key][index])
+                if owner>=0:
+                    maps.append(dict(key=key,index=int(index),owner=owner,
+                                     nominal_polygon=cache.layers[key]['geometry'][index],rotation_center=bound.centers[owner]))
+        return dict(maps=maps,binary=True,samples=0,method='当前姿态过孔实体覆盖（0/100%）')
     if settings and settings.probability_show_ranges:
         from dataclasses import replace
         p=replace(p,target_nsigma=0)

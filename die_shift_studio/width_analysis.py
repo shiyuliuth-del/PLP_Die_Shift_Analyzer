@@ -507,33 +507,8 @@ class WidthAnalyzer:
         placed[indices]=shapely.set_coordinates(shapes[indices],coordinates)
         return placed
 
-    def _measure(self, name, plane, states, progress):
-        if plane['gates'] is None:
-            notify=lambda n,t:progress(.65*n,t)
-            if self.catalogue_store is None:
-                plane['gates']=self._catalogue(plane,notify)
-            else:
-                def identify():
-                    gates=self._catalogue(plane,notify)
-                    # Share only nominal topology. Each receiver reconstructs its
-                    # own GEOS objects and computes its own statistical bounds.
-                    pieces=(shapely.to_wkb(plane['pieces']),plane['parents'],plane['local']) if gates else None
-                    return gates,pieces
-                gates,pieces=self.catalogue_store.get_or_compute((*self.catalogue_key,name),identify)
-                if pieces is not None and 'pieces' not in plane:
-                    wkb,plane['parents'],plane['local']=pieces
-                    plane['pieces']=shapely.from_wkb(wkb)
-                plane['gates']=gates
-        gates, walls = plane['gates'], plane['walls']
-        nominal = not np.any(states)
-        if 'wall_templates' not in plane:
-            shapes=np.asarray([w.geometry for w in walls],object)
-            plane['wall_templates']=self._templates(shapes,[w.owner for w in walls])
-        geometries=self._placed(plane['wall_templates'],states,nominal)
-        retained = [dict(plane=name,name=w.name,layers=w.layers or plane['keys'],refs=w.refs,kind=w.kind,geometry=g)
-                    for w,g in zip(walls[:plane['metal_count']],geometries)]
-        if not gates:
-            return [],retained
+    def sections(self,plane,states,geometries,nominal):
+        gates,walls=plane['gates'],plane['walls']
         if 'arrays' not in plane:
             orig=np.array([g.ends for g in gates]);pairs=np.array([g.pair for g in gates])
             features=np.array([g.features for g in gates]);owners=np.array([w.owner for w in walls])
@@ -578,11 +553,6 @@ class WidthAnalyzer:
                 mask = plane['local'][features[:,side]]
                 if np.any(mask):
                     inside[mask] &= ~shapely.relate_pattern(lines[mask],geometries[pairs[mask,side]],'T********')
-        half_depth=.65*(self.width+self.space)
-        if 'occupied' not in plane:
-            original=np.asarray([w.geometry for w in walls],object)
-            plane['occupied']=occupied_batches(orig,pairs,walls,original,half_depth,self.tol)
-        obstacles=plane['occupied'] if nominal else occupied_batches(ends,pairs,walls,geometries,half_depth,self.tol,sources)
         # A pad that has travelled through the opposite wall cannot reopen the
         # original routing order on the far side. Rotate the reference with a
         # common rigid owner, so a rigid board rotation preserves the channel.
@@ -594,6 +564,41 @@ class WidthAnalyzer:
             x,y = ref[common].T
             ref[common] = np.column_stack((np.cos(angle)*x-np.sin(angle)*y,np.sin(angle)*x+np.cos(angle)*y))
         open_order = np.einsum('ij,ij->i',ends[:,1]-ends[:,0],ref)>0
+        return orig,pairs,ends,gaps,inside,ref,open_order,sources
+
+    def _measure(self, name, plane, states, progress):
+        if plane['gates'] is None:
+            notify=lambda n,t:progress(.65*n,t)
+            if self.catalogue_store is None:
+                plane['gates']=self._catalogue(plane,notify)
+            else:
+                def identify():
+                    gates=self._catalogue(plane,notify)
+                    # Share only nominal topology. Each receiver reconstructs its
+                    # own GEOS objects and computes its own statistical bounds.
+                    pieces=(shapely.to_wkb(plane['pieces']),plane['parents'],plane['local']) if gates else None
+                    return gates,pieces
+                gates,pieces=self.catalogue_store.get_or_compute((*self.catalogue_key,name),identify)
+                if pieces is not None and 'pieces' not in plane:
+                    wkb,plane['parents'],plane['local']=pieces
+                    plane['pieces']=shapely.from_wkb(wkb)
+                plane['gates']=gates
+        gates, walls = plane['gates'], plane['walls']
+        nominal = not np.any(states)
+        if 'wall_templates' not in plane:
+            shapes=np.asarray([w.geometry for w in walls],object)
+            plane['wall_templates']=self._templates(shapes,[w.owner for w in walls])
+        geometries=self._placed(plane['wall_templates'],states,nominal)
+        retained = [dict(plane=name,name=w.name,layers=w.layers or plane['keys'],refs=w.refs,kind=w.kind,geometry=g)
+                    for w,g in zip(walls[:plane['metal_count']],geometries)]
+        if not gates:
+            return [],retained
+        orig,pairs,ends,gaps,inside,ref,open_order,sources=self.sections(plane,states,geometries,nominal)
+        half_depth=.65*(self.width+self.space)
+        if 'occupied' not in plane:
+            original=np.asarray([w.geometry for w in walls],object)
+            plane['occupied']=occupied_batches(orig,pairs,walls,original,half_depth,self.tol)
+        obstacles=plane['occupied'] if nominal else occupied_batches(ends,pairs,walls,geometries,half_depth,self.tol,sources)
         # Split projections retain nominal lane ownership, but are not physical
         # cross-sections of the new pair. Draw that pair only at its own measured
         # throat with its own nominal through-routes, never on the parent axis.

@@ -157,14 +157,23 @@ def sample_die(model,parameters,cfg,owner,progress=lambda *_:None):
     return dict(base,lower=lower,upper=upper,estimate=success/n,status='二项精确区间；整包联合置信度至少99%',samples=n,success=success,unknown=upper-lower)
 
 
+def binary_die(model,p,owner,hit_owners=None):
+    records=[r for r in model.records if r['owner']==owner]
+    base=dict(die=owner+1,interfaces=len(records),boxes=0,samples=0)
+    if not records:return dict(base,lower=0.,upper=1.,estimate=None,status='无可验证接口',unknown=1.)
+    if hit_owners is None:
+        limit=p.annulus_um+p.line_space_um+max(1e-9,model.data.dbu_um*1e-6)
+        hit=any(np.any(shapely.dwithin(r['poly'],model.node_geometry[r['foreign']],limit)) for r in records if len(r['foreign']))
+    else:hit=owner in hit_owners
+    value=float(not hit)
+    return dict(base,lower=value,upper=value,estimate=value,status='名义状态二值',unknown=0.)
+
 def integrate_die(model,parameters,cfg,owner,progress=lambda *_:None):
+    if math.isinf(parameters.target_nsigma):return binary_die(model,parameters,owner)
     p=parameters.for_die(owner);count=len(model.bound.centers)
     base=dict(die=owner+1,interfaces=sum(r['owner']==owner for r in model.records))
     if base['interfaces']==0:return dict(base,lower=0.,upper=1.,estimate=None,status='无可验证接口',boxes=0,unknown=1.)
     event=DieEvent(model,p,owner,cfg.acceleration)
-    if math.isinf(p.target_nsigma):
-        state=np.zeros(3);kind,_=event.classify(state,state);value=float(kind==1)
-        return dict(base,lower=value,upper=value,estimate=value,status='名义状态二值',boxes=1,unknown=0.)
     mass=PhysicalMass(p,count);lo=mass.mu-mass.b;hi=mass.mu+mass.b
     queue=[];safe=[];hit=[];boxes=0;serial=0
     def push(a,b):
@@ -198,7 +207,7 @@ def integrate_die(model,parameters,cfg,owner,progress=lambda *_:None):
                 status='达到误差目标' if upper-lower<=cfg.yield_tolerance else '预算结束；保留未定概率')
 
 
-def model_yield(model,p,settings,progress=lambda *_:None):
+def model_yield(model,p,settings,progress=lambda *_:None,contact=None):
     model.configure_parameters(p);count=len(model.bound.centers)
     done=np.zeros(count);last=[0.]
     import threading,time
@@ -210,7 +219,10 @@ def model_yield(model,p,settings,progress=lambda *_:None):
                 unit='状态盒' if settings.yield_method=='partition' else '样本'
                 progress(97+round(2*float(done.mean())),f'全输入无接触概率积分：DIE {owner+1}，{unit} {n}/{budget}');last[0]=now
     integrate=integrate_die if settings.yield_method=='partition' else sample_die
-    rows=parallel_map(lambda owner:integrate(model,p,settings,owner,lambda n,b:update(owner,n,b)),range(count))
+    if math.isinf(p.target_nsigma):
+        hits={issue['die']-1 for issue in contact['issues']} if contact is not None else None
+        rows=[binary_die(model,p,i,hits) for i in range(count)]
+    else:rows=parallel_map(lambda owner:integrate(model,p,settings,owner,lambda n,b:update(owner,n,b)),range(count))
     lower=math.prod(q['lower'] for q in rows);upper=math.prod(q['upper'] for q in rows)
     if model.connections.ownership_notes or not rows:lower=0.;upper=1.
     target_failure=p.failure_threshold
@@ -223,4 +235,4 @@ def model_yield(model,p,settings,progress=lambda *_:None):
                 interval_kind='确定状态' if binary else '确定性积分区间' if settings.yield_method=='partition' else '99%联合置信区间',
                 method='当前名义状态二值判定' if binary else '确定性全输入状态盒积分；区间中点估计' if settings.yield_method=='partition' else '全输入独立蒙特卡洛；Clopper–Pearson精确二项区间与Bonferroni联合保护',
                 scope='原始固定RDL的所有已识别运动过孔接口；同DIE所有孔共享同一状态，各DIE随机状态相互独立。不含型变后的动态布线、其他制造缺陷或全套DRC。',
-                definition='积分整个输入范围内所有接口均无异网接触的概率，不是安全内盒概率，也不是各过孔良率独立相乘。')
+                definition='当前名义姿态下全部接口无异网接触取100%，否则取0%。' if binary else '积分整个输入范围内所有接口均无异网接触的概率，不是安全内盒概率，也不是各过孔良率独立相乘。')

@@ -4,13 +4,19 @@ import numpy as np
 from matplotlib.backend_bases import MouseButton
 from matplotlib.patches import Rectangle
 
-def control_held(event):
+def pointer_modifiers(event):
     native=getattr(event,'guiEvent',None)
     if native is not None and hasattr(native,'modifiers'):
         from .qt_compat import Qt
-        return bool(native.modifiers() & getattr(Qt,'KeyboardModifier',Qt).ControlModifier)
-    modifiers=getattr(event,'modifiers',()) or ()
-    return bool({'ctrl','control'}.intersection(modifiers)) or any(v in ('ctrl','control') for v in str(event.key or '').lower().split('+'))
+        flags=native.modifiers();keys=getattr(Qt,'KeyboardModifier',Qt)
+        return {name for name,mask in [('ctrl',keys.ControlModifier),('shift',keys.ShiftModifier)] if flags & mask}
+    modifiers=set(getattr(event,'modifiers',()) or ())
+    modifiers.update(str(getattr(event,'key',None) or '').lower().split('+'))
+    if 'control' in modifiers:modifiers.add('ctrl')
+    return modifiers
+
+def control_held(event):
+    return 'ctrl' in pointer_modifiers(event)
 
 class Navigation:
     def __init__(self,canvas,ax):

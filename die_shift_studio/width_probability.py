@@ -31,6 +31,7 @@ class ChannelProbability:
             z,err=normalization(p.scale_nsigma,p.rho_xy,*map(bool,b[:2]),False)
             self.laws.append((mu,b,sigma,p.rho_xy,z-err))
         self.wall_data={};self.results={};self.edge_shapes={};self.edge_results={}
+        self.masses={};self.params=params;self.box_masses={}
         self.board_faces=[]
         if self.convex and board.geom_type=='Polygon':
             points=shapely.get_coordinates(board.exterior);inside=np.array(board.centroid.coords[0])
@@ -85,6 +86,36 @@ class ChannelProbability:
         tail=np.where(delta < -alim-blim,0.,tail)
         return min(1.,float(aw@tail@bw)*(1+1e-12))
 
+    def witness_lower(self,a,b,points,demand):
+        # Every pose in the central conditional box keeps these two material
+        # points closer than the required aperture. Their distance bounds the
+        # true feature minimum from above; no random samples are used.
+        if a.owner==b.owner:
+            return float(np.linalg.norm(points[1]-points[0])<demand-self.tol)
+        moved=[];slope=0.;owners=[]
+        for wall,pt in zip((a,b),points):
+            if wall.owner<0:moved.append(pt);continue
+            i=wall.owner;mu,_,sig,_,_=self.laws[i];pivot=self.centers[i]
+            moved.append(rigid_transform(np.array([pt]),pivot,mu)[0])
+            slope+=np.linalg.norm(sig[:2])+np.linalg.norm(pt-pivot)*sig[2]
+            owners.append(i)
+        slack=demand-self.tol-np.linalg.norm(moved[1]-moved[0])
+        if slack<=0:return 0.
+        scale=min(self.k,slack/slope*(1-1e-12)) if slope else self.k
+        # Rounding DOWN reuses mass evaluations without weakening the proof.
+        scale=math.floor(scale*1024)/1024
+        if scale<=0:return 0.
+        lower=1.
+        from .model_yield import PhysicalMass
+        for i in owners:
+            token=(i,scale)
+            if token not in self.box_masses:
+                if i not in self.masses:self.masses[i]=PhysicalMass(self.params.for_die(i),len(self.centers))
+                law=self.masses[i];half=np.minimum(law.b,scale*law.sig)
+                mass,error=law(law.mu-half,law.mu+half);self.box_masses[token]=max(0.,mass-error)
+            lower*=self.box_masses[token]
+        return lower
+
     def edge(self,key,index,geo,owner,rule):
         # A convex board inset by 'rule' is the intersection of its inward
         # half-planes. Any edge violation is in the union of their events.
@@ -105,7 +136,7 @@ class ChannelProbability:
                 upper+=float(weights@np.where(delta < -limit,0.,f))
                 if upper>=1:break
             upper=min(1.,upper*(1+1e-12))
-        event=dict(upper=upper,threshold=self.threshold,low=upper<=self.threshold)
+        event=dict(lower=float(owner==-1),upper=upper,threshold=self.threshold,low=upper<=self.threshold)
         self.edge_results[token]=event
         return event
 
@@ -131,6 +162,7 @@ class ChannelProbability:
                     upper=self.bound(a,b,n,demand,1)
                     if upper>self.threshold and upper<1 and any(o>=0 and self.laws[o][1][2] for o in (a.owner,b.owner)):
                         upper=self.bound(a,b,n,demand,8)
-        result=None if upper is None else dict(upper=upper,threshold=self.threshold,low=upper<=self.threshold)
+        lower=self.witness_lower(a,b,original,demand) if upper is not None and upper>self.threshold else 0.
+        result=None if upper is None else dict(lower=min(lower,upper),upper=upper,threshold=self.threshold,low=upper<=self.threshold)
         self.results[key]=result
         return result

@@ -348,16 +348,19 @@ def uncertainty_bound(points,center,params,die_count,details=False,state=None):
     if not len(points):
         return np.array([])
     p=params
+    if math.isinf(p.target_nsigma) and not details:return np.zeros(len(points))
     mu,covariance,k=statistical_state(p,die_count) if state is None else state
     st=math.sqrt(covariance[2,2])
     a=points-np.asarray(center)
     t=float(mu[2])
     rot=np.array([[math.cos(t),-math.sin(t)],[math.sin(t),math.cos(t)]])
     b=a@rot.T
-    jac=np.zeros((len(a),2,3));jac[:,0,0]=1;jac[:,1,1]=1
-    jac[:,0,2]=-b[:,1];jac[:,1,2]=b[:,0]
-    cov=jac@covariance@np.swapaxes(jac,1,2)
-    eig=np.maximum(0,np.linalg.eigvalsh(cov)[:,-1])
+    # Largest eigenvalue of J Σ Jᵀ in closed form for a symmetric 2×2 matrix.
+    x,y=b.T
+    xx=covariance[0,0]-2*y*covariance[0,2]+y*y*covariance[2,2]
+    yy=covariance[1,1]+2*x*covariance[1,2]+x*x*covariance[2,2]
+    xy=covariance[0,1]+x*covariance[0,2]-y*covariance[1,2]-x*y*covariance[2,2]
+    eig=np.maximum(0,(xx+yy+np.hypot(xx-yy,2*xy))*.5)
     mean=np.linalg.norm(b-a+mu[:2],axis=1)
     if math.isinf(k):
         linear=np.full(len(a),math.inf if np.any(np.diag(covariance)[:2]>0) else 0.)
@@ -398,7 +401,9 @@ def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order
     params.validate(); p=replace(params,residual_budget_um=0.,routing_edge_keepout_um=0.)
     from .drc_rules import effective_rules
     effective_rules(p,settings)
-    roles=canonical_roles(roles,motions);original_case=build_case(data,roles,geometry,layer_order,connections)
+    roles=canonical_roles(roles,motions)
+    original_case=(contact_model.case if contact_model is not None and contact_model.data is data and contact_model.roles==roles
+                   and contact_model.connections is connections else build_case(data,roles,geometry,layer_order,connections))
     from .stack import Connections
     progress(3,'识别相邻物理层的名义重叠连接')
     connections=original_case['connections']
@@ -490,7 +495,7 @@ def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order
     from .settings import ViewSettings
     cfg=settings or ViewSettings()
     progress(97,'计算整个输入范围内的无接触概率')
-    compute_yield=lambda:model_yield(contact_model,p,cfg,progress)
+    compute_yield=lambda:model_yield(contact_model,p,cfg,progress,contact=contact)
     if safe_range_cache is None:whole_yield=compute_yield()
     else:
         key=('whole-input-yield',fingerprint((data.geometry_id,data.top_name,roles,connections.order,asdict(p),cfg.yield_method,cfg.yield_sample_exponent,cfg.random_seed,cfg.yield_box_budget,cfg.yield_tolerance)))
