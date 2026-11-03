@@ -26,9 +26,10 @@ class API:
         if library is None:
             if sys.platform=='win32':
                 path=Path(os.environ['SystemRoot'])/'System32'/'nvcuda.dll'
+                if not path.is_file():raise OSError('系统目录中未找到 NVIDIA 驱动 nvcuda.dll')
                 library=C.WinDLL(str(path),winmode=0x800)
             else:library=C.CDLL('libcuda.so.1')
-        self.lib=library
+        self.lib=library;self.device_errors=[]
         for name,args in _SIGNATURES.items():
             fn=getattr(library,name);fn.argtypes=args;fn.restype=I
         self.call('cuInit',0)
@@ -48,10 +49,13 @@ class API:
     def devices(self):
         devices=[]
         for ordinal in range(self.integer('cuDeviceGetCount')):
-            dev=self.integer('cuDeviceGet',ordinal);name=C.create_string_buffer(256);size=S()
-            self.call('cuDeviceGetName',name,len(name),dev)
-            self.call('cuDeviceTotalMem_v2',C.byref(size),dev)
-            arch=tuple(self.integer('cuDeviceGetAttribute',a,dev) for a in (75,76))
+            try:
+                dev=self.integer('cuDeviceGet',ordinal);name=C.create_string_buffer(256);size=S()
+                self.call('cuDeviceGetName',name,len(name),dev)
+                self.call('cuDeviceTotalMem_v2',C.byref(size),dev)
+                arch=tuple(self.integer('cuDeviceGetAttribute',a,dev) for a in (75,76))
+            except RuntimeError as exc:
+                self.device_errors.append(f'设备 {ordinal} · {exc}');continue
             devices.append(dict(index=ordinal,device=dev,name=name.value.decode('utf8','replace'),
                                 memory_mb=size.value//2**20,arch=arch))
         return devices
@@ -127,7 +131,10 @@ class Runtime:
                                 np.cos(states[:,2]),np.sin(states[:,2]),states[:,2])).astype('float64',copy=False)
 
     def rigid(self,points,owners,centers,states):
-        n=len(points);table=self.table(centers,states)
+        n=len(points);table=self.table(centers,states);owners=np.asarray(owners)
+        if np.shape(points)!=(n,2) or owners.shape!=(n,) or (n and owners.max()>=len(table)):
+            raise ValueError('刚体坐标、归属和 DIE 数组不匹配')
+        if n>=2**30:raise MemoryError('刚体坐标超过核函数索引范围')
         with self.batch(n*36+table.nbytes) as b:
             src=b.upload(np.asarray(points,dtype='float64'));own=b.upload(np.asarray(owners,dtype='int32'))
             out=b.allocate(n*16);b.launch('rigid',n,n,src,own,b.upload(table),out)
@@ -135,6 +142,8 @@ class Runtime:
 
     def poses(self,vertices,center,states):
         n=len(vertices)*len(states);table=self.table(center,states)
+        if np.shape(vertices)!=(len(vertices),2):raise ValueError('批量姿态坐标必须为二维点')
+        if n>=2**30:raise MemoryError('批量姿态超过核函数索引范围')
         with self.batch((n+len(vertices))*16+table.nbytes) as b:
             src=b.upload(np.asarray(vertices,dtype='float64'));out=b.allocate(n*16)
             b.launch('poses',n,n,len(vertices),src,b.upload(table),out)
@@ -142,6 +151,9 @@ class Runtime:
 
     def blend(self,points,weights,center,state,method,angle):
         n=len(points);table=self.table(center,np.asarray(state).reshape(1,3))
+        points=np.asarray(points,dtype=np.float64);weights=np.asarray(weights,dtype=np.float64)
+        if points.shape!=(n,2) or weights.shape!=(n,):raise ValueError('型变坐标与权重不匹配')
+        if n>=2**30:raise MemoryError('型变坐标超过核函数索引范围')
         gamma=float(np.deg2rad(angle))*(1 if state[2]>=0 else -1)
         cot=float(1/np.tan(gamma/2)) if method=='arc' else 0.
         with self.batch(n*40+table.nbytes) as b:
@@ -162,9 +174,9 @@ class Runtime:
         else:raise ValueError('unknown convolution mode')
         nx=1<<(w-1).bit_length();ny=1<<(h-1).bit_length();n=nx*ny;size=int(np.prod(shape))
         if n>=2**31:raise MemoryError('FFT grid exceeds index range')
-        tw=twiddles(max(nx,ny))
-        with self.batch(48*n+tw.nbytes+a.nbytes+b.nbytes+size*8) as work:
-            roots=work.upload(tw)
+        longest=max(nx,ny);tw_bytes=16*max(1,longest//2)
+        with self.batch(48*n+tw_bytes+a.nbytes+b.nbytes+size*8) as work:
+            roots=work.upload(twiddles(longest))
             def fft(buf,inverse):
                 for vertical,axis in enumerate((nx,ny)):
                     span=2

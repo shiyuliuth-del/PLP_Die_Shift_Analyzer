@@ -66,6 +66,17 @@ jobs:
           $source = Join-Path $expand $zip.BaseName
           "DSA_TEST_SOURCE=$source" >> $env:GITHUB_ENV
           "DIE_SHIFT_PYTHON=$py" >> $env:GITHUB_ENV
+      - name: Locate the Windows C++ compiler for the interface test
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vs) { throw 'MSVC not found' }
+          "DSA_VCVARS=$vs\VC\Auxiliary\Build\vcvars64.bat" >> $env:GITHUB_ENV
+      - name: Check the native ABI and kernel arithmetic with a CPU test driver
+        shell: cmd
+        run: |
+          call "%DSA_VCVARS%" >nul
+          "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_v32.py -v
       - name: Exercise the one-click BUILD.bat from the extracted source
         shell: cmd
         run: call "%DSA_TEST_SOURCE%\BUILD.bat"

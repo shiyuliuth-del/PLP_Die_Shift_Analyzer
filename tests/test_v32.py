@@ -1,5 +1,5 @@
 """Native ABI simulation, independent convolution/reference checks and no-driver fallback."""
-import concurrent.futures,ctypes,hashlib,shutil,subprocess,sys,tempfile,unittest
+import concurrent.futures,ctypes,hashlib,os,shutil,subprocess,sys,tempfile,unittest
 from pathlib import Path
 from unittest.mock import patch
 import numpy as np
@@ -43,16 +43,26 @@ class SparseAndCpuTests(unittest.TestCase):
                 np.testing.assert_allclose(acc.convolve(np.ones((3,4)),np.ones((3,3)),backend='cuda'),fftconvolve(np.ones((3,4)),np.ones((3,3)),'same'))
         finally:acc._probe.cache_clear()
 
-@unittest.skipUnless(shutil.which('g++') and sys.platform.startswith('linux'),'Native test-driver compilation uses Linux g++')
+@unittest.skipUnless((sys.platform.startswith('linux') and shutil.which('g++')) or (os.name=='nt' and shutil.which('cl')),'Test driver requires g++ on Linux or MSVC on Windows')
 class DriverABITests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.tmp=tempfile.TemporaryDirectory();dll=Path(cls.tmp.name)/'test-driver.so'
-        subprocess.run(['g++','-std=c++11','-O2','-shared','-fPIC',str(Path(__file__).with_name('cuda_test_driver.cpp')),'-o',str(dll)],check=True)
-        cls.api=API(ctypes.CDLL(str(dll)))
+        cls.tmp=tempfile.TemporaryDirectory();root=Path(cls.tmp.name);src=str(Path(__file__).with_name('cuda_test_driver.cpp').resolve())
+        if os.name=='nt':
+            dll=root/'test-driver.dll'
+            subprocess.run(['cl','/nologo','/EHsc','/O2','/LD',src,'/link','/OUT:'+str(dll)],cwd=root,check=True)
+            cls.api=API(ctypes.WinDLL(str(dll)))
+        else:
+            dll=root/'test-driver.so'
+            subprocess.run(['g++','-std=c++11','-O2','-shared','-fPIC',src,'-o',str(dll)],check=True)
+            cls.api=API(ctypes.CDLL(str(dll)))
 
     @classmethod
-    def tearDownClass(cls):cls.tmp.cleanup()
+    def tearDownClass(cls):
+        if os.name=='nt':
+            import _ctypes
+            _ctypes.FreeLibrary(cls.api.lib._handle)
+        cls.tmp.cleanup()
 
     def test_skip_broken_device_and_compare_native_calls(self):
         old=acc._runtime;acc._probe.cache_clear()

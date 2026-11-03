@@ -13,7 +13,11 @@ thread_local Dim blockIdx, blockDim, threadIdx;
 #include "../die_shift_studio/cuda_kernels.cu"
 static std::atomic<int> allocations{0},refs{0};
 static thread_local std::vector<void*> contexts;
+#ifdef _WIN32
+#define FN extern "C" __declspec(dllexport) int
+#else
 #define FN extern "C" int
+#endif
 FN testAllocations() {return allocations;}
 FN testReferences() {return refs;}
 FN cuInit(unsigned) {return 0;}

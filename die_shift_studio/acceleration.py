@@ -111,7 +111,9 @@ def _probe():
     from .cuda_driver import API,Runtime
     try:
         api=API();info['driver_version']=api.version
-        devices=api.devices();info['devices']=devices
+        devices=api.devices();info['devices']=devices;notes.extend(api.device_errors)
+        info['device_errors']=notes
+        if api.version<12000:raise RuntimeError(f'当前 CUDA 驱动 API {api.version}，内置 PTX 8.0 需要支持 CUDA 12.0 的驱动')
         if not devices:notes.append('NVIDIA 驱动未枚举到 CUDA 设备')
         if _select(devices,lambda d:Runtime(api,d),'NVIDIA Driver',info,notes):return info
     except Exception as exc:notes.append('NVIDIA 驱动 · '+str(exc))
@@ -138,19 +140,27 @@ def _device_call(name,backend,eligible,args,check=None):
     cap=capabilities()
     if cap['backend']!='cuda' or name not in cap.get('operations',(name,)):return None
     rt=_runtime
-    if 'provider' not in cap:  # Source-compatible CuPy provider without recorded metadata.
-        import cupy as cp
-        rt=_CuPy(cp,cap.get('selected',{}).get('index',0))
+    if rt is None:return None
     try:
         result=getattr(rt,name)(*args)
         if not np.isfinite(result).all():raise ArithmeticError('CUDA output is not finite')
         if check is not None:check(result)
+        with _probe_lock:
+            used=cap.setdefault('used_operations',[])
+            if name not in used:
+                used.append(name)
+                logging.getLogger(__name__).info('GPU 已执行 %s · %s',name,cap.get('selected',{}).get('name','CUDA'))
         return result
-    except MemoryError:
+    except MemoryError as exc:
+        with _probe_lock:
+            fallback=cap.setdefault('capacity_fallback',{})
+            if name not in fallback:logging.getLogger(__name__).info('%s 本批次转 CPU：%s',name,exc)
+            fallback[name]=str(exc)
         return None
     except Exception as exc:
-        logging.getLogger(__name__).error('%s GPU 运算失败，使用 CPU 重算：%s',name,exc)
         with _probe_lock:
+            if 'operations' not in cap or name in cap['operations']:
+                logging.getLogger(__name__).error('%s GPU 运算失败，使用 CPU 重算：%s',name,exc)
             if 'operations' in cap and name in cap['operations']:
                 cap['operations']=[op for op in cap['operations'] if op!=name]
                 cap.setdefault('operation_errors',{})[name]=str(exc)
