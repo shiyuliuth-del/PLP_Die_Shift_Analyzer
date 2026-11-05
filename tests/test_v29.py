@@ -73,7 +73,7 @@ class V29Tests(unittest.TestCase):
         p=Parameters(single_bound_x_um=35,single_bound_y_um=0,bound_angle_deg=0,line_space_um=15)
         grid=ExtremeCatalog({'dies':[0]},p)
         node=dict(geometry=[box(-10,-5,10,5)])
-        model=SimpleNamespace(case={'board':box(-90,-90,90,90)},cache=SimpleNamespace(layers={'5/0':node}),bound=SimpleNamespace(centers=np.zeros((1,2))))
+        model=SimpleNamespace(roles={'5/0':'固定RDL'},case={'board':box(-90,-90,90,90)},cache=SimpleNamespace(layers={'5/0':node}),bound=SimpleNamespace(centers=np.zeros((1,2))))
         recon=SimpleNamespace(vias=[dict(owner=0,targets=[('5/0',0)])],width_um=0.,tol=.001,settings=ViewSettings())
         e=SimpleNamespace(p=p,contact=model,reconstructor=recon,deformer=None)
         check=lambda:not reconstruction_edge_scopes(e,grid,lambda *_:None)
