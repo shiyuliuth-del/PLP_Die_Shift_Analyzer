@@ -93,6 +93,10 @@ def main():
         w.manual_states=np.array([[-7.,2,0],[0,0,0]]);w.request_preview();settle()
         w.width_yield.refresh();assert w.width_yield.bank is bank
         w.change_width_ignores(all_refs,False);settle()
+        w.target_sigma.setCurrentText('∞');settle()
+        assert w.width_yield.bank is bank and w.width_yield.bank['scale_nsigma']==2
+        assert w.setting_fields['yield_method'].isEnabled()
+        assert not w.setting_fields['probability_show_ranges'].isEnabled()
     assert not w.ignored_width_lines
     # A stale completion from a prior GDS cannot update the active labels.
     w.width_yield.reset()
