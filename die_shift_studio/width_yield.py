@@ -98,7 +98,7 @@ def policy_yields(bank,ignored):
 def measure_width_yield(model,params,cfg,cache_group,progress,partial=None):
     # Width acceptance refers to the source layout, independent of a displayed
     # individual pose, a repaired preview, colours, and the current ignored set.
-    if not any(r in ('运动RDL','固定RDL') for r in model.roles.values()):
+    if not any(r in ('运动RDL','固定RDL') and len(model.data.layers.get(k,())) for k,r in model.roles.items()):
         raise ValueError('图纸尚未设置 RDL 层')
     if math.isinf(params.target_nsigma):params=replace(params,target_nsigma=0)
     model.configure_parameters(params);model.bound.acceleration=cfg.acceleration
@@ -108,6 +108,9 @@ def measure_width_yield(model,params,cfg,cache_group,progress,partial=None):
         progress(1,'建立整包宽度通道')
         events=WidthEvents(analyzer,params,lambda n,t:progress(1+round(.08*n),t))
         count=len(model.bound.centers)
+        if not events.edges and all(plane.local is None for plane in events.planes):
+            progress(100,'全输入范围的宽度几何界限已通过')
+            return dict(chunks=(packed_events([set()],[set()]),),method='exact',total=1,scale_nsigma=params.scale_nsigma)
         chunks=[];done=0;next_preview=BATCH
         for states,weights,method,total in joint_batches(params,count,cfg):
             red,yellow=events.classify(states)

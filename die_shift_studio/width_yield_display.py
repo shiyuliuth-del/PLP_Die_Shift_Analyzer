@@ -1,5 +1,5 @@
 """Background whole-layout calculation and lightweight reclassification of ignored lines."""
-from dataclasses import asdict
+from dataclasses import asdict,replace
 from .qt_compat import QtWidgets as W,QtCore,ALIGN_RIGHT,ALIGN_VCENTER
 from .session_cache import logical_fingerprint
 from .width_yield import measure_width_yield,policy_yields
@@ -48,9 +48,13 @@ class WidthYieldDisplay:
         try:p=w.params()
         except ValueError as exc:
             self.reset();self.label.setText('宽度良率 · 工艺未就绪');self.label.setToolTip(str(exc));return
+        # All three labels integrate the same bounded distribution for finite
+        # k, 0 or infinity when the saved reference scale agrees.
+        p=replace(p,target_nsigma=0)
         cfg=w.view_settings;roles=w.roles();order=w.ordered_layers()
+        sampling=(cfg.yield_method,cfg.yield_box_budget) if cfg.yield_method=='partition' else (cfg.yield_method,cfg.yield_sample_exponent,cfg.random_seed)
         token=('width-yield-v33',logical_fingerprint((w.data.geometry_id,w.data.top_name,roles,order,asdict(p),
-               cfg.drc_tolerance_um,cfg.yield_method,cfg.yield_sample_exponent,cfg.yield_box_budget,cfg.random_seed)))
+               cfg.drc_tolerance_um,sampling)))
         key=(id(w.cache_group),token)
         if self.key==key:
             self.render();return
@@ -103,7 +107,7 @@ class WidthYieldDisplay:
         self.rendered=stamp
         q=policy_yields(self.bank,ignored);v=q['values']
         partial=q['samples']<q['total']
-        method={'exact':'确定姿态','mc':'独立联合蒙特卡洛','cubature':'确定性联合求积'}[q['method']]
+        method={'exact':'全输入几何判定','mc':'独立联合蒙特卡洛','cubature':'确定性联合求积'}[q['method']]
         mark='' if q['method']=='exact' else '≈'
         labels=[f'{name} {mark}{100*x:.2f}%' for name,x in zip(POLICIES,v)]
         self.label.setText('宽度良率  '+'  ·  '.join(labels)+(' …' if partial else ''))
