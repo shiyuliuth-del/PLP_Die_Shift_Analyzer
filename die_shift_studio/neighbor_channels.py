@@ -39,14 +39,20 @@ def occupied(ends,pairs,walls,geometries,half_depth,tol,source_refs=None):
         spread=np.einsum('ij,ij->i',extent[wi],abs(d[ci]))
         interior=(~protect[ci])&(mid-spread>tol)&(mid+spread<length[ci]-tol)
         v=np.flatnonzero(interior)
-        v=v[shapely.intersects(geometries[wi[v]],rects[ci[v]])]
+        touch=shapely.intersects(geometries[wi[v]],rects[ci[v]])
+        ko=np.array([walls[w].kind=='禁布区' for w in wi[v]],bool)
+        touch[ko] &= shapely.relate_pattern(geometries[wi[v[ko]]],rects[ci[v[ko]]],'T********')
+        v=v[touch]
         blocked=np.zeros(len(ends),bool)
         for k,w in zip(ci[v],wi[v]):
             if not blocked[k]:
                 blocked[k]=True;result[int(k)].append((int(w),0.,0.))
         keep=~blocked[ci];ci,wi=ci[keep],wi[keep]
         if not len(ci):return result
-    hit=shapely.intersects(geometries[wi],rects[ci]);ci,wi=ci[hit],wi[hit]
+    hit=shapely.intersects(geometries[wi],rects[ci])
+    ko=np.array([walls[w].kind=='禁布区' for w in wi],bool)
+    hit[ko] &= shapely.relate_pattern(geometries[wi[ko]],rects[ci[ko]],'T********')
+    ci,wi=ci[hit],wi[hit]
     if not len(ci):return result
     clips=shapely.intersection(rects[ci],geometries[wi])
     # Disconnected parts of a concave island leave independent openings.

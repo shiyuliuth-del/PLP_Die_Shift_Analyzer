@@ -1,21 +1,21 @@
 """Background whole-layout calculation and lightweight reclassification of ignored lines."""
 from dataclasses import asdict,replace
 from decimal import ROUND_FLOOR,ROUND_CEILING
-from .qt_compat import QtWidgets as W,QtCore,QtGui,ALIGN_RIGHT,ALIGN_VCENTER
+from .qt_compat import QtWidgets as W,QtCore,QtGui,ALIGN_CENTER
 from .session_cache import logical_fingerprint
 from .width_yield import measure_width_yield,policy_yields,policy_texts,percentage_text
 
-POLICIES=('原图','修黄','修红黄')
+POLICIES=('良率1','良率2')
 
 
 class YieldLabel(W.QLabel):
-    """Keep three complete numbers readable without resizing the camera on an update."""
+    """Keep both numbers centred in a dedicated, stable row above the plot."""
     def __init__(self,parent):
         super().__init__(parent)
         self.parts=None;self.pixel_size=12
-        self.setAlignment(ALIGN_RIGHT|ALIGN_VCENTER);self.setContentsMargins(0,0,18,0)
+        self.setAlignment(ALIGN_CENTER);self.setContentsMargins(4,0,4,0)
         self.setStyleSheet('font-size:12px');self.ensurePolished()
-        self.setFixedHeight(3*self.fontMetrics().lineSpacing()+2)
+        self.setFixedHeight(2*self.fontMetrics().lineSpacing()+2)
 
     def minimumSizeHint(self):
         return QtCore.QSize(0,self.height())
@@ -29,7 +29,7 @@ class YieldLabel(W.QLabel):
     def reflow(self):
         if self.parts is None:return
         prefix,labels,suffix=self.parts
-        width=max(1,self.width()-self.contentsMargins().right())
+        width=max(1,self.width()-self.contentsMargins().right()-self.contentsMargins().left())
         font=QtGui.QFont(self.font());font.setPixelSize(12)
         metrics=QtGui.QFontMetrics(font)
         whole=prefix+'  ·  '.join(labels)+suffix
@@ -47,13 +47,10 @@ class YieldLabel(W.QLabel):
 class WidthYieldDisplay:
     def __init__(self,window):
         self.w=window;self.key=None;self.pending=None;self.worker=None;self.bank=None;self.rendered=None
-        self.label=YieldLabel(window.toolbar)
+        self.label=YieldLabel(window.canvas.parent())
         sizes=getattr(W.QSizePolicy,'Policy',W.QSizePolicy)
         self.label.setSizePolicy(sizes.Expanding,sizes.Fixed)
-        toolbar=window.toolbar;loc=toolbar.locLabel
-        self.original_policy=loc.sizePolicy()
-        coordinate_action=next(a for a in toolbar.actions() if toolbar.widgetForAction(a) is loc)
-        self.action=toolbar.insertWidget(coordinate_action,self.label);self.action.setVisible(False)
+        self.label.hide()
         self.timer=QtCore.QTimer(window);self.timer.setSingleShot(True);self.timer.setInterval(35)
         self.timer.timeout.connect(self.start)
 
@@ -68,15 +65,7 @@ class WidthYieldDisplay:
         w=self.w
         if w.loading or w._closing:return
         enabled=w.width_toggle.isChecked()
-        if self.action.isVisible()!=enabled:
-            sizes=getattr(W.QSizePolicy,'Policy',W.QSizePolicy)
-            if enabled:
-                w.toolbar.locLabel.setSizePolicy(sizes.Preferred,sizes.Preferred)
-                w.toolbar.locLabel.setMinimumWidth(w.toolbar.locLabel.fontMetrics().horizontalAdvance('x=−0000.00 y=−0000.00'))
-            else:
-                w.toolbar.locLabel.setSizePolicy(self.original_policy)
-                w.toolbar.locLabel.setMinimumWidth(0)
-            self.action.setVisible(enabled)
+        self.label.setVisible(enabled)
         if not enabled or not w.data:
             self.reset()
             if enabled:self.label.setText('宽度良率 · 等待图纸')
@@ -84,12 +73,12 @@ class WidthYieldDisplay:
         try:p=w.params()
         except ValueError as exc:
             self.reset();self.label.setText('宽度良率 · 工艺未就绪');self.label.setToolTip(str(exc));return
-        # All three labels integrate the same bounded distribution for finite
+        # Both labels integrate the same bounded distribution for finite
         # k, 0 or infinity when the saved reference scale agrees.
         p=replace(p,target_nsigma=0)
         cfg=w.view_settings;roles=w.roles();order=w.ordered_layers()
         sampling=(cfg.yield_method,cfg.yield_box_budget) if cfg.yield_method=='partition' else (cfg.yield_method,cfg.yield_sample_exponent,cfg.random_seed)
-        token=('width-yield-v33',logical_fingerprint((w.data.geometry_id,w.data.top_name,roles,order,asdict(p),
+        token=('width-yield-v34',logical_fingerprint((w.data.geometry_id,w.data.top_name,roles,order,asdict(p),
                cfg.drc_tolerance_um,sampling)))
         key=(id(w.cache_group),token)
         if self.key==key:
@@ -148,15 +137,15 @@ class WidthYieldDisplay:
         labels=[name+' '+text for name,text in zip(POLICIES,policy_texts(q,decimals))]
         prefix='宽度良率（99%下限）  ' if any('≥' in t for t in labels) else '宽度良率  '
         self.label.set_values(prefix,labels,' …' if partial else '')
-        tip=['原图：红、黄或被忽略线路出现问题即失效。','修黄：红色或被忽略线路出现问题即失效。',
-             '修红黄：被忽略线路出现问题即失效。',f'{method} · {q["samples"]}/{q["total"]} 个整包姿态，按原始 RDL 和全部输入范围计算。']
+        tip=['良率1：红色、黄色问题均修正，被忽略线路保持原图；忽略线路出现问题即失效。',
+             '良率2：所有问题均不修正，任一红色或黄色问题（含忽略线路）出现即失效。',f'{method} · {q["samples"]}/{q["total"]} 个整包姿态，按原始 RDL 和全部输入范围计算。']
         if q['intervals']:
             text=[percentage_text(lo,fhi,decimals,ROUND_FLOOR)+' – '+percentage_text(hi,flo,decimals,ROUND_CEILING)
                   for (lo,hi),(flo,fhi) in zip(q['intervals'],q['failure_intervals'])]
-            tip.append('固定忽略集合下三项联合 99% 置信区间：'+'，'.join(text))
+            tip.append('固定忽略集合下两项联合 99% 置信区间：'+'，'.join(text))
         elif q['method']=='cubature':tip.append('数值积分估计，精度可通过增加积分预算复核。')
         tip.append('出现尚未分辨的0/100%尾部时，未获证明的数值统一用≥显示固定样本数下的99%置信下限。确定性积分未分辨尾部时显示待细化。')
-        tip.append('已按全输入几何界限证明，或第三项无忽略线路的修复假设成立时，显示精确值。')
+        tip.append('已按全输入几何界限证明，或第一项无忽略线路的修复假设成立时，显示精确值。')
         tip.append(f'概率尺度 {self.bank["scale_nsigma"]:g}σ；0/∞ 沿用最近有限级别。')
         self.label.setToolTip('\n'.join(tip))
         if self.w.result is not None:

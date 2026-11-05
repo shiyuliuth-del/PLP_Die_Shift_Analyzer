@@ -279,7 +279,7 @@ class MainWindow(W.QMainWindow):
         self.per_die_toggle=W.QCheckBox('按芯片分别设置单边幅度');page.addWidget(self.per_die_toggle)
         self.per_die_table=table(['芯片','X / μm','Y / μm','O / °','旋转中心']);self.per_die_table.setMaximumHeight(215);page.addWidget(self.per_die_table);self.per_die_table.hide()
         self.per_die_toggle.toggled.connect(self.per_die_changed)
-        self._group(page,'系统偏差与相关性',['mean_x_um','mean_y_um','mean_angle_deg','rho_xy'],collapsed=True);page.addStretch()
+        page.addStretch()
         page=self._page('工艺')
         self._group(page,'目标层数与线宽线距',['panel_layers','wafer_layers','line_width_um','line_space_um','wafer_line_width_um','wafer_line_space_um'])
         page.addWidget(label('运动层按下层连接追溯所属芯片。固定层保持名义位置，层数由GDS用途自动统计。'))
@@ -293,7 +293,7 @@ class MainWindow(W.QMainWindow):
         self.figure=Figure(figsize=(9,5));self.figure.subplots_adjust(left=.043,right=.993,bottom=.095,top=.99);self.canvas=FigureCanvasQTAgg(self.figure);self.ax=self.figure.add_subplot(111)
         page=W.QWidget();v=W.QVBoxLayout(page);v.setContentsMargins(0,0,0,0);self.toolbar=NavigationToolbar2QT(self.canvas,self);v.addWidget(self.toolbar)
         from .width_yield_display import WidthYieldDisplay
-        self.width_yield=WidthYieldDisplay(self)
+        self.width_yield=WidthYieldDisplay(self);v.addWidget(self.width_yield.label)
         self.width_label_overflow=W.QPlainTextEdit()
         self.width_label_overflow.setReadOnly(True);self.width_label_overflow.setMaximumHeight(92)
         self.width_label_overflow.setToolTip('图内空间不足的已选线路标记');self.width_label_overflow.hide()
@@ -429,6 +429,12 @@ class MainWindow(W.QMainWindow):
             header.toggled.connect(expand);page.addWidget(header);page.addWidget(body)
             self.setting_sections[title]=header
             return form
+        biases=group('系统偏差与相关性')
+        for key in ('mean_x_um','mean_y_um','mean_angle_deg','rho_xy'):
+            name,low,high,decimals=SPECS[key]
+            widget=W.QDoubleSpinBox();widget.setRange(low,high);widget.setDecimals(decimals)
+            widget.setValue(getattr(Parameters(),key));widget.setKeyboardTracking(False)
+            widget.valueChanged.connect(self.invalidate);biases.addRow(name,widget);self.fields[key]=widget
         hardware=group('硬件与计算资源')
         profile=resource_profile()
         self.hardware_label=label(f"{profile['cpu']} 逻辑CPU · 可用内存 {profile['available_memory_mb']} MB · 最多 {profile['workers']} 线程 / {profile['process_workers']} 进程\n显卡检测中…");hardware.addRow(self.hardware_label)
@@ -521,7 +527,7 @@ class MainWindow(W.QMainWindow):
         spin(yield_group,'yield_sample_exponent','样本数 = 2 的指数',8,20)
         spin(yield_group,'yield_box_budget','全输入良率积分预算',64,65536)
         spin(yield_group,'yield_tolerance','无接触良率区间宽度目标',.000001,.1,6)
-        self.setting_fields['yield_method'].setToolTip('无接触良率使用状态盒概率界；三项宽度良率使用完整联合姿态的蒙特卡洛或确定性条件求积。')
+        self.setting_fields['yield_method'].setToolTip('无接触良率使用状态盒概率界；两项宽度良率使用完整联合姿态的蒙特卡洛或确定性条件求积。')
         self.setting_fields['yield_box_budget'].setToolTip('宽度联合积分取预算以内最大的2次幂节点数，无接触积分按每DIE分配状态盒。')
         self.setting_fields['safe_box_precision'].setToolTip('返回包含输入均值的安全内盒；多个端点顺序比较体积。未定候选拒绝，精度不代表全局最优误差。')
         channel=group('宽度分析 · 元素显示')
@@ -1192,7 +1198,7 @@ class MainWindow(W.QMainWindow):
         if self.result is None or not data or not self.width_toggle.isChecked():return
         show=self.width_sufficient_toggle.isChecked()
         visible=[r for r in data['rows'] if show or r['status']!='宽度足够']
-        keys=('status','pair','refs','original','required','current','point','plane','gap_um','nominal_gap_um','slots_um','widths_um','minimum_um','keep_um','split','locked','unresolved','narrowing_um','event_probability')
+        keys=('status','pair','refs','original','required','current','point','plane','gap_um','nominal_gap_um','slots_um','widths_um','wall_margins_um','minimum_um','keep_um','split','locked','unresolved','narrowing_um','event_probability')
         summary=(self._coupled_data if self.coupled_view() else frame.get('width_summary')) if frame.get('nominal_global') else None
         if summary is not None:
             evidence=[kind for severity,kind in summary['lines'].values()]
@@ -1200,7 +1206,7 @@ class MainWindow(W.QMainWindow):
                 **{k:evidence.count(k) for k in ('exceeded','undetermined','binary')})
         else:self.result.pop('width_extreme_summary',None)
         self.result['preview_width_analysis']=dict(states=frame['states'].tolist(),counts=data['counts'],scope=data['scope'],parameters=data['parameters'],examined=data['examined'],
-                                                   displayed=len(visible),edge_violations=[{k:e[k] for k in ('layer','indices','point','gap_um','required_um','event_probability') if k in e} for e in data.get('edge_violations',[])],rows=[{k:r[k] for k in keys if k in r} for r in visible[:100]])
+                                                   displayed=len(visible),edge_violations=[{k:e[k] for k in ('kind','layer','indices','point','gap_um','required_um','intrusion_area_um2','event_probability') if k in e} for e in data.get('edge_violations',[])],rows=[{k:r[k] for k in keys if k in r} for r in visible[:100]])
         self.report_dirty=True
 
     def width_filter_changed(self,*_):
@@ -1539,7 +1545,7 @@ class MainWindow(W.QMainWindow):
         if self.width_toggle.isChecked():
             modes=self.view_settings.width_display
             if self.ignored_width_lines and modes['描边']!='hide':handles.append(Patch(facecolor='#95c8a5',edgecolor='#95c8a5',alpha=.6,label='已忽略的宽度问题'))
-            for key,label,color in [('运动过孔孔盘','运动孔盘','#589881'),('固定过孔孔盘','固定孔盘','#6985a5'),('固定障碍','固定障碍','#85848e'),('边距','封装边距不足','#c44956')]:
+            for key,label,color in [('运动过孔孔盘','运动孔盘','#589881'),('固定过孔孔盘','固定孔盘','#6985a5'),('固定障碍','固定障碍','#85848e'),('边距','边缘或禁布区违规','#c44956')]:
                 if modes[key]!='hide':handles.append(Patch(facecolor=tint(color,modes[key],.65),label=label))
             if (self.current_frame or {}).get('width_summary') is not None and modes['描边']!='hide':
                 binary=self.params().target_nsigma in (0.,math.inf)

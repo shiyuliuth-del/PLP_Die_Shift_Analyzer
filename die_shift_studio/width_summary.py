@@ -10,7 +10,7 @@ import math
 import numpy as np
 import shapely
 from .width_analysis import ADEQUATE,BLOCKED,NARROW,section_subset
-from .edge_clearance import edge_violations
+from .width_keepout import routing_violations
 from .statistics import ExtremeCatalog
 from .width_witness import channel_witness,edge_witness
 
@@ -136,7 +136,7 @@ def _sweeps(analyzer,plane,grid,progress):
     bounds_pieces=shapely.bounds(plane['pieces'])
     for k,g in enumerate(gates):
         ia,ib=g.pair;fa,fb=g.features;axes=scope(g)
-        need=sum(max(analyzer.width,v) for v in g.widths)+(len(g.widths)+1)*analyzer.space
+        need=analyzer.demand(plane,g)
         if not axes:
             bounds[k]=[*g.ends.min(axis=0)-half-analyzer.tol,*g.ends.max(axis=0)+half+analyzer.tol]
             risk[k]=g.nominal_gap<=need+analyzer.tol
@@ -162,7 +162,7 @@ def _sweeps(analyzer,plane,grid,progress):
         bounds[k]=[*low.min(axis=0)-half-analyzer.tol,*high.max(axis=0)+half+analyzer.tol]
     for j,(owners,ids) in enumerate(groups.items()):
         sub=section_subset(plane,ids,{w for i in ids for w in gates[i].pair})
-        demand=np.array([sum(max(analyzer.width,v) for v in g.widths)+(len(g.widths)+1)*analyzer.space for g in sub['gates']])
+        demand=np.array([analyzer.demand(sub,g) for g in sub['gates']])
         b=bounds[ids];possible=risk[ids]
         for ends,gaps in sweep_sections(analyzer,sub,grid,owners,lambda f:progress((j+f)/len(groups),'检查截面可达范围')):
             b[:,:2]=np.minimum(b[:,:2],ends.min(axis=(0,2))-half-analyzer.tol)
@@ -207,6 +207,7 @@ class OccupancyBank:
             c=model.bound.centers[owner]
             shapes.extend(shapely.set_coordinates(nominal.copy(),rigid_transform(xy,c,z)) for z in grid.locals[owner][1:])
         self.tree=shapely.STRtree(np.concatenate(shapes));self.per_digit=len(walls)
+        self.keepout=np.asarray([w.kind=='禁布区' for w in walls],bool)
 
     def masks(self,ends,half,tol,allowed):
         delta=ends[:,1]-ends[:,0];length=np.linalg.norm(delta,axis=1)
@@ -214,6 +215,8 @@ class OccupancyBank:
         rect=shapely.polygons(np.stack((ends[:,0]-side,ends[:,1]-side,ends[:,1]+side,ends[:,0]+side),axis=1))
         k,ids=self.tree.query(rect,predicate='intersects');digits=ids//self.per_digit
         keep=(length[k]>tol)&np.isin(digits,allowed)
+        ko=self.keepout[ids%self.per_digit]
+        keep[ko] &= shapely.relate_pattern(rect[k[ko]],self.tree.geometries[ids[ko]],'T********')
         k,ids,digits=k[keep],ids[keep],digits[keep]
         masks=[0]*self.count
         if len(k):
@@ -237,7 +240,7 @@ def _solve_throat(analyzer,name,plane,grid,target,partners,ambiguous,found,witne
     other=defaultdict(list)
     for w in sorted(partners):other[plane['walls'][w].owner].append(plane['walls'][w])
     placements={};total=math.prod(grid.radices[i] for i in owners)
-    demand=np.asarray([sum(max(analyzer.width,v) for v in g.widths)+(len(g.widths)+1)*analyzer.space for g in gates])
+    demand=np.asarray([analyzer.demand(target,g) for g in gates])
     for step,(digits,z) in enumerate(combinations(grid,owners)):
         if step%32==0:progress(step/total)
         nominal=not np.any(z)
@@ -309,17 +312,17 @@ def summarize(analyzer,p,progress=lambda *_:None):
     edge_flags=[np.zeros(r,bool) for r in grid.radices];fixed=False
     for digit in range(max(grid.radices)):
         z=np.asarray([v[digit] if digit<len(v) else v[0] for v in grid.locals])
-        for row in edge_violations(model,z,p,analyzer.settings):
+        for row in routing_violations(model,z,p,analyzer.settings):
             key=row['layer'];indices=row['indices']
             node=model.nodes[model.ids[key,indices[0]]];owner=node['owner']
             if owner>=0:edge_flags[owner][digit if digit<grid.radices[owner] else 0]=True
             else:fixed=True
-            event=analyzer.probability.edge(key,indices[0],node['poly'],owner,row['required_um']) if analyzer.probability else None
+            event=analyzer.probability.edge(key,indices[0],node['poly'],owner,row['required_um']) if analyzer.probability and row['kind']!='禁布区侵入' else None
             digits=[0]*grid.count
             if owner>=0 and digit<grid.radices[owner]:digits[owner]=digit
             strongest(found,[(key,i) for i in indices],BLOCKED,event,binary,witnesses,
                       edge_witness(row,grid.index(digits),model,z))
-        progress(94+round(6*(digit+1)/max(grid.radices)),'汇总线路与封装边距')
+        progress(94+round(6*(digit+1)/max(grid.radices)),'汇总线路、封装边距与禁布区')
     factors.extend(((i,),flag) for i,flag in enumerate(edge_flags) if np.any(flag))
     if fixed:factors.append(((),True))
     return dict(lines=found,witnesses=witnesses,red_factors=factors,channel_lines=channel_lines,

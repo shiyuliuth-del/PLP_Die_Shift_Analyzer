@@ -117,7 +117,9 @@ def check_frame(bound,roles,p,result,states,layers,scheme,connections=None,check
             if not np.all(shapely.is_valid(polygons)):raise ValueError(f'图层{key}含无效几何，无法检查禁布区')
             pairs=tree.query(polygons,predicate='intersects')
             if pairs.size:
-                hits=indices[np.unique(pairs[0])];fail(f'图层{key}触碰禁布区',layer['centers'][hits],bound.owners[key][hits])
+                inside=shapely.relate_pattern(polygons[pairs[0]],obstacles[pairs[1]],'T********')
+                hits=indices[np.unique(pairs[0,inside])]
+                if len(hits):fail(f'图层{key}侵入禁布区',layer['centers'][hits],bound.owners[key][hits])
     if check_interfaces:
         connections=connections or case.get('connections')
         from .contact import ContactModel
@@ -178,7 +180,7 @@ class PreviewEngine:
         self.width_key=key
     def width_summary(self,progress):
         from .width_summary import summarize
-        key=('width-extremes-v29',self.signature,self.width_key)
+        key=('width-extremes-v34',self.signature,self.width_key)
         if self.cache_group is None:return summarize(self.width_analyzer,self.p,progress)
         values=self.cache_group.values
         # The all-pose index belongs to the pinned zero view. Switching
@@ -264,16 +266,19 @@ class PreviewEngine:
             check['failures'].extend(dict(kind=q['kind'],layer=q['layer'],point=q['point']) for q in edges)
             if edges:check['problem_percent']=100
         if getattr(self,'width_key',(False,))[0]:
+            from .width_keepout import violations as keepout_violations
+            changed=overrides
             if frame.get('reconstruction',{}).get('replacements'):
                 changed=self.final_copper(overrides,frame['reconstruction']['replacements'])
                 edges=edge_violations(self.contact,states,self.p,cfg,changed)
+            edges=edges+keepout_violations(self.contact,states,changed)
             probability=self.width_analyzer.probability
             changed_copper=bool(overrides or frame.get('reconstruction',{}).get('replacements'))
             if probability is not None and edges and not changed_copper:
                 annotated=[]
                 for q in edges:
                     layer=q['layer'];index=q['indices'][0];node=self.contact.nodes[self.contact.ids[layer,index]]
-                    event=probability.edge(layer,index,node['poly'],node['owner'],q['required_um'])
+                    event=probability.edge(layer,index,node['poly'],node['owner'],q['required_um']) if q['kind']!='禁布区侵入' else None
                     annotated.append(dict(q,event_probability=event))
                 edges=annotated
             frame['width_analysis']=dict(self.width_analyzer.frame(frame,progress,quick=quick),edge_violations=edges)

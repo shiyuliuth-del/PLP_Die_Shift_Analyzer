@@ -44,7 +44,7 @@ def main():
     q['parameters'].update(target_nsigma=2,bound_angle_deg=0)
     q['overlays']={'width':True}
     w.set_data(read_gds(Path(q['gds_path'])),q);settle()
-    assert w.width_yield.bank is not None and '原图' in w.width_yield.label.text()
+    assert w.width_yield.bank is not None and '良率1' in w.width_yield.label.text()
     assert '99%' in w.width_yield.label.toolTip()
     w.run_evaluation();settle()
     assert 'width_policy_yield' in w.result
@@ -64,7 +64,7 @@ def main():
     old_bank=w.width_yield.bank;action.trigger();dismiss();settle()
     from die_shift_studio.report import report_document
     html,resources=report_document(w.result)
-    assert '整包三种宽度策略良率' in html and resources
+    assert '整包两种宽度策略良率' in html and resources
     assert ref in w.ignored_width_lines and w.width_yield.bank is old_bank
     np.testing.assert_allclose((w.ax.get_xlim(),w.ax.get_ylim()),bounds)
     for k,on in visibility.items():w.visible_boxes[k].setChecked(on)
@@ -107,7 +107,7 @@ def main():
         w.width_yield.refresh();w.width_yield.timer.stop();w.width_yield.start()
         legacy=dict(q);legacy['overlays']={}
         w.set_data(w.data,legacy)
-    settle();assert not w.ignored_width_lines and not w.width_yield.action.isVisible()
+    settle();assert not w.ignored_width_lines and not w.width_yield.label.isVisible()
     assert w.view_settings.width_yield_decimals==6
     w.close();settle();tmp.cleanup()
     print('GUI_V33_PASS actual right-click pick/menu, blank click, green ignore, cached policy updates, saved/old jobs, stale worker')

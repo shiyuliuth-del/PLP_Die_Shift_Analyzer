@@ -20,16 +20,17 @@ from .landing_geometry import embedded_pad
 
 ADEQUATE, NARROW, BLOCKED = '宽度足够','需局部收窄','宽度不足'
 COLORS = {BLOCKED:'#c44956', NARROW:'#bd8127', ADEQUATE:'#498d79'}
-SCOPE = '名义固定 RDL 有线路穿越的相邻实体局部窄口。矩形沿该对实体的实际最短截面，两侧各保留一道线距。'
+SCOPE = '名义固定 RDL 有线路穿越的相邻实体局部窄口。矩形沿该对实体的实际最短截面，普通壁及封装侧保留线距，禁布区可贴边但不可进入。'
 CHUNK = 256
 
 
-def capacity(gap, width, space):
-    """Largest integer n >= 0 satisfying n*w + (n+1)*s <= gap."""
+def capacity(gap, width, space, margins=None):
+    """Largest n >= 0 with n*w + (n-1)*s + left + right <= gap."""
+    if margins is None:margins=(space,space)
     if min(width, space) <= 0:
         raise ValueError('通道的有效线宽和线距必须大于零')
     # Allow floating-point roundoff at an exact design-rule equality.
-    ratio = (gap - space) / (width + space)
+    ratio = (gap - sum(margins) + space) / (width + space)
     return max(0, math.floor(ratio + 8 * math.ulp(max(1., abs(ratio)))))
 
 
@@ -173,7 +174,7 @@ def _parallel_stations(a, b, ends, tree, tol):
     return samples
 
 
-def _crossings(ends, plane, tol):
+def _crossings(ends, plane, tol, open_edges=None):
     """Count material intervals crossing an open nominal gate, not net IDs."""
     answers = [[] for _ in ends]
     if not len(ends) or not len(plane['routes']):
@@ -196,7 +197,10 @@ def _crossings(ends, plane, tol):
     lo, hi = np.full(len(parts),np.inf), np.full(len(parts),-np.inf)
     np.minimum.at(lo,owner,position)
     np.maximum.at(hi,owner,position)
-    valid = (lo>tol) & (hi<gaps[ci]-tol)
+    # Metal walls cannot be mistaken for a through-route. A keepout wall may
+    # be touched by a real trace, so accept its boundary endpoint explicitly.
+    allow=np.zeros((len(ends),2),bool) if open_edges is None else np.asarray(open_edges,bool)
+    valid = np.where(allow[ci,0],lo>=-tol,lo>tol) & np.where(allow[ci,1],hi<=gaps[ci]+tol,hi<gaps[ci]-tol)
     parts, lo, hi, ci, ri = (v[valid] for v in (parts,lo,hi,ci,ri))
     if not len(ci):
         return answers
@@ -257,7 +261,7 @@ def _crossings(ends, plane, tol):
     return answers
 
 
-def _intruders(lines, pairs, walls, tree, tol):
+def _intruders(lines, pairs, walls, tree, tol, keepout=None):
     """Other barriers touching the interior of each gate, excluding its endpoints."""
     result = defaultdict(list)
     if not len(lines):
@@ -293,6 +297,9 @@ def _intruders(lines, pairs, walls, tree, tol):
     if len(ci):
         inner = shapely.linestrings(trimmed[ci])
         hits = shapely.intersects(walls[wi],inner)
+        if keepout is not None:
+            selected=np.asarray(keepout,bool)[wi]
+            hits[selected] &= shapely.relate_pattern(inner[selected],walls[wi[selected]],'T********')
         for c,w in zip(ci[hits],wi[hits]):
             result[int(c)].append(int(w))
     return result
@@ -312,7 +319,7 @@ class WidthAnalyzer:
         self.section_cache=EphemeralCache();self.demands={}
         self.catalogue_store=cache_group.values if cache_group is not None else None
         if self.catalogue_store is not None:
-            self.catalogue_key=('width-catalogue-v27',model.data.geometry_id,model.data.top_name,
+            self.catalogue_key=('width-catalogue-v34',model.data.geometry_id,model.data.top_name,
                                 tuple(sorted(model.roles.items())),tuple(model.connections.order),
                                 self.width,self.space,self.annulus,self.tol)
         self.planes = self._planes()
@@ -354,6 +361,9 @@ class WidthAnalyzer:
                 for a,b in zip(xy,xy[1:]):
                     if np.linalg.norm(a-b)>self.tol:
                         edges.append(Wall(f'封装边 {len(edges)+1}','边框',LineString([a,b]),board_refs))
+        from .width_keepout import regions
+        keepouts=[Wall(f'禁布区 {refs[0][0]} #{refs[0][1]+1}','禁布区',g,refs,
+                       layers=tuple(sorted({k for k,_ in refs}))) for g,refs in regions(m)]
         planes = {}
         for plane,ids in m.planes.items():
             fixed = [i for i in ids if m.roles[m.nodes[i]['key']]=='固定RDL']
@@ -404,6 +414,7 @@ class WidthAnalyzer:
                     name = f'固定障碍 {refs[0][0]} #{refs[0][1]+1}'
                     walls.append(Wall(name,'固定障碍',g,refs,layers=tuple(sorted({k for k,_ in refs if k in keys})),net=net,
                                       pads=tuple(fixed_pads[r] for r in refs if r in fixed_pads)))
+            walls.extend(keepouts)
             route_sources = list(sources.values())
             routes = np.asarray([shapely.union_all([g for _,g in src]) for src in route_sources],object)
             shapely.prepare(routes)
@@ -491,7 +502,7 @@ class WidthAnalyzer:
                 feature_pairs = np.asarray(candidates)
                 pairs = parent[feature_pairs]
                 lines = shapely.linestrings(ends)
-                blocked = _intruders(lines,pairs,geometries,tree,self.tol)
+                blocked = _intruders(lines,pairs,geometries,tree,self.tol,[w.kind=='禁布区' for w in walls])
                 accessible = shapely.covers(inside,lines)
                 # For a concave feature, reject seams that cross its own copper.
                 for side in (0,1):
@@ -501,7 +512,8 @@ class WidthAnalyzer:
                 indices = [k for k,ok in enumerate(accessible) if ok and k not in blocked]
                 if not indices:
                     continue
-                crossing=dict(zip(indices,_crossings(ends[indices],route_plane,self.tol)))
+                crossing=dict(zip(indices,_crossings(ends[indices],route_plane,self.tol,
+                                  np.asarray([[walls[w].kind=='禁布区' for w in pairs[k]] for k in indices],bool))))
                 # For tied parallel faces, each station samples an interval
                 # between nominal topology events. A missing or different
                 # passage interrupts the run even on the same two straight walls.
@@ -704,21 +716,29 @@ class WidthAnalyzer:
         progress(1.,'通道容量检查完成')
         return rows,retained
 
+    def margins(self,a,b):
+        return tuple(0. if w.kind=='禁布区' else self.space for w in (a,b))
+
+    def demand(self,plane,gate):
+        margins=self.margins(*(plane['walls'][i] for i in gate.pair))
+        return sum(max(self.width,v) for v in gate.widths)+(len(gate.widths)-1)*self.space+sum(margins)
+
     def _row(self,name,plane,a,b,original,gap,point,axis,widths,refs,locked,split,unresolved):
-        required=len(widths);key=(original,widths)
+        required=len(widths);margins=self.margins(a,b);key=(original,widths,margins)
         demand=self.demands.get(key)
         if demand is None:
             keep=tuple(max(self.width,v) for v in widths)
-            keep_um=sum(keep)+(required+1)*self.space
+            keep_um=sum(keep)+(required-1)*self.space+sum(margins)
             # Match the sequential additions in holds_original, including
             # its roundoff rule at exact design-rule equality.
-            used=self.space;threshold=0.
-            for w in keep:
-                threshold=used+w+self.space;used+=w+self.space
-            demand=(capacity(original,self.width,self.space),keep_um,required*self.width+(required+1)*self.space,threshold)
+            used=margins[0];threshold=0.
+            for i,w in enumerate(keep):
+                threshold=used+w+(margins[1] if i==required-1 else self.space);used+=w+self.space
+            demand=(capacity(original,self.width,self.space,margins),keep_um,
+                    required*self.width+(required-1)*self.space+sum(margins),threshold)
             self.demands[key]=demand
         before,keep_um,min_um,threshold=demand
-        current=capacity(gap,self.width,self.space)
+        current=capacity(gap,self.width,self.space,margins)
         fits=(gap+self.tol>=self.space if not widths else current>=required)
         status=BLOCKED if not fits else ADEQUATE if threshold<=gap+8*math.ulp(max(1.,gap)) else NARROW
         return dict(plane=name,layers=plane['keys'],pair=(a.name,b.name),ends=(a.kind,b.kind),
@@ -726,7 +746,7 @@ class WidthAnalyzer:
                     point=point.tolist(),direction=axis.tolist(),gap_um=gap,nominal_gap_um=original,
                     original=before,required=required,current=current,
                     widths_um=widths,keep_um=keep_um,
-                    minimum_um=min_um,status=status,slots_um=[gap] if gap else [],
+                    wall_margins_um=margins,minimum_um=min_um,status=status,slots_um=[gap] if gap else [],
                     locked=locked,split=split,unresolved=unresolved,
                     narrowing_um=max(0.,keep_um-gap) if required else 0.)
 

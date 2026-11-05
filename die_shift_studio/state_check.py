@@ -1,4 +1,4 @@
-"""Deterministic closed-boundary checks on a rendered state, not probabilities."""
+"""Deterministic geometry checks on a rendered state, not probabilities."""
 import numpy as np
 from shapely.geometry import Polygon
 from shapely.strtree import STRtree
@@ -25,8 +25,8 @@ def check_state(data,case,roles,p,result,states,layers,scheme):
             if roles.get(key) not in ('运动过孔','固定过孔','运动RDL','固定RDL'):continue
             for a in arrays:
                 poly=Polygon(a)
-                if any(poly.intersects(obstacles[j]) for j in tree.query(poly)):
-                    fail(f'图层{key}触碰禁布区',poly.centroid.coords[0])
+                if any(poly.relate_pattern(obstacles[j],'T********') for j in tree.query(poly)):
+                    fail(f'图层{key}侵入禁布区',poly.centroid.coords[0])
     from .contact import ContactModel
     from .stack import Connections
     connections=case.get('connections') or Connections(data,roles)

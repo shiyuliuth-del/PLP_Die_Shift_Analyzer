@@ -122,6 +122,8 @@ class WidthOverlay:
         places=self.w.view_settings.width_label_decimals
         if item['kind']=='channel':
             body=self.label_text(item,places)
+        elif item['kind']=='keepout':
+            body=f"禁布区侵入 {item['intrusion_area_um2']:.{places}f} μm²\n允许贴边，不允许进入"
         else:
             body=(f"封装边距 {item['gap_um']:.{places}f} μm · 要求 {item['required_um']:.{places}f} μm"
                   f"\n不足 {item['shortfall_um']:.{places}f} μm")
@@ -279,7 +281,7 @@ class WidthOverlay:
         objects = [o for o in (data or {}).get('retained',[]) if visible.intersection(o['layers'])
                    and modes[o['kind']]!='hide' and any(k in visible for k,_ in o['refs']) and overlaps(o['geometry'].bounds,w.view_bounds)]
         self.barriers.set_paths([w.geometry_patch(o['geometry']) for o in objects])
-        palette={'运动过孔孔盘':('#aacbbd','#588574'),'固定过孔孔盘':('#aec2d7','#6c86a1'),'固定障碍':('#c7c8ce','#81808c')}
+        palette={'运动过孔孔盘':('#aacbbd','#588574'),'固定过孔孔盘':('#aec2d7','#6c86a1'),'固定障碍':('#c7c8ce','#81808c'),'禁布区':('#e3c5c1','#b48a86')}
         self.barriers.set_facecolors([tint(palette[o['kind']][0],modes[o['kind']],.77) for o in objects])
         self.barriers.set_edgecolors([tint(palette[o['kind']][1],modes[o['kind']]) for o in objects])
         self.barriers.set_visible(bool(objects))
@@ -289,7 +291,9 @@ class WidthOverlay:
         self.boxes.set_edgecolors([low_ink(tint(c,modes['截面']),low_risk(r)) for c,r in zip(colors,shown)])
         self.boxes.set_visible(bool(shown) and modes['截面']!='hide')
         board_visible=any(k in visible for k,r in w.roles().items() if r=='封装边框')
-        edges=[v for v in (data or {}).get('edge_violations',[]) if (flags[2] or not low_risk(v)) and v['layer'] in visible and board_visible and overlaps(v['geometry'].bounds,w.view_bounds)]
+        edges=[v for v in (data or {}).get('edge_violations',[]) if (flags[2] or not low_risk(v)) and v['layer'] in visible
+               and (bool(visible.intersection(v['boundary_layers'])) if v['kind']=='禁布区侵入' else board_visible)
+               and overlaps(v['geometry'].bounds,w.view_bounds)]
         self.edges.set_paths([w.geometry_patch(v['geometry']) for v in edges])
         edge_colors=[IGNORED_COLOR if all((v['layer'],i) in w.ignored_width_lines for i in v['indices']) else COLORS[BLOCKED] for v in edges]
         self.edges.set_facecolor([low_ink(tint(c,modes['边距'],.40),low_risk(v)) for c,v in zip(edge_colors,edges)])
@@ -404,7 +408,7 @@ class WidthOverlay:
             rare=sum(low_risk(r) for r in data['rows'])
             w.width_summary.setText(w.width_summary.text()+f" 已确认低概率通道 {rare} 个。")
         if data and data.get('edge_violations'):
-            w.width_summary.setText(w.width_summary.text()+f" 封装边距不足 {len(data['edge_violations'])} 个图形。")
+            w.width_summary.setText(w.width_summary.text()+f" 封装边缘或禁布区违规 {len(data['edge_violations'])} 个图形。")
     def hover(self,event):
         w = self.w
         if self.tree is None or event.inaxes is not w.ax or event.xdata is None:

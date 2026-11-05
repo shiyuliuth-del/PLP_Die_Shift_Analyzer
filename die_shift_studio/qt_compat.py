@@ -16,6 +16,7 @@ BACKGROUND=getattr(Qt,'ItemDataRole',Qt).BackgroundRole
 TOOLTIP=getattr(Qt,'ItemDataRole',Qt).ToolTipRole
 ALIGNMENT=getattr(Qt,'ItemDataRole',Qt).TextAlignmentRole
 ALIGN_RIGHT=getattr(Qt,'AlignmentFlag',Qt).AlignRight
+ALIGN_CENTER=getattr(Qt,'AlignmentFlag',Qt).AlignCenter
 ALIGN_VCENTER=getattr(Qt,'AlignmentFlag',Qt).AlignVCenter
 ASCENDING=getattr(Qt,'SortOrder',Qt).AscendingOrder
 ACCEPTED=getattr(QtWidgets.QDialog,'DialogCode',QtWidgets.QDialog).Accepted

@@ -9,6 +9,8 @@ on:
       - 'tests/gui_v32.py'
       - 'tests/gui_v33.py'
       - 'tests/test_v33.py'
+      - 'tests/test_v34.py'
+      - 'tests/gui_v34.py'
       - 'tests/test_v32.py'
       - 'tests/cuda_test_driver.cpp'
       - 'main.py'
@@ -92,6 +94,13 @@ jobs:
           "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_v33.py -v
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" tests/gui_v33.py
+      - name: Verify two yields and keepout-aware channels
+        shell: cmd
+        run: |
+          set PYTHONPATH=.;tests
+          "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_v34.py -v
+          if errorlevel 1 exit /b 1
+          "%DIE_SHIFT_PYTHON%" tests/gui_v34.py
       - name: Exercise the one-click BUILD.bat from the extracted source
         shell: cmd
         run: call "%DSA_TEST_SOURCE%\BUILD.bat"

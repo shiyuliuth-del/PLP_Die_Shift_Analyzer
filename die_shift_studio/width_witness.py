@@ -18,7 +18,8 @@ def edge_witness(row,index,model,states):
         dx,dy,angle=states[owner];pivot=model.bound.centers[owner]
         x,y=point-pivot-[dx,dy];cs,sn=math.cos(angle),math.sin(angle)
         point=pivot+[cs*x+sn*y,cs*y-sn*x]
-    return dict(kind='edge',index=int(index),nominal_point=point.tolist(),
+    return dict(kind='keepout' if row.get('kind')=='禁布区侵入' else 'edge',index=int(index),nominal_point=point.tolist(),
+                intrusion_area_um2=row.get('intrusion_area_um2',0.),
                 gap_um=row['gap_um'],required_um=row['required_um'],
                 shortfall_um=row['required_um']-row['gap_um'])
 
