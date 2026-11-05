@@ -42,7 +42,7 @@ summary=w.current_frame['width_summary'];refs=sorted(summary['lines'])
 assert len(refs)==3 and not labels().strip()
 w.set_view((0,0),380,170);w.viewport_changed(force=True);settle()
 faces=w.width_overlay.outlines.get_facecolors()
-assert len(faces)==3 and np.all((faces[:,3]>.04)&(faces[:,3]<.20))
+assert len(faces)==3 and np.all((faces[:,3]>.09)&(faces[:,3]<=.20))
 for k,cb in w.visible_boxes.items():
     if k!=refs[0][0]:cb.setChecked(False)
 settle()

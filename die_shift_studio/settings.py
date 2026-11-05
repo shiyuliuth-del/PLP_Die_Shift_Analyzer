@@ -21,6 +21,7 @@ class ViewSettings:
     width_display:dict=field(default_factory=lambda:dict(DEFAULTS),hash=False)
     width_label_font_pt:float=8.
     width_label_decimals:int=2
+    width_yield_decimals:int=6
     show_low_contact:bool=True
     show_low_width:bool=True
     cache_max_entries:int=2000
@@ -111,11 +112,11 @@ class ViewSettings:
                  'deformation_execution':('auto','serial','thread','process')}
         for key,allowed in choices.items():
             if getattr(q,key) not in allowed:raise ValueError('无效设置：'+key)
-        limits={'width_label_decimals':(0,6),'width_label_font_pt':(6,24),'drc_tolerance_um':(-10000,10000),'probability_gamma':(.1,1.),'contact_marker_size':(.1,10000),'unadapted_marker_size':(.1,10000),'deformation_min_angle_deg':(1,179),'deformation_arc_angle_deg':(1,120),'deformation_tolerance_um':(.001,1.),'sample_exponent':(8,18),'random_seed':(0,2147483647),'quadrature_order':(5,81),
+        limits={'width_yield_decimals':(0,12),'width_label_decimals':(0,6),'width_label_font_pt':(6,24),'drc_tolerance_um':(-10000,10000),'probability_gamma':(.1,1.),'contact_marker_size':(.1,10000),'unadapted_marker_size':(.1,10000),'deformation_min_angle_deg':(1,179),'deformation_arc_angle_deg':(1,120),'deformation_tolerance_um':(.001,1.),'sample_exponent':(8,18),'random_seed':(0,2147483647),'quadrature_order':(5,81),
                 'tail_sigma':(4,10),'probability_cell_um':(0,1000),'angle_bins':(4,128),
                 'footprint_samples':(1,8),'space_resolution':(31,401),
                 'animation_fps':(10,120),'animation_speed':(1,5),'camera_speed':(1,5),'contact_box_budget':(128,32768),'animation_duration_ms':(80,3000),'animation_steps':(2,60),'probability_alpha':(.05,.95),'space_alpha':(.05,.95),'intrusion_alpha':(.05,.85)}
-        integers={'width_label_decimals','animation_fps','animation_speed','camera_speed','contact_box_budget','sample_exponent','random_seed','quadrature_order','angle_bins','footprint_samples','space_resolution','animation_duration_ms','animation_steps'}
+        integers={'width_yield_decimals','width_label_decimals','animation_fps','animation_speed','camera_speed','contact_box_budget','sample_exponent','random_seed','quadrature_order','angle_bins','footprint_samples','space_resolution','animation_duration_ms','animation_steps'}
         limits.update(cache_max_entries=(10,100000),yield_sample_exponent=(8,20),yield_box_budget=(64,65536),yield_tolerance=(.000001,.1),deformation_iterations=(1,64),deformation_local_steps=(1,12),deformation_growth=(1.1,3.),
                       deformation_route_candidates=(1,256),deformation_min_length=(1,20),deformation_corner_guard=(0,3),
                       deformation_joint_rounds=(0,32),deformation_workers=(0,16),safe_box_precision=(.0001,.1),

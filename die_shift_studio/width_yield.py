@@ -1,5 +1,6 @@
 """Joint package probabilities on the original RDL. Shared poses, never marginal products."""
 from dataclasses import replace
+from decimal import Decimal,ROUND_HALF_EVEN,ROUND_FLOOR,ROUND_CEILING
 import math
 import numpy as np
 from scipy.special import ndtr,ndtri
@@ -70,29 +71,66 @@ def packed_events(red,yellow,weights=None):
 
 def policy_yields(bank,ignored):
     """Union event masks by sample before weighting. Ignoring needs no geometry rerun."""
-    passed=np.zeros(3);mass=0.;samples=0
+    lost=np.zeros(3);passed=np.zeros(3);mass=0.;samples=0
     for n,all_risk,red,per_line,weights in bank['chunks']:
         ignored_hit=0
         for ref in ignored:ignored_hit|=per_line.get(ref,0)
         failures=(all_risk,red|ignored_hit,ignored_hit)
         samples+=n
         if weights is None:
-            mass+=n;passed+=[n-int(mask).bit_count() for mask in failures]
+            mass+=n;counts=np.array([int(mask).bit_count() for mask in failures])
+            lost+=counts;passed+=n-counts
         else:
             mass+=float(weights.sum())
             for i,mask in enumerate(failures):
-                safe=np.fromiter((not (mask>>j)&1 for j in range(n)),bool,count=n)
-                passed[i]+=weights[safe].sum()
+                failed=np.fromiter((bool((mask>>j)&1) for j in range(n)),bool,count=n)
+                lost[i]+=weights[failed].sum();passed[i]+=weights[~failed].sum()
     if not mass:return None
-    estimates=passed/mass
-    intervals=None
+    failure=lost/mass;estimates=passed/mass
+    intervals=None;failure_intervals=None
+    proven=[bank['method']=='exact']*3
+    if not ignored:proven[2]=True
     if bank['method']=='mc':
         alpha=.01/3
-        intervals=[(float(beta.ppf(alpha/2,s,samples-s+1)) if s else 0.,
-                    float(beta.ppf(1-alpha/2,s+1,samples-s)) if s<samples else 1.) for s in passed]
-        if not ignored:intervals[2]=(1.,1.)
-    return dict(values=estimates,intervals=intervals,samples=samples,
+        failure_intervals=[(float(beta.ppf(alpha/2,s,samples-s+1)) if s else 0.,
+                            float(beta.isf(alpha/2,s+1,samples-s)) if s<samples else 1.) for s in lost]
+        if not ignored:failure_intervals[2]=(0.,0.)
+        intervals=[(1-high,1-low) for low,high in failure_intervals]
+    return dict(values=estimates,failure_probability=failure,proven=proven,
+                intervals=intervals,failure_intervals=failure_intervals,samples=samples,
                 total=bank['total'],method=bank['method'])
+
+
+def percentage_text(value,failure,decimals,rounding=ROUND_HALF_EVEN):
+    """Preserve a small positive failure even when floating-point yield is 1."""
+    quantum=Decimal(1).scaleb(-decimals)
+    y=Decimal(str(float(value)))*100
+    f=Decimal(str(float(failure)))*100
+    def scientific(number,direction):
+        unit=Decimal(1).scaleb(number.adjusted()-decimals)
+        return format(number.quantize(unit,rounding=direction),f'.{decimals}E').replace('E','e')+'%'
+    if f>0 and y.quantize(quantum,rounding=ROUND_HALF_EVEN)==100:
+        direction={ROUND_FLOOR:ROUND_CEILING,ROUND_CEILING:ROUND_FLOOR}.get(rounding,rounding)
+        return '100%−'+scientific(f,direction)
+    if y>0 and y<quantum:return scientific(y,rounding)
+    return format(y.quantize(quantum,rounding=rounding),f'.{decimals}f')+'%'
+
+
+def policy_texts(result,decimals):
+    """One-sided confidence bounds for unsampled tails, never a fabricated exact 100%."""
+    texts=[]
+    failures=result.get('failure_probability',[1-v for v in result['values']])
+    proven_flags=result.get('proven',[result['method']=='exact']*3)
+    endpoint=any((v==0 or f==0) and not proven for v,f,proven in zip(result['values'],failures,proven_flags))
+    for i,(value,failure,proven) in enumerate(zip(result['values'],failures,proven_flags)):
+        if proven:
+            texts.append('100%' if value==1 else '0%' if value==0 else percentage_text(value,failure,decimals))
+        elif endpoint and result.get('failure_intervals'):
+            lo,_=result['intervals'][i];_,fhi=result['failure_intervals'][i]
+            texts.append('≥'+percentage_text(lo,fhi,decimals,ROUND_FLOOR))
+        elif failure==0 or value==0:texts.append('待细化')
+        else:texts.append('≈'+percentage_text(value,failure,decimals))
+    return texts
 
 
 def measure_width_yield(model,params,cfg,cache_group,progress,partial=None):

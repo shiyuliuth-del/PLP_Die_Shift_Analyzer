@@ -10,7 +10,7 @@ from die_shift_studio.fast_preview import GeometryCache
 from die_shift_studio.stack import Connections
 from die_shift_studio.contact import ContactModel
 from die_shift_studio.settings import ViewSettings
-from die_shift_studio.width_yield import measure_width_yield,policy_yields
+from die_shift_studio.width_yield import measure_width_yield,policy_yields,policy_texts
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--gds',required=True,type=Path)
@@ -37,7 +37,9 @@ def main():
                 sigma=6,samples=4096,seed=cfg.random_seed,first_result_seconds=first[0] if first else full,
                 complete_seconds=full,ignored_reclassification_median_seconds=float(np.median(timings)),
                 original_values=policy_yields(bank,[])['values'].tolist(),
+                original_display=policy_texts(policy_yields(bank,[]),cfg.width_yield_decimals),
                 ignore_all_sampled_problem_lines_values=policy_yields(bank,refs)['values'].tolist(),
+                ignore_all_sampled_problem_lines_display=policy_texts(policy_yields(bank,refs),cfg.width_yield_decimals),
                 risky_source_count=len(refs),sampling='joint independent Monte Carlo on the complete bounded support')
     args.output.write_text(json.dumps(report,indent=2)+'\n')
     print(json.dumps(report))

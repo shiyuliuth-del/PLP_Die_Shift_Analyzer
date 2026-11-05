@@ -80,12 +80,15 @@ def main():
     all_refs={r for item in w.current_frame['width_analysis']['rows'] if item['status']!='宽度足够' for r in item['refs']}
     w.change_width_ignores(all_refs,True);settle()
     assert not any(a.get_visible() for a in w.width_overlay.labels)
+    bank_before=w.width_yield.bank
+    w.setting_fields['width_yield_decimals'].setValue(3);settle()
+    assert w.width_yield.bank is bank_before
     with patch.object(W.QInputDialog,'getText',return_value=('width choices',True)):
         w.save_project()
     if os.environ.get('DSA_GUI_CAPTURE'):
         w.grab().save(os.environ['DSA_GUI_CAPTURE'])
     saved=w.project_path;record=json.loads(saved.read_text())
-    assert record['ignored_width_lines']['refs']
+    assert record['ignored_width_lines']['refs'] and record['settings']['width_yield_decimals']==3
     w.load_project(saved);settle();assert w.ignored_width_lines==all_refs
     # M/pose changes and visibility must reuse the same whole-input distribution.
     bank=w.width_yield.bank
@@ -105,6 +108,7 @@ def main():
         legacy=dict(q);legacy['overlays']={}
         w.set_data(w.data,legacy)
     settle();assert not w.ignored_width_lines and not w.width_yield.action.isVisible()
+    assert w.view_settings.width_yield_decimals==6
     w.close();settle();tmp.cleanup()
     print('GUI_V33_PASS actual right-click pick/menu, blank click, green ignore, cached policy updates, saved/old jobs, stale worker')
 

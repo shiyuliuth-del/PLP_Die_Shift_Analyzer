@@ -15,7 +15,8 @@
 
 - 干净源码快照通过 300 项核心测试、15 组 Qt 界面回归、两种 KLayout 后端启动及 16 个示例工程。随后补验最终报告更新逻辑和有限级别/∞ 之间的分布缓存复用，具体源码提交记录在[验收清单](package_verification.json)。
 - Windows Python 3.13 的干净与已装 CuPy 两组环境通过新核心/右键 GUI、源包 BUILD.bat、单文件程序启动、旧工程保留及概率/DRC。该 Windows 环境使用合成图纸，GD55 由本机外部文件验收。[最终运行代码的 Windows 记录](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/actions/runs/41961938595)
-- 正式源码 ZIP 包含 95 个运行/构建源文件，1,028,723 字节，SHA-256 为 `76d11fbe0c3d138c98d3ebc648b77b6a14250e1f059127cd88bf18ac2e9e9a96`。Windows 运行入口为 RUN.bat，构建入口为 BUILD.bat。
+- 验收期间用户反馈近 100% 数值无法区分。独立累计成功/失效质量，微小失效显示为科学计数法的百分比余量。未命中尾部时统一显示 99% 置信下限，确定性积分未分辨时显示待细化。新增可保存的 `width_yield_decimals`，默认 6，范围 0–12。三档风险填充略微加深，数字更新时工具栏高度固定。
+- Windows 运行入口为 RUN.bat，构建入口为 BUILD.bat。最终资产清单和校验值随发布记录。
 
 ## 2026-11-03 · V32 · Windows 构建体积与 GPU 后端
 

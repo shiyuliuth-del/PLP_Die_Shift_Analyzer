@@ -7,7 +7,7 @@ from scipy.stats import binomtest
 from die_shift_studio.core import Parameters
 from die_shift_studio.settings import ViewSettings
 from die_shift_studio.project import normalize_project,restored_width_ignores
-from die_shift_studio.width_yield import joint_batches,policy_yields,packed_events,measure_width_yield
+from die_shift_studio.width_yield import joint_batches,policy_yields,packed_events,measure_width_yield,policy_texts
 from die_shift_studio.width_yield_geometry import WidthEvents
 from die_shift_studio.width_analysis import WidthAnalyzer,ADEQUATE,BLOCKED
 from die_shift_studio.edge_clearance import edge_violations
@@ -26,6 +26,26 @@ class JointPolicyTests(unittest.TestCase):
         # Overlapping red and yellow events count once per package.
         bank['chunks']=(packed_events([{a,b},{a},set(),set()],[{a},set(),set(),set()]),)
         np.testing.assert_array_equal(policy_yields(bank,[])['values'],[.5,.5,1.])
+
+    def test_unsampled_failures_and_tiny_weighted_tails_remain_visible(self):
+        ref=('5/0',0)
+        bank=dict(method='mc',total=4096,chunks=(packed_events([set()]*4096,[set()]*4096),))
+        stats=policy_yields(bank,[])
+        text=policy_texts(stats,6)
+        self.assertTrue(text[0].startswith('≥99.'));self.assertTrue(text[1].startswith('≥99.'))
+        self.assertEqual(text[2],'100%')
+        bank=dict(method='cubature',total=2,chunks=(packed_events([{ref},set()],[set(),set()],np.array([1e-40,1.])),))
+        stats=policy_yields(bank,[ref]);self.assertGreater(stats['failure_probability'][0],0)
+        for digits in (0,2,6,12):
+            text=policy_texts(stats,digits)
+            self.assertTrue(all('100%−' in x and 'e-38%' in x for x in text),text)
+        bank['chunks']=(packed_events([{ref},set()],[set(),set()],np.array([1.,1e-40])),)
+        text=policy_texts(policy_yields(bank,[ref]),6)
+        self.assertTrue(all('e-38%' in x and '100%' not in x for x in text),text)
+        bank['chunks']=(packed_events([set()],[set()],np.ones(1)),)
+        self.assertEqual(policy_texts(policy_yields(bank,[ref]),6),['待细化']*3)
+        self.assertEqual(ViewSettings.from_dict({}).width_yield_decimals,6)
+        self.assertEqual(ViewSettings.from_dict({'width_yield_decimals':10}).width_yield_decimals,10)
 
     def test_continuous_law_independent_dies_and_correlated_xy(self):
         p=replace(Parameters(),multi_bound_x_um=35,multi_bound_y_um=35,bound_angle_deg=0,target_nsigma=2)

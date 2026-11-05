@@ -204,7 +204,7 @@ class WidthOverlay:
                 edge=ink if ignored else (.45*ink+.43 if uncertain else .46*ink+.28)
                 factor=.62 if mode=='dim' else 1.
                 colors.append((*edge,(.61 if uncertain else .82)*factor))
-                faces.append((*ink,(.09 if uncertain else .14)*factor))
+                faces.append((*ink,(.14 if uncertain else .20)*factor))
                 dashes.append((0,(4,2.4)) if uncertain else 'solid')
             self.outlines.set_paths(paths);self.outlines.set_edgecolors(colors);self.outlines.set_facecolors(faces)
             self.outlines.set_linestyles(dashes or ['solid']);self.outlines.set_visible(bool(paths));self.summary_stamp=stamp
@@ -285,14 +285,14 @@ class WidthOverlay:
         self.barriers.set_visible(bool(objects))
         self.boxes.set_paths([w.geometry_patch(g) for g in rectangles])
         colors = [IGNORED_COLOR if ignored_row(r,w.ignored_width_lines) else COLORS[r['status']] for r in shown]
-        self.boxes.set_facecolors([low_ink(tint(c,modes['截面'],.14),low_risk(r)) for c,r in zip(colors,shown)])
+        self.boxes.set_facecolors([low_ink(tint(c,modes['截面'],.20),low_risk(r)) for c,r in zip(colors,shown)])
         self.boxes.set_edgecolors([low_ink(tint(c,modes['截面']),low_risk(r)) for c,r in zip(colors,shown)])
         self.boxes.set_visible(bool(shown) and modes['截面']!='hide')
         board_visible=any(k in visible for k,r in w.roles().items() if r=='封装边框')
         edges=[v for v in (data or {}).get('edge_violations',[]) if (flags[2] or not low_risk(v)) and v['layer'] in visible and board_visible and overlaps(v['geometry'].bounds,w.view_bounds)]
         self.edges.set_paths([w.geometry_patch(v['geometry']) for v in edges])
         edge_colors=[IGNORED_COLOR if all((v['layer'],i) in w.ignored_width_lines for i in v['indices']) else COLORS[BLOCKED] for v in edges]
-        self.edges.set_facecolor([low_ink(tint(c,modes['边距'],.34),low_risk(v)) for c,v in zip(edge_colors,edges)])
+        self.edges.set_facecolor([low_ink(tint(c,modes['边距'],.40),low_risk(v)) for c,v in zip(edge_colors,edges)])
         self.edges.set_edgecolor([low_ink(tint(c,modes['边距']),low_risk(v)) for c,v in zip(edge_colors,edges)])
         self.edges.set_visible(bool(edges) and modes['边距']!='hide')
         # Use the displayed replacement geometry when a source wire was deformed.
@@ -341,7 +341,7 @@ class WidthOverlay:
         for status,artist in self.inset.items():
             color=IGNORED_COLOR if status==IGNORED else dark(COLORS[status])
             artist.set_paths(fill_paths[status])
-            artist.set_facecolor([low_ink(tint(color,ink_mode,.32),q) for q in fill_low[status]])
+            artist.set_facecolor([low_ink(tint(color,ink_mode,.40),q) for q in fill_low[status]])
             artist.set_edgecolor([low_ink(tint(color,ink_mode,.5),q) for q in fill_low[status]])
             artist.set_visible(bool(fill_paths[status]))
         self.rows = shown

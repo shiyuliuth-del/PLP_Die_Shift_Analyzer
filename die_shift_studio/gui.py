@@ -525,6 +525,8 @@ class MainWindow(W.QMainWindow):
         self.setting_fields['yield_box_budget'].setToolTip('宽度联合积分取预算以内最大的2次幂节点数，无接触积分按每DIE分配状态盒。')
         self.setting_fields['safe_box_precision'].setToolTip('返回包含输入均值的安全内盒；多个端点顺序比较体积。未定候选拒绝，精度不代表全局最优误差。')
         channel=group('宽度分析 · 元素显示')
+        spin(channel,'width_yield_decimals','良率小数位数',0,12)
+        self.setting_fields['width_yield_decimals'].setToolTip('接近100%时以100%减去科学计数法失效概率显示；未采到事件时显示区间界限。')
         drawing_modes=WidthDisplayEditor();self.setting_fields['width_display']=drawing_modes
         channel.addRow(drawing_modes);drawing_modes.valueChanged.connect(self.settings_changed)
         text_row=W.QHBoxLayout();text_row.setContentsMargins(0,0,0,0)
@@ -621,11 +623,11 @@ class MainWindow(W.QMainWindow):
                     self.draw_contact_ranges();self.refresh_legend();self.update_die_label_visibility();self.render_scene()
                 else:self._layout_pending=True
             return
-        presentation=('width_display','width_label_font_pt','width_label_decimals','show_low_contact','show_low_width',*ranges)
+        presentation=('width_display','width_label_font_pt','width_label_decimals','width_yield_decimals','show_low_contact','show_low_width',*ranges)
         if all(getattr(updated,k)==getattr(self.view_settings,k) for k in values if k not in (*presentation,'cache_max_entries')):
             display_change=any(getattr(updated,k)!=getattr(self.view_settings,k) for k in presentation)
             self.view_settings=updated;self.cache_group.limit(updated.cache_max_entries);self.refresh_cache_status()
-            if display_change and self.data:self._legend_stamp=None;self.plot_layout(preserve=True)
+            if display_change and self.data:self._legend_stamp=None;self.plot_layout(preserve=True);self.width_yield.render()
             return
         intent=self._motion_intent if self.transition.timer.isActive() else None
         self.stop_animation()
