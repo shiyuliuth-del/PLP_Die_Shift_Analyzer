@@ -279,6 +279,14 @@ def report_document(r,motions=None,progress=lambda *_:None):
              'M 为已计算整包姿态数，独立蒙特卡洛取 wₘ=1，确定性条件求积使用条件截断质量的乘积权重。'
              '每个整包姿态先合并所有线路事件，再积分得到 Yⱼ。第二、三项按相应颜色的修复假设计算。')
         if policy.get('intervals'):
+            step('三项宽度良率的有限样本区间',
+                 f'已求解 {policy["samples"]} 个独立整包状态，忽略集合固定，联合置信度99%。',
+                 [r'S_j=\sum_{m=1}^{M}\mathbf{1}_{\{\mathbf{z}_m\notin F_j\}},\quad\alpha=0.01',
+                  r'L_j=Q_{\mathrm{Beta}}\!\left(\frac{\alpha}{6};S_j,M-S_j+1\right)',
+                  r'U_j=Q_{\mathrm{Beta}}\!\left(1-\frac{\alpha}{6};S_j+1,M-S_j\right)'],
+                 '三项区间见下表；未分辨尾部时，图中用≥显示相应下限。',
+                 'Sⱼ 是第 j 项策略下成功的整包状态数，M 是状态总数。QBeta(p;a,b) 是形状参数 a、b 的 Beta 分布累积概率 p 对应的分位数。'
+                 'α/6 分配给三项的上下两侧。Sⱼ=0 时下限为0，Sⱼ=M时上限为1。全输入几何证明及无忽略线路的第三项使用可证精确值。')
             fail_intervals=policy.get('failure_intervals') or [(1-b,1-a) for a,b in policy['intervals']]
             decimals=policy.get('decimals',6)
             rows=[[name,percentage_text(a,fhi,decimals,ROUND_FLOOR),percentage_text(b,flo,decimals,ROUND_CEILING)]

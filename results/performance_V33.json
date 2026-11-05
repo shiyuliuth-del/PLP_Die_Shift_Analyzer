@@ -31,5 +31,16 @@
     0.999755859375
   ],
   "risky_source_count": 1,
-  "sampling": "joint independent Monte Carlo on the complete bounded support"
+  "sampling": "joint independent Monte Carlo on the complete bounded support",
+  "original_display": [
+    "≥99.788637%",
+    "≥99.843946%",
+    "100%"
+  ],
+  "ignore_all_sampled_problem_lines_display": [
+    "≈99.975586%",
+    "≈99.975586%",
+    "≈99.975586%"
+  ],
+  "display_note": "A zero observed tail uses simultaneous 99% lower bounds for the non-certified policies. Tiny nonzero failure mass is formatted independently of rounded yield."
 }

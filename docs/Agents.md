@@ -13,8 +13,8 @@
 - GD55 的 24 个完整三 DIE 姿态含八种正负角点，与原始完整宽度帧逐线路核对一致。独立解析测试覆盖共享失效的并集、两个 DIE 的独立性、XY 相关及完全相关、锁零轴和旧工程。真实 Qt 事件覆盖右键命中、既有选集、空白无响应、绿色、工程恢复、缓存复用、过期任务和报告公式。
 - GD55 4096 个整包姿态的本机 CPU 测量，首个结果 2.81 s、完成 14.39 s，忽略集合重分类中位 0.74 ms。[完整测量设置与结果](../results/performance_V33.json)
 
-- 干净源码快照通过 300 项核心测试、15 组 Qt 界面回归、两种 KLayout 后端启动及 16 个示例工程。随后补验最终报告更新逻辑和有限级别/∞ 之间的分布缓存复用，具体源码提交记录在[验收清单](package_verification.json)。
-- Windows Python 3.13 的干净与已装 CuPy 两组环境通过新核心/右键 GUI、源包 BUILD.bat、单文件程序启动、旧工程保留及概率/DRC。该 Windows 环境使用合成图纸，GD55 由本机外部文件验收。[最终运行代码的 Windows 记录](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/actions/runs/41961938595)
+- 含高精度显示修订的干净源码快照通过 301 项核心测试、15 组 Qt 界面回归、两种 KLayout 后端启动及 16 个示例工程。随后补验最终报告更新逻辑和有限级别/∞ 之间的分布缓存复用，具体源码提交记录在[验收清单](package_verification.json)。
+- Windows Python 3.13 的干净与已装 CuPy 两组环境通过新核心/右键 GUI、源包 BUILD.bat、单文件程序启动、旧工程保留及概率/DRC。该 Windows 环境使用合成图纸，GD55 由本机外部文件验收。[最终运行代码的 Windows 记录](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/actions/runs/41965415978)
 - 验收期间用户反馈近 100% 数值无法区分。独立累计成功/失效质量，微小失效显示为科学计数法的百分比余量。未命中尾部时统一显示 99% 置信下限，确定性积分未分辨时显示待细化。新增可保存的 `width_yield_decimals`，默认 6，范围 0–12。三档风险填充略微加深，数字更新时工具栏高度固定。
 - Windows 运行入口为 RUN.bat，构建入口为 BUILD.bat。最终资产清单和校验值随发布记录。
 

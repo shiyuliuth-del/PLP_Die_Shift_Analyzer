@@ -1,7 +1,7 @@
 {
   "version": "V33",
   "status": "PASS",
-  "tested_at_utc": "2026-11-05T03:36:20.758683+00:00",
+  "tested_at_utc": "2026-11-05T04:09:57.970087+00:00",
   "scope": "Clean source checkout, local platform. Windows executable verification is recorded separately.",
   "platform": "linux",
   "gui_suites": 15,
@@ -20,7 +20,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "Ran 300 tests in 245.744s",
+        "Ran 301 tests in 71.932s",
         "",
         "OK"
       ]
@@ -52,7 +52,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "GUI_V20_PASS {'status': 'PASS', 'accepted': 2, 'modes': ['axial', 'axial'], 'animation_enabled_during_revisits': True, 'dashed_middle_band': True, 'first_animation_frames': 3, 'cached_animation_frames': 4, 'hidden_layer_hides_deformation': True, 'report_formula_rendered': True, 'repeated_pose_switches': 18, 'repeated_switch_median_ms': 700.8563944837078, 'project_switch_keeps_results': True, 'zero_restore_ms': 34.139836963731796, 'clear_all_projects_bytes': 0}"
+        "GUI_V20_PASS {'status': 'PASS', 'accepted': 2, 'modes': ['axial', 'axial'], 'animation_enabled_during_revisits': True, 'dashed_middle_band': True, 'first_animation_frames': 4, 'cached_animation_frames': 3, 'hidden_layer_hides_deformation': True, 'report_formula_rendered': True, 'repeated_pose_switches': 18, 'repeated_switch_median_ms': 697.0203910022974, 'project_switch_keeps_results': True, 'zero_restore_ms': 9.10154398297891, 'clear_all_projects_bytes': 0}"
       ]
     },
     {
@@ -72,7 +72,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "GUI_V23_CHANNEL_PASS {'status': 'PASS', 'extreme_and_m_key_pad_motion': True, 'independent_die_stacks': True, 'channel_counts': [3, 3, 2], 'three_risk_classes': True, 'project_roundtrip': True, 'legacy_defaults': True, 'reconstruction_gap_um': 35.0, 'reconstruction_seam_um': 32.0, 'reconstruction_cover_area_um2': 1120.0, 'animation_frames_seen': 55, 'cached_replay': True, 'layer_visibility': True, 'table_focus': True, 'report_formulas': True}"
+        "GUI_V23_CHANNEL_PASS {'status': 'PASS', 'extreme_and_m_key_pad_motion': True, 'independent_die_stacks': True, 'channel_counts': [3, 3, 2], 'three_risk_classes': True, 'project_roundtrip': True, 'legacy_defaults': True, 'reconstruction_gap_um': 35.0, 'reconstruction_seam_um': 32.0, 'reconstruction_cover_area_um2': 1120.0, 'animation_frames_seen': 61, 'cached_replay': True, 'layer_visibility': True, 'table_focus': True, 'report_formulas': True}"
       ]
     },
     {
@@ -461,27 +461,27 @@
       "discrete_states": 27
     }
   ],
-  "source_snapshot": "5c7c18c661c72a9a9f3849d577123b3ef8d3944f",
-  "followup_runtime_commit": "30f8f741e0e53598b68f8d376cbe510d9766f664",
+  "source_snapshot": "f1cbf3a0aea97faaee57a2d985a11628927b38d5",
   "followup_checks": [
-    {
-      "args": [
-        "tests/gui_smoke.py"
-      ],
-      "status": "PASS",
-      "scope": "Final report-update code through the normal GUI workflow"
-    },
     {
       "args": [
         "tests/gui_v33.py"
       ],
       "status": "PASS",
-      "scope": "Final report snapshot and finite/infinity probability-cache reuse"
+      "scope": "Typeset confidence-interval formulas, precision save/restore and menu behaviour",
+      "report_sha256": "31c7cdac101ee2e195d554ebcd12864fec41c420f8b1c6508a4bd9cfc5d0cac7"
     },
     {
-      "url": "https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/actions/runs/41961938595",
+      "scope": "232px-wide label, three policies at 12 decimal places",
       "status": "PASS",
-      "scope": "Final runtime source built and started on Windows, clean and CuPy environments"
+      "font_px": 10,
+      "required_height_px": 36,
+      "available_height_px": 44
+    },
+    {
+      "url": "https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/actions/runs/41965415978",
+      "status": "PASS",
+      "scope": "Scientific precision and unobserved tails, native Windows source and one-file build, clean/CuPy"
     }
   ]
 }
