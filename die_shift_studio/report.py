@@ -268,8 +268,8 @@ def report_document(r,motions=None,progress=lambda *_:None):
         step('整包三种宽度策略良率',
              f'原始 RDL、逐芯片输入范围及真实旋转中心。已计算 {policy["samples"]}/{policy["total"]} 个整包姿态，概率尺度 {policy["scale_nsigma"]:g}σ。',
              [r'F_1=R\cup A\cup I,\quad F_2=R\cup I,\quad F_3=I',
-              r'Y_j=\int_H\mathbf{1}_{\{\boldsymbol{z}\notin F_j\}}f_H(\boldsymbol{z})\,d\boldsymbol{z}',
-              r'\widehat{Y}_j=\frac{\sum_{m=1}^M w_m\mathbf{1}_{\{\boldsymbol{z}_m\notin F_j\}}}{\sum_{m=1}^M w_m}'],
+              r'Y_j=\int_H\mathbf{1}_{\{\mathbf{z}\notin F_j\}}f_H(\mathbf{z})\,d\mathbf{z}',
+              r'\widehat{Y}_j=\frac{\sum_{m=1}^M w_m\mathbf{1}_{\{\mathbf{z}_m\notin F_j\}}}{\sum_{m=1}^M w_m}'],
              '原图 '+fmt(policy['values'][0]*100,4)+'% · 修黄 '+fmt(policy['values'][1]*100,4)+'% · 修红黄 '+fmt(policy['values'][2]*100,4)+'%。',
              'z 包含全部 DIE 的 X、Y、转角。H 是每轴输入最大幅度构成的联合硬边界，f_H 是在 H 内归一化的联合正态密度。'
              '同一 DIE 的所有孔盘使用同一姿态，独立 DIE 联合抽取。R、A 分别是任一线路红色、黄色的事件集合，I 是被忽略线路发生红色或黄色问题的事件集合。'

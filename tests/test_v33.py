@@ -1,6 +1,7 @@
 """Independent event unions, continuous laws, exact geometry parity and saved ignores."""
 from dataclasses import replace
-import math,unittest
+import math,os,unittest
+from pathlib import Path
 import numpy as np
 from scipy.stats import binomtest
 from die_shift_studio.core import Parameters
@@ -90,6 +91,36 @@ class SceneParityTests(unittest.TestCase):
                         expected[0].update((row['layer'],j) for j in row['indices'])
                     self.assertEqual([red[i],yellow[i]],expected,(name,i))
             finally:analyzer.close();engine.close()
+
+    @unittest.skipUnless(os.environ.get('DIE_SHIFT_TEST_GDS') and Path(os.environ['DIE_SHIFT_TEST_GDS']).is_file(),
+                         'External GD55 is supplied by the local acceptance run')
+    def test_gd55_three_die_joint_events_match_complete_frames(self):
+        from die_shift_studio.core import read_gds,build_case
+        from die_shift_studio.fast_preview import PreviewEngine,GeometryCache
+        from die_shift_studio.stack import Connections
+        data=read_gds(Path(os.environ['DIE_SHIFT_TEST_GDS']))
+        used=dict(zip(('127/0','128/0','3/0','4/0','5/0','6/0'),
+                      ('封装边框','芯片边框','运动RDL','运动过孔','固定RDL','固定过孔')))
+        roles={k:used.get(k,'不参与') for k in data.layers};order=['6/0','5/0','4/0','3/0']
+        cache=GeometryCache(data);con=Connections(data,roles,order,cache.geometries)
+        case=build_case(data,roles,connections=con);p=Parameters()
+        engine=PreviewEngine(cache,case,roles,{},p,None,con)
+        analyzer=WidthAnalyzer(engine.contact,p,ViewSettings());analyzer.probability=None
+        try:
+            events=WidthEvents(analyzer,p,lambda *_:None)
+            n=len(case['dies']);self.assertEqual(n,3)
+            z=np.random.default_rng(335).uniform(-1,1,(24,n,3))*[35,35,math.radians(1)]
+            from itertools import product
+            for j,signs in enumerate(product((-1,1),repeat=3)):z[j]=np.array(signs)*[35,35,math.radians(1)]
+            z[8]=0;red,yellow=events.classify(z)
+            for i,state in enumerate(z):
+                expected=[set(),set()]
+                for row in analyzer.frame({'states':state},quick=True)['rows']:
+                    if row['status']!=ADEQUATE:expected[row['status']!=BLOCKED].update(row['refs'])
+                for row in edge_violations(engine.contact,state,p,ViewSettings()):
+                    expected[0].update((row['layer'],j) for j in row['indices'])
+                self.assertEqual([red[i],yellow[i]],expected,i)
+        finally:analyzer.close();engine.close()
 
     def test_ignored_refs_are_bound_to_the_source_and_old_jobs_default_empty(self):
         data,project,_,_,engine=example('示例O_运动网络三线路通道')

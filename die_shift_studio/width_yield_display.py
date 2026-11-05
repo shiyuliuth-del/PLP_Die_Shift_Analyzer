@@ -110,7 +110,7 @@ class WidthYieldDisplay:
         tip=['原图：红、黄或被忽略线路出现问题即失效。','修黄：红色或被忽略线路出现问题即失效。',
              '修红黄：被忽略线路出现问题即失效。',f'{method} · {q["samples"]}/{q["total"]} 个整包姿态，按原始 RDL 和全部输入范围计算。']
         if q['intervals']:
-            tip.append('三项联合 99% 置信区间：'+'，'.join(f'{100*a:.3f}%–{100*b:.3f}%' for a,b in q['intervals']))
+            tip.append('固定忽略集合下三项联合 99% 置信区间：'+'，'.join(f'{100*a:.3f}%–{100*b:.3f}%' for a,b in q['intervals']))
         elif q['method']=='cubature':tip.append('数值积分估计，精度可通过增加积分预算复核。')
         tip.append(f'概率尺度 {self.bank["scale_nsigma"]:g}σ；0/∞ 沿用最近有限级别。')
         self.label.setToolTip('\n'.join(tip))
