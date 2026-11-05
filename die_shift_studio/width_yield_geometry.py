@@ -1,0 +1,134 @@
+"""Per-package width events on the source RDL, using the preview's physical gates."""
+from collections import defaultdict
+from types import SimpleNamespace
+import math
+import numpy as np
+import shapely
+from .neighbor_channels import occupied
+from .statistics import mean_and_bounds
+from .width_analysis import ADEQUATE,BLOCKED,section_subset
+from .width_summary import sweep_sections
+
+
+class RiskPlane:
+    def __init__(self,analyzer,plane,params):
+        self.analyzer=analyzer
+        walls=plane['walls']
+        shapes=np.asarray([w.geometry for w in walls],object)
+        owners=np.asarray([w.owner for w in walls],int)
+        self.template=analyzer._templates(shapes,owners)
+        self.walls=walls
+        self.name=plane['keys'][0].split('/')[0]
+        gates=plane['gates']
+        self.local=None
+        if not gates:return
+        # The whole-support proof only removes entire source-mouth groups.
+        # A third landing can suppress a parent section; its own adjacent pair
+        # has a separate catalogue entry and is tested independently.
+        count=len(analyzer.model.bound.centers)
+        travel=np.zeros(len(walls));hulls=[];inside=[]
+        for i,w in enumerate(walls):
+            xy=shapely.get_coordinates(w.geometry.convex_hull)
+            hulls.append(xy)
+            if w.owner>=0:
+                mu,b=mean_and_bounds(params.for_die(w.owner),count)
+                radius=np.linalg.norm(xy-analyzer.model.bound.centers[w.owner],axis=1).max()
+                travel[i]=np.linalg.norm(abs(mu[:2])+b[:2])+2*radius*math.sin(min(math.pi,abs(mu[2])+b[2])/2)
+            box=np.array(w.geometry.bounds)+travel[i]*np.array([-1,-1,1,1])
+            inside.append(analyzer.inside.covers(shapely.box(*box) if travel[i] else w.geometry))
+        convex=analyzer.board.equals(analyzer.board.convex_hull)
+        zero=np.zeros((count,3))
+        _,_,_,gap,within,_,order,_=analyzer._sections(plane,zero,shapes,False)
+        risky=set()
+        self.half=.65*(analyzer.width+analyzer.space)
+        for k,g in enumerate(gates):
+            a,b=g.pair
+            need=sum(max(analyzer.width,w) for w in g.widths)+(len(g.widths)+1)*analyzer.space
+            if travel[a]==travel[b]==0:
+                safe=within[k] and order[k] and min(gap[k],g.nominal_gap)>need+analyzer.tol
+            elif convex and inside[a] and inside[b] and not any(plane['local'][list(g.features)]):
+                axis=(g.ends[1]-g.ends[0])/g.nominal_gap
+                clearance=(hulls[b]@axis).min()-(hulls[a]@axis).max()
+                relative=0. if owners[a]==owners[b] else travel[a]+travel[b]
+                safe=clearance-relative>need+analyzer.tol
+            else:safe=False
+            if not safe:risky.add((g.pair,g.strand_refs))
+        ids=[i for i,g in enumerate(gates) if (g.pair,g.strand_refs) in risky]
+        if not ids:return
+        self.local=section_subset(plane,ids,range(len(walls)))
+        self.groups=defaultdict(list)
+        self.need=[]
+        for i,g in enumerate(self.local['gates']):
+            self.groups[g.pair,g.strand_refs].append(i)
+            self.need.append(sum(max(analyzer.width,w) for w in g.widths)+(len(g.widths)+1)*analyzer.space)
+        self.need=np.array(self.need)
+        self.owners=tuple(sorted({w.owner for w in walls if w.owner>=0}))
+
+    def events(self,states,red,yellow):
+        if self.local is None:return
+        n,ndie,_=states.shape
+        local=self.local;gates=local['gates'];tol=self.analyzer.tol
+        banks=[np.vstack((np.zeros(3),states[:,k])) for k in range(ndie)]
+        grid=SimpleNamespace(locals=banks,radices=[n+1]*ndie,count=ndie)
+        offset=0
+        for ends,gaps in sweep_sections(self.analyzer,local,grid,self.owners,lambda _:None,paired=True):
+            for j in np.flatnonzero(np.any(gaps<=self.need+tol,axis=1)):
+                pos=offset+j
+                if not states[pos].any():
+                    # The nominal preview retains tied nominal stations verbatim.
+                    continue
+                alert=np.flatnonzero(gaps[j]<=self.need+tol)
+                groups={(gates[k].pair,gates[k].strand_refs) for k in alert}
+                ids=[i for group in groups for i in self.groups[group]]
+                pairs=np.asarray([gates[i].pair for i in ids])
+                geo=self.analyzer._placed(self.template,states[pos],False)
+                covered=occupied(ends[j,ids],pairs,self.walls,geo,self.half,tol)
+                candidates=[]
+                for station,i in enumerate(ids):
+                    if station in covered:continue
+                    g=gates[i];a,b=(self.walls[k] for k in g.pair)
+                    refs=tuple(sorted({ref for strand in g.strand_refs for ref in strand}))
+                    row=self.analyzer._row(self.name,local,a,b,g.nominal_gap,gaps[j,i],ends[j,i].mean(axis=0),
+                                           np.zeros(2),g.widths,refs,0,False,False)
+                    candidates.append((g,row))
+                for row in self.analyzer._distinct_throats(candidates,self.half):
+                    if row['status']!=ADEQUATE:
+                        (red[pos] if row['status']==BLOCKED else yellow[pos]).update(row['refs'])
+            offset+=len(gaps)
+
+
+class WidthEvents:
+    def __init__(self,analyzer,params,progress):
+        self.analyzer=analyzer;self.params=params;self.model=analyzer.model
+        n=len(self.model.bound.centers);zero=np.zeros((n,3))
+        nominal=analyzer.frame({'states':zero},progress)
+        self.nominal=[set(),set()]
+        for row in nominal['rows']:
+            if row['status']!=ADEQUATE:self.nominal[row['status']!=BLOCKED].update(row['refs'])
+        self.planes=[RiskPlane(analyzer,p,params) for p in analyzer.planes.values()]
+        # Build exact boundary candidates once; the displacement envelope includes
+        # translated, rotated copper, external fan-out and off-centre pivots.
+        self.edges=[];board=self.model.case['board'];self.boundary=board.boundary
+        for node in self.model.nodes:
+            key=node['key'];role=self.model.roles[key]
+            if role not in ('运动RDL','固定RDL'):continue
+            rule=(params.line_space_um if role=='固定RDL' else params.wafer_line_space_um)-analyzer.settings.drc_tolerance_um
+            geo=node['poly'];o=node['owner'];travel=0.
+            if o>=0:
+                mu,b=mean_and_bounds(params.for_die(o),n)
+                lever=np.linalg.norm(shapely.get_coordinates(geo)-self.model.bound.centers[o],axis=1).max()
+                travel=np.linalg.norm(abs(mu[:2])+b[:2])+2*lever*math.sin(min(math.pi,abs(mu[2])+b[2])/2)
+            if not board.covers(geo) or geo.distance(self.boundary)<=rule+travel+analyzer.tol:
+                self.edges.append((key,node['index'],geo,o,rule))
+
+    def classify(self,states):
+        red=[set() for _ in states];yellow=[set() for _ in states]
+        for plane in self.planes:plane.events(states,red,yellow)
+        for i in np.flatnonzero(~np.any(states,axis=(1,2))):
+            red[i].update(self.nominal[0]);yellow[i].update(self.nominal[1])
+        tol=max(1e-9,self.model.data.dbu_um*1e-6)
+        for key,index,geo,owner,rule in self.edges:
+            placed=([self.model.moved(geo,owner,z) for z in states] if owner>=0 else [geo]*len(states))
+            fail=~shapely.covers(self.model.case['board'],placed) | (shapely.distance(placed,self.boundary)<rule-tol)
+            for i in np.flatnonzero(fail):red[i].add((key,index))
+        return red,yellow

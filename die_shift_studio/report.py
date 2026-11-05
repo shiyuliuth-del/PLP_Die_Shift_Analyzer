@@ -263,6 +263,21 @@ def report_document(r,motions=None,progress=lambda *_:None):
                 else ('贴合（直接相接）' if (q['gap_um'] is not None and q['gap_um']<=1e-6)
                       else ('无需补线（无切口面）' if q.get('bridge_area_um2') is None else '已补线'))))] for q in recon['pieces'][:100]]))
         if len(recon['pieces'])>100:blocks.append(f"<p>重构移动区共{len(recon['pieces'])}块，报告列出前100块；“重构预演”表可定位当前全部块。</p>")
+    policy=r.get('width_policy_yield')
+    if policy:
+        step('整包三种宽度策略良率',
+             f'原始 RDL、逐芯片输入范围及真实旋转中心。已计算 {policy["samples"]}/{policy["total"]} 个整包姿态，概率尺度 {policy["scale_nsigma"]:g}σ。',
+             [r'F_1=R\cup A\cup I,\quad F_2=R\cup I,\quad F_3=I',
+              r'Y_j=\int_H\mathbf{1}_{\{\boldsymbol{z}\notin F_j\}}f_H(\boldsymbol{z})\,d\boldsymbol{z}',
+              r'\widehat{Y}_j=\frac{\sum_{m=1}^M w_m\mathbf{1}_{\{\boldsymbol{z}_m\notin F_j\}}}{\sum_{m=1}^M w_m}'],
+             '原图 '+fmt(policy['values'][0]*100,4)+'% · 修黄 '+fmt(policy['values'][1]*100,4)+'% · 修红黄 '+fmt(policy['values'][2]*100,4)+'%。',
+             'z 包含全部 DIE 的 X、Y、转角。H 是每轴输入最大幅度构成的联合硬边界，f_H 是在 H 内归一化的联合正态密度。'
+             '同一 DIE 的所有孔盘使用同一姿态，独立 DIE 联合抽取。R、A 分别是任一线路红色、黄色的事件集合，I 是被忽略线路发生红色或黄色问题的事件集合。'
+             'M 为已计算整包姿态数，独立蒙特卡洛取 wₘ=1，确定性条件求积使用条件截断质量的乘积权重。'
+             '每个整包姿态先合并所有线路事件，再积分得到 Yⱼ。第二、三项按相应颜色的修复假设计算。')
+        if policy.get('intervals'):
+            blocks.append(grid(['宽度策略','联合99%置信下限','联合99%置信上限'],
+                [[label,fmt(100*a,4)+'%',fmt(100*b,4)+'%'] for label,(a,b) in zip(('原图','修黄','修红黄'),policy['intervals'])]))
     width=r.get('preview_width_analysis')
     if width:
         summary=r.get('width_extreme_summary')

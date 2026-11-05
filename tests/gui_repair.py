@@ -30,7 +30,7 @@ def main():
             deadline = time.monotonic() + 180
             while time.monotonic() < deadline:
                 app.processEvents()
-                pending = (window.worker, window.preview_workers, window.preview_pending,
+                pending = (window.width_yield.worker, window.width_yield.timer.isActive(), window.worker, window.preview_workers, window.preview_pending,
                            window.motion_worker, window.motion_pending, window.hardware_worker,
                            window.coverage_timer.isActive(), window._coverage_pending,
                            window.viewport_timer.isActive(), window.transition.timer.isActive(),

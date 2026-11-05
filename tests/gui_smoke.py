@@ -20,7 +20,7 @@ with tempfile.TemporaryDirectory() as tmp:
         end=time.monotonic()+240
         while time.monotonic()<end:
             app.processEvents()
-            if window.worker is None and window.preview_worker is None and window.preview_pending is None and not window.coverage_timer.isActive() and not window._coverage_pending and not window.viewport_timer.isActive() and not window.transition.timer.isActive() and not window.issue_navigation.isActive():break
+            if window.width_yield.worker is None and not window.width_yield.timer.isActive() and window.worker is None and window.preview_worker is None and window.preview_pending is None and not window.coverage_timer.isActive() and not window._coverage_pending and not window.viewport_timer.isActive() and not window.transition.timer.isActive() and not window.issue_navigation.isActive():break
             time.sleep(.003)
         assert window.worker is None and window.preview_worker is None and window.preview_pending is None
         assert not errors,errors

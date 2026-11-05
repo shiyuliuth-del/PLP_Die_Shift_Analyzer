@@ -20,7 +20,7 @@ def wait():
     until=time.monotonic()+180
     while time.monotonic()<until:
         app.processEvents()
-        if not any((w.worker,w.preview_workers,w.preview_pending,w.motion_worker,w.motion_pending,
+        if not any((w.width_yield.worker,w.width_yield.timer.isActive(),w.worker,w.preview_workers,w.preview_pending,w.motion_worker,w.motion_pending,
                     w.hardware_worker,w.transition.timer.isActive(),w.viewport_timer.isActive(),
                     w.coverage_timer.isActive(),w._coverage_pending,w.mouse_die.timer.isActive(),w.mouse_die.idle.isActive())):break
         time.sleep(.005)

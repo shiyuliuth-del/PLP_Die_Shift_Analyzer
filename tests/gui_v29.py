@@ -17,7 +17,7 @@ def settle():
     until=time.monotonic()+180
     while time.monotonic()<until:
         app.processEvents()
-        if not any((w.worker,w.preview_workers,w.preview_pending,w.motion_worker,w.filter_job,w.hardware_worker,
+        if not any((w.width_yield.worker,w.width_yield.timer.isActive(),w.worker,w.preview_workers,w.preview_pending,w.motion_worker,w.filter_job,w.hardware_worker,
                     w.coverage_timer.isActive(),w._coverage_pending,w.viewport_timer.isActive(),w.transition.timer.isActive())):
             app.processEvents();break
         time.sleep(.004)

@@ -15,6 +15,13 @@ from .width_labels import LabelLayout
 from .width_witness import pose_text
 
 HEADERS = ['状态','固定 RDL','通道两侧','原可通','必须通过','现可通','原间距 / μm','现间距 / μm','保宽需 / μm','最小需 / μm','预期收窄 / μm','问题线路','位置 / μm']
+IGNORED='已忽略'
+IGNORED_COLOR='#95c8a5'
+
+def ignored_row(row,ignored):
+    return bool(row['refs']) and row['status']!=ADEQUATE and all(ref in ignored for ref in row['refs'])
+
+
 INTRO = '按固定 RDL 原始线路穿越数比较各姿态的孔盘通道容量。勾选后默认低亮显示原始线路，矩形标记相邻孔盘通道。'
 
 
@@ -27,6 +34,7 @@ class ChannelRows(QtCore.QAbstractTableModel):
     def __init__(self,parent):
         super().__init__(parent)
         self.rows = []
+        self.ignored=frozenset()
 
     def replace_rows(self,rows):
         self.beginResetModel()
@@ -51,11 +59,11 @@ class ChannelRows(QtCore.QAbstractTableModel):
         if role==TOOLTIP:
             return WidthOverlay.description(r)
         if role==BACKGROUND:
-            color = QtGui.QColor(COLORS[r['status']])
+            color = QtGui.QColor(IGNORED_COLOR if ignored_row(r,self.ignored) else COLORS[r['status']])
             color.setAlpha(15 if low_risk(r) else 48)
             return color
         if role==DISPLAY:
-            return (r['status']+(' · 低概率' if low_risk(r) else ''),r['plane'],' ↔ '.join(r['pair']),r['original'],r['required'],r['current'],
+            return (r['status']+(' · 已忽略' if ignored_row(r,self.ignored) else '')+(' · 低概率' if low_risk(r) else ''),r['plane'],' ↔ '.join(r['pair']),r['original'],r['required'],r['current'],
                     f"{r['nominal_gap_um']:.2f}",f"{r['gap_um']:.2f}",f"{r['keep_um']:.2f}",f"{r['minimum_um']:.2f}",f"{r['narrowing_um']:.3f}",
                     '、'.join(f'{k} #{j+1}' for k,j in r['refs']),f"{r['point'][0]:.1f}, {r['point'][1]:.1f}")[index.column()]
         return None
@@ -134,7 +142,9 @@ class WidthOverlay:
             if getattr(self,'label_source',None) is not summary or self.label_stamp!=stamp:
                 self.label_source=summary;self.label_stamp=stamp;self.label_rows={};self.pose_texts={};self.layouts=OrderedDict()
             for key,index in selected:
-                ref=(key,index);item=summary.get('witnesses',{}).get(ref)
+                ref=(key,index)
+                if ref in w.ignored_width_lines:continue
+                item=summary.get('witnesses',{}).get(ref)
                 if key not in visible or item is None:continue
                 if ref not in self.label_rows:
                     entry=self.summary_entry(ref,item,summary);rect=None
@@ -181,7 +191,7 @@ class WidthOverlay:
 
     def draw_summary(self,summary,visible,modes,selected):
         w=self.w;mode=modes['描边']
-        stamp=(id(summary),visible,mode,w.view_bounds)
+        stamp=(id(summary),visible,mode,w.view_bounds,w.ignored_width_lines)
         if stamp!=self.summary_stamp:
             paths=[];colors=[];faces=[];dashes=[]
             for (key,index),(severity,evidence) in summary['lines'].items():
@@ -189,8 +199,9 @@ class WidthOverlay:
                 geometry=w.geometry_cache.layers[key]['geometry'][index]
                 if not overlaps(geometry.bounds,w.view_bounds):continue
                 paths.append(w.geometry_patch(geometry))
-                uncertain=evidence=='undetermined';ink=np.asarray(to_rgb(COLORS[severity]))
-                edge=.45*ink+.43 if uncertain else .46*ink+.28
+                uncertain=evidence=='undetermined';ignored=(key,index) in w.ignored_width_lines
+                ink=np.asarray(to_rgb(IGNORED_COLOR if ignored else COLORS[severity]))
+                edge=ink if ignored else (.45*ink+.43 if uncertain else .46*ink+.28)
                 factor=.62 if mode=='dim' else 1.
                 colors.append((*edge,(.61 if uncertain else .82)*factor))
                 faces.append((*ink,(.09 if uncertain else .14)*factor))
@@ -210,12 +221,13 @@ class WidthOverlay:
             self.boxes = PatchCollection([],linewidths=1.3,zorder=11.9)
             self.outlines = PatchCollection([],facecolors='none',linewidths=1.15,zorder=11.25)
             self.edges = PatchCollection([],linewidths=1.,zorder=11.1)
-            self.inset = {s:PatchCollection([],linewidths=.4,hatch='///',zorder=11.6+i*.01) for i,s in enumerate((NARROW,BLOCKED))}
+            self.inset = {s:PatchCollection([],linewidths=.4,hatch='///',zorder=11.6+i*.01) for i,s in enumerate((NARROW,BLOCKED,IGNORED))}
             for item in (self.barriers,self.boxes,self.outlines,self.edges,*self.inset.values()):
                 w.ax.add_collection(item)
             self.stamp = self.table_stamp = self.summary_stamp = None
         visible = frozenset(k for k,check in w.visible_boxes.items() if check.isChecked())
-        flags = (id(data),w.width_sufficient_toggle.isChecked(),w.view_settings.show_low_width)
+        flags = (id(data),w.width_sufficient_toggle.isChecked(),w.view_settings.show_low_width,w.ignored_width_lines)
+        w.width_table.model().ignored=w.ignored_width_lines
         modes=w.view_settings.width_display
         nominal=w.width_toggle.isChecked() and (w.current_frame or {}).get('nominal_global')
         selected=tuple(w.selection.selected) if nominal else ()
@@ -272,15 +284,16 @@ class WidthOverlay:
         self.barriers.set_edgecolors([tint(palette[o['kind']][1],modes[o['kind']]) for o in objects])
         self.barriers.set_visible(bool(objects))
         self.boxes.set_paths([w.geometry_patch(g) for g in rectangles])
-        colors = [COLORS[r['status']] for r in shown]
+        colors = [IGNORED_COLOR if ignored_row(r,w.ignored_width_lines) else COLORS[r['status']] for r in shown]
         self.boxes.set_facecolors([low_ink(tint(c,modes['截面'],.14),low_risk(r)) for c,r in zip(colors,shown)])
         self.boxes.set_edgecolors([low_ink(tint(c,modes['截面']),low_risk(r)) for c,r in zip(colors,shown)])
         self.boxes.set_visible(bool(shown) and modes['截面']!='hide')
         board_visible=any(k in visible for k,r in w.roles().items() if r=='封装边框')
         edges=[v for v in (data or {}).get('edge_violations',[]) if (flags[2] or not low_risk(v)) and v['layer'] in visible and board_visible and overlaps(v['geometry'].bounds,w.view_bounds)]
         self.edges.set_paths([w.geometry_patch(v['geometry']) for v in edges])
-        self.edges.set_facecolor([low_ink(tint('#c44956',modes['边距'],.34),low_risk(v)) for v in edges])
-        self.edges.set_edgecolor([low_ink(tint('#c44956',modes['边距']),low_risk(v)) for v in edges])
+        edge_colors=[IGNORED_COLOR if all((v['layer'],i) in w.ignored_width_lines for i in v['indices']) else COLORS[BLOCKED] for v in edges]
+        self.edges.set_facecolor([low_ink(tint(c,modes['边距'],.34),low_risk(v)) for c,v in zip(edge_colors,edges)])
+        self.edges.set_edgecolor([low_ink(tint(c,modes['边距']),low_risk(v)) for c,v in zip(edge_colors,edges)])
         self.edges.set_visible(bool(edges) and modes['边距']!='hide')
         # Use the displayed replacement geometry when a source wire was deformed.
         changed = {}
@@ -300,7 +313,8 @@ class WidthOverlay:
             g = changed.get((k,i),w.geometry_cache.layers[k]['geometry'][i])
             if overlaps(g.bounds,w.view_bounds):
                 paths.append(w.geometry_patch(g))
-                inks.append(low_ink(tint(dark(COLORS[BLOCKED if (k,i) in danger else NARROW]),modes['描边'],.63),(k,i) not in significant))
+                color=IGNORED_COLOR if (k,i) in w.ignored_width_lines else dark(COLORS[BLOCKED if (k,i) in danger else NARROW])
+                inks.append(low_ink(tint(color,modes['描边'],.8),(k,i) not in significant))
         self.outlines.set_paths(paths)
         self.outlines.set_edgecolors(inks)
         self.outlines.set_visible(bool(paths) and modes['描边']!='hide')
@@ -321,10 +335,11 @@ class WidthOverlay:
                     if token not in self.clips:self.clips[token]=g.intersection(rectangle)
                     part=self.clips[token]
                     if part.area>0:
-                        fill_paths[r['status']].append(w.geometry_patch(part));fill_low[r['status']].append(low_risk(r))
+                        style=IGNORED if ref in w.ignored_width_lines else r['status']
+                        fill_paths[style].append(w.geometry_patch(part));fill_low[style].append(low_risk(r))
         ink_mode='dim' if 'dim' in (modes['描边'],modes['截面']) else 'show'
         for status,artist in self.inset.items():
-            color=dark(COLORS[status])
+            color=IGNORED_COLOR if status==IGNORED else dark(COLORS[status])
             artist.set_paths(fill_paths[status])
             artist.set_facecolor([low_ink(tint(color,ink_mode,.32),q) for q in fill_low[status]])
             artist.set_edgecolor([low_ink(tint(color,ink_mode,.5),q) for q in fill_low[status]])
@@ -332,7 +347,7 @@ class WidthOverlay:
         self.rows = shown
         self.tree = STRtree(rectangles) if shown else None
         fontsize=w.view_settings.width_label_font_pt
-        order=[] if modes['标注']=='hide' else sorted(range(len(shown)),key=lambda i:(self.identity(shown[i])!=self.selected,low_risk(shown[i])))
+        order=[] if modes['标注']=='hide' else sorted((i for i,r in enumerate(shown) if not ignored_row(r,w.ignored_width_lines)),key=lambda i:(self.identity(shown[i])!=self.selected,low_risk(shown[i])))
         layout=LabelLayout(w.ax,rectangles,fontsize,self.text_sizes,modes['截面']!='hide') if order else None
         texts=[self.label_text(r,w.view_settings.width_label_decimals) for r in shown] if order else []
         if layout:layout.prescreen(texts)
@@ -397,7 +412,7 @@ class WidthOverlay:
                 w.canvas.setToolTip('')
             return
         hits = self.tree.query(Point(event.xdata,event.ydata),predicate='intersects')
-        text = self.description(self.rows[int(hits[0])]) if len(hits) else ''
+        text = self.description(self.rows[int(hits[0])]) if len(hits) and not ignored_row(self.rows[int(hits[0])],w.ignored_width_lines) else ''
         if text!=w.canvas.toolTip():
             w.canvas.setToolTip(text)
 
