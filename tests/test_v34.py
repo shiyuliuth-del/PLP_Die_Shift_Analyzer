@@ -160,6 +160,21 @@ class KeepoutTests(unittest.TestCase):
         bad=model(box(-20,-20,21,20))
         self.assertAlmostEqual(violations(bad,np.zeros((1,3)))[0]['intrusion_area_um2'],40.)
 
+    def test_hidden_keepout_sources_do_not_leak_through_merged_overlays(self):
+        from types import SimpleNamespace
+        from die_shift_studio.width_overlay import visible_keepout_walls,visible_keepout_intrusion
+        a,b=box(0,0,20,40),box(0,30,20,60)
+        cache=SimpleNamespace(layers={'10/0':{'geometry':[a]},'11/0':{'geometry':[b]}})
+        row=dict(kind='禁布区侵入',boundary_refs=(('10/0',0),('11/0',0)),geometry=box(5,5,15,55))
+        shown=visible_keepout_intrusion(row,{'10/0'},cache)
+        self.assertTrue(shown['geometry'].equals(box(5,5,15,40)))
+        self.assertTrue(row['geometry'].equals(box(5,5,15,55)))  # no numerical mutation
+        self.assertIsNone(visible_keepout_intrusion(row,set(),cache))
+        gate=dict(ends=('固定障碍','禁布区'),boundary_refs=((),row['boundary_refs']),
+                  witness_um=[[-10,50],[0,50]])
+        self.assertFalse(visible_keepout_walls(gate,{'10/0'},cache,.001))
+        self.assertTrue(visible_keepout_walls(gate,{'11/0'},cache,.001))
+
     def test_continuous_events_and_all_extreme_summaries_match_preview(self):
         e=fixture(True);cfg=ViewSettings();e.configure_width(True,cfg)
         a=e.width_analyzer;a.probability=None
