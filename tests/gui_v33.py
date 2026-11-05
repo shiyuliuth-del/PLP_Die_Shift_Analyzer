@@ -47,6 +47,7 @@ def main():
     assert w.width_yield.bank is not None and '原图' in w.width_yield.label.text()
     assert '99%' in w.width_yield.label.toolTip()
     w.run_evaluation();settle()
+    assert 'width_policy_yield' in w.result
     w.manual_states=np.array([[3.,0,0],[0.,0,0]]);w.request_preview();settle()
     row=next(r for r in w.current_frame['width_analysis']['rows'] if r['status']=='需局部收窄')
     ref=row['refs'][0]

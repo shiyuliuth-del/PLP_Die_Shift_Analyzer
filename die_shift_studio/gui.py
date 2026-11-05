@@ -2051,6 +2051,7 @@ class MainWindow(W.QMainWindow):
         self._assessment_digest=logical_fingerprint((r.get('parameters'),r.get('contact_analysis'),r.get('issues')))
         self._width_grid_summary=summary;self._problem_tag=None
         self.result=r;self.dirty=False;self.evaluation_motions=r.get('motions',self.motions());self.manual_states=None
+        self.width_yield.render()
         if self.case is None:self.case=build_case(self.data,self.roles(),layer_order=self.ordered_layers())
         self.extremes=catalog if catalog is not None else ExtremeCatalog(self.case,self.params())
         self.focus_extremes=RepresentativeExtremes.from_result(self.case,self.params(),r,self.extremes)
@@ -2107,16 +2108,21 @@ class MainWindow(W.QMainWindow):
     def update_report(self):
         if getattr(self,'_report_rendering',False):return
         self._report_rendering=True;result=self.result;self.progress.show();self.progress.setValue(0)
+        width_snapshot=result.get('width_policy_yield');retry=False
         try:
             def progress(n,text):
                 self.progress.setValue(n);self.progress.setFormat(text);self.log_bus.emit(text)
                 flag=getattr(QtCore.QEventLoop,'ProcessEventsFlag',QtCore.QEventLoop).ExcludeUserInputEvents
                 W.QApplication.processEvents(flag)
             html,resources=report_document(result,self.evaluation_motions,progress)
-            if self.result is result:set_document(self.detail,html,resources);self.report_dirty=False
+            if self.result is result:
+                set_document(self.detail,html,resources)
+                self.report_dirty=result.get('width_policy_yield') is not width_snapshot;retry=self.report_dirty
         except Exception:self.error(traceback.format_exc())
         finally:
             self._report_rendering=False
+            if retry and self.result is result and self.tabs.currentWidget() is self.detail:
+                QtCore.QTimer.singleShot(0,self.update_report)
             if not self._tasks:self.progress.hide();self.cleanup_retired_sessions()
     def jump_extreme_page(self):
         try:page=int(self.page_edit.text())-1
