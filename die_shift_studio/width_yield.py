@@ -71,11 +71,11 @@ def packed_events(red,yellow,weights=None):
 
 def policy_yields(bank,ignored):
     """Union event masks by sample before weighting. Ignoring needs no geometry rerun."""
-    lost=np.zeros(3);passed=np.zeros(3);mass=0.;samples=0
+    lost=np.zeros(2);passed=np.zeros(2);mass=0.;samples=0
     for n,all_risk,red,per_line,weights in bank['chunks']:
         ignored_hit=0
         for ref in ignored:ignored_hit|=per_line.get(ref,0)
-        failures=(all_risk,red|ignored_hit,ignored_hit)
+        failures=(ignored_hit,all_risk)
         samples+=n
         if weights is None:
             mass+=n;counts=np.array([int(mask).bit_count() for mask in failures])
@@ -88,13 +88,13 @@ def policy_yields(bank,ignored):
     if not mass:return None
     failure=lost/mass;estimates=passed/mass
     intervals=None;failure_intervals=None
-    proven=[bank['method']=='exact']*3
-    if not ignored:proven[2]=True
+    proven=[bank['method']=='exact']*2
+    if not ignored:proven[0]=True
     if bank['method']=='mc':
-        alpha=.01/3
+        alpha=.01/2
         failure_intervals=[(float(beta.ppf(alpha/2,s,samples-s+1)) if s else 0.,
                             float(beta.isf(alpha/2,s+1,samples-s)) if s<samples else 1.) for s in lost]
-        if not ignored:failure_intervals[2]=(0.,0.)
+        if not ignored:failure_intervals[0]=(0.,0.)
         intervals=[(1-high,1-low) for low,high in failure_intervals]
     return dict(values=estimates,failure_probability=failure,proven=proven,
                 intervals=intervals,failure_intervals=failure_intervals,samples=samples,
@@ -120,7 +120,7 @@ def policy_texts(result,decimals):
     """One-sided confidence bounds for unsampled tails, never a fabricated exact 100%."""
     texts=[]
     failures=result.get('failure_probability',[1-v for v in result['values']])
-    proven_flags=result.get('proven',[result['method']=='exact']*3)
+    proven_flags=result.get('proven',[result['method']=='exact']*len(result['values']))
     endpoint=any((v==0 or f==0) and not proven for v,f,proven in zip(result['values'],failures,proven_flags))
     for i,(value,failure,proven) in enumerate(zip(result['values'],failures,proven_flags)):
         if proven:
@@ -146,7 +146,7 @@ def measure_width_yield(model,params,cfg,cache_group,progress,partial=None):
         progress(1,'建立整包宽度通道')
         events=WidthEvents(analyzer,params,lambda n,t:progress(1+round(.08*n),t))
         count=len(model.bound.centers)
-        if not events.edges and all(plane.local is None for plane in events.planes):
+        if not events.edges and not events.intrusions and all(plane.local is None for plane in events.planes):
             progress(100,'全输入范围的宽度几何界限已通过')
             return dict(chunks=(packed_events([set()],[set()]),),method='exact',total=1,scale_nsigma=params.scale_nsigma)
         chunks=[];done=0;next_preview=BATCH

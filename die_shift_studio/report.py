@@ -268,45 +268,45 @@ def report_document(r,motions=None,progress=lambda *_:None):
         from .width_yield import policy_texts,percentage_text
         from decimal import ROUND_FLOOR,ROUND_CEILING
         policy_labels=policy_texts(policy,policy.get('decimals',6))
-        step('整包三种宽度策略良率',
+        step('整包两种宽度策略良率',
              f'原始 RDL、逐芯片输入范围及真实旋转中心。已计算 {policy["samples"]}/{policy["total"]} 个整包姿态，概率尺度 {policy["scale_nsigma"]:g}σ。',
-             [r'F_1=R\cup A\cup I,\quad F_2=R\cup I,\quad F_3=I',
+             [r'F_1=I,\qquad F_2=R\cup A',
               r'Y_j=\int_H\mathbf{1}_{\{\mathbf{z}\notin F_j\}}f_H(\mathbf{z})\,d\mathbf{z}',
               r'\widehat{Y}_j=\frac{\sum_{m=1}^M w_m\mathbf{1}_{\{\mathbf{z}_m\notin F_j\}}}{\sum_{m=1}^M w_m}'],
-             ' · '.join(name+' '+value for name,value in zip(('原图','修黄','修红黄'),policy_labels))+'。',
+             ' · '.join(name+' '+value for name,value in zip(('良率1','良率2'),policy_labels))+'。',
              'z 包含全部 DIE 的 X、Y、转角。H 是每轴输入最大幅度构成的联合硬边界，f_H 是在 H 内归一化的联合正态密度。'
              '同一 DIE 的所有孔盘使用同一姿态，独立 DIE 联合抽取。R、A 分别是任一线路红色、黄色的事件集合，I 是被忽略线路发生红色或黄色问题的事件集合。'
              'M 为已计算整包姿态数，独立蒙特卡洛取 wₘ=1，确定性条件求积使用条件截断质量的乘积权重。'
-             '每个整包姿态先合并所有线路事件，再积分得到 Yⱼ。第二、三项按相应颜色的修复假设计算。')
+             '每个整包姿态先合并所有线路事件，再积分得到 Yⱼ。第一项假设修正所有未忽略的红黄问题，忽略线路保持原图；第二项不修正任何问题。只计宽度问题。')
         if policy.get('intervals'):
-            step('三项宽度良率的有限样本区间',
+            step('两项宽度良率的有限样本区间',
                  f'已求解 {policy["samples"]} 个独立整包状态，忽略集合固定，联合置信度99%。',
                  [r'S_j=\sum_{m=1}^{M}\mathbf{1}_{\{\mathbf{z}_m\notin F_j\}},\quad\alpha=0.01',
-                  r'L_j=Q_{\mathrm{Beta}}\!\left(\frac{\alpha}{6};S_j,M-S_j+1\right)',
-                  r'U_j=Q_{\mathrm{Beta}}\!\left(1-\frac{\alpha}{6};S_j+1,M-S_j\right)'],
-                 '三项区间见下表；未分辨尾部时，图中用≥显示相应下限。',
+                  r'L_j=Q_{\mathrm{Beta}}\!\left(\frac{\alpha}{4};S_j,M-S_j+1\right)',
+                  r'U_j=Q_{\mathrm{Beta}}\!\left(1-\frac{\alpha}{4};S_j+1,M-S_j\right)'],
+                 '两项区间见下表；未分辨尾部时，图中用≥显示相应下限。',
                  'Sⱼ 是第 j 项策略下成功的整包状态数，M 是状态总数。QBeta(p;a,b) 是形状参数 a、b 的 Beta 分布累积概率 p 对应的分位数。'
-                 'α/6 分配给三项的上下两侧。Sⱼ=0 时下限为0，Sⱼ=M时上限为1。全输入几何证明及无忽略线路的第三项使用可证精确值。')
+                 'α/4 分配给两项的上下两侧。Sⱼ=0 时下限为0，Sⱼ=M时上限为1。全输入几何证明及无忽略线路的第一项使用可证精确值。')
             fail_intervals=policy.get('failure_intervals') or [(1-b,1-a) for a,b in policy['intervals']]
             decimals=policy.get('decimals',6)
             rows=[[name,percentage_text(a,fhi,decimals,ROUND_FLOOR),percentage_text(b,flo,decimals,ROUND_CEILING)]
-                  for name,(a,b),(flo,fhi) in zip(('原图','修黄','修红黄'),policy['intervals'],fail_intervals)]
+                  for name,(a,b),(flo,fhi) in zip(('良率1','良率2'),policy['intervals'],fail_intervals)]
             blocks.append(grid(['宽度策略','联合99%置信下限','联合99%置信上限'],rows))
     width=r.get('preview_width_analysis')
     if width:
         summary=r.get('width_extreme_summary')
         if summary:
             step('首行全组合宽度风险',f"全部离散姿态共 {summary['states']:,} 种。每条线路取最重等级。",
-                 [r'L_{\\min}=Nw+(N+1)s,\\qquad L_{\\rm keep}=\\sum_i\\max(w_i,w)+(N+1)s'],
+                 [r'L_{\min}=Nw+(N-1)s+m_a+m_b,\qquad L_{\rm keep}=\sum_i\max(w_i,w)+(N-1)s+m_a+m_b'],
                  f"风险线路 {summary['lines']} 条，已证超限 {summary['exceeded']} 条，概率待定 {summary['undetermined']} 条，二值 {summary['binary']} 条。",
-                 'N 是名义贯穿根数，w、s 是扣除容差后的最小线宽和线距，wᵢ 是各线原宽，单位均为 μm。有限级别仅在位置事件下界大于门限时画实线，不能证明的风险保留虚线。')
+                 'mₐ、mᵦ 为两侧边距：禁布区侧为0，其他侧为s。N 是名义贯穿根数，w、s 是扣除容差后的最小线宽和线距，wᵢ 是各线原宽，单位均为 μm。有限级别仅在位置事件下界大于门限时画实线，不能证明的风险保留虚线。')
         parameters=width['parameters']
         step('当前姿态的固定 RDL 通道容量',
              f"名义图纸的穿越线路，有效线宽 {fmt(parameters['width_um'])} μm，有效线距 {fmt(parameters['space_um'])} μm，最小包围量 {fmt(parameters['enclosure_um'])} μm。",
-             [r'W(n)=nw+(n+1)s',r'C(g)=\max\left(0,\left\lfloor\frac{g-s}{w+s}\right\rfloor\right)',
-              r'C_{0,j}=C(g_{0,j}),\quad C_{t,j}=C(g_{t,j})',r'u_i=2\,\mathrm{dist}(m_i,\partial R_i),\quad W_{\rm keep}=\sum_{i=1}^{N}\max(u_i,w)+(N+1)s',r'\Delta W=\max(0,W_{\rm keep}-g_t)\quad(N>0)'],
+             [r'W(n)=nw+(n-1)s+m_a+m_b',r'C(g)=\max\left(0,\left\lfloor\frac{g-m_a-m_b+s}{w+s}\right\rfloor\right)',
+              r'C_{0,j}=C(g_{0,j}),\quad C_{t,j}=C(g_{t,j})',r'u_i=2\,\mathrm{dist}(m_i,\partial R_i),\quad W_{\rm keep}=\sum_{i=1}^{N}\max(u_i,w)+(N-1)s+m_a+m_b',r'\Delta W=\max(0,W_{\rm keep}-g_t)\quad(N>0)'],
              f"相邻通道截面 {width['examined']} 个，宽度足够 {width['counts']['宽度足够']} 个，需局部收窄 {width['counts']['需局部收窄']} 个，宽度不足 {width['counts']['宽度不足']} 个。",
-             'w、s 为工艺固定线宽、线距分别减去共用 DRC 容差。n 根线所需宽度 W(n) 包含两侧线距。'
+             'w、s 为工艺固定线宽、线距分别减去共用 DRC 容差。n 根线所需宽度 W(n) 包含 n−1 道线间距及两壁边距 mₐ、mᵦ；普通孔盘、固定金属和封装边界取 s，禁布区侧取 0。禁布区固定且无电连接，可贴边不可进入。'
              'N 为原图确实穿越截面的线路根数。g₀ 为原净宽，gₜ,ⱼ 为运动后第 j 段可用净宽。C₀ 和 Cₜ 分别为原可通与现可通根数。'
              '孔和孔盘构成定宽的实体壁。另一孔盘进入评估矩形时，将整块投影区间作为占用，由相邻两壁分别计算。有独立可识别的同心孔盘时保留较大外形。无运动过孔的固定 RDL 网络整块占用。'
              'mᵢ 是第 i 条线路与截面相交区间的中点，∂Rᵢ 是其名义铜边界。uᵢ 是局部铜厚度的平面量测值，对直线斜穿同样给出横向原宽。'
@@ -315,22 +315,22 @@ def report_document(r,motions=None,progress=lambda *_:None):
         blocks.append(grid(['DIE','DX / μm','DY / μm','O / °'],[[i+1,fmt(z[0]),fmt(z[1]),fmt(math.degrees(z[2]))] for i,z in enumerate(width['states'])]))
         if 0<p.target_nsigma<math.inf:
             step('通道风险的概率上界','该截面两壁、原始穿越线路、各芯片独立或共享的真实运动与当前良率级别。',
-                 [r'L_{\min}=Nw+(N+1)s,\quad L_{\rm keep}=\sum_{i=1}^N\max(w,w_i)+(N+1)s',
+                 [r'L_{\min}=Nw+(N-1)s+m_a+m_b,\quad L_{\rm keep}=\sum_{i=1}^N\max(w,w_i)+(N-1)s+m_a+m_b',
                   r'd(A,B)\geq\min_{b\in B}n^Tb-\max_{a\in A}n^Ta,\quad \Pr(d<L\mid H)\leq U'],
                  '仅在 U 不超过门限时淡显。收窄用保宽需求，宽度不足用工艺最小需求。',
-                 'A、B 为两侧真实实体，n 是名义截面从 A 指向 B 的单位向量。N 是必过线路根数，wᵢ 是第 i 根的原始线宽。沿 n 计算旋转区间内的最小投影间距及截断正态平移尾概率，再按角度质量相加。无法证明或发生分段的位置保留正常颜色。')
+                 'mₐ、mᵦ 为两壁边距，禁布区侧为0，其他侧为s。A、B 为两侧真实实体，n 是名义截面从 A 指向 B 的单位向量。N 是必过线路根数，wᵢ 是第 i 根的原始线宽。沿 n 计算旋转区间内的最小投影间距及截断正态平移尾概率，再按角度质量相加。无法证明或发生分段的位置保留正常颜色。')
         blocks.append(grid(['固定 RDL','状态','通道','原可通','必须通过','现可通','预期收窄 / μm','位置 / μm','位置事件上界'],
                            [[q['plane'],q['status'],' ↔ '.join(q['pair']),q['original'],q['required'],q['current'],fmt(q.get('narrowing_um',0)),
                              str([round(x,3) for x in q['point']]),f"{q['event_probability']['upper']:.4g}" if q.get('event_probability') else '—'] for q in width['rows'][:100]]))
         if width.get('displayed',len(width['rows']))>100:blocks.append('<p>报告列出前 100 个选定类别的截面。完整清单见图形下方的宽度分析表。</p>')
         edge=width.get('edge_violations',[])
-        step('线路到封装边框的实际净距',f'当前姿态下的运动和固定 RDL 以及封装边框，共 {len(edge)} 个不足图形。',
+        step('线路到封装边框与禁布区',f'当前姿态下的运动和固定 RDL 以及封装边框、禁布区，共 {len(edge)} 个不足图形。',
              [r'A_{\rm allowed}=B\ominus D_{s_k},\qquad E_i=P_i\cap A_{\rm allowed}^{\rm c}'],
-             f'封装边距不足 {len(edge)} 个图形',
-             'B 是封装有效区域，含内孔。D 是半径等于本层有效线距 sₖ 的圆盘，Pᵢ 是当前实际铜轮廓。Eᵢ 为落在允许区域以外的铜。恰好达标允许。')
+             f'封装边缘或禁布区违规 {len(edge)} 个图形',
+             'B 是封装有效区域，含内孔。D 是半径等于本层有效线距 sₖ 的圆盘，Pᵢ 是当前实际铜轮廓。Eᵢ 为落在允许区域以外的铜。恰好达标允许。另对禁布区域 K 检查当前铜内部与 K 内部的交集；仅共边、共点允许，正面积侵入标红。不对 K 加线距或 DRC 容差缓冲。')
         if edge:
-            blocks.append(grid(['层','图形编号','实测净距 / μm','要求 / μm','位置 / μm'],
-                               [[q['layer'],[i+1 for i in q['indices']],fmt(q['gap_um']),fmt(q['required_um']),q['point']] for q in edge[:100]]))
+            blocks.append(grid(['类型','层','图形编号','实测净距 / μm','要求 / μm','侵入面积 / μm²','位置 / μm'],
+                               [[q.get('kind','封装边缘线距不足'),q['layer'],[i+1 for i in q['indices']],fmt(q['gap_um']),fmt(q['required_um']),fmt(q.get('intrusion_area_um2',0)),q['point']] for q in edge[:100]]))
 
     hidden={'per_die_enabled','die_bounds','die_pivots','input_nsigma','interdie','fixed_via_assignment','residual_budget_um','transition_length_um','max_route_angle_deg','routing_edge_keepout_um'}
     appendix='<h2>附录：输入与几何明细</h2>'+grid(['参数','含义/单位','值'],[[key,PARAMETER_DESCRIPTIONS.get(key,key),fmt(value,8)] for key,value in r['parameters'].items() if key not in hidden])

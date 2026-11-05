@@ -78,6 +78,30 @@ class ChannelTable(W.QTableView):
         self.setColumnWidth(2,265)
 
 
+def visible_keepout_walls(row,visible,cache,dbu):
+    """A merged computational wall must not reveal a hidden source layer."""
+    ends=row.get('witness_um',row.get('nominal_witness_um'))
+    if ends is None:return True
+    for side,kind in enumerate(row['ends']):
+        if kind!='禁布区':continue
+        refs=row['boundary_refs'][side]
+        if all(k in visible for k,_ in refs):continue
+        point=Point(ends[side])
+        if not any(k in visible and cache.layers[k]['geometry'][i].distance(point)<=max(1e-9,dbu*1e-5)
+                   for k,i in refs):return False
+    return True
+
+
+def visible_keepout_intrusion(row,visible,cache):
+    if row['kind']!='禁布区侵入':return row
+    refs=row['boundary_refs']
+    if all(k in visible for k,_ in refs):return row
+    pieces=[cache.layers[k]['geometry'][i] for k,i in refs if k in visible]
+    if not pieces:return None
+    geometry=row['geometry'].intersection(shapely.union_all(pieces))
+    return dict(row,geometry=geometry) if geometry.area>0 else None
+
+
 class WidthOverlay:
     def __init__(self, window):
         self.w = window
@@ -122,6 +146,8 @@ class WidthOverlay:
         places=self.w.view_settings.width_label_decimals
         if item['kind']=='channel':
             body=self.label_text(item,places)
+        elif item['kind']=='keepout':
+            body=f"禁布区侵入 {item['intrusion_area_um2']:.{places}f} μm²\n允许贴边，不允许进入"
         else:
             body=(f"封装边距 {item['gap_um']:.{places}f} μm · 要求 {item['required_um']:.{places}f} μm"
                   f"\n不足 {item['shortfall_um']:.{places}f} μm")
@@ -248,7 +274,8 @@ class WidthOverlay:
             self.active_rows=[r for r in self.table_rows if visible.intersection(r['layers'])
                       and all(not ks or visible.intersection(ks) for ks in r['boundary_layers'])
                       and all(any(k in visible for k,_ in refs) for refs in r['boundary_refs'])
-                      and (not r['refs'] or any(k in visible for k,_ in r['refs']))]
+                      and (not r['refs'] or any(k in visible for k,_ in r['refs']))
+                      and visible_keepout_walls(r,visible,w.geometry_cache,w.data.dbu_um)]
             if self.active_rows:
                 points=np.asarray([r['point'] for r in self.active_rows])
                 reach=np.array([max(r['gap_um']/2,rules['width_um']) for r in self.active_rows])+(.65*(rules['width_um']+rules['space_um']))
@@ -276,7 +303,9 @@ class WidthOverlay:
                 r=active[i];rectangle=rect(r)
                 if overlaps(rectangle.bounds,w.view_bounds):
                     shown.append(r);rectangles.append(rectangle)
-        objects = [o for o in (data or {}).get('retained',[]) if visible.intersection(o['layers'])
+        # Keepouts already have exact, per-source GDS artists. Do not redraw a
+        # merged computational union on top of hidden contributing layers.
+        objects = [o for o in (data or {}).get('retained',[]) if o['kind']!='禁布区' and visible.intersection(o['layers'])
                    and modes[o['kind']]!='hide' and any(k in visible for k,_ in o['refs']) and overlaps(o['geometry'].bounds,w.view_bounds)]
         self.barriers.set_paths([w.geometry_patch(o['geometry']) for o in objects])
         palette={'运动过孔孔盘':('#aacbbd','#588574'),'固定过孔孔盘':('#aec2d7','#6c86a1'),'固定障碍':('#c7c8ce','#81808c')}
@@ -289,7 +318,10 @@ class WidthOverlay:
         self.boxes.set_edgecolors([low_ink(tint(c,modes['截面']),low_risk(r)) for c,r in zip(colors,shown)])
         self.boxes.set_visible(bool(shown) and modes['截面']!='hide')
         board_visible=any(k in visible for k,r in w.roles().items() if r=='封装边框')
-        edges=[v for v in (data or {}).get('edge_violations',[]) if (flags[2] or not low_risk(v)) and v['layer'] in visible and board_visible and overlaps(v['geometry'].bounds,w.view_bounds)]
+        edges=[v for v in (data or {}).get('edge_violations',[]) if (flags[2] or not low_risk(v)) and v['layer'] in visible
+               and (bool(visible.intersection(v['boundary_layers'])) if v['kind']=='禁布区侵入' else board_visible)
+               and overlaps(v['geometry'].bounds,w.view_bounds)]
+        edges=[q for v in edges if (q:=visible_keepout_intrusion(v,visible,w.geometry_cache)) is not None]
         self.edges.set_paths([w.geometry_patch(v['geometry']) for v in edges])
         edge_colors=[IGNORED_COLOR if all((v['layer'],i) in w.ignored_width_lines for i in v['indices']) else COLORS[BLOCKED] for v in edges]
         self.edges.set_facecolor([low_ink(tint(c,modes['边距'],.40),low_risk(v)) for c,v in zip(edge_colors,edges)])
@@ -404,7 +436,7 @@ class WidthOverlay:
             rare=sum(low_risk(r) for r in data['rows'])
             w.width_summary.setText(w.width_summary.text()+f" 已确认低概率通道 {rare} 个。")
         if data and data.get('edge_violations'):
-            w.width_summary.setText(w.width_summary.text()+f" 封装边距不足 {len(data['edge_violations'])} 个图形。")
+            w.width_summary.setText(w.width_summary.text()+f" 封装边缘或禁布区违规 {len(data['edge_violations'])} 个图形。")
     def hover(self,event):
         w = self.w
         if self.tree is None or event.inaxes is not w.ax or event.xdata is None:

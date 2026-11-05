@@ -43,7 +43,7 @@ class RiskPlane:
         self.half=.65*(analyzer.width+analyzer.space)
         for k,g in enumerate(gates):
             a,b=g.pair
-            need=sum(max(analyzer.width,w) for w in g.widths)+(len(g.widths)+1)*analyzer.space
+            need=analyzer.demand(plane,g)
             if travel[a]==travel[b]==0:
                 safe=within[k] and order[k] and min(gap[k],g.nominal_gap)>need+analyzer.tol
             elif convex and inside[a] and inside[b] and not any(plane['local'][list(g.features)]):
@@ -60,7 +60,7 @@ class RiskPlane:
         self.need=[]
         for i,g in enumerate(self.local['gates']):
             self.groups[g.pair,g.strand_refs].append(i)
-            self.need.append(sum(max(analyzer.width,w) for w in g.widths)+(len(g.widths)+1)*analyzer.space)
+            self.need.append(analyzer.demand(self.local,g))
         self.need=np.array(self.need)
         self.owners=tuple(sorted({w.owner for w in walls if w.owner>=0}))
 
@@ -108,6 +108,8 @@ class WidthEvents:
         self.planes=[RiskPlane(analyzer,p,params) for p in analyzer.planes.values()]
         # Build exact boundary candidates once; the displacement envelope includes
         # translated, rotated copper, external fan-out and off-centre pivots.
+        from .width_keepout import forbidden
+        self.keepout=forbidden(self.model);self.intrusions=[]
         self.edges=[];board=self.model.case['board'];self.boundary=board.boundary
         for node in self.model.nodes:
             key=node['key'];role=self.model.roles[key]
@@ -120,6 +122,8 @@ class WidthEvents:
                 travel=np.linalg.norm(abs(mu[:2])+b[:2])+2*lever*math.sin(min(math.pi,abs(mu[2])+b[2])/2)
             if not board.covers(geo) or geo.distance(self.boundary)<=rule+travel+analyzer.tol:
                 self.edges.append((key,node['index'],geo,o,rule))
+            if not self.keepout.is_empty and geo.distance(self.keepout)<=travel+analyzer.tol:
+                self.intrusions.append((key,node['index'],geo,o))
 
     def classify(self,states):
         red=[set() for _ in states];yellow=[set() for _ in states]
@@ -130,5 +134,9 @@ class WidthEvents:
         for key,index,geo,owner,rule in self.edges:
             placed=([self.model.moved(geo,owner,z) for z in states] if owner>=0 else [geo]*len(states))
             fail=~shapely.covers(self.model.case['board'],placed) | (shapely.distance(placed,self.boundary)<rule-tol)
+            for i in np.flatnonzero(fail):red[i].add((key,index))
+        for key,index,geo,owner in self.intrusions:
+            placed=([self.model.moved(geo,owner,z) for z in states] if owner>=0 else [geo]*len(states))
+            fail=shapely.relate_pattern(placed,self.keepout,'T********')
             for i in np.flatnonzero(fail):red[i].add((key,index))
         return red,yellow

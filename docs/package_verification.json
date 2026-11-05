@@ -1,10 +1,10 @@
 {
-  "version": "V33",
+  "version": "V34",
   "status": "PASS",
-  "tested_at_utc": "2026-11-05T04:09:57.970087+00:00",
+  "tested_at_utc": "2026-11-05T05:36:34.578573+00:00",
   "scope": "Clean source checkout, local platform. Windows executable verification is recorded separately.",
   "platform": "linux",
-  "gui_suites": 15,
+  "gui_suites": 16,
   "runs": [
     {
       "args": [
@@ -20,7 +20,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "Ran 301 tests in 71.932s",
+        "Ran 310 tests in 68.833s",
         "",
         "OK"
       ]
@@ -52,7 +52,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "GUI_V20_PASS {'status': 'PASS', 'accepted': 2, 'modes': ['axial', 'axial'], 'animation_enabled_during_revisits': True, 'dashed_middle_band': True, 'first_animation_frames': 4, 'cached_animation_frames': 3, 'hidden_layer_hides_deformation': True, 'report_formula_rendered': True, 'repeated_pose_switches': 18, 'repeated_switch_median_ms': 697.0203910022974, 'project_switch_keeps_results': True, 'zero_restore_ms': 9.10154398297891, 'clear_all_projects_bytes': 0}"
+        "GUI_V20_PASS {'status': 'PASS', 'accepted': 2, 'modes': ['axial', 'axial'], 'animation_enabled_during_revisits': True, 'dashed_middle_band': True, 'first_animation_frames': 3, 'cached_animation_frames': 4, 'hidden_layer_hides_deformation': True, 'report_formula_rendered': True, 'repeated_pose_switches': 18, 'repeated_switch_median_ms': 698.4344930388033, 'project_switch_keeps_results': True, 'zero_restore_ms': 9.45210101781413, 'clear_all_projects_bytes': 0}"
       ]
     },
     {
@@ -72,7 +72,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "GUI_V23_CHANNEL_PASS {'status': 'PASS', 'extreme_and_m_key_pad_motion': True, 'independent_die_stacks': True, 'channel_counts': [3, 3, 2], 'three_risk_classes': True, 'project_roundtrip': True, 'legacy_defaults': True, 'reconstruction_gap_um': 35.0, 'reconstruction_seam_um': 32.0, 'reconstruction_cover_area_um2': 1120.0, 'animation_frames_seen': 61, 'cached_replay': True, 'layer_visibility': True, 'table_focus': True, 'report_formulas': True}"
+        "GUI_V23_CHANNEL_PASS {'status': 'PASS', 'extreme_and_m_key_pad_motion': True, 'independent_die_stacks': True, 'channel_counts': [3, 3, 2], 'three_risk_classes': True, 'project_roundtrip': True, 'legacy_defaults': True, 'reconstruction_gap_um': 35.0, 'reconstruction_seam_um': 32.0, 'reconstruction_cover_area_um2': 1120.0, 'animation_frames_seen': 63, 'cached_replay': True, 'layer_visibility': True, 'table_focus': True, 'report_formulas': True}"
       ]
     },
     {
@@ -179,6 +179,16 @@
         "This plugin does not support raise()",
         "This plugin does not support grabbing the keyboard",
         "GUI_V33_PASS actual right-click pick/menu, blank click, green ignore, cached policy updates, saved/old jobs, stale worker"
+      ]
+    },
+    {
+      "args": [
+        "tests/gui_v34.py"
+      ],
+      "env": {},
+      "status": "PASS",
+      "summary": [
+        "GUI_V34_PASS fixed centred two yields, bias settings/old Jobs, keepout intrusion, hide/display independence, report"
       ]
     },
     {
@@ -459,29 +469,36 @@
         "初筛建议：当前空间条件无初筛候选"
       ],
       "discrete_states": 27
-    }
-  ],
-  "source_snapshot": "f1cbf3a0aea97faaee57a2d985a11628927b38d5",
-  "followup_checks": [
+    },
     {
       "args": [
-        "tests/gui_v33.py"
+        "-m",
+        "die_shift_studio",
+        "--project",
+        "Jobs/示例R_禁布区贴边与联合良率.dshift.json",
+        "--json",
+        "results/示例R_禁布区贴边与联合良率.dshift.json"
       ],
+      "env": {},
       "status": "PASS",
-      "scope": "Typeset confidence-interval formulas, precision save/restore and menu behaviour",
-      "report_sha256": "31c7cdac101ee2e195d554ebcd12864fec41c420f8b1c6508a4bd9cfc5d0cac7"
-    },
-    {
-      "scope": "232px-wide label, three policies at 12 decimal places",
-      "status": "PASS",
-      "font_px": 10,
-      "required_height_px": 36,
-      "available_height_px": 44
-    },
-    {
-      "url": "https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/actions/runs/41965415978",
-      "status": "PASS",
-      "scope": "Scientific precision and unobserved tails, native Windows source and one-file build, clean/CuPy"
+      "summary": [
+        "初筛建议：动静区局部重构"
+      ],
+      "discrete_states": 3
     }
-  ]
+  ],
+  "source_commit": "af6d558",
+  "followup": {
+    "source_commit": "a055efbbd00bb0443f14d99771a865b7e722f9e0",
+    "reason": "Display-only clipping of merged keepouts when a contributing source layer is hidden; numerical geometry unchanged.",
+    "checks": [
+      "OPENBLAS_NUM_THREADS=1 PYTHONPATH=.:tests python3 -m unittest tests.test_v34 -q: 10 tests PASS",
+      "QT_QPA_PLATFORM=offscreen OPENBLAS_NUM_THREADS=1 python3 tests/gui_v34.py: PASS"
+    ],
+    "sha256": {
+      "die_shift_studio/width_overlay.py": "31846805552b688ae25429a7e5d29f889c7f58822a7a2e563a7b2901a0eca4b4",
+      "tests/test_v34.py": "f3b53baf26306d8739098bb7bb1422c38beb9f9ddd532a473deb3fc7ea3de4b3"
+    }
+  },
+  "windows": "Final source ZIP: both Windows CI matrix jobs required before PR #15 merge. See https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/pull/15/checks. No physical NVIDIA GPU available in hosted CI."
 }

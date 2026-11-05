@@ -3,7 +3,7 @@ import math
 import numpy as np
 import shapely
 from collections import defaultdict
-from .edge_clearance import edge_violations
+from .width_keepout import routing_violations,forbidden
 from .extreme_filter import ProblemIndex
 from .width_summary import strongest,combinations
 from .width_analysis import BLOCKED
@@ -40,7 +40,7 @@ def reconstruction_edge_scopes(engine,grid,progress):
             scale=max(scale,float(np.max(abs(pivot))),float(np.max(abs(moved))))
         pad=8*recon.width_um+4*recon.tol+64*np.finfo(float).eps*(1+scale)
         envelope=shapely.box(*(lo-pad),*(hi+pad))
-        if not board.covers(envelope) or envelope.distance(boundary)<=rule:
+        if not board.covers(envelope) or envelope.distance(boundary)<=rule or envelope.intersects(forbidden(model)):
             scopes[tuple(sorted(dies))].append((layer,index))
     return scopes
 
@@ -63,7 +63,7 @@ def scan_reconstruction(engine,grid,settings,base,progress):
             result=engine.reconstructor.frame(z,None,update,targets=refs)
             replacements=result['replacements']
             if replacements:
-                edges=edge_violations(engine.contact,z,engine.p,settings,replacements,replacements_only=True)
+                edges=routing_violations(engine.contact,z,engine.p,settings,replacements,replacements_only=True)
                 flag[local]=bool(edges)
                 if edges:
                     digits=[0]*grid.count
@@ -112,12 +112,12 @@ def scan(engine,grid,settings,width,focused,progress):
         else:
             reconstruction=engine.reconstructor.frame(z,deformation,update) if getattr(engine,'reconstructor',None) else None
             rebuilt=(reconstruction or {}).get('replacements',{})
-            edges=edge_violations(engine.contact,z,engine.p,settings,engine.final_copper(replacements,rebuilt))
+            edges=routing_violations(engine.contact,z,engine.p,settings,engine.final_copper(replacements,rebuilt))
             problem=bool(edges) or channels.matches(digits)
             for row in edges:
                 layer=row['layer'];i=row['indices'][0];node=engine.contact.nodes[engine.contact.ids[layer,i]]
                 event=None
-                if not (replacements or rebuilt) and engine.width_analyzer.probability:
+                if not (replacements or rebuilt) and engine.width_analyzer.probability and row['kind']!='禁布区侵入':
                     event=engine.width_analyzer.probability.edge(layer,i,node['poly'],node['owner'],row['required_um'])
                 strongest(lines,[(layer,j) for j in row['indices']],BLOCKED,event,binary,witnesses,
                           edge_witness(row,index,engine.contact,z))

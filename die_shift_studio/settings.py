@@ -4,8 +4,8 @@ import math
 
 ELEMENTS={'固定RDL':'原始固定 RDL 线路','运动RDL':'原始运动 RDL 线路','固定过孔':'固定过孔实体','运动过孔':'运动过孔实体',
           '封装边框':'封装边框','芯片边框':'芯片边框','其他':'其他 GDS 图形','运动过孔孔盘':'运动孔盘',
-          '固定过孔孔盘':'固定孔盘','固定障碍':'整块固定障碍','截面':'通道矩形','描边':'风险线路描边',
-          '标注':'文字和箭头','边距':'封装边缘违规'}
+          '固定过孔孔盘':'固定孔盘','固定障碍':'整块固定障碍','禁布区':'禁布区','截面':'通道矩形','描边':'风险线路描边',
+          '标注':'文字和箭头','边距':'封装边缘与禁布区违规'}
 DEFAULTS={k:'dim' if k in ('固定RDL','运动RDL') else 'show' for k in ELEMENTS}
 
 
@@ -141,7 +141,7 @@ class ViewSettings:
         return cls(**data)
 
     def width_key(self):
-        return (True,'nominal-physical-throat-v29',self.drc_tolerance_um)
+        return (True,'nominal-physical-throat-v34',self.drc_tolerance_um)
 
     def numeric_key(self):
         return tuple(getattr(self,k) for k in ('acceleration','probability_method','sample_exponent','random_seed',

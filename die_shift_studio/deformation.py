@@ -610,7 +610,8 @@ class DeformationPreview:
                 add('新增其他运动孔控制区侵入',excess)
         for k,v in self.model.cache.layers.items():
             if self.model.roles.get(k)=='禁布区':
-                for g in v['geometry']:add('禁布区侵入',candidate.intersection(g))
+                for g in v['geometry']:
+                    if candidate.relate_pattern(g,'T********'):add('禁布区侵入',candidate.intersection(g))
         return bad
 
     def prepared_source(self,c):

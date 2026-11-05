@@ -18,22 +18,22 @@ class JointPolicyTests(unittest.TestCase):
         a,b=('5/0',0),('5/0',1)
         bank=dict(method='mc',total=4,
                   chunks=(packed_events([{a},set(),{a},set()],[{b},{b},set(),set()]),))
-        np.testing.assert_array_equal(policy_yields(bank,[])['values'],[.25,.5,1.])
-        q=policy_yields(bank,[b]);np.testing.assert_array_equal(q['values'],[.25,.25,.5])
-        for s,interval in zip((1,1,2),q['intervals']):
-            expected=binomtest(s,4).proportion_ci(confidence_level=1-.01/3)
+        np.testing.assert_array_equal(policy_yields(bank,[])['values'],[1.,.25])
+        q=policy_yields(bank,[b]);np.testing.assert_array_equal(q['values'],[.5,.25])
+        for s,interval in zip((2,1),q['intervals']):
+            expected=binomtest(s,4).proportion_ci(confidence_level=1-.01/2)
             np.testing.assert_allclose(interval,[expected.low,expected.high],atol=1e-12)
         # Overlapping red and yellow events count once per package.
         bank['chunks']=(packed_events([{a,b},{a},set(),set()],[{a},set(),set(),set()]),)
-        np.testing.assert_array_equal(policy_yields(bank,[])['values'],[.5,.5,1.])
+        np.testing.assert_array_equal(policy_yields(bank,[])['values'],[1.,.5])
 
     def test_unsampled_failures_and_tiny_weighted_tails_remain_visible(self):
         ref=('5/0',0)
         bank=dict(method='mc',total=4096,chunks=(packed_events([set()]*4096,[set()]*4096),))
         stats=policy_yields(bank,[])
         text=policy_texts(stats,6)
-        self.assertTrue(text[0].startswith('≥99.'));self.assertTrue(text[1].startswith('≥99.'))
-        self.assertEqual(text[2],'100%')
+        self.assertTrue(text[1].startswith('≥99.'))
+        self.assertEqual(text[0],'100%')
         bank=dict(method='cubature',total=2,chunks=(packed_events([{ref},set()],[set(),set()],np.array([1e-40,1.])),))
         stats=policy_yields(bank,[ref]);self.assertGreater(stats['failure_probability'][0],0)
         for digits in (0,2,6,12):
@@ -43,7 +43,7 @@ class JointPolicyTests(unittest.TestCase):
         text=policy_texts(policy_yields(bank,[ref]),6)
         self.assertTrue(all('e-38%' in x and '100%' not in x for x in text),text)
         bank['chunks']=(packed_events([set()],[set()],np.ones(1)),)
-        self.assertEqual(policy_texts(policy_yields(bank,[ref]),6),['待细化']*3)
+        self.assertEqual(policy_texts(policy_yields(bank,[ref]),6),['待细化']*2)
         self.assertEqual(ViewSettings.from_dict({}).width_yield_decimals,6)
         self.assertEqual(ViewSettings.from_dict({'width_yield_decimals':10}).width_yield_decimals,10)
 
@@ -86,8 +86,8 @@ class JointPolicyTests(unittest.TestCase):
             bank=measure_width_yield(engine.contact,p,cfg,None,lambda *_:None)
             refs=set().union(*(set(x[3]) for x in bank['chunks']))
             first=policy_yields(bank,[]);last=policy_yields(bank,refs)
-            self.assertLessEqual(first['values'][0],first['values'][1]);self.assertEqual(first['values'][2],1.)
-            np.testing.assert_allclose(last['values'],[first['values'][0]]*3)
+            self.assertGreaterEqual(first['values'][0],first['values'][1]);self.assertEqual(first['values'][0],1.)
+            np.testing.assert_allclose(last['values'],[first['values'][1]]*2)
         finally:engine.close()
 
 class SceneParityTests(unittest.TestCase):
