@@ -7,6 +7,8 @@ on:
       - 'tools/windows_acceptance.py'
       - 'tests/gui_v30.py'
       - 'tests/gui_v32.py'
+      - 'tests/gui_v33.py'
+      - 'tests/test_v33.py'
       - 'tests/test_v32.py'
       - 'tests/cuda_test_driver.cpp'
       - 'main.py'
@@ -83,6 +85,13 @@ jobs:
       - name: Verify hardware preference and pending Qt worker shutdown
         shell: cmd
         run: '"%DIE_SHIFT_PYTHON%" tests/gui_v32.py'
+      - name: Verify joint width probabilities and context menu
+        shell: cmd
+        run: |
+          set PYTHONPATH=.;tests
+          "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_v33.py -v
+          if errorlevel 1 exit /b 1
+          "%DIE_SHIFT_PYTHON%" tests/gui_v33.py
       - name: Exercise the one-click BUILD.bat from the extracted source
         shell: cmd
         run: call "%DSA_TEST_SOURCE%\BUILD.bat"

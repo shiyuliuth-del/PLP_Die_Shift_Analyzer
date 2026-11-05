@@ -1,10 +1,10 @@
 {
-  "version": "V32",
+  "version": "V33",
   "status": "PASS",
-  "tested_at_utc": "2026-11-03T08:34:57.637918+00:00",
+  "tested_at_utc": "2026-11-05T04:09:57.970087+00:00",
   "scope": "Clean source checkout, local platform. Windows executable verification is recorded separately.",
   "platform": "linux",
-  "gui_suites": 14,
+  "gui_suites": 15,
   "runs": [
     {
       "args": [
@@ -20,7 +20,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "Ran 293 tests in 140.902s",
+        "Ran 301 tests in 71.932s",
         "",
         "OK"
       ]
@@ -52,7 +52,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "GUI_V20_PASS {'status': 'PASS', 'accepted': 2, 'modes': ['axial', 'axial'], 'animation_enabled_during_revisits': True, 'dashed_middle_band': True, 'first_animation_frames': 4, 'cached_animation_frames': 4, 'hidden_layer_hides_deformation': True, 'report_formula_rendered': True, 'repeated_pose_switches': 18, 'repeated_switch_median_ms': 698.9281044952804, 'project_switch_keeps_results': True, 'zero_restore_ms': 9.310434004873969, 'clear_all_projects_bytes': 0}"
+        "GUI_V20_PASS {'status': 'PASS', 'accepted': 2, 'modes': ['axial', 'axial'], 'animation_enabled_during_revisits': True, 'dashed_middle_band': True, 'first_animation_frames': 4, 'cached_animation_frames': 3, 'hidden_layer_hides_deformation': True, 'report_formula_rendered': True, 'repeated_pose_switches': 18, 'repeated_switch_median_ms': 697.0203910022974, 'project_switch_keeps_results': True, 'zero_restore_ms': 9.10154398297891, 'clear_all_projects_bytes': 0}"
       ]
     },
     {
@@ -72,7 +72,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "GUI_V23_CHANNEL_PASS {'status': 'PASS', 'extreme_and_m_key_pad_motion': True, 'independent_die_stacks': True, 'channel_counts': [3, 3, 2], 'three_risk_classes': True, 'project_roundtrip': True, 'legacy_defaults': True, 'reconstruction_gap_um': 35.0, 'reconstruction_seam_um': 32.0, 'reconstruction_cover_area_um2': 1120.0, 'animation_frames_seen': 63, 'cached_replay': True, 'layer_visibility': True, 'table_focus': True, 'report_formulas': True}"
+        "GUI_V23_CHANNEL_PASS {'status': 'PASS', 'extreme_and_m_key_pad_motion': True, 'independent_die_stacks': True, 'channel_counts': [3, 3, 2], 'three_risk_classes': True, 'project_roundtrip': True, 'legacy_defaults': True, 'reconstruction_gap_um': 35.0, 'reconstruction_seam_um': 32.0, 'reconstruction_cover_area_um2': 1120.0, 'animation_frames_seen': 61, 'cached_replay': True, 'layer_visibility': True, 'table_focus': True, 'report_formulas': True}"
       ]
     },
     {
@@ -92,6 +92,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "This plugin does not support grabbing the keyboard",
         "This plugin does not support propagateSizeHints()",
         "GUI_V24_PASS: Q keyboard, source and preview nodes, atomic validation, saved edits, fresh evaluation, independent visibility, clipped styles, cached origin transitions and right-button navigation."
       ]
@@ -166,6 +167,18 @@
       "status": "PASS",
       "summary": [
         "GUI_V32_PASS selected NVIDIA, CPU fallback preserves saved preference, queued worker shutdown"
+      ]
+    },
+    {
+      "args": [
+        "tests/gui_v33.py"
+      ],
+      "env": {},
+      "status": "PASS",
+      "summary": [
+        "This plugin does not support raise()",
+        "This plugin does not support grabbing the keyboard",
+        "GUI_V33_PASS actual right-click pick/menu, blank click, green ignore, cached policy updates, saved/old jobs, stale worker"
       ]
     },
     {
@@ -446,6 +459,29 @@
         "初筛建议：当前空间条件无初筛候选"
       ],
       "discrete_states": 27
+    }
+  ],
+  "source_snapshot": "f1cbf3a0aea97faaee57a2d985a11628927b38d5",
+  "followup_checks": [
+    {
+      "args": [
+        "tests/gui_v33.py"
+      ],
+      "status": "PASS",
+      "scope": "Typeset confidence-interval formulas, precision save/restore and menu behaviour",
+      "report_sha256": "31c7cdac101ee2e195d554ebcd12864fec41c420f8b1c6508a4bd9cfc5d0cac7"
+    },
+    {
+      "scope": "232px-wide label, three policies at 12 decimal places",
+      "status": "PASS",
+      "font_px": 10,
+      "required_height_px": 36,
+      "available_height_px": 44
+    },
+    {
+      "url": "https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/actions/runs/41965415978",
+      "status": "PASS",
+      "scope": "Scientific precision and unobserved tails, native Windows source and one-file build, clean/CuPy"
     }
   ]
 }

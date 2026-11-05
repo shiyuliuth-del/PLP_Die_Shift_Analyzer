@@ -40,7 +40,7 @@ def combinations(grid,owners):
         yield digits,states
 
 
-def sweep_sections(analyzer,plane,grid,owners,progress):
+def sweep_sections(analyzer,plane,grid,owners,progress,paired=False):
     """Vectorize independent endpoint pairs in bounded blocks of discrete poses."""
     gates,walls=plane['gates'],plane['walls']
     orig=np.array([g.ends for g in gates]);feat=np.array([g.features for g in gates])
@@ -57,12 +57,15 @@ def sweep_sections(analyzer,plane,grid,owners,progress):
         return out
     pieces=bank(plane['pieces'],owner[plane['parents']])
     geos=bank(np.array([w.geometry for w in walls],object),owner)
-    radices=tuple(grid.radices[i] for i in owners);count=math.prod(radices)
+    radices=tuple(grid.radices[i] for i in owners);count=len(grid.locals[0])-1 if paired else math.prod(radices)
     steps=max(1,min(128,4096//len(gates)))
     for start in range(0,count,steps):
         progress(start/count)
         size=min(steps,count-start);digits=np.zeros((size,grid.count),int)
-        if owners:digits[:,list(owners)]=np.asarray(np.unravel_index(np.arange(start,start+size),radices)).T
+        if paired:
+            local_ids=np.arange(start+1,start+size+1)
+            for o in owners:digits[:,o]=np.where(np.any(grid.locals[o][local_ids]!=0,axis=1),local_ids,0)
+        elif owners:digits[:,list(owners)]=np.asarray(np.unravel_index(np.arange(start,start+size),radices)).T
         ids=[];shapes=[]
         for side in (0,1):
             o=owner[pairs[:,side]]

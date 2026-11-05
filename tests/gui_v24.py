@@ -27,7 +27,7 @@ def wait():
     while time.monotonic()<end:
         app.processEvents()
         if not any((w.worker,w.preview_workers,w.preview_pending,w.motion_worker,w.motion_pending,w.hardware_worker,w.coverage_timer.isActive(),
-                    w._coverage_pending,w.viewport_timer.isActive(),w.transition.timer.isActive(),w.mouse_die.timer.isActive(),w.mouse_die.idle.isActive())):break
+                    w._coverage_pending,w.viewport_timer.isActive(),w.transition.timer.isActive(),w.mouse_die.timer.isActive(),w.mouse_die.idle.isActive(),w.width_yield.worker,w.width_yield.timer.isActive())):break
         time.sleep(.005)
     else:raise AssertionError('V24 GUI timeout')
     assert not errors,errors
@@ -67,11 +67,13 @@ def pointer(name,world):
     event=MouseEvent(name,w.canvas,*xy,button=MouseButton.RIGHT)
     w.canvas.callbacks.process(name,event)
 
-w.fit_plot();wait();span=np.ptp(w.ax.get_xlim())
+w.fit_plot();wait();span=np.ptp(w.ax.get_xlim());original_limits=(w.ax.get_xlim(),w.ax.get_ylim())
 px,py=w.ax.transData.transform((40.,20.));scale=w.canvas.devicePixelRatioF()
 QTest.mouseClick(w.canvas,getattr(Qt,'MouseButton',Qt).RightButton,
                  pos=QtCore.QPoint(round(px/scale),round(w.canvas.height()-py/scale)));wait()
-np.testing.assert_allclose([np.mean(w.ax.get_xlim()),np.mean(w.ax.get_ylim())],[40,20],atol=2)
+np.testing.assert_array_equal((w.ax.get_xlim(),w.ax.get_ylim()),original_limits)
+menu=W.QApplication.activePopupWidget()
+if menu is not None:menu.close();wait()
 assert abs(np.ptp(w.ax.get_xlim())-span)<2
 pointer('button_press_event',(70.,55.));pointer('motion_notify_event',(-50.,-10.))
 assert w.navigation.rubber is not None

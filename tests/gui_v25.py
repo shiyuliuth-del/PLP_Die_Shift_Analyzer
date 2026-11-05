@@ -23,7 +23,7 @@ def wait():
     end=time.monotonic()+180
     while time.monotonic()<end:
         app.processEvents()
-        if not (w.worker or w.preview_workers or w.preview_pending or w.motion_worker or w.motion_pending or w.hardware_worker
+        if not (w.width_yield.worker or w.width_yield.timer.isActive() or w.worker or w.preview_workers or w.preview_pending or w.motion_worker or w.motion_pending or w.hardware_worker
                 or w.transition.timer.isActive() or w.coverage_timer.isActive() or w._coverage_pending or w.viewport_timer.isActive()
                 or w.mouse_die.timer.isActive() or w.mouse_die.idle.isActive()):break
         time.sleep(.004)

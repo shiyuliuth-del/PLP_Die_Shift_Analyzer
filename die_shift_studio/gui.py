@@ -200,7 +200,7 @@ class MainWindow(W.QMainWindow):
         self.die_labels=[];self._default_view=None;self._artist_frame=None;self.report_dirty=True;self._reordering=False
         self.space_data=None;self.repair_data=None;self.space_artists=[];self.space_stamp=None;self.space_colorbar=None;self._resizing=False
         self._issue_table_stamp=None;self.dirty=False;self.manual_states=None;self.evaluation_motions={};self.probability_data=None;self.probability_artists=[];self.probability_stamp=None;self.legend=None;self.zone_artists=[];self.invalid_artists=[]
-        self.view_settings=ViewSettings();self.setting_fields={};self.layer_styles={};self.histogram_dirty=False
+        self.ignored_width_lines=frozenset();self.view_settings=ViewSettings();self.setting_fields={};self.layer_styles={};self.histogram_dirty=False
         self.coverage_timer=QtCore.QTimer(self);self.coverage_timer.setSingleShot(True);self.coverage_timer.setInterval(180);self.coverage_timer.timeout.connect(self.refresh_coverage)
         self._coverage_pending=False;self._evaluation_requested=False;self._motion_intent=None;self.motion_worker=None;self.motion_pending=None;self.motion_generation=0;self.deformation_artists={};self._plotting=False;self.viewport_index=None;self._viewport_stamp=None
         self.issue_navigation=QtCore.QTimer(self);self.issue_navigation.setSingleShot(True);self.issue_navigation.setInterval(0);self.issue_navigation.timeout.connect(lambda:self.locate_issue(self.issue_table.currentRow(),0))
@@ -259,7 +259,7 @@ class MainWindow(W.QMainWindow):
         self.controls=W.QTabWidget();lay.addWidget(self.controls,1)
         page=self._page('偏移')
         summary=label('方案1：动静区之间局部重构RDL。\n方案2：RDL整体随动，固定RDL窗口捕获。\n方案3：预制运动RDL，动静接口适配。');summary.setObjectName('Notice');page.addWidget(summary)
-        self.shortcut_label=label('快捷键（鼠标位于图中）：F 恢复视图，M 手动偏移，Shift＋点选/框选追加，Ctrl＋点选/框选扣除，Q 查看或编辑选中图形节点，ESC 退出/取消选择。\n普通模式：滚轮缩放，中键平移，右键单击居中、拖框缩放。\n手动偏移：右键拖动芯片，滚轮旋转，Ctrl＋滚轮缩放。');page.addWidget(self.shortcut_label)
+        self.shortcut_label=label('快捷键（鼠标位于图中）：F 恢复视图，M 手动偏移，Shift＋点选/框选追加，Ctrl＋点选/框选扣除，Q 查看或编辑选中图形节点，ESC 退出/取消选择。\n普通模式：滚轮缩放，中键平移，右键单击查看选中图形、拖框缩放。\n手动偏移：右键拖动芯片，滚轮旋转，Ctrl＋滚轮缩放。');page.addWidget(self.shortcut_label)
         self.gds_label=label('尚未打开GDS');self.gds_label.setTextInteractionFlags(getattr(Qt,'TextInteractionFlag',Qt).TextSelectableByMouse);page.addWidget(self.gds_label)
         row=W.QHBoxLayout();row.addWidget(W.QLabel('顶层Cell'));self.top=W.QComboBox();self.top.currentTextChanged.connect(self.top_changed);row.addWidget(self.top,1);page.addLayout(row)
         self.open_gds_button=W.QPushButton('打开GDS');self.open_gds_button.setObjectName('Primary');self.open_gds_button.clicked.connect(self.open_gds);page.addWidget(self.open_gds_button)
@@ -292,6 +292,8 @@ class MainWindow(W.QMainWindow):
         self.tabs=W.QTabWidget();split.addWidget(self.tabs);split.setSizes([445,1095])
         self.figure=Figure(figsize=(9,5));self.figure.subplots_adjust(left=.043,right=.993,bottom=.095,top=.99);self.canvas=FigureCanvasQTAgg(self.figure);self.ax=self.figure.add_subplot(111)
         page=W.QWidget();v=W.QVBoxLayout(page);v.setContentsMargins(0,0,0,0);self.toolbar=NavigationToolbar2QT(self.canvas,self);v.addWidget(self.toolbar)
+        from .width_yield_display import WidthYieldDisplay
+        self.width_yield=WidthYieldDisplay(self)
         self.width_label_overflow=W.QPlainTextEdit()
         self.width_label_overflow.setReadOnly(True);self.width_label_overflow.setMaximumHeight(92)
         self.width_label_overflow.setToolTip('图内空间不足的已选线路标记');self.width_label_overflow.hide()
@@ -389,7 +391,7 @@ class MainWindow(W.QMainWindow):
         self.reconstruction_table=table(['固定RDL层','所属','网络','移动区面积 / μm²','位移 / μm','裂隙 / μm','补线面积 / μm²','切口缝长 / μm','状态']);cv.addWidget(self.reconstruction_table)
         self.reconstruction_table.currentCellChanged.connect(lambda row,*_:self.reconstruction_overlay.locate(row));self.preview_tabs.addTab(self.reconstruction_page,'重构预演')
         right_split.addWidget(bottom);right_split.setSizes([560,240]);self.tabs.addTab(page,'结果图形')
-        self.canvas._managed_viewport=True;self.navigation=Navigation(self.canvas,self.ax)
+        self.canvas._managed_viewport=True;self.navigation=Navigation(self.canvas,self.ax,self.show_shape_menu)
         self.canvas.mpl_connect('resize_event',self.resize_plot)
         self.ax.callbacks.connect('xlim_changed',self.update_die_label_visibility);self.ax.callbacks.connect('ylim_changed',self.update_die_label_visibility)
         self.ax.callbacks.connect('xlim_changed',self.queue_viewport);self.ax.callbacks.connect('ylim_changed',self.queue_viewport)
@@ -513,14 +515,18 @@ class MainWindow(W.QMainWindow):
         spin(safe,'safe_box_budget','每候选连续验证盒预算',32,32768)
         spin(safe,'safe_box_starts','端点扩张起点数',1,6)
         spin(safe,'safe_box_passes','体积交换轮数',1,8)
-        yield_group=group('全输入无接触模型良率')
-        choices['yield_method']=[('蒙特卡洛 + 99%置信区间','monte_carlo'),('确定性状态盒积分（不随机采样）','partition')]
+        yield_group=group('全输入良率计算')
+        choices['yield_method']=[('蒙特卡洛 + 99%置信区间','monte_carlo'),('确定性积分（不随机采样）','partition')]
         choice(yield_group,'yield_method','计算方法')
-        spin(yield_group,'yield_sample_exponent','每DIE样本数 = 2 的指数',8,20)
-        spin(yield_group,'yield_box_budget','全输入良率积分预算 / DIE',64,65536)
-        spin(yield_group,'yield_tolerance','良率区间宽度目标（概率）',.000001,.1,6)
+        spin(yield_group,'yield_sample_exponent','样本数 = 2 的指数',8,20)
+        spin(yield_group,'yield_box_budget','全输入良率积分预算',64,65536)
+        spin(yield_group,'yield_tolerance','无接触良率区间宽度目标',.000001,.1,6)
+        self.setting_fields['yield_method'].setToolTip('无接触良率使用状态盒概率界；三项宽度良率使用完整联合姿态的蒙特卡洛或确定性条件求积。')
+        self.setting_fields['yield_box_budget'].setToolTip('宽度联合积分取预算以内最大的2次幂节点数，无接触积分按每DIE分配状态盒。')
         self.setting_fields['safe_box_precision'].setToolTip('返回包含输入均值的安全内盒；多个端点顺序比较体积。未定候选拒绝，精度不代表全局最优误差。')
         channel=group('宽度分析 · 元素显示')
+        spin(channel,'width_yield_decimals','良率小数位数',0,12)
+        self.setting_fields['width_yield_decimals'].setToolTip('接近100%时以100%减去科学计数法失效概率显示；未采到事件时显示区间界限。')
         drawing_modes=WidthDisplayEditor();self.setting_fields['width_display']=drawing_modes
         channel.addRow(drawing_modes);drawing_modes.valueChanged.connect(self.settings_changed)
         text_row=W.QHBoxLayout();text_row.setContentsMargins(0,0,0,0)
@@ -595,6 +601,11 @@ class MainWindow(W.QMainWindow):
         if binary:
             for key in ('sample_exponent','random_seed','angle_bins','quadrature_order','yield_sample_exponent','yield_box_budget','yield_tolerance'):
                 self.setting_fields[key].setEnabled(False)
+            if hasattr(self,'width_toggle') and self.width_toggle.isChecked():
+                self.setting_fields['yield_method'].setEnabled(True)
+                self.setting_fields['yield_sample_exponent'].setEnabled(not partition)
+                self.setting_fields['yield_box_budget'].setEnabled(partition)
+                self.setting_fields['random_seed'].setEnabled(not partition)
             return
         deterministic=self.setting_fields['probability_method'].currentData()=='quadrature'
         for key in ('sample_exponent','random_seed','angle_bins'):self.setting_fields[key].setEnabled(not deterministic)
@@ -612,11 +623,11 @@ class MainWindow(W.QMainWindow):
                     self.draw_contact_ranges();self.refresh_legend();self.update_die_label_visibility();self.render_scene()
                 else:self._layout_pending=True
             return
-        presentation=('width_display','width_label_font_pt','width_label_decimals','show_low_contact','show_low_width',*ranges)
+        presentation=('width_display','width_label_font_pt','width_label_decimals','width_yield_decimals','show_low_contact','show_low_width',*ranges)
         if all(getattr(updated,k)==getattr(self.view_settings,k) for k in values if k not in (*presentation,'cache_max_entries')):
             display_change=any(getattr(updated,k)!=getattr(self.view_settings,k) for k in presentation)
             self.view_settings=updated;self.cache_group.limit(updated.cache_max_entries);self.refresh_cache_status()
-            if display_change and self.data:self._legend_stamp=None;self.plot_layout(preserve=True)
+            if display_change and self.data:self._legend_stamp=None;self.plot_layout(preserve=True);self.width_yield.render()
             return
         intent=self._motion_intent if self.transition.timer.isActive() else None
         self.stop_animation()
@@ -628,6 +639,7 @@ class MainWindow(W.QMainWindow):
         live_motion=any(getattr(updated,k)!=getattr(old_settings,k) for k in ('animation_enabled','animation_return_zero','animation_duration_ms','animation_fps','animation_speed','animation_strategy'))
         repair_shape=(updated.repair_landing_pad!=old_settings.repair_landing_pad or updated.repair_patch_width_um!=old_settings.repair_patch_width_um)
         reconstruction_shape=any(getattr(updated,k)!=getattr(old_settings,k) for k in ('reconstruction_length_um','reconstruction_width_um','reconstruction_overlap_um'))
+        if numeric or updated.drc_tolerance_um!=old_settings.drc_tolerance_um:self.width_yield.refresh()
         if numeric:
             self.dirty=self.result is not None
             self.revision+=1;self.probability_data=None;self.footprint_data=None;self.space_data=None;self.repair_data=None
@@ -777,10 +789,10 @@ class MainWindow(W.QMainWindow):
         old=self.cache_registry.retire(self.cache_project_key)
         if old is not None:old.enabled=False;self.retired_sessions.append(old)
         self._attach_cache_group(self.cache_project_key,self.view_settings.cache_max_entries)
-        self.cleanup_retired_sessions();self.refresh_cache_status()
+        self.cleanup_retired_sessions();self.refresh_cache_status();self.width_yield.refresh()
     def clear_cached_results(self,all_projects=False):
         if self.cache_clear_worker is not None:return
-        self.stop_animation();self._prepared_motion=None;self._prepared_package=None
+        self.stop_animation();self.width_yield.reset();self._prepared_motion=None;self._prepared_package=None
         self.preview_ticket+=1;self.preview_pending=None;self.motion_pending=None;self.motion_generation+=1
         self._width_grid_summary=None;self._problem_tag=None;self._coupled_key=None;self._coupled_data=None
         for worker in [self.worker,self.motion_worker,self.filter_job,*self.preview_workers]:
@@ -797,7 +809,7 @@ class MainWindow(W.QMainWindow):
             progress(100,'缓存文件已清除')
         worker=Worker(work,self);self.cache_clear_worker=worker;self.watch_worker(worker,'清理缓存')
         def finish():
-            self.cache_clear_worker=None;self.clear_cache_button.setEnabled(True);self.refresh_cache_status();self.cleanup_retired_sessions();worker.deleteLater()
+            self.cache_clear_worker=None;self.clear_cache_button.setEnabled(True);self.refresh_cache_status();self.cleanup_retired_sessions();worker.deleteLater();self.width_yield.refresh()
         worker.finished.connect(finish);worker.start()
     def cleanup_retired_sessions(self):
         if self._tasks:return
@@ -835,6 +847,7 @@ class MainWindow(W.QMainWindow):
     def coverage_changed(self,*_):
         if self.loading:return
         if self.target_sigma.currentText() not in ('0','∞'):self.reference_nsigma=float(self.target_sigma.currentText())
+        self.width_yield.refresh()
         self._width_grid_summary=None;self._problem_tag=None
         self.enable_settings();self.stop_animation();self.revision+=1;self.engine=None;self.connections=None
         self.probability_data=None;self.footprint_data=None;self.space_data=None;self.repair_data=None;self.preview_ticket+=1;self.preview_pending=None
@@ -851,6 +864,7 @@ class MainWindow(W.QMainWindow):
         else:self.request_preview()
     def invalidate(self,*_):
         if self.loading:return
+        self.width_yield.refresh()
         self._width_grid_summary=None;self._problem_tag=None
         self.revision+=1;self.dirty=self.result is not None;self.refresh_extreme_colors();self.engine=None;self.connections=None;self.probability_data=None;self.footprint_data=None;self.space_data=None;self.repair_data=None
         self.statusBar().showMessage('参数已修改；保留上次计算结果。预演控制区使用当前工艺，重新评估后更新统计结论。')
@@ -921,6 +935,8 @@ class MainWindow(W.QMainWindow):
         self.coverage_timer.stop();self._coverage_pending=False;self._evaluation_requested=False
         self.loading=True
         try:
+            from .project import restored_width_ignores
+            self.ignored_width_lines=restored_width_ignores(project,data)
             self.data=data;self.gds_label.setText(Path(data.path).name+'\n'+str(Path(data.path).resolve()));self.gds_label.setToolTip(str(Path(data.path).resolve()))
             view=project.get('extreme_view',{'mode':'focus','page':1})
             self.grid_mode.blockSignals(True);self.grid_mode.setCurrentIndex(int(view['mode']=='focus'));self.grid_mode.blockSignals(False)
@@ -1193,6 +1209,7 @@ class MainWindow(W.QMainWindow):
             self.plot_layout(preserve=True)
     def width_changed(self,*_):
         if self.loading:return
+        self.enable_settings();self.width_yield.refresh()
         self.filter_changed(pending_ok=True)
         if self.width_toggle.isChecked():self.request_preview()
         else:self.plot_layout(preserve=True)
@@ -1504,7 +1521,7 @@ class MainWindow(W.QMainWindow):
         return origin
     def refresh_legend(self):
         stamp=(tuple((k,self.visible_boxes[k].isChecked(),str(self.style_for(k))) for k in self.ordered_layers()),
-               self.view_settings.show_annulus_range,self.view_settings.show_spacing_range,self.current_frame is not None,(self.current_frame or {}).get('width_summary') is not None,self.target_sigma.currentText(),bool(getattr(self,'deformation_diagnostics',[])),self.probability_toggle.isChecked(),id(self.probability_data),self.view_settings.probability_cmap,self.view_settings.probability_alpha,self.view_settings.probability_gamma,self.view_settings.probability_show_ranges,self.view_settings.probability_ranges,self.view_settings.probability_target_color,self.view_settings.contact_marker_color,self.view_settings.unadapted_marker_color,self.width_toggle.isChecked(),self.width_sufficient_toggle.isChecked(),self.repair_toggle.isChecked(),self.reconstruction_toggle.isChecked(),bool(self.current_frame and self.current_frame.get('motion_issues')))
+               self.view_settings.show_annulus_range,self.view_settings.show_spacing_range,self.current_frame is not None,(self.current_frame or {}).get('width_summary') is not None,self.target_sigma.currentText(),bool(getattr(self,'deformation_diagnostics',[])),self.probability_toggle.isChecked(),id(self.probability_data),self.view_settings.probability_cmap,self.view_settings.probability_alpha,self.view_settings.probability_gamma,self.view_settings.probability_show_ranges,self.view_settings.probability_ranges,self.view_settings.probability_target_color,self.view_settings.contact_marker_color,self.view_settings.unadapted_marker_color,self.width_toggle.isChecked(),self.width_sufficient_toggle.isChecked(),self.ignored_width_lines,self.repair_toggle.isChecked(),self.reconstruction_toggle.isChecked(),bool(self.current_frame and self.current_frame.get('motion_issues')))
         if stamp==self._legend_stamp:return
         self._legend_stamp=stamp
         if self.legend is not None:self.legend.remove()
@@ -1521,6 +1538,7 @@ class MainWindow(W.QMainWindow):
                         Patch(facecolor='#c0392b',edgecolor='#8e2b21',alpha=.5,hatch='///',label='补块新增违规')]
         if self.width_toggle.isChecked():
             modes=self.view_settings.width_display
+            if self.ignored_width_lines and modes['描边']!='hide':handles.append(Patch(facecolor='#95c8a5',edgecolor='#95c8a5',alpha=.6,label='已忽略的宽度问题'))
             for key,label,color in [('运动过孔孔盘','运动孔盘','#589881'),('固定过孔孔盘','固定孔盘','#6985a5'),('固定障碍','固定障碍','#85848e'),('边距','封装边距不足','#c44956')]:
                 if modes[key]!='hide':handles.append(Patch(facecolor=tint(color,modes[key],.65),label=label))
             if (self.current_frame or {}).get('width_summary') is not None and modes['描边']!='hide':
@@ -2035,6 +2053,7 @@ class MainWindow(W.QMainWindow):
         self._assessment_digest=logical_fingerprint((r.get('parameters'),r.get('contact_analysis'),r.get('issues')))
         self._width_grid_summary=summary;self._problem_tag=None
         self.result=r;self.dirty=False;self.evaluation_motions=r.get('motions',self.motions());self.manual_states=None
+        self.width_yield.render()
         if self.case is None:self.case=build_case(self.data,self.roles(),layer_order=self.ordered_layers())
         self.extremes=catalog if catalog is not None else ExtremeCatalog(self.case,self.params())
         self.focus_extremes=RepresentativeExtremes.from_result(self.case,self.params(),r,self.extremes)
@@ -2091,16 +2110,21 @@ class MainWindow(W.QMainWindow):
     def update_report(self):
         if getattr(self,'_report_rendering',False):return
         self._report_rendering=True;result=self.result;self.progress.show();self.progress.setValue(0)
+        width_snapshot=result.get('width_policy_yield');retry=False
         try:
             def progress(n,text):
                 self.progress.setValue(n);self.progress.setFormat(text);self.log_bus.emit(text)
                 flag=getattr(QtCore.QEventLoop,'ProcessEventsFlag',QtCore.QEventLoop).ExcludeUserInputEvents
                 W.QApplication.processEvents(flag)
             html,resources=report_document(result,self.evaluation_motions,progress)
-            if self.result is result:set_document(self.detail,html,resources);self.report_dirty=False
+            if self.result is result:
+                set_document(self.detail,html,resources)
+                self.report_dirty=result.get('width_policy_yield') is not width_snapshot;retry=self.report_dirty
         except Exception:self.error(traceback.format_exc())
         finally:
             self._report_rendering=False
+            if retry and self.result is result and self.tabs.currentWidget() is self.detail:
+                QtCore.QTimer.singleShot(0,self.update_report)
             if not self._tasks:self.progress.hide();self.cleanup_retired_sessions()
     def jump_extreme_page(self):
         try:page=int(self.page_edit.text())-1
@@ -2411,10 +2435,21 @@ class MainWindow(W.QMainWindow):
     def project_settings(self):
         return dict(schema_version=5,app_version=__version__,sha256=self.data.sha256,top_cell=self.data.top_name,
                     roles=self.roles(),parameters=asdict(self.params()),settings=asdict(self.view_settings),node_edits=list(self.data.node_edits),
+                    ignored_width_lines=dict(sha256=self.data.sha256,top_cell=self.data.top_name,refs=[list(r) for r in sorted(self.ignored_width_lines)]),
                     extreme_view=dict(filter_problems=self.problem_filter.isChecked(),mode='focus' if self.grid_mode.currentIndex() else 'all',page_size=EXTREME_PAGE_SIZE,page=(self.preview_page if self.extremes is not None else self._initial_extreme_page)+1),
                     expanded_settings=[title for title,header in self.setting_sections.items() if header.isChecked()],
                     overlays={name:getattr(self,name+'_toggle').isChecked() for name in OVERLAY_DEFAULTS},layer_styles=self.layer_styles,
                     visibility={k:w.isChecked() for k,w in self.visible_boxes.items()},motions=self.motions(),layer_order=self.ordered_layers())
+
+    def show_shape_menu(self,event,point):
+        from .shape_menu import show_shape_menu
+        show_shape_menu(self,event,point)
+
+    def change_width_ignores(self,refs,ignore):
+        self.ignored_width_lines=(self.ignored_width_lines.union(refs) if ignore else self.ignored_width_lines.difference(refs))
+        self._legend_stamp=None
+        self.plot_layout(preserve=True)
+        self.width_yield.refresh()
 
     def show_properties(self):
         if not self.data:return
@@ -2480,9 +2515,9 @@ class MainWindow(W.QMainWindow):
             self.load_gds(gds,project.get('top_cell'),project,project_path=path)
         except Exception as exc:self.refresh_jobs();self.error(exc)
     def closeEvent(self,event):
-        self.stop_animation()
+        self.stop_animation();self.width_yield.reset()
         if hasattr(self,'mouse_die'):self.mouse_die.pending=False;self.mouse_die.full_pending=False;self.mouse_die.timer.stop();self.mouse_die.idle.stop()
-        running=[w for w in [self.worker,self.motion_worker,self.hardware_worker,self.cache_clear_worker,self.filter_job,*self.preview_workers] if w is not None and w.isRunning()]
+        running=[w for w in [self.worker,self.motion_worker,self.hardware_worker,self.cache_clear_worker,self.filter_job,self.width_yield.worker,*self.preview_workers] if w is not None and w.isRunning()]
         # The physical thread may have returned before Qt delivers its queued
         # finished handlers. Keep their QObject parent alive through delivery.
         if running or self._tasks:

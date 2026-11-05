@@ -13,7 +13,7 @@ from die_shift_studio.preview import rigid_transform
 from die_shift_studio.statistics import statistical_state
 from die_shift_studio.report import report_document
 app=W.QApplication([]);tmp=tempfile.TemporaryDirectory();w=MainWindow(jobs_dir=Path(tmp.name)/'Jobs');w.show();errors=[];w.error=lambda e:errors.append(str(e))
-def busy():return any((w.worker,w.preview_worker,w.preview_pending,w.motion_worker,w.motion_pending,w.hardware_worker,w.coverage_timer.isActive(),w._coverage_pending,w.transition.timer.isActive(),w.viewport_timer.isActive(),w.mouse_die.pending,w.mouse_die.full_pending,w.mouse_die.idle.isActive(),w.mouse_die.timer.isActive()))
+def busy():return any((w.width_yield.worker,w.width_yield.timer.isActive(),w.worker,w.preview_worker,w.preview_pending,w.motion_worker,w.motion_pending,w.hardware_worker,w.coverage_timer.isActive(),w._coverage_pending,w.transition.timer.isActive(),w.viewport_timer.isActive(),w.mouse_die.pending,w.mouse_die.full_pending,w.mouse_die.idle.isActive(),w.mouse_die.timer.isActive()))
 def wait():
     deadline=time.monotonic()+180
     while time.monotonic()<deadline:

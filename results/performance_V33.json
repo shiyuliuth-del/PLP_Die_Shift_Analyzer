@@ -1,0 +1,46 @@
+{
+  "version": "V33",
+  "gds_sha256": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+  "shape_count": 1225,
+  "die_count": 3,
+  "logical_cpu": 8,
+  "python": "3.12.3",
+  "backend": "cpu",
+  "single_side_um": [
+    35,
+    35
+  ],
+  "angle_deg": 1,
+  "linewidth_um": 15,
+  "spacing_um": 15,
+  "enclosure_um": 15,
+  "sigma": 6,
+  "samples": 4096,
+  "seed": 510,
+  "first_result_seconds": 2.8086597769870423,
+  "complete_seconds": 14.387409419985488,
+  "ignored_reclassification_median_seconds": 0.0007370604726020247,
+  "original_values": [
+    0.999755859375,
+    1.0,
+    1.0
+  ],
+  "ignore_all_sampled_problem_lines_values": [
+    0.999755859375,
+    0.999755859375,
+    0.999755859375
+  ],
+  "risky_source_count": 1,
+  "sampling": "joint independent Monte Carlo on the complete bounded support",
+  "original_display": [
+    "≥99.788637%",
+    "≥99.843946%",
+    "100%"
+  ],
+  "ignore_all_sampled_problem_lines_display": [
+    "≈99.975586%",
+    "≈99.975586%",
+    "≈99.975586%"
+  ],
+  "display_note": "A zero observed tail uses simultaneous 99% lower bounds for the non-certified policies. Tiny nonzero failure mass is formatted independently of rounded yield."
+}

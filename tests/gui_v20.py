@@ -9,7 +9,7 @@ def wait():
     end=time.monotonic()+240
     while time.monotonic()<end:
         app.processEvents()
-        if not any((w.worker,w.preview_worker,w.preview_pending,w.motion_worker,w.motion_pending,w.hardware_worker,w.coverage_timer.isActive(),w._coverage_pending,w.viewport_timer.isActive(),w.transition.timer.isActive())):break
+        if not any((w.width_yield.worker,w.width_yield.timer.isActive(),w.worker,w.preview_worker,w.preview_pending,w.motion_worker,w.motion_pending,w.hardware_worker,w.coverage_timer.isActive(),w._coverage_pending,w.viewport_timer.isActive(),w.transition.timer.isActive())):break
         time.sleep(.003)
     else:raise AssertionError('V20 Qt timeout')
     assert not errors,errors

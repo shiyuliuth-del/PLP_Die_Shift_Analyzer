@@ -19,8 +19,8 @@ def control_held(event):
     return 'ctrl' in pointer_modifiers(event)
 
 class Navigation:
-    def __init__(self,canvas,ax):
-        self.canvas=canvas;self.ax=ax;self.drag=None;self.zoom=None;self.rubber=None;self.background=None
+    def __init__(self,canvas,ax,on_context=None):
+        self.canvas=canvas;self.ax=ax;self.on_context=on_context;self.drag=None;self.zoom=None;self.rubber=None;self.background=None
         self.ids=[canvas.mpl_connect(event,fn) for event,fn in
                   [('scroll_event',self.scroll),('button_press_event',self.press),
                    ('motion_notify_event',self.motion),('button_release_event',self.release),
@@ -81,13 +81,14 @@ class Navigation:
                     or getattr(self.canvas,'die_move_active',False)):
                 self.cancel_zoom();return
             end=np.clip([e.x,e.y],self.ax.bbox.min,self.ax.bbox.max)
+            dragged=self.rubber is not None
             self.cancel_zoom();a,b=inv.transform([pixel,end])
             if np.linalg.norm(end-pixel)<4:
-                center=a;size=np.array([np.ptp(self.ax.get_xlim()),np.ptp(self.ax.get_ylim())])
-            else:
-                center=(a+b)/2
-                ratio=self.ax.bbox.width/max(1.,self.ax.bbox.height)
-                size=np.abs(b-a);w=max(size[0],size[1]*ratio);size=np.array([w,w/ratio])
+                if not dragged and self.on_context and e.inaxes is self.ax:self.on_context(e,b)
+                return
+            center=(a+b)/2
+            ratio=self.ax.bbox.width/max(1.,self.ax.bbox.height)
+            size=np.abs(b-a);w=max(size[0],size[1]*ratio);size=np.array([w,w/ratio])
             self.history()
             self.ax.set_xlim(center[0]+np.array([-.5,.5])*size[0]);self.ax.set_ylim(center[1]+np.array([-.5,.5])*size[1]);self.history()
             if not getattr(self.canvas,'_managed_viewport',False):self.canvas.draw_idle()
