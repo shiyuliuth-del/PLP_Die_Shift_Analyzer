@@ -168,24 +168,27 @@ def measure_width_yield(model,params,cfg,cache_group,progress,partial=None):
     analyzer=WidthAnalyzer(model,params,cfg,cache_group)
     analyzer.probability=None  # Bounds used solely to fade preview annotations are irrelevant here.
     try:
+        from .width_risk_probability import enrich
         if cfg.width_yield_method=='grid':
             from .width_grid import measure_grid
-            return measure_grid(analyzer,params,cfg,progress)
+            bank=measure_grid(analyzer,params,cfg,progress)
+            progress(99,'合成逐线路与逐通道概率')
+            return enrich(bank)
         progress(1,'建立整包宽度通道')
         events=WidthEvents(analyzer,params,lambda n,t:progress(1+round(.08*n),t))
         count=len(model.bound.centers)
         if not events.edges and not events.intrusions and all(plane.local is None for plane in events.planes):
             progress(100,'全输入范围的宽度几何界限已通过')
-            return dict(chunks=(packed_events([set()],[set()]),),method='exact',total=1,scale_nsigma=params.scale_nsigma)
+            return enrich(dict(chunks=(packed_events([set()],[set()]),),site_chunks=({},),method='exact',total=1,scale_nsigma=params.scale_nsigma))
         from .width_sampling import mixture_batches
-        chunks=[];done=0;next_preview=BATCH
+        chunks=[];site_chunks=[];done=0;next_preview=BATCH
         for states,weights,bound,total in mixture_batches(params,count,cfg):
             method='exact' if weights is None else 'importance'
-            red,yellow=events.classify(states)
-            chunks.append(packed_events(red,yellow,weights));done+=len(states)
+            red,yellow,sites=events.classify(states,with_sites=True)
+            chunks.append(packed_events(red,yellow,weights));site_chunks.append(sites);done+=len(states)
             progress(10+round(90*done/total),f'整包宽度良率 {done}/{total}')
             if partial and done>=next_preview and done<total:
-                partial(dict(chunks=tuple(chunks),method=method,total=total,scale_nsigma=params.scale_nsigma,weight_bound=bound))
+                partial(enrich(dict(chunks=tuple(chunks),site_chunks=tuple(site_chunks),method=method,total=total,scale_nsigma=params.scale_nsigma,weight_bound=bound)))
                 next_preview=done*2
-        return dict(chunks=tuple(chunks),method=method,total=total,scale_nsigma=params.scale_nsigma,weight_bound=bound)
+        return enrich(dict(chunks=tuple(chunks),site_chunks=tuple(site_chunks),method=method,total=total,scale_nsigma=params.scale_nsigma,weight_bound=bound))
     finally:analyzer.close()

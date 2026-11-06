@@ -85,7 +85,10 @@ with patch('die_shift_studio.width_analysis.WidthAnalyzer._measure',side_effect=
     click([150,60]);assert not w.selection.selected and not labels().strip()
 w.problem_filter.setChecked(False);settle();table=w.extreme_table
 table.setCurrentCell(1,0);settle();QTest.keyClick(table,getattr(Qt,'Key',Qt).Key_Down);settle()
-assert table.currentRow()==2 and not w.width_overlay.outlines.get_facecolors().size
+assert table.currentRow()==2 and not w.current_frame.get('nominal_global')
+# V36 extends probability-weighted fill to concrete poses, retaining fixed alpha.
+faces=w.width_overlay.outlines.get_facecolors()
+assert not len(faces) or np.allclose(faces[:,3],.20)
 # Check the actually painted border on every side, including the span across column joins.
 view=table.viewport();pm=view.grab();im=pm.toImage();scale=pm.devicePixelRatio()
 def ink(x,y):

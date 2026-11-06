@@ -180,7 +180,7 @@ class PreviewEngine:
         self.width_key=key
     def width_summary(self,progress):
         from .width_summary import summarize
-        key=('width-extremes-v34',self.signature,self.width_key)
+        key=('width-extremes-v36',self.signature,self.width_key)
         if self.cache_group is None:return summarize(self.width_analyzer,self.p,progress)
         values=self.cache_group.values
         # The all-pose index belongs to the pinned zero view. Switching

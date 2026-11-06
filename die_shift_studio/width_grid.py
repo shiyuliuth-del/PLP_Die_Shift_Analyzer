@@ -76,9 +76,10 @@ def measure_grid(analyzer,params,cfg,progress):
     progress(2,f'全情况网格：{grid.combinations:,} 个组合，按实际依赖分解')
     analyzer.probability=None
     analyzer.frame({'states':np.zeros((grid.count,3))},lambda n,t:progress(2+round(n*.06),t))
-    records=defaultdict(set);checks=0
-    def collect(clause,refs):
+    records=defaultdict(set);sites=defaultdict(set);checks=0
+    def collect(clause,refs,keys=()):
         for ref in refs:records[ref].add(clause)
+        for key in keys:sites[key].add(clause)
     for j,(name,plane) in enumerate(analyzer.planes.items()):
         def update(f,text):progress(8+int(84*(j+f)/len(analyzer.planes)),text)
         groups=list(_target_groups(analyzer,plane,grid,lambda f,t:update(.5*f,t)))
@@ -92,7 +93,8 @@ def measure_grid(analyzer,params,cfg,progress):
             key=row['layer'];owner=analyzer.model.nodes[analyzer.model.ids[key,row['indices'][0]]]['owner']
             ds=digit if owner>=0 and digit<grid.radices[owner] else 0
             clause=PoseClause(((owner,(ds,)),) if owner>=0 else ())
-            collect(clause,[(key,i) for i in row['indices']])
+            from .width_event_ids import edge_keys
+            collect(clause,[(key,i) for i in row['indices']],edge_keys(row))
         progress(92+round(6*(digit+1)/max(grid.radices)),'穷举封装边距与禁布区')
     clauses=sorted(set().union(*records.values()) if records else set(),key=lambda c:c.allowed)
     # Store an immutable numerical decision graph. Repeated ignore changes
@@ -102,6 +104,7 @@ def measure_grid(analyzer,params,cfg,progress):
     progress(100,'全情况网格完成；连续空间精度由网格分辨率决定')
     return dict(method='grid',total=grid.combinations,grid=grid,all_index=all_index,
                 by_line={r:tuple(sorted(v,key=lambda c:c.allowed)) for r,v in records.items()},
+                by_site={r:tuple(sorted(v,key=lambda c:c.allowed)) for r,v in sites.items()},
                 scale_nsigma=params.scale_nsigma,local_checks=checks,
                 grid_nodes=cfg.width_grid_nodes,mass_error=grid.mass_error,steps=grid.steps)
 

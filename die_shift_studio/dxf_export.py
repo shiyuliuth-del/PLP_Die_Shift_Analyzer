@@ -110,24 +110,23 @@ def _verify(path,expected,extents):
     return count
 
 
-def write(snapshot,path,progress=lambda *_:None):
+def write(snapshot,path,progress=lambda *_:None,*,settings=None):
+    from .dxf_settings import DxfSettings
+    from .dxf_prepare import prepare
+    options=settings or DxfSettings()
+    if not isinstance(options,DxfSettings):options=DxfSettings.from_dict(options)
     path=Path(path)
     if not path.parent.is_dir():raise ValueError('输出目录不存在')
     progress(0,'准备当前几何DXF')
     polygons=[];names=set();extent=np.array([math.inf,math.inf,-math.inf,-math.inf])
-    keys=sorted(snapshot.layers,key=lambda key:tuple(map(int,key.split('/'))))
-    for j,key in enumerate(keys):
-        layer,datatype=map(int,key.split('/'));name=f'L{layer}_D{datatype}';names.add(name)
-        for wkb in snapshot.layers[key]:
-            g=shapely.from_wkb(wkb)
-            if not g.is_valid:raise ValueError(f'图层 {key} 含无效输出几何')
-            for p in shapely.get_parts(g):
-                if p.is_empty:continue
-                if p.geom_type!='Polygon':raise ValueError(f'图层 {key} 含非面输出几何')
-                rings=[_vertices(p.exterior),*[_vertices(r) for r in p.interiors]]
-                bounds=np.asarray(p.bounds);extent[:2]=np.minimum(extent[:2],bounds[:2]);extent[2:]=np.maximum(extent[2:],bounds[2:])
-                polygons.append((name,p,rings))
-        progress(round(15*(j+1)/max(1,len(keys))),'展开输出轮廓')
+    prepared,source_count,merged_count=prepare(snapshot,options,progress)
+    for name,p in prepared:
+        if not p.is_valid or not np.isfinite(p.bounds).all():raise ValueError(f'图层 {name} 的合并/缩放结果无效')
+        names.add(name)
+        rings=[_vertices(p.exterior),*[_vertices(r) for r in p.interiors]]
+        bounds=np.asarray(p.bounds);extent[:2]=np.minimum(extent[:2],bounds[:2]);extent[2:]=np.maximum(extent[2:],bounds[2:])
+        polygons.append((name,p,rings))
+    output_layer_count=len(names)
     if not polygons:raise ValueError('当前没有可导出的有效图形')
     names.add('0');layers=[dict(encoded_name=n,color=7) for n in sorted(names)]
     handles,entity_handles=_handles(layers,len(polygons))
@@ -135,11 +134,11 @@ def write(snapshot,path,progress=lambda *_:None):
     try:
         with os.fdopen(fd,'w',encoding='ascii',newline='') as f:
             writer=PairWriter(f)
-            doc._write_header(writer,handles,extent,0)
+            doc._write_header(writer,handles,extent,int(options.show_fill))
             doc._write_classes(writer);doc._write_tables(writer,handles,layers,extent);doc._write_blocks(writer,handles)
             writer.extend(((0,'SECTION'),(2,'ENTITIES')))
             for i,((name,p,rings),handle) in enumerate(zip(polygons,entity_handles)):
-                if len(rings)==1:doc._write_outline(writer,dict(vertices=rings[0]),name,handle,handles['block_record_model'])
+                if len(rings)==1 and options.polygon_mode=='outline':doc._write_outline(writer,dict(vertices=rings[0]),name,handle,handles['block_record_model'])
                 else:
                     # Straight edge loops retain holes without bridges or fitting.
                     hatch=dict(handle=handle,encoded_layer=name,seed=p.representative_point().coords[0],
@@ -155,4 +154,5 @@ def write(snapshot,path,progress=lambda *_:None):
     finally:
         if os.path.exists(temp):os.unlink(temp)
     progress(100,'DXF输出完成')
-    return dict(path=str(path),polygons=len(polygons),layers=len(keys),sha256=digest,ignored=snapshot.ignored_count)
+    return dict(path=str(path),polygons=len(polygons),layers=output_layer_count,sha256=digest,ignored=snapshot.ignored_count,
+                input_polygons=source_count,merged_polygons=merged_count,flattened=True,merge_layers=options.merge_layers,scale=options.scale)

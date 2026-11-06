@@ -200,7 +200,8 @@ class MainWindow(W.QMainWindow):
         self.die_labels=[];self._default_view=None;self._artist_frame=None;self.report_dirty=True;self._reordering=False
         self.space_data=None;self.repair_data=None;self.space_artists=[];self.space_stamp=None;self.space_colorbar=None;self._resizing=False
         self._issue_table_stamp=None;self.dirty=False;self.manual_states=None;self.evaluation_motions={};self.probability_data=None;self.probability_artists=[];self.probability_stamp=None;self.legend=None;self.zone_artists=[];self.invalid_artists=[]
-        self.ignored_width_lines=frozenset();self.dxf_directory='';self.view_settings=ViewSettings();self.setting_fields={};self.layer_styles={};self.histogram_dirty=False
+        from .dxf_settings import DxfSettings
+        self.dxf_settings=DxfSettings();self.ignored_width_lines=frozenset();self.dxf_directory='';self.view_settings=ViewSettings();self.setting_fields={};self.layer_styles={};self.histogram_dirty=False
         self.coverage_timer=QtCore.QTimer(self);self.coverage_timer.setSingleShot(True);self.coverage_timer.setInterval(180);self.coverage_timer.timeout.connect(self.refresh_coverage)
         self._coverage_pending=False;self._evaluation_requested=False;self._motion_intent=None;self.motion_worker=None;self.motion_pending=None;self.motion_generation=0;self.deformation_artists={};self._plotting=False;self.viewport_index=None;self._viewport_stamp=None
         self.issue_navigation=QtCore.QTimer(self);self.issue_navigation.setSingleShot(True);self.issue_navigation.setInterval(0);self.issue_navigation.timeout.connect(lambda:self.locate_issue(self.issue_table.currentRow(),0))
@@ -288,8 +289,10 @@ class MainWindow(W.QMainWindow):
         self.fixed_assignment='all'
         page.addStretch()
         self.build_settings(self._page('设置'))
-        output=self._page('输出');self.dxf_button=W.QPushButton('DXF输出');output.addWidget(self.dxf_button);output.addStretch()
-        self.dxf_button.setToolTip('输出已导入的全部图层及当前完成的几何修改；显隐不会删去图层，不输出风险标记或恢复圆弧。')
+        output=self._page('输出');self.dxf_button=W.QPushButton('DXF输出');output.addWidget(self.dxf_button)
+        from .dxf_controls import build as build_dxf_controls
+        build_dxf_controls(self,output);output.addStretch()
+        self.dxf_button.setToolTip('按下方参数展开顶层并输出当前完成的几何；默认合并全部图层，不输出风险标记或恢复圆弧。')
         from .export_ui import export_dxf
         self.dxf_button.clicked.connect(lambda:export_dxf(self))
         self.run_button=W.QPushButton('方案评估');self.run_button.setObjectName('Primary');self.run_button.clicked.connect(lambda:self.run_evaluation());lay.addWidget(self.run_button);split.addWidget(left)
@@ -529,20 +532,23 @@ class MainWindow(W.QMainWindow):
         spin(yield_group,'yield_sample_exponent','样本数 = 2 的指数',8,20)
         spin(yield_group,'yield_box_budget','全输入良率积分预算',64,65536)
         spin(yield_group,'yield_tolerance','无接触良率区间宽度目标',.000001,.1,6)
-        self.setting_fields['yield_method'].setToolTip('仅控制无接触良率；宽度良率在“宽度分析 · 良率计算”单独设置。')
+        self.setting_fields['yield_method'].setToolTip('仅控制无接触良率；宽度良率在“宽度分析”单独设置。')
         self.setting_fields['yield_box_budget'].setToolTip('无接触积分按每DIE分配状态盒；与宽度分析的网格节点数独立。')
         self.setting_fields['safe_box_precision'].setToolTip('返回包含输入均值的安全内盒；多个端点顺序比较体积。未定候选拒绝，精度不代表全局最优误差。')
-        width_probability=group('宽度分析 · 良率计算')
+        width_probability=group('宽度分析')
         choices['width_yield_method']=[('尾部增强采样（联合概率）','importance'),('全情况分析（有限网格穷举）','grid')]
         choice(width_probability,'width_yield_method','计算方法')
         spin(width_probability,'width_yield_exponent','采样数 = 2 的指数',8,20)
         spin(width_probability,'width_yield_seed','采样随机种子',0,2147483647)
         spin(width_probability,'width_grid_nodes','每活动轴网格节点数（含端点）',3,21)
         self.setting_fields['width_grid_nodes'].setToolTip('穷举全部有限网格组合及其区间概率，按真实依赖分解共享计算；零幅度轴不增加组合。提高节点数会增加耗时，不是连续空间的有限精确穷举。')
-        channel=group('宽度分析 · 元素显示')
+        channel=width_probability
+        box=W.QCheckBox('标签显示问题概率');self.setting_fields['width_show_probability']=box;channel.addRow(box);box.toggled.connect(self.settings_changed)
+        box.setToolTip('显示该通道在完整输入范围内出现红色或黄色问题的概率；不是当前姿态的0/100%。小数与良率共用。')
         spin(channel,'width_yield_decimals','良率小数位数',0,12)
         self.setting_fields['width_yield_decimals'].setToolTip('接近100%时以100%减去科学计数法失效概率显示；未采到事件时显示区间界限。')
         drawing_modes=WidthDisplayEditor();self.setting_fields['width_display']=drawing_modes
+        drawing_modes.setToolTip('风险线路按完整输入范围下的联合失效概率改变RGB深浅（对数深度）；不随概率改变填充透明度。')
         channel.addRow(drawing_modes);drawing_modes.valueChanged.connect(self.settings_changed)
         text_row=W.QHBoxLayout();text_row.setContentsMargins(0,0,0,0)
         text_row.addWidget(spin(None,'width_label_font_pt','',6,24,1))
@@ -639,7 +645,7 @@ class MainWindow(W.QMainWindow):
                     self.draw_contact_ranges();self.refresh_legend();self.update_die_label_visibility();self.render_scene()
                 else:self._layout_pending=True
             return
-        presentation=('width_display','width_label_font_pt','width_label_decimals','width_yield_decimals','show_low_contact','show_low_width',*ranges)
+        presentation=('width_show_probability','width_display','width_label_font_pt','width_label_decimals','width_yield_decimals','show_low_contact','show_low_width',*ranges)
         if all(getattr(updated,k)==getattr(self.view_settings,k) for k in values if k not in (*presentation,'cache_max_entries')):
             display_change=any(getattr(updated,k)!=getattr(self.view_settings,k) for k in presentation)
             self.view_settings=updated;self.cache_group.limit(updated.cache_max_entries);self.refresh_cache_status()
@@ -953,6 +959,9 @@ class MainWindow(W.QMainWindow):
         try:
             from .project import restored_width_ignores
             self.ignored_width_lines=restored_width_ignores(project,data);self.dxf_directory=project.get('dxf_directory','')
+            from .dxf_settings import DxfSettings
+            from .dxf_controls import restore as restore_dxf_controls
+            self.dxf_settings=DxfSettings.from_dict(project.get('dxf_options'));restore_dxf_controls(self)
             self.data=data;self.gds_label.setText(Path(data.path).name+'\n'+str(Path(data.path).resolve()));self.gds_label.setToolTip(str(Path(data.path).resolve()))
             view=project.get('extreme_view',{'mode':'focus','page':1})
             self.grid_mode.blockSignals(True);self.grid_mode.setCurrentIndex(int(view['mode']=='focus'));self.grid_mode.blockSignals(False)
@@ -2451,7 +2460,7 @@ class MainWindow(W.QMainWindow):
     def project_settings(self):
         return dict(schema_version=5,app_version=__version__,sha256=self.data.sha256,top_cell=self.data.top_name,
                     roles=self.roles(),parameters=asdict(self.params()),settings=asdict(self.view_settings),node_edits=list(self.data.node_edits),
-                    dxf_directory=self.dxf_directory,
+                    dxf_directory=self.dxf_directory,dxf_options=asdict(self.dxf_settings),
                     ignored_width_lines=dict(sha256=self.data.sha256,top_cell=self.data.top_name,refs=[list(r) for r in sorted(self.ignored_width_lines)]),
                     extreme_view=dict(filter_problems=self.problem_filter.isChecked(),mode='focus' if self.grid_mode.currentIndex() else 'all',page_size=EXTREME_PAGE_SIZE,page=(self.preview_page if self.extremes is not None else self._initial_extreme_page)+1),
                     expanded_settings=[title for title,header in self.setting_sections.items() if header.isChecked()],

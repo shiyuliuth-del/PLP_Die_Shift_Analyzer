@@ -14,6 +14,17 @@ def append_report(q,step,grid,blocks):
          'z 包含全部 DIE 的 X、Y、转角；同一DIE共享姿态，DIE之间按当前模型独立。H 是最大幅度输入盒，f_H 是盒内归一化联合正态密度。'
          'R、A 为所有红、黄问题的事件并集；I 仅合并忽略线路的红黄事件。全修正假设修复全部未忽略问题，不修正保留全部问题，只统计宽度。'
          '增加忽略集合时全修正良率不增加；事件相同或存在包含关系时，未全部忽略也可相等。修正收益独立累计，不能用浮点相减抹去尾部。')
+    step('线路填充与问题标签的概率',
+         '与两项宽度良率共用当前输入范围、工艺规则、旋转中心和积分方法。',
+         [r'E_c=R_c\cup A_c,\quad p_c=\int_H\mathbf{1}_{E_c}(\mathbf{z})f_H(\mathbf{z})\,d\mathbf{z}',
+          r'E_\ell=\bigcup_{c\in\mathcal{C}_\ell}E_c,\quad p_\ell=\int_H\mathbf{1}_{E_\ell}(\mathbf{z})f_H(\mathbf{z})\,d\mathbf{z}',
+          r'd(p)=\frac{\ln(1+10^{12}p)}{\ln(1+10^{12})}',
+          r'\mathbf{C}(p)=(1-d)(0.9+0.1\mathbf{C}_0)+0.72d\mathbf{C}_0,\quad\alpha=\mathrm{constant}'],
+         f"累计 {len(q.get('risk_lines',[]))} 条风险线路，{q.get('probability_sites',0)} 个通道或边距事件；标签与良率共用 {q.get('decimals',6)} 位小数。",
+         'c是具有同一对实体、原始穿线束与连续名义开口的通道；不把不连通的开口合并。R_c、A_c分别是红色、黄色事件，p_c是任一宽度问题概率。'
+         'ℓ是源线路，C_ℓ是影响它的通道与封装边距/禁布区事件集合；p_ℓ先合并共享姿态下的事件，不相加、不取最大值。'
+         '标签显示p_c，线路填充使用p_ℓ；选择极端姿态不把它们改成0/100%。C_0是等级基础RGB，d是仅用于显示的单调深度映射；透明度α不随概率改变。'
+         '采样未命中保留上界提示，网格未命中注明离散分辨率限制；隐藏标签概率不停止良率计算、不改几何。')
     if q['method']=='grid':
         step('全情况分析：有限网格穷举',
              f"每活动轴 {q.get('grid_nodes')} 个节点（含端点），等价整包组合 {q['total']:,}；实际局部几何求解 {q.get('local_checks',0):,} 次。",
