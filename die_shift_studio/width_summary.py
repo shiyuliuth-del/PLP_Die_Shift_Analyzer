@@ -232,7 +232,7 @@ class OccupancyBank:
         return classes
 
 
-def _solve_throat(analyzer,name,plane,grid,target,partners,ambiguous,found,witnesses,clauses,binary,progress):
+def _solve_throat(analyzer,name,plane,grid,target,partners,ambiguous,found,witnesses,clauses,binary,progress,collect=None):
     from .extreme_filter import PoseClause
     gates=target['gates'];walls=target['walls'];half=.65*(analyzer.width+analyzer.space)
     owners=tuple(sorted({w.owner for w in walls if w.owner>=0 and grid.radices[w.owner]>1}))
@@ -280,17 +280,18 @@ def _solve_throat(analyzer,name,plane,grid,target,partners,ambiguous,found,witne
                 pose_index=grid.index([allowed[i][0] if i in allowed else 0 for i in range(grid.count)])
 
                 direct=[(g,dict(r)) for i,(g,r) in enumerate(zip(gates,base)) if not mask>>i&1]
-                rows=analyzer._distinct_throats(direct,half);red=False
+                rows=analyzer._distinct_throats(direct,half);red=False;risk_refs=set()
                 for r in rows:
                     if r['status']==ADEQUATE:continue
-                    red |= r['status']==BLOCKED
+                    red |= r['status']==BLOCKED;risk_refs.update(r['refs'])
                     event=None
                     if analyzer.probability and not ambiguous:
                         event=analyzer.probability.classify(r,[next(w for w in walls if w.name==key) for key in r['pair']])
                     strongest(found,r['refs'],r['status'],event,binary,witnesses,channel_witness(r,pose_index))
-                resolved[mask]=red
-            if resolved[mask]:
-                clauses.add(PoseClause(tuple(sorted(allowed.items()))))
+                resolved[mask]=(red,tuple(sorted(risk_refs)))
+            clause=PoseClause(tuple(sorted(allowed.items())))
+            if resolved[mask][0]:clauses.add(clause)
+            if collect and resolved[mask][1]:collect(clause,resolved[mask][1])
     return total
 
 

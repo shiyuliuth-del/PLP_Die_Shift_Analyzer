@@ -71,20 +71,28 @@ def packed_events(red,yellow,weights=None):
 
 def policy_yields(bank,ignored):
     """Union event masks by sample before weighting. Ignoring needs no geometry rerun."""
+    if bank['method']=='grid':
+        from .width_grid import grid_yields
+        return grid_yields(bank,ignored)
     lost=np.zeros(2);passed=np.zeros(2);mass=0.;samples=0
+    lost2=np.zeros(2);passed2=np.zeros(2);mass2=0.;gain=0.;gain2=0.
     for n,all_risk,red,per_line,weights in bank['chunks']:
         ignored_hit=0
         for ref in ignored:ignored_hit|=per_line.get(ref,0)
         failures=(ignored_hit,all_risk)
+        gain_mask=all_risk & ~ignored_hit
         samples+=n
         if weights is None:
             mass+=n;counts=np.array([int(mask).bit_count() for mask in failures])
-            lost+=counts;passed+=n-counts
+            lost+=counts;passed+=n-counts;gain+=gain_mask.bit_count()
         else:
-            mass+=float(weights.sum())
+            mass+=float(weights.sum());mass2+=float(weights@weights)
+            benefit=np.fromiter((bool((gain_mask>>j)&1) for j in range(n)),bool,count=n)
+            gain+=weights[benefit].sum();gain2+=(weights[benefit]**2).sum()
             for i,mask in enumerate(failures):
                 failed=np.fromiter((bool((mask>>j)&1) for j in range(n)),bool,count=n)
                 lost[i]+=weights[failed].sum();passed[i]+=weights[~failed].sum()
+                lost2[i]+=(weights[failed]**2).sum();passed2[i]+=(weights[~failed]**2).sum()
     if not mass:return None
     failure=lost/mass;estimates=passed/mass
     intervals=None;failure_intervals=None
@@ -96,7 +104,23 @@ def policy_yields(bank,ignored):
                             float(beta.isf(alpha/2,s+1,samples-s)) if s<samples else 1.) for s in lost]
         if not ignored:failure_intervals[0]=(0.,0.)
         intervals=[(1-high,1-low) for low,high in failure_intervals]
+    gain_interval=None
+    if bank['method']=='importance':
+        from .width_sampling import bounded_interval
+        bound=bank['weight_bound']
+        ml,mh=bounded_interval(mass,mass2,samples,bound)
+        def ratio(total,squared):
+            lo,hi=bounded_interval(total,squared,samples,bound)
+            return max(0.,lo/mh),min(1.,hi/ml) if ml else 1.
+        failure_intervals=[ratio(a,b) for a,b in zip(lost,lost2)]
+        intervals=[ratio(a,b) for a,b in zip(passed,passed2)]
+        # Intersect success and independently accumulated failure bounds.
+        intervals=[(max(lo,1-fhi),min(hi,1-flo)) for (lo,hi),(flo,fhi) in zip(intervals,failure_intervals)]
+        failure_intervals=[(max(lo,1-shi),min(hi,1-slo)) for (lo,hi),(slo,shi) in zip(failure_intervals,intervals)]
+        if not ignored:intervals[0]=(1.,1.);failure_intervals[0]=(0.,0.)
+        gain_interval=ratio(gain,gain2)
     return dict(values=estimates,failure_probability=failure,proven=proven,
+                gain_probability=gain/mass,gain_interval=gain_interval,
                 intervals=intervals,failure_intervals=failure_intervals,samples=samples,
                 total=bank['total'],method=bank['method'])
 
@@ -125,6 +149,7 @@ def policy_texts(result,decimals):
     for i,(value,failure,proven) in enumerate(zip(result['values'],failures,proven_flags)):
         if proven:
             texts.append('100%' if value==1 else '0%' if value==0 else percentage_text(value,failure,decimals))
+        elif result['method']=='grid':texts.append('≈'+percentage_text(value,failure,decimals))
         elif endpoint and result.get('failure_intervals'):
             lo,_=result['intervals'][i];_,fhi=result['failure_intervals'][i]
             texts.append('≥'+percentage_text(lo,fhi,decimals,ROUND_FLOOR))
@@ -143,19 +168,24 @@ def measure_width_yield(model,params,cfg,cache_group,progress,partial=None):
     analyzer=WidthAnalyzer(model,params,cfg,cache_group)
     analyzer.probability=None  # Bounds used solely to fade preview annotations are irrelevant here.
     try:
+        if cfg.width_yield_method=='grid':
+            from .width_grid import measure_grid
+            return measure_grid(analyzer,params,cfg,progress)
         progress(1,'建立整包宽度通道')
         events=WidthEvents(analyzer,params,lambda n,t:progress(1+round(.08*n),t))
         count=len(model.bound.centers)
         if not events.edges and not events.intrusions and all(plane.local is None for plane in events.planes):
             progress(100,'全输入范围的宽度几何界限已通过')
             return dict(chunks=(packed_events([set()],[set()]),),method='exact',total=1,scale_nsigma=params.scale_nsigma)
+        from .width_sampling import mixture_batches
         chunks=[];done=0;next_preview=BATCH
-        for states,weights,method,total in joint_batches(params,count,cfg):
+        for states,weights,bound,total in mixture_batches(params,count,cfg):
+            method='exact' if weights is None else 'importance'
             red,yellow=events.classify(states)
             chunks.append(packed_events(red,yellow,weights));done+=len(states)
             progress(10+round(90*done/total),f'整包宽度良率 {done}/{total}')
             if partial and done>=next_preview and done<total:
-                partial(dict(chunks=tuple(chunks),method=method,total=total,scale_nsigma=params.scale_nsigma))
+                partial(dict(chunks=tuple(chunks),method=method,total=total,scale_nsigma=params.scale_nsigma,weight_bound=bound))
                 next_preview=done*2
-        return dict(chunks=tuple(chunks),method=method,total=total,scale_nsigma=params.scale_nsigma)
+        return dict(chunks=tuple(chunks),method=method,total=total,scale_nsigma=params.scale_nsigma,weight_bound=bound)
     finally:analyzer.close()

@@ -11,6 +11,8 @@ on:
       - 'tests/test_v33.py'
       - 'tests/test_v34.py'
       - 'tests/gui_v34.py'
+      - 'tests/test_v35.py'
+      - 'tests/gui_v35.py'
       - 'tests/test_v32.py'
       - 'tests/cuda_test_driver.cpp'
       - 'main.py'
@@ -46,7 +48,7 @@ jobs:
       - name: Prepare the Windows test environment
         run: |
           python -m venv .venv
-          .\.venv\Scripts\python -m pip install -r requirements.txt
+          .\.venv\Scripts\python -m pip install -r requirements.txt ezdxf
       - name: Exercise an existing CuPy build environment
         if: matrix.environment == 'with-cupy'
         run: .\.venv\Scripts\python -m pip install cupy-cuda12x
@@ -101,6 +103,13 @@ jobs:
           "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_v34.py -v
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" tests/gui_v34.py
+      - name: Verify rare-event integration, exhaustive grids and straight DXF
+        shell: cmd
+        run: |
+          set PYTHONPATH=.;tests
+          "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_v35.py -v
+          if errorlevel 1 exit /b 1
+          "%DIE_SHIFT_PYTHON%" tests/gui_v35.py
       - name: Exercise the one-click BUILD.bat from the extracted source
         shell: cmd
         run: call "%DSA_TEST_SOURCE%\BUILD.bat"

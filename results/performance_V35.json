@@ -1,0 +1,98 @@
+{
+  "version": "V35",
+  "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.39",
+  "python": "3.12.3",
+  "cpu": 8,
+  "gds_sha256": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+  "inputs": {
+    "dies": 3,
+    "bounds_um": [
+      35,
+      35
+    ],
+    "angle_deg": 1,
+    "width_space_enclosure_um": [
+      15,
+      15,
+      15
+    ],
+    "sigma": 6,
+    "samples": 4096,
+    "seed": 510
+  },
+  "original_direct": {
+    "seconds": 24.544527579972055,
+    "observed_sources": 1,
+    "ignore_source_26": {
+      "ref": [
+        "5/0",
+        25
+      ],
+      "values": [
+        0.999755859375,
+        0.999755859375
+      ],
+      "failure": [
+        0.000244140625,
+        0.000244140625
+      ],
+      "text": [
+        "≈99.975586%",
+        "≈99.975586%"
+      ]
+    }
+  },
+  "tail_full_wall": {
+    "seconds": 47.34764281602111,
+    "observed_sources": 6,
+    "ignore_source_26": {
+      "ref": [
+        "5/0",
+        25
+      ],
+      "values": [
+        0.9999460722645459,
+        0.9999443034818501
+      ],
+      "failure": [
+        5.3927735453879526e-05,
+        5.569651814966797e-05
+      ],
+      "text": [
+        "≈99.994607%",
+        "≈99.994430%"
+      ]
+    }
+  },
+  "tail_reachable_wall": {
+    "seconds": 10.347527870966587,
+    "observed_sources": 6,
+    "ignore_source_26": {
+      "ref": [
+        "5/0",
+        25
+      ],
+      "values": [
+        0.9999460722645459,
+        0.9999443034818501
+      ],
+      "failure": [
+        5.3927735453879526e-05,
+        5.569651814966797e-05
+      ],
+      "text": [
+        "≈99.994607%",
+        "≈99.994430%"
+      ]
+    }
+  },
+  "optimized_parity": "All 4096 source-event bit masks and importance weights identical to the unscreened reference",
+  "grid": {
+    "nodes_per_axis": 5,
+    "equivalent_combinations": 1953125,
+    "local_geometry_solves": 1125,
+    "seconds": 7.442758249002509,
+    "note": "Complete finite grid only; coarse discretization is not a continuous-space accuracy certificate"
+  },
+  "scope": "Local host CPU-oriented geometry; no physical CUDA speed claim; cold solve times exclude GUI painting."
+}

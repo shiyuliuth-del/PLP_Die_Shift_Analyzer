@@ -107,5 +107,14 @@ def smoke(output):
         app.processEvents()
         if not window._tasks:
             QtCore.QCoreApplication.sendPostedEvents(None,getattr(QtCore.QEvent,'Type',QtCore.QEvent).DeferredDelete)
+        if record['status']=='PASS':
+            try:
+                from .dxf_export import Snapshot,write
+                from shapely.geometry import box
+                import tempfile
+                with tempfile.TemporaryDirectory(prefix='dsa-dxf-smoke-') as folder:
+                    exported=write(Snapshot({'5/0':(box(0,0,30,20).difference(box(5,5,10,10)).wkb,)},'SMOKE',None,0),Path(folder)/'straight.dxf')
+                    record['dxf_export']=dict(polygons=exported['polygons'],sha256=exported['sha256'],units='um',arc_restore=False)
+            except Exception:record.update(status='FAIL',dxf_error=traceback.format_exc())
         Path(output).write_text(json.dumps(record,ensure_ascii=False,indent=2),encoding='utf-8')
     return 0 if record['status']=='PASS' else 1

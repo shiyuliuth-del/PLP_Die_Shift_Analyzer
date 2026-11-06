@@ -44,7 +44,7 @@ def main():
     q['parameters'].update(target_nsigma=2,bound_angle_deg=0)
     q['overlays']={'width':True}
     w.set_data(read_gds(Path(q['gds_path'])),q);settle()
-    assert w.width_yield.bank is not None and '良率1' in w.width_yield.label.text()
+    assert w.width_yield.bank is not None and '全修正良率' in w.width_yield.label.text()
     assert '99%' in w.width_yield.label.toolTip()
     w.run_evaluation();settle()
     assert 'width_policy_yield' in w.result
@@ -98,7 +98,8 @@ def main():
         w.change_width_ignores(all_refs,False);settle()
         w.target_sigma.setCurrentText('∞');settle()
         assert w.width_yield.bank is bank and w.width_yield.bank['scale_nsigma']==2
-        assert w.setting_fields['yield_method'].isEnabled()
+        assert w.setting_fields['width_yield_method'].isEnabled()
+        assert not w.setting_fields['yield_method'].isEnabled()
         assert not w.setting_fields['probability_show_ranges'].isEnabled()
     assert not w.ignored_width_lines
     # A stale completion from a prior GDS cannot update the active labels.

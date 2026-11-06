@@ -1,5 +1,4 @@
 """Draw retained barriers, failed gate rectangles and affected source outlines."""
-from collections import OrderedDict
 import numpy as np
 import shapely
 from shapely.ops import nearest_points
@@ -122,20 +121,14 @@ class WidthOverlay:
         return base
 
     def reset_summary(self):
-        self.label_source=None;self.label_rows={};self.layouts=OrderedDict();self.pose_texts={}
-        self.summary_stamp=None;self.set_overflow()
-
-    def set_overflow(self,blocks=()):
-        panel=self.w.width_label_overflow
-        text='\n\n'.join(blocks)
-        if getattr(self,'overflow_text',None)==text:return
-        self.overflow_text=text;panel.setPlainText(text);panel.setVisible(bool(text))
+        self.label_source=None;self.pose_texts={}
+        self.summary_stamp=None
 
     def set_label(self,n,text,tip,offset,fontsize,status,mode,low=False,summary=False):
         if n==len(self.labels):
             self.labels.append(self.w.ax.annotate('',xy=(0,0),textcoords='offset points',xytext=(0,0),
                 ha='center',va='center',multialignment='left',bbox=dict(boxstyle='square,pad=0.15',facecolor='white'),
-                arrowprops=dict(arrowstyle='->',lw=.9,shrinkB=0)))
+                arrowprops=dict(arrowstyle='->',lw=.9,shrinkB=0),annotation_clip=False))
         a=self.labels[n];a.xy=tip;a.set_position(offset);a.set_text(text);a.set_fontsize(fontsize)
         color=COLORS[status];dark=np.asarray(to_rgb(color))*.64
         a.set_color(low_ink(tint(dark,mode),low));a.arrow_patch.set_color(low_ink(tint(color,mode),low))
@@ -156,64 +149,53 @@ class WidthOverlay:
         status=summary['lines'][ref][0]
         return status,f"{ref[0]} #{ref[1]+1} · {status}\n{body}\n"+self.pose_texts[pose]
 
+    def label_anchor(self,geometry,target=None):
+        w=self.w
+        view=shapely.box(min(w.ax.get_xlim()),min(w.ax.get_ylim()),max(w.ax.get_xlim()),max(w.ax.get_ylim()))
+        outside=not view.intersects(geometry)
+        if outside:anchor=nearest_points(view,geometry)[0]
+        else:
+            copper=geometry if view.covers(geometry) else geometry.intersection(view)
+            anchor=nearest_points(target or copper.representative_point(),copper)[1]
+        xy=w.ax.transData.transform(anchor.coords[0])
+        xy=np.clip(xy,w.ax.bbox.min+1,w.ax.bbox.max-1)
+        inv=w.ax.transData.inverted();scale=w.canvas.get_renderer().points_to_pixels(2.5)
+        return shapely.box(*inv.transform(xy-scale),*inv.transform(xy+scale)),tuple(inv.transform(xy)),outside
+
+    def retarget(self,position,tip):
+        side,old,offset,font=position;w=self.w;scale=w.canvas.get_renderer().points_to_pixels(1)
+        center=w.ax.transData.transform(old)+np.asarray(offset)*scale
+        return side,tip,tuple((center-w.ax.transData.transform(tip))/scale),font
+
     def summary_labels(self,summary,selected,visible,modes):
-        w=self.w;items=[];boxes=[];overflow=[]
-        if modes['描边']!='hide' and modes['标注']!='hide' and selected:
-            view=shapely.box(min(w.ax.get_xlim()),min(w.ax.get_ylim()),max(w.ax.get_xlim()),max(w.ax.get_ylim()))
-            scale=w.canvas.get_renderer().points_to_pixels(2.5)
-            inv=w.ax.transData.inverted()
-            renderer=w.canvas.get_renderer()
-            legend=(tuple(w.legend.get_window_extent(renderer).extents) if w.legend is not None and w.legend.get_visible() else ())
-            stamp=(tuple(view.bounds),tuple(w.ax.bbox.bounds),scale,w.view_settings.width_label_decimals,w.view_settings.width_label_font_pt,legend)
-            if getattr(self,'label_source',None) is not summary or self.label_stamp!=stamp:
-                self.label_source=summary;self.label_stamp=stamp;self.label_rows={};self.pose_texts={};self.layouts=OrderedDict()
+        w=self.w;items=[];boxes=[];anchors=[];outside=[]
+        if getattr(self,'label_source',None) is not summary:
+            self.label_source=summary;self.pose_texts={}
+        size=w.view_settings.width_label_font_pt
+        if modes['描边']!='hide' and modes['标注']!='hide':
             for key,index in selected:
-                ref=(key,index)
-                if ref in w.ignored_width_lines:continue
-                item=summary.get('witnesses',{}).get(ref)
-                if key not in visible or item is None:continue
-                if ref not in self.label_rows:
-                    entry=self.summary_entry(ref,item,summary);rect=None
-                    geo=w.geometry_cache.layers[key]['geometry'][index]
-                    if view.intersects(geo):
-                        # Anchor on visible source copper, including branches and holes.
-                        copper=geo if view.covers(geo) else geo.intersection(view)
-                        if item['kind']=='channel':
-                            section=shapely.LineString(item['nominal_ends'])
-                            crossed=copper.intersection(section);target=section.centroid
-                            if not crossed.is_empty:copper=crossed
-                        else:target=Point(item['nominal_point'])
-                        anchor=nearest_points(target,copper)[1]
-                        xy=w.ax.transData.transform((anchor.x,anchor.y))
-                        rect=shapely.box(*inv.transform(xy-scale),*inv.transform(xy+scale))
-                    self.label_rows[ref]=(rect,entry)
-                rect,entry=self.label_rows[ref]
-                if rect is None:overflow.append(entry[1]+'\n线路在当前视野外');continue
-                boxes.append(rect);items.append(entry)
-        count=0;size=w.view_settings.width_label_font_pt
-        if items or overflow:
-            font=w.width_label_overflow.font()
-            if font.pointSizeF()!=size:font.setPointSizeF(size);w.width_label_overflow.setFont(font)
+                ref=(key,index);item=summary.get('witnesses',{}).get(ref)
+                if ref in w.ignored_width_lines or key not in visible or item is None:continue
+                geometry=w.geometry_cache.layers[key]['geometry'][index]
+                target=(shapely.LineString(item['nominal_ends']).centroid if item['kind']=='channel' else Point(item['nominal_point']))
+                rectangle,anchor,out=self.label_anchor(geometry,target)
+                severity,message=self.summary_entry(ref,item,summary)
+                if out:message+='\n目标线路在当前视野外'
+                items.append((severity,message));boxes.append(rectangle);anchors.append(anchor);outside.append(out)
+        count=0
         if items:
-            token=tuple(text for _,text in items)
-            positions=self.layouts.get(token)
-            if positions is None:
-                layout=LabelLayout(w.ax,boxes,size,self.text_sizes)
-                if legend:
-                    lo,hi=np.asarray(legend).reshape(2,2)/layout.scale
-                    layout.labels.append((lo,hi))
-                positions=[layout.place_selected(i,text) for i,(_,text) in enumerate(items)]
-                if len(items)<=128:
-                    self.layouts[token]=positions
-                    if len(self.layouts)>8:self.layouts.popitem(last=False)
-            else:self.layouts.move_to_end(token)
-            for (severity,message),position in zip(items,positions):
-                if position is None:
-                    overflow.append(message);continue
-                _,tip,offset=position
-                self.set_label(count,message,tip,offset,size,severity,modes['标注'],summary=True);count+=1
+            layout=LabelLayout(w.ax,boxes,size,self.text_sizes)
+            if w.legend is not None and w.legend.get_visible():
+                box=w.legend.get_window_extent(w.canvas.get_renderer())
+                layout.labels.append((np.array([box.x0,box.y0])/layout.scale,np.array([box.x1,box.y1])/layout.scale))
+            for i,(severity,message) in enumerate(items):
+                near=layout.place_selected(i,message)
+                position=(*near,size) if near else layout.place_pinned(i,message)
+                if position is None:continue
+                if outside[i]:position=self.retarget(position,anchors[i])
+                _,tip,offset,font=position
+                self.set_label(count,message,tip,offset,font,severity,modes['标注'],summary=True);count+=1
         for label in self.labels[count:]:label.set_visible(False)
-        self.set_overflow(overflow)
 
     def draw_summary(self,summary,visible,modes,selected):
         w=self.w;mode=modes['描边']
@@ -256,7 +238,7 @@ class WidthOverlay:
         w.width_table.model().ignored=w.ignored_width_lines
         modes=w.view_settings.width_display
         nominal=w.width_toggle.isChecked() and (w.current_frame or {}).get('nominal_global')
-        selected=tuple(w.selection.selected) if nominal else ()
+        selected=tuple(w.selection.selected)
         stamp = (flags,selected,tuple(w.ax.get_xlim()),tuple(w.ax.get_ylim()),id(w._coupled_data),visible,tuple(modes.items()),w.view_settings.width_label_font_pt,w.view_settings.width_label_decimals,tuple(w.ax.bbox.bounds),w.figure.dpi,w.view_bounds,self.selected,id(w.current_frame),w.reconstruction_toggle.isChecked(),w.deformation_toggle.isChecked())
         if self.stamp == stamp and (getattr(w,'_in_animation',False) or self.table_stamp==flags):
             return
@@ -264,7 +246,7 @@ class WidthOverlay:
         if data is None:
             if self.table_stamp!=flags:
                 for a in (self.barriers,self.boxes,self.outlines,self.edges,*self.inset.values(),*self.labels):a.set_visible(False)
-                self.outlines.set_facecolors('none');self.summary_stamp=None;self.rows=[];self.tree=None;self.set_overflow()
+                self.outlines.set_facecolors('none');self.summary_stamp=None;self.rows=[];self.tree=None
                 self.table_stamp=flags;self.fill_table([],None)
             return
         rules = (data or {}).get('parameters',{})
@@ -286,7 +268,7 @@ class WidthOverlay:
             self.draw_summary(summary,visible,modes,selected)
             if self.table_stamp!=flags:self.table_stamp=flags;self.fill_table(rows,data)
             return
-        self.summary_stamp=None;self.set_overflow();self.outlines.set_facecolors('none');self.outlines.set_linestyles('solid')
+        self.summary_stamp=None;self.outlines.set_facecolors('none');self.outlines.set_linestyles('solid')
         if hasattr(self.outlines,'_static_preview'):del self.outlines._static_preview
         if getattr(self,'geometry_data',None) is not data:
             self.geometry_data = data
@@ -379,18 +361,44 @@ class WidthOverlay:
         self.rows = shown
         self.tree = STRtree(rectangles) if shown else None
         fontsize=w.view_settings.width_label_font_pt
-        order=[] if modes['标注']=='hide' else sorted((i for i,r in enumerate(shown) if not ignored_row(r,w.ignored_width_lines)),key=lambda i:(self.identity(shown[i])!=self.selected,low_risk(shown[i])))
-        layout=LabelLayout(w.ax,rectangles,fontsize,self.text_sizes,modes['截面']!='hide') if order else None
-        texts=[self.label_text(r,w.view_settings.width_label_decimals) for r in shown] if order else []
+        label_rows=list(shown);label_rects=list(rectangles);anchors={}
+        shown_ids={id(r) for r in shown};selected_refs=set(w.selection.selected)
+        for row in active:
+            wanted=self.identity(row)==self.selected or bool(selected_refs.intersection(row['refs']))
+            if not wanted or id(row) in shown_ids or ignored_row(row,w.ignored_width_lines):continue
+            geos=[]
+            for ref in row['refs']:
+                key,index=ref
+                if key not in visible:continue
+                geo=changed.get(ref)
+                if geo is None:
+                    arrays=(w.current_frame or {}).get('layers',{}).get(key,{}).get('polygons')
+                    geo=shapely.Polygon(arrays[index]) if arrays is not None else w.geometry_cache.layers[key]['geometry'][index]
+                if not geo.is_empty:geos.append(geo)
+            if not geos:continue
+            rect,tip,out=self.label_anchor(shapely.union_all(geos),Point(row['point']))
+            if not out:continue
+            anchors[len(label_rows)]=tip;label_rows.append(row);label_rects.append(rect)
+        order=[] if modes['标注']=='hide' else sorted((i for i,r in enumerate(label_rows) if not ignored_row(r,w.ignored_width_lines)),
+                                key=lambda i:(self.identity(label_rows[i])!=self.selected,low_risk(label_rows[i])))
+        layout=LabelLayout(w.ax,label_rects,fontsize,self.text_sizes,modes['截面']!='hide') if order else None
+        texts=[self.label_text(r,w.view_settings.width_label_decimals)+('\n目标线路在当前视野外' if i in anchors else '') for i,r in enumerate(label_rows)] if order else []
         if layout:layout.prescreen(texts)
         count=0;next_sides={}
         for i in order:
-            r=shown[i];text=texts[i]
+            r=label_rows[i];text=texts[i]
             source=(r['plane'],r['pair'],tuple(map(tuple,r['nominal_witness_um'])))
             found=layout.place(i,text,self.label_sides.get(source))
+            font=fontsize
+            wanted=self.identity(r)==self.selected or bool(selected_refs.intersection(r['refs']))
+            if found is None and wanted:
+                near=layout.place_selected(i,text)
+                fitted=(*near,fontsize) if near else layout.place_pinned(i,text)
+                if fitted:found=fitted[:3];font=fitted[3]
             if found is None:continue
+            if i in anchors:found=self.retarget((*found,font),anchors[i])[:3]
             side,tip,offset=found;next_sides[source]=side
-            self.set_label(count,text,tip,offset,fontsize,r['status'],modes['标注'],low_risk(r));count+=1
+            self.set_label(count,text,tip,offset,font,r['status'],modes['标注'],low_risk(r));count+=1
         self.label_sides=next_sides
         for a in self.labels[count:]:a.set_visible(False)
         if not getattr(w,'_in_animation',False) and self.table_stamp!=flags:

@@ -216,7 +216,8 @@ class KeepoutTests(unittest.TestCase):
             # The 20 μm trace overlaps a 20 μm keepout iff -40 < DX < 0.
             from scipy.special import ndtr
             loss=(ndtr(0)-ndtr(-40/25))/(ndtr(2)-ndtr(-2))
-            self.assertAlmostEqual(q['values'][0],1-loss,delta=.001)
+            self.assertLessEqual(q['intervals'][0][0],1-loss)
+            self.assertGreaterEqual(q['intervals'][0][1],1-loss)
             self.assertLessEqual(q['values'][1],q['values'][0])
             with patch.object(WidthEvents,'classify',side_effect=AssertionError('geometry rerun')):
                 self.assertEqual(policy_yields(bank,[])['values'][0],1.)

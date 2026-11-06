@@ -1,5 +1,5 @@
 """Per-package width events on the source RDL, using the preview's physical gates."""
-from collections import defaultdict
+from collections import defaultdict,OrderedDict
 from types import SimpleNamespace
 import math
 import numpy as np
@@ -8,6 +8,26 @@ from .neighbor_channels import occupied
 from .statistics import mean_and_bounds
 from .width_analysis import ADEQUATE,BLOCKED,section_subset
 from .width_summary import sweep_sections
+
+
+def relevant_walls(plane,ids,travel,tol,width,space):
+    """Conservative full-input envelope of every retained measurement rectangle."""
+    walls=plane['walls'];bounds=shapely.bounds([w.geometry for w in walls])
+    guard=tol+64*np.finfo(float).eps*(1+np.max(abs(bounds)))
+    sweeps=bounds+travel[:,None]*np.array([-1,-1,1,1])+guard*np.array([-1,-1,1,1])
+    features=shapely.bounds(plane['pieces']);queries=[];keep=set()
+    for k in ids:
+        g=plane['gates'][k];pair=np.asarray(g.pair);keep.update(g.pair)
+        ab=features[list(g.features)].copy();delta=travel[pair,None]+guard
+        ab[:,:2]-=delta;ab[:,2:]+=delta
+        limit=g.nominal_gap+travel[pair].sum()+guard
+        low=np.maximum(ab[:,:2],ab[::-1,:2]-limit)
+        high=np.minimum(ab[:,2:],ab[::-1,2:]+limit)
+        pad=.65*(width+space)+guard
+        queries.append(shapely.box(*(low.min(axis=0)-pad),*(high.max(axis=0)+pad)))
+    tree=shapely.STRtree(shapely.box(*sweeps.T))
+    if queries:keep.update(map(int,tree.query(queries)[1]))
+    return keep
 
 
 class RiskPlane:
@@ -55,13 +75,19 @@ class RiskPlane:
             if not safe:risky.add((g.pair,g.strand_refs))
         ids=[i for i,g in enumerate(gates) if (g.pair,g.strand_refs) in risky]
         if not ids:return
-        self.local=section_subset(plane,ids,range(len(walls)))
+        kept=relevant_walls(plane,ids,travel,analyzer.tol,analyzer.width,analyzer.space)
+        local_travel=travel[sorted(kept)]
+        self.local=section_subset(plane,ids,kept)
+        self.walls=self.local['walls'];walls=self.walls
+        self.template=analyzer._templates(np.asarray([w.geometry for w in walls],object),[w.owner for w in walls])
         self.groups=defaultdict(list)
         self.need=[]
         for i,g in enumerate(self.local['gates']):
             self.groups[g.pair,g.strand_refs].append(i)
             self.need.append(analyzer.demand(self.local,g))
         self.need=np.array(self.need)
+        self.group_walls={key:relevant_walls(self.local,indices,local_travel,analyzer.tol,analyzer.width,analyzer.space) for key,indices in self.groups.items()}
+        self.contexts=OrderedDict()
         self.owners=tuple(sorted({w.owner for w in walls if w.owner>=0}))
 
     def events(self,states,red,yellow):
@@ -78,11 +104,21 @@ class RiskPlane:
                     # The nominal preview retains tied nominal stations verbatim.
                     continue
                 alert=np.flatnonzero(gaps[j]<=self.need+tol)
-                groups={(gates[k].pair,gates[k].strand_refs) for k in alert}
-                ids=[i for group in groups for i in self.groups[group]]
-                pairs=np.asarray([gates[i].pair for i in ids])
-                geo=self.analyzer._placed(self.template,states[pos],False)
-                covered=occupied(ends[j,ids],pairs,self.walls,geo,self.half,tol)
+                groups=tuple(sorted({(gates[k].pair,gates[k].strand_refs) for k in alert}))
+                context=self.contexts.get(groups)
+                if context is None:
+                    ids=[i for group in groups for i in self.groups[group]]
+                    wall_ids=sorted(set().union(*(self.group_walls[group] for group in groups)))
+                    mapping={value:i for i,value in enumerate(wall_ids)}
+                    objects=[self.walls[i] for i in wall_ids]
+                    pairs=np.array([[mapping[k] for k in gates[i].pair] for i in ids])
+                    template=self.analyzer._templates(np.asarray([w.geometry for w in objects],object),[w.owner for w in objects])
+                    context=(ids,pairs,objects,template);self.contexts[groups]=context
+                    if len(self.contexts)>32:self.contexts.popitem(last=False)
+                else:self.contexts.move_to_end(groups)
+                ids,pairs,objects,template=context
+                geo=self.analyzer._placed(template,states[pos],False)
+                covered=occupied(ends[j,ids],pairs,objects,geo,self.half,tol)
                 candidates=[]
                 for station,i in enumerate(ids):
                     if station in covered:continue

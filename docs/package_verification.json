@@ -1,10 +1,10 @@
 {
-  "version": "V34",
+  "version": "V35",
   "status": "PASS",
-  "tested_at_utc": "2026-11-05T05:36:34.578573+00:00",
+  "tested_at_utc": "2026-11-06T03:53:36.053867+00:00",
   "scope": "Clean source checkout, local platform. Windows executable verification is recorded separately.",
   "platform": "linux",
-  "gui_suites": 16,
+  "gui_suites": 17,
   "runs": [
     {
       "args": [
@@ -20,7 +20,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "Ran 310 tests in 68.833s",
+        "Ran 320 tests in 81.145s",
         "",
         "OK"
       ]
@@ -52,7 +52,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "GUI_V20_PASS {'status': 'PASS', 'accepted': 2, 'modes': ['axial', 'axial'], 'animation_enabled_during_revisits': True, 'dashed_middle_band': True, 'first_animation_frames': 3, 'cached_animation_frames': 4, 'hidden_layer_hides_deformation': True, 'report_formula_rendered': True, 'repeated_pose_switches': 18, 'repeated_switch_median_ms': 698.4344930388033, 'project_switch_keeps_results': True, 'zero_restore_ms': 9.45210101781413, 'clear_all_projects_bytes': 0}"
+        "GUI_V20_PASS {'status': 'PASS', 'accepted': 2, 'modes': ['axial', 'axial'], 'animation_enabled_during_revisits': True, 'dashed_middle_band': True, 'first_animation_frames': 3, 'cached_animation_frames': 3, 'hidden_layer_hides_deformation': True, 'report_formula_rendered': True, 'repeated_pose_switches': 18, 'repeated_switch_median_ms': 696.3335025066044, 'project_switch_keeps_results': True, 'zero_restore_ms': 9.427907003555447, 'clear_all_projects_bytes': 0}"
       ]
     },
     {
@@ -72,7 +72,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "GUI_V23_CHANNEL_PASS {'status': 'PASS', 'extreme_and_m_key_pad_motion': True, 'independent_die_stacks': True, 'channel_counts': [3, 3, 2], 'three_risk_classes': True, 'project_roundtrip': True, 'legacy_defaults': True, 'reconstruction_gap_um': 35.0, 'reconstruction_seam_um': 32.0, 'reconstruction_cover_area_um2': 1120.0, 'animation_frames_seen': 63, 'cached_replay': True, 'layer_visibility': True, 'table_focus': True, 'report_formulas': True}"
+        "GUI_V23_CHANNEL_PASS {'status': 'PASS', 'extreme_and_m_key_pad_motion': True, 'independent_die_stacks': True, 'channel_counts': [3, 3, 2], 'three_risk_classes': True, 'project_roundtrip': True, 'legacy_defaults': True, 'reconstruction_gap_um': 35.0, 'reconstruction_seam_um': 32.0, 'reconstruction_cover_area_um2': 1120.0, 'animation_frames_seen': 61, 'cached_replay': True, 'layer_visibility': True, 'table_focus': True, 'report_formulas': True}"
       ]
     },
     {
@@ -189,6 +189,16 @@
       "status": "PASS",
       "summary": [
         "GUI_V34_PASS fixed centred two yields, bias settings/old Jobs, keepout intrusion, hide/display independence, report"
+      ]
+    },
+    {
+      "args": [
+        "tests/gui_v35.py"
+      ],
+      "env": {},
+      "status": "PASS",
+      "summary": [
+        "GUI_V35_PASS on-row fixed centre/no canvas loss, independent saved width integration, pinned labels, native picker, edited shifted DXF/all layers"
       ]
     },
     {
@@ -487,18 +497,13 @@
       "discrete_states": 3
     }
   ],
-  "source_commit": "af6d558",
-  "followup": {
-    "source_commit": "a055efbbd00bb0443f14d99771a865b7e722f9e0",
-    "reason": "Display-only clipping of merged keepouts when a contributing source layer is hidden; numerical geometry unchanged.",
-    "checks": [
-      "OPENBLAS_NUM_THREADS=1 PYTHONPATH=.:tests python3 -m unittest tests.test_v34 -q: 10 tests PASS",
-      "QT_QPA_PLATFORM=offscreen OPENBLAS_NUM_THREADS=1 python3 tests/gui_v34.py: PASS"
-    ],
-    "sha256": {
-      "die_shift_studio/width_overlay.py": "31846805552b688ae25429a7e5d29f889c7f58822a7a2e563a7b2901a0eca4b4",
-      "tests/test_v34.py": "f3b53baf26306d8739098bb7bb1422c38beb9f9ddd532a473deb3fc7ea3de4b3"
-    }
-  },
-  "windows": "Final source ZIP: both Windows CI matrix jobs required before PR #15 merge. See https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/pull/15/checks. No physical NVIDIA GPU available in hosted CI."
+  "runtime_implementation_commit": "ea1bfd6",
+  "final_runtime_commit": "df057df",
+  "snapshot_note": "The clean run includes the updated four-tab gui_smoke assertion; after staging, the only runtime-file diff was two comments in width_labels.py. No executable runtime statements changed.",
+  "gd55_dxf_verification": "results/dxf_V35.json",
+  "source_archive": {
+    "files": 103,
+    "bytes": 1093195,
+    "sha256": "f1f0789105dae68b6745f759799373ff782a93972f6a3a70fa8f4025f7c51e67"
+  }
 }

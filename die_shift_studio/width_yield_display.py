@@ -5,17 +5,17 @@ from .qt_compat import QtWidgets as W,QtCore,QtGui,ALIGN_CENTER
 from .session_cache import logical_fingerprint
 from .width_yield import measure_width_yield,policy_yields,policy_texts,percentage_text
 
-POLICIES=('良率1','良率2')
+POLICIES=('全修正良率','不修正良率')
 
 
 class YieldLabel(W.QLabel):
-    """Keep both numbers centred in a dedicated, stable row above the plot."""
+    """Keep both numbers on the toolbar row without changing the plot height."""
     def __init__(self,parent):
         super().__init__(parent)
         self.parts=None;self.pixel_size=12
         self.setAlignment(ALIGN_CENTER);self.setContentsMargins(4,0,4,0)
         self.setStyleSheet('font-size:12px');self.ensurePolished()
-        self.setFixedHeight(2*self.fontMetrics().lineSpacing()+2)
+        self.setMinimumWidth(0)
 
     def minimumSizeHint(self):
         return QtCore.QSize(0,self.height())
@@ -33,11 +33,13 @@ class YieldLabel(W.QLabel):
         font=QtGui.QFont(self.font());font.setPixelSize(12)
         metrics=QtGui.QFontMetrics(font)
         whole=prefix+'  ·  '.join(labels)+suffix
-        text=whole if metrics.horizontalAdvance(whole)<=width else '\n'.join(labels)+suffix
+        text=whole
         size=12
         while size>8 and max(metrics.horizontalAdvance(line) for line in text.splitlines())>width:
             size-=1;font.setPixelSize(size);metrics=QtGui.QFontMetrics(font)
         if size!=self.pixel_size:self.pixel_size=size;self.setStyleSheet(f'font-size:{size}px')
+        if metrics.horizontalAdvance(text)>width:
+            text=metrics.elidedText(text,getattr(QtCore.Qt,'TextElideMode',QtCore.Qt).ElideRight,width)
         super().setText(text)
 
     def clear(self):
@@ -77,8 +79,8 @@ class WidthYieldDisplay:
         # k, 0 or infinity when the saved reference scale agrees.
         p=replace(p,target_nsigma=0)
         cfg=w.view_settings;roles=w.roles();order=w.ordered_layers()
-        sampling=(cfg.yield_method,cfg.yield_box_budget) if cfg.yield_method=='partition' else (cfg.yield_method,cfg.yield_sample_exponent,cfg.random_seed)
-        token=('width-yield-v34',logical_fingerprint((w.data.geometry_id,w.data.top_name,roles,order,asdict(p),
+        sampling=(cfg.width_yield_method,cfg.width_grid_nodes) if cfg.width_yield_method=='grid' else (cfg.width_yield_method,cfg.width_yield_exponent,cfg.width_yield_seed)
+        token=('width-yield-v35',logical_fingerprint((w.data.geometry_id,w.data.top_name,roles,order,asdict(p),
                cfg.drc_tolerance_um,sampling)))
         key=(id(w.cache_group),token)
         if self.key==key:
@@ -133,17 +135,24 @@ class WidthYieldDisplay:
         self.rendered=stamp
         q=policy_yields(self.bank,ignored);v=q['values']
         partial=q['samples']<q['total']
-        method={'exact':'全输入几何判定','mc':'独立联合蒙特卡洛','cubature':'确定性联合求积'}[q['method']]
+        method={'exact':'全输入几何判定','mc':'独立联合蒙特卡洛','cubature':'确定性联合求积','importance':'全范围尾部增强加权积分','grid':'全情况有限网格穷举'}[q['method']]
         labels=[name+' '+text for name,text in zip(POLICIES,policy_texts(q,decimals))]
-        prefix='宽度良率（99%下限）  ' if any('≥' in t for t in labels) else '宽度良率  '
+        prefix=''
         self.label.set_values(prefix,labels,' …' if partial else '')
-        tip=['良率1：红色、黄色问题均修正，被忽略线路保持原图；忽略线路出现问题即失效。',
-             '良率2：所有问题均不修正，任一红色或黄色问题（含忽略线路）出现即失效。',f'{method} · {q["samples"]}/{q["total"]} 个整包姿态，按原始 RDL 和全部输入范围计算。']
+        tip=['全修正良率：红色、黄色问题均修正，被忽略线路保持原图；忽略线路出现问题即失效。',
+             '不修正良率：所有问题均不修正，任一红色或黄色问题（含忽略线路）出现即失效。',f'{method} · {q["samples"]}/{q["total"]} 个整包姿态，按原始 RDL 和全部输入范围计算。']
         if q['intervals']:
             text=[percentage_text(lo,fhi,decimals,ROUND_FLOOR)+' – '+percentage_text(hi,flo,decimals,ROUND_CEILING)
                   for (lo,hi),(flo,fhi) in zip(q['intervals'],q['failure_intervals'])]
             tip.append('固定忽略集合下两项联合 99% 置信区间：'+'，'.join(text))
         elif q['method']=='cubature':tip.append('数值积分估计，精度可通过增加积分预算复核。')
+        if q['method']=='grid':
+            tip.append(f"完整有限网格：每轴 {q['grid_nodes']} 节点；局部几何求解 {q['local_checks']:,} 次。区间质量按截断正态积分，不是等概率。连续空间误差由网格分辨率决定。")
+        gain=q.get('gain_probability',0.)
+        tip.append(f'未忽略线路修正的额外收益：{100*gain:.{decimals}e}%。')
+        if not gain and ignored:
+            tip.append('当前网格下相等；连续空间差异仍受分辨率限制。' if q['method']=='grid' else '当前积分尚未分辨两项差异，不代表所有风险线路均已忽略。')
+        tip.append('增加忽略集合时全修正良率单调不增；共同或包含的失效事件可能使两项提前相等。')
         tip.append('出现尚未分辨的0/100%尾部时，未获证明的数值统一用≥显示固定样本数下的99%置信下限。确定性积分未分辨尾部时显示待细化。')
         tip.append('已按全输入几何界限证明，或第一项无忽略线路的修复假设成立时，显示精确值。')
         tip.append(f'概率尺度 {self.bank["scale_nsigma"]:g}σ；0/∞ 沿用最近有限级别。')
@@ -151,5 +160,6 @@ class WidthYieldDisplay:
         if self.w.result is not None:
             self.w.result['width_policy_yield']=dict(values=v.tolist(),failure_probability=q['failure_probability'].tolist(),proven=q['proven'],failure_intervals=q['failure_intervals'],decimals=decimals,intervals=q['intervals'],method=q['method'],
                 samples=q['samples'],total=q['total'],scale_nsigma=self.bank['scale_nsigma'],
-                parameters=asdict(self.w.params()),ignored=[list(r) for r in sorted(ignored)])
+                parameters=asdict(self.w.params()),ignored=[list(r) for r in sorted(ignored)],
+                gain_probability=q.get('gain_probability',0.),grid_nodes=q.get('grid_nodes'),local_checks=q.get('local_checks'),steps=q.get('steps'))
             self.w.report_dirty=True
