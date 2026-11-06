@@ -510,11 +510,24 @@
   "tested_source_commit": "3f4d2d381743a7a93406266d984bcce7be2a9af8",
   "source_archive": {
     "files": 108,
-    "bytes": 1115786,
-    "sha256": "f0247510e7c0d1aad7b94254df477e01d4941013bf1476f78b7c65a7065306a4"
+    "bytes": 1115967,
+    "sha256": "03ed6e9806f5305375cce788466f8b0456e7bbd6d60738fc861f246c44798f26"
   },
   "external_validation": [
     "results/width_V36.json",
     "results/dxf_V36.json"
-  ]
+  ],
+  "additional_presentation_check": {
+    "commit": "9bcb8ea529ac9707cc264df86816d13cbc1ea27b",
+    "scope": "Fixed fill alpha for both evidence states, with matching dim/show behaviour at nominal and concrete poses; output-scope tooltip clarified afterwards",
+    "commands": [
+      "tests/gui_v36.py",
+      "tests/gui_v29.py"
+    ],
+    "status": "PASS",
+    "runtime_hashes": {
+      "die_shift_studio/width_overlay.py": "18fce47de42418ca928e0173167f0fa73ef7783348e51c3b625620eeae420058",
+      "die_shift_studio/dxf_controls.py": "a629928ed9fac3c431f87dc96d46f76afa8e7b763aa5d1e3c9d0f2c605138b15"
+    }
+  }
 }
