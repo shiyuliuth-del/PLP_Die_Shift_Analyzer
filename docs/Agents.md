@@ -4,7 +4,7 @@
 
 ## 2026-11-06 · V36 · 合并DXF与宽度概率显示
 
-基于V35主线 `73234e17293633308e67d1ab78c7364af5923ca0`，分支 `codex/v36-width-probability-dxf`。本轮用户要求默认Flatten/Merge、统一宽度栏目、缺省全情况、固定透明度概率填充、标签概率行和可保存输出参数。
+基于V35主线 `73234e17293633308e67d1ab78c7364af5923ca0`，分支 `codex/v36-width-probability-dxf`，集成入口为[PR #17](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/pull/17)。本轮用户要求默认Flatten/Merge、统一宽度栏目、缺省全情况、固定透明度概率填充、标签概率行和可保存输出参数。
 
 - 所选Top Cell继续完整展开，默认在导出副本中逐层Merge，不跨层合并。输出范围、实体、比例、孔洞拆层与HATCH显示独立保存为schema5的dxf_options；不改原GDS、画布或数值输入。关闭Merge保留原有逐节点路径，始终禁用圆弧恢复。参数参考原File Bridge 1.16.2，同一版本的本机Git源仍可读；未使用后来插件版本替换用户参考。
 - 两个宽度设置分组迁移到“宽度分析”，缺失方法字段默认grid；显式旧importance保留。新增width_show_probability默认true，概率共用width_yield_decimals，几何标签精度不改。旧栏目展开记录去重迁移，DXF折叠状态也保留。
@@ -13,7 +13,7 @@
 - 7项新核心回归及V36真实Qt检查通过，涵盖层级/阵列/镜像、逐层Merge/孔洞/比例、原生保存、设置保存与旧字段、全部小网格逐帧概率、非连通开口、联合/微小概率、固定alpha和多选视野外标签。旧V33/V34采样置信回归显式选择importance，V35逐节点回归显式关闭Merge；V29扩展为具体姿态填充合同，并未去掉对应验证。
 - GD55默认±35 μm、±1°、15/15/15 μm、6σ、每活动轴5节点，1953125组合/1125次局部求解，新增9个位置事件、6条失效线路，与V35逐线路概率及两项良率逐值一致；21个完整帧的线路/位置事件均相符。本机单次约4.99 s，旧版对照6.45 s，仅记录单次测量，不宣称统计显著提速。[宽度验证](../results/width_V36.json)
 - 默认Merge将GD55 1225实体合为1034个；双精度材料并集和孔洞一致，KLayout整数网格的回读残差逐层记录且双向在1DBU内，源GDS哈希不变。[DXF验证](../results/dxf_V36.json)
-- 最终干净源码快照3f4d2d3通过327项核心（含GD55）、18组Qt、两种KLayout后端启动及17个工程，共38组执行。两处旧测试的栏目查找已更新为统一名称，其真实点击、折叠/恢复和字号断言保留。源包108个文件、1,115,786字节，解压启动/DXF冒烟/7-Zip通过，SHA-256为 `f0247510e7c0d1aad7b94254df477e01d4941013bf1476f78b7c65a7065306a4`。Windows最终头提交的clean/with-cupy两组须通过后再合并；不发布测试EXE。[源码验收](package_verification.json) · [V36公式与操作](V36_使用说明.md)
+- 最终干净源码快照3f4d2d3通过327项核心（含GD55）、18组Qt、两种KLayout后端启动及17个工程，共38组执行。两处旧测试的栏目查找已更新为统一名称，其真实点击、折叠/恢复和字号断言保留。源包108个文件、1,115,786字节，解压启动/DXF冒烟/7-Zip通过，SHA-256为 `f0247510e7c0d1aad7b94254df477e01d4941013bf1476f78b7c65a7065306a4`。[Windows最终头提交检查](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/pull/17/checks)的clean/with-cupy两组须通过后再合并；不发布测试EXE。[源码验收](package_verification.json) · [V36公式与操作](V36_使用说明.md)
 
 ## 2026-11-06 · V35 · 尾部良率、全情况网格、DXF与图内标签
 
