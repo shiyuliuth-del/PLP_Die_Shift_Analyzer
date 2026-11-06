@@ -166,7 +166,7 @@ class GeometrySelection:
             else:w.statusBar().showMessage('已取消图形选择')
             if w.tabs.currentIndex()!=0:return
             artists=[self.artist,self.deformed_artist]
-            if summary is not None:
+            if w.width_toggle.isChecked():
                 w.width_overlay.draw();artists.extend(w.width_overlay.labels)
-            signature=(tuple(self.selected),w.width_overlay.stamp if summary is not None else None)
+            signature=(tuple(self.selected),w.width_overlay.stamp if w.width_toggle.isChecked() else None)
             w.scene_renderer.draw_selection(artists,w.legend,signature)

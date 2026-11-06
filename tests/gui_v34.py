@@ -32,8 +32,8 @@ def main():
     q['settings'].update(animation_enabled=False,yield_method='partition',yield_box_budget=256)
     w.set_data(read_gds(Path(q['gds_path'])),q);settle()
     label=w.width_yield.label
-    assert label.isVisible() and '良率1' in label.text() and '良率2' in label.text()
-    assert '修黄 ' not in label.text() and len(w.width_yield.bank['chunks'])>0
+    assert label.isVisible() and '全修正良率' in label.text() and '不修正良率' in label.text()
+    assert '修黄 ' not in label.text() and w.width_yield.bank['total']>0
     bank=w.width_yield.bank
     # Coordinates cannot move/resize the yield row, including long negative values.
     for width in (1550,1120):

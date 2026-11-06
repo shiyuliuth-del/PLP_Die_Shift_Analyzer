@@ -97,6 +97,7 @@ def main():
             record=json.loads(out.read_text(encoding='utf8'));records.append(record)
             if not with_fixtures:assert record.get('standalone'),record
             assert record['status']=='PASS' and record['frozen'] and record['platform']=='win32',record
+            assert record['dxf_export']['polygons']==1 and not record['dxf_export']['arc_restore'],record
             assert Path(record['jobs']).samefile(install/'Jobs') and (install/'logs').is_dir()
             assert marker.read_bytes()==b'{}' and not list(cwd.iterdir())
         # Exercise the single BAT through cmd.exe with a spaced, Unicode argument.

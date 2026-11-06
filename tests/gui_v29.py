@@ -31,7 +31,7 @@ def click(xy,mod=keys.NoModifier):
     settle()
 
 def labels():
-    return '\n'.join([a.get_text() for a in w.width_overlay.labels if a.get_visible()]+[w.width_label_overflow.toPlainText()])
+    return '\n'.join(a.get_text() for a in w.width_overlay.labels if a.get_visible())
 
 name='示例O_运动网络三线路通道';q=json.loads((ROOT/'examples'/(name+'.json')).read_text())
 q['gds_path']=str(ROOT/'examples'/q['gds_path']);q['parameters'].update(target_nsigma=0,per_die_enabled=True,die_bounds=[[35,0,.7],[0,10,0]])
@@ -58,17 +58,22 @@ with patch('die_shift_studio.width_analysis.WidthAnalyzer._measure',side_effect=
     if os.environ.get('DSA_V29_SCREENSHOT'):w.grab().save(os.environ['DSA_V29_SCREENSHOT'])
     # A multi-selection persists when panning its source lines out of view.
     w.set_view((4000,4000),350,180);w.viewport_changed(force=True);settle()
-    assert set(w.selection.selected)==set(refs) and w.width_label_overflow.isVisible()
-    assert w.width_label_overflow.toPlainText().count('线路在当前视野外')==len(refs)
-    for ref in refs:assert f'{ref[0]} #{ref[1]+1} ·' in w.width_label_overflow.toPlainText()
+    assert set(w.selection.selected)==set(refs) and not hasattr(w,'width_label_overflow')
+    assert labels().count('线路在当前视野外')==len(refs)
+    w.canvas.draw()
+    for a in w.width_overlay.labels:
+        if not a.get_visible():continue
+        point=w.ax.transData.transform(a.xy)
+        assert min(abs(point[0]-w.ax.bbox.x0),abs(point[0]-w.ax.bbox.x1),abs(point[1]-w.ax.bbox.y0),abs(point[1]-w.ax.bbox.y1))<2
+        extent=a.get_bbox_patch().get_window_extent(w.canvas.get_renderer())
+        assert w.ax.bbox.contains(extent.x0,extent.y0) and w.ax.bbox.contains(extent.x1,extent.y1)
+    for ref in refs:assert f'{ref[0]} #{ref[1]+1} ·' in labels()
     w.set_view((0,0),380,170);w.viewport_changed(force=True);settle()
     # A small viewport must still expose every selected label without overlap.
-    w.width_overlay.layouts.clear()
     with patch('die_shift_studio.width_labels.LabelLayout.place_selected',return_value=None):
         click(points[1],keys.ControlModifier);click(points[1],keys.ShiftModifier)
-        assert w.width_label_overflow.isVisible()
-        for ref in refs:assert f'{ref[0]} #{ref[1]+1} ·' in w.width_label_overflow.toPlainText()
-    w.width_overlay.layouts.clear()
+        assert not hasattr(w,'width_label_overflow') and any(a.get_visible() for a in w.width_overlay.labels)
+        for ref in refs:assert f'{ref[0]} #{ref[1]+1} ·' in labels()
     click(points[1],keys.ControlModifier)
     assert f'{refs[1][0]} #{refs[1][1]+1} ·' not in labels() and f'{refs[0][0]} #{refs[0][1]+1} ·' in labels()
     QTest.keyClick(w.canvas,getattr(Qt,'Key',Qt).Key_Escape);settle();assert not labels().strip()

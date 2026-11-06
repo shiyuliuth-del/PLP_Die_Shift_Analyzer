@@ -89,6 +89,33 @@ class LabelLayout:
         self.labels.append((lo[i],hi[i]))
         return None,tuple(self.ax.transData.inverted().transform(base*self.scale)),tuple(centers[i]-base)
 
+    def place_pinned(self,index,text):
+        """Keep an explicitly requested label on the canvas, even in a crowded view."""
+        half=self.half_size(text);low0,high0=self.viewport[:2]+2,self.viewport[2:]-2
+        extent=high0-low0
+        if np.any(extent<=1):return
+        font=self.fontsize
+        scale=min(1.,float(np.min(extent/(2*half))))
+        if scale<1:
+            old=self.fontsize;self.fontsize=max(.5,font*scale*.97)
+            font=self.fontsize;half=self.half_size(text);self.fontsize=old
+        low,high=low0+half,high0-half
+        if np.any(high<low):return
+        base=np.clip(self.quads[index].mean(axis=0),self.viewport[:2]+1,self.viewport[2:]-1)
+        near=np.clip(base,low,high)
+        x=np.linspace(low[0],high[0],13);y=np.linspace(low[1],high[1],11)
+        centers=np.vstack((near,np.stack(np.meshgrid(x,y),axis=-1).reshape(-1,2)))
+        lo,hi=centers-half,centers+half;score=np.zeros(len(centers))
+        for a,b in self.labels:
+            score+=np.prod(np.maximum(0,np.minimum(hi,b)-np.maximum(lo,a)),axis=1)
+        if self.tree is not None:
+            candidates=shapely.box(*lo.T,*hi.T);i,j=self.tree.query(candidates,predicate='intersects')
+            if len(i):np.add.at(score,i,shapely.area(shapely.intersection(candidates[i],self.tree.geometries[j])))
+        distance=np.sum((centers-base)**2,axis=1)
+        i=int(np.lexsort((distance,score))[0]);self.labels.append((lo[i],hi[i]))
+        tip=tuple(self.ax.transData.inverted().transform(base*self.scale))
+        return None,tip,tuple(centers[i]-base),font
+
     def place(self,index,text,preferred=None):
         if self.viable is not None and not self.viable[index]:return
         q=self.quads[index];low,high=self.viewport[:2],self.viewport[2:]
