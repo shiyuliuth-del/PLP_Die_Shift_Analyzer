@@ -47,8 +47,10 @@ def main():
         value=w.width_overlay.problem_probability(summary['witnesses'][ref])
         assert probability_text(value,6) in texts[0]
         # Exercise actual paint alpha while probability changes by orders of magnitude.
-        luminance=[];alphas=[]
+        luminance=[];alphas=[];nominal_frame=w.current_frame
         for probability in (1e-9,.8):
+            evidence=dict(summary['lines']);evidence[ref]=(evidence[ref][0],'exceeded' if probability==1e-9 else 'undetermined')
+            w.current_frame=dict(nominal_frame,width_summary=dict(summary,lines=evidence))
             local=dict(bank,probability_lines=dict(bank['probability_lines']))
             local['probability_lines'][ref]=dict(p=probability,success=1-probability,method='grid')
             w.width_yield.bank=local;w.width_yield.refresh_overlay();w.canvas.draw()
@@ -56,8 +58,8 @@ def main():
             visible_refs=[key for key in summary['lines'] if key[0] in w.visible_boxes and w.visible_boxes[key[0]].isChecked()]
             index=visible_refs.index(ref);color=rgba[index]
             alphas.append(color[3]);luminance.append(color[:3]@np.array([.2126,.7152,.0722]))
-        assert alphas[0]==alphas[1] and luminance[1]<luminance[0]
-        w.width_yield.bank=bank;w.width_yield.refresh_overlay()
+        assert alphas[0]==alphas[1]==.20 and luminance[1]<luminance[0]
+        w.current_frame=nominal_frame;w.width_yield.bank=bank;w.width_yield.refresh_overlay()
         frame=w.current_frame
         with patch.object(w,'request_preview',side_effect=AssertionError('display control requested geometry')):
             w.setting_fields['width_yield_decimals'].setValue(3);settle()
@@ -65,6 +67,10 @@ def main():
             assert all('问题概率：' not in a.get_text() for a in w.width_overlay.labels if a.get_visible())
             w.setting_fields['width_show_probability'].setChecked(True);settle()
         assert w.width_yield.bank is bank and w.current_frame is frame
+        outline_mode=w.setting_fields['width_display'].boxes['描边']
+        outline_mode.setCurrentIndex(outline_mode.findData('dim'));settle()
+        assert np.allclose(w.width_overlay.outlines.get_facecolors()[:,3],.20*.34)
+        outline_mode.setCurrentIndex(outline_mode.findData('show'));settle()
         assert any(probability_text(value,3) in a.get_text() for a in w.width_overlay.labels if a.get_visible())
         states=np.zeros((len(w.case['dies']),3));states[0,0]=30
         w.manual_states=states;w.request_preview();settle()
@@ -74,6 +80,9 @@ def main():
         labels=[a for a in w.width_overlay.labels if a.get_visible()]
         assert labels and all('问题概率：' in a.get_text() for a in labels)
         assert np.allclose(w.width_overlay.outlines.get_facecolors()[:,3],.20)
+        outline_mode.setCurrentIndex(outline_mode.findData('dim'));settle()
+        assert np.allclose(w.width_overlay.outlines.get_facecolors()[:,3],.20*.34)
+        outline_mode.setCurrentIndex(outline_mode.findData('show'));settle()
         w.set_view((4000,4000),400,250);w.viewport_changed(force=True);settle();w.canvas.draw()
         assert any('视野外' in a.get_text() and '问题概率：' in a.get_text() for a in w.width_overlay.labels if a.get_visible())
         for a in w.width_overlay.labels:

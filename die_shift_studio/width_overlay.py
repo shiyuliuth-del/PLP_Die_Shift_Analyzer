@@ -245,7 +245,7 @@ class WidthOverlay:
                 edge=ink if ignored else (.45*ink+.43 if uncertain else .46*ink+.28)
                 factor=.62 if mode=='dim' else 1.
                 colors.append((*edge,(.61 if uncertain else .82)*factor))
-                faces.append((*probability_color(ink,self.line_probability((key,index))),(.14 if uncertain else .20)*factor))
+                faces.append(tint(probability_color(ink,self.line_probability((key,index))),mode,.20))
                 dashes.append((0,(4,2.4)) if uncertain else 'solid')
             self.outlines.set_paths(paths);self.outlines.set_edgecolors(colors);self.outlines.set_facecolors(faces)
             self.outlines.set_linestyles(dashes or ['solid']);self.outlines.set_visible(bool(paths));self.summary_stamp=stamp

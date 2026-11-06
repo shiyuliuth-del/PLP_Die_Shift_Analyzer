@@ -24,6 +24,7 @@ def build(window,layout):
         fields[key]=box;form.addRow(title,box)
     for key,title in (('merge_layers','Merge 导出层图案'),('separate_holes','孔洞单独输出到 _holes 图层'),('show_fill','显示 HATCH 填充')):
         box=W.QCheckBox(title);fields[key]=box;form.addRow(box)
+    fields['layer_scope'].setToolTip('“当前显示图层”只按图层表显示勾选；宽度分析的低亮/元素隐藏不会删除实体。参与分析指用途不是“不参与”的图层。')
     fields['merge_layers'].setToolTip('默认开启：在独立导出副本内逐层合并相接、重叠和重复图形。关闭仍输出已展开的顶层几何，不恢复层级。')
     fields['separate_holes'].setToolTip('主图层写外轮廓，孔洞写同名_holes层；目标CAD须将孔洞层作为减法掩膜，不能直接视为同层实心铜。')
     fields['show_fill'].setToolTip('只改变DXF的FILLMODE显示偏好；仍保留HATCH实体与孔洞。')
