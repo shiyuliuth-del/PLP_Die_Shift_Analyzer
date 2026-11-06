@@ -1,0 +1,71 @@
+{
+  "status": "PASS",
+  "scope": "All exported double nodes equal; integer-reader differences bounded and reported",
+  "gds_sha256": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+  "pose": [
+    -35,
+    -35,
+    -1
+  ],
+  "layer_count": 10,
+  "output_polygons": 1225,
+  "integer_readback": [
+    {
+      "layer": "7/0",
+      "xor_dbu2": 0,
+      "xor_um2": 0.0
+    },
+    {
+      "layer": "6/0",
+      "xor_dbu2": 0,
+      "xor_um2": 0.0
+    },
+    {
+      "layer": "5/0",
+      "xor_dbu2": 137020,
+      "xor_um2": 0.13702
+    },
+    {
+      "layer": "4/0",
+      "xor_dbu2": 0,
+      "xor_um2": 0.0
+    },
+    {
+      "layer": "3/0",
+      "xor_dbu2": 0,
+      "xor_um2": 0.0
+    },
+    {
+      "layer": "2/0",
+      "xor_dbu2": 0,
+      "xor_um2": 0.0
+    },
+    {
+      "layer": "1/0",
+      "xor_dbu2": 0,
+      "xor_um2": 0.0
+    },
+    {
+      "layer": "122/0",
+      "xor_dbu2": 0,
+      "xor_um2": 0.0
+    },
+    {
+      "layer": "127/0",
+      "xor_dbu2": 0,
+      "xor_um2": 0.0
+    },
+    {
+      "layer": "128/0",
+      "xor_dbu2": 0,
+      "xor_um2": 0.0
+    }
+  ],
+  "units": 13,
+  "arc_entities": 0,
+  "source_unchanged": true,
+  "exact_double_nodes": true,
+  "all_readback_within_dbu": 0.001,
+  "klayout_version": "0.30.8",
+  "ezdxf_version": "1.1.3"
+}

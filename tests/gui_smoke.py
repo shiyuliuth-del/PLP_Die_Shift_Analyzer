@@ -40,7 +40,7 @@ with tempfile.TemporaryDirectory() as tmp:
     for i,key in enumerate(desired):header.moveSection(header.visualIndex(window._layer_keys.index(key)),i)
     window.layer_moved()
     assert not window.visible_boxes['90/0'].isChecked()
-    assert [window.controls.tabText(i) for i in range(window.controls.count())]==['偏移','工艺','设置']
+    assert [window.controls.tabText(i) for i in range(window.controls.count())]==['偏移','工艺','设置','输出']
     assert any('方案1' in w.text() and w.text().count('\n')==2 for w in window.findChildren(W.QLabel))
     assert [window.tabs.tabText(i) for i in range(window.tabs.count())]==['结果图形','结果分析','报告']
     assert [window.preview_tabs.tabText(i) for i in range(2)]==['极端情况','信息']

@@ -69,8 +69,8 @@ class LabelLayout:
     def place_selected(self,index,text):
         near=self.place(index,text)
         if near is not None:return near
-        # An explicit selection can use a more distant leader before moving
-        # its full label to the scrollable overflow. Never obscure other tags.
+        # An explicit selection can use a more distant leader before the
+        # least-overlap pinned fallback. Prefer not to obscure other tags.
         half=self.half_size(text);low=self.viewport[:2]+half+1;high=self.viewport[2:]-half-1
         if np.any(high<low):return
         base=self.quads[index].mean(axis=0)
