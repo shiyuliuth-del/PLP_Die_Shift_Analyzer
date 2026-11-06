@@ -95,6 +95,7 @@ def main():
         w.selection.clear();w.fit_plot();settle()
         for key,box in w.visible_boxes.items():box.setChecked(key=='4/0')
         settle()
+        w.dxf_fields['merge_layers'].setChecked(False)  # Retain the unmerged-node export regression.
         target=folder/'当前 修改.dxf';calls=[]
         def choose(dialog):
             assert dialog.acceptMode()==getattr(W.QFileDialog,'AcceptMode',W.QFileDialog).AcceptSave

@@ -1,0 +1,79 @@
+{
+  "status": "PASS",
+  "baseline": {
+    "version": "V35",
+    "python": "3.12.3",
+    "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.39",
+    "gds_sha256": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+    "parameters": {
+      "bounds_um": [
+        35,
+        35
+      ],
+      "angle_deg": 1,
+      "width_space_enclosure_um": [
+        15,
+        15,
+        15
+      ],
+      "sigma": 6,
+      "nodes": 5
+    },
+    "grid_seconds": 6.445637422031723,
+    "grid_combinations": 1953125,
+    "local_checks": 1125,
+    "full_frame_checks": 0,
+    "site_count": 0,
+    "line_probabilities": {
+      "('5/0', 44)": 1.5415342181515538e-12,
+      "('5/0', 41)": 7.707867036764209e-13,
+      "('5/0', 25)": 0.004168394353460177,
+      "('5/0', 93)": 0.0003015403886689543,
+      "('5/0', 102)": 1.5415342181515538e-12,
+      "('5/0', 31)": 2.2692234792713395e-07
+    },
+    "ignored_source_26_values": [
+      0.9958316056465402,
+      0.9955310962306257
+    ]
+  },
+  "current": {
+    "version": "V36",
+    "python": "3.12.3",
+    "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.39",
+    "gds_sha256": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+    "parameters": {
+      "bounds_um": [
+        35,
+        35
+      ],
+      "angle_deg": 1,
+      "width_space_enclosure_um": [
+        15,
+        15,
+        15
+      ],
+      "sigma": 6,
+      "nodes": 5
+    },
+    "grid_seconds": 4.9908307459554635,
+    "grid_combinations": 1953125,
+    "local_checks": 1125,
+    "full_frame_checks": 21,
+    "site_count": 9,
+    "line_probabilities": {
+      "('5/0', 44)": 1.5415342181515538e-12,
+      "('5/0', 41)": 7.707867036764209e-13,
+      "('5/0', 25)": 0.004168394353460177,
+      "('5/0', 93)": 0.0003015403886689543,
+      "('5/0', 102)": 1.5415342181515538e-12,
+      "('5/0', 31)": 2.2692234792713395e-07
+    },
+    "ignored_source_26_values": [
+      0.9958316056465402,
+      0.9955310962306257
+    ]
+  },
+  "numerical_parity": true,
+  "note": "Single serial measurements, no statistical speedup claim; full-frame checks compare both line and per-mouth unions"
+}

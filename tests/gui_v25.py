@@ -61,7 +61,7 @@ w.load_project(job);wait();w.run_evaluation();wait()
 w.controls.setCurrentIndex(2);wait()
 assert all(not b.isChecked() for b in w.setting_sections.values())
 assert all(not w.setting_fields[key].isVisible() for key in w.setting_fields)
-section=w.setting_sections['宽度分析 · 元素显示'];QTest.mouseClick(section,left)
+section=w.setting_sections['宽度分析'];QTest.mouseClick(section,left)
 size=w.setting_fields['width_label_font_pt'];assert size.isVisible()
 size.setValue(11);wait();assert not w.preview_pending
 w.controls.setCurrentIndex(0);w.width_toggle.setChecked(True);wait()
@@ -119,7 +119,7 @@ with patch.object(WidthAnalyzer,'_measure',side_effect=AssertionError('view solv
     w.set_view((75,38),370,280);w.viewport_changed();wait();check_callouts()
     w.resize(1230,810);wait();check_callouts()
 path=w.jobs_dir/'test.dshift.json';w.write_project(path);w.load_project(path);wait()
-assert w.setting_sections['宽度分析 · 元素显示'].isChecked() and size.value()==16
+assert w.setting_sections['宽度分析'].isChecked() and size.value()==16
 w.load_project(job);wait()
 assert not any(b.isChecked() for b in w.setting_sections.values()) and size.value()==8
 w.close();app.processEvents();QtCore.QCoreApplication.sendPostedEvents(None,getattr(QtCore.QEvent,'Type',QtCore.QEvent).DeferredDelete);tmp.cleanup()

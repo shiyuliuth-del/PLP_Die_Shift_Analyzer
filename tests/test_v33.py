@@ -82,7 +82,7 @@ class JointPolicyTests(unittest.TestCase):
         _,_,_,p,engine=example('示例O_运动网络三线路通道')
         try:
             p=replace(p,target_nsigma=2,multi_bound_x_um=35,multi_bound_y_um=0,bound_angle_deg=0)
-            cfg=replace(ViewSettings(),yield_method='partition',yield_box_budget=1024)
+            cfg=replace(ViewSettings(),width_yield_method='importance',yield_method='partition',yield_box_budget=1024)
             bank=measure_width_yield(engine.contact,p,cfg,None,lambda *_:None)
             refs=set().union(*(set(x[3]) for x in bank['chunks']))
             first=policy_yields(bank,[]);last=policy_yields(bank,refs)

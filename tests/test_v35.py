@@ -151,7 +151,8 @@ class DxfTests(unittest.TestCase):
             def no_klayout(name,*args,**kwargs):
                 if name=='pya' or name.startswith('klayout'):raise AssertionError('DXF must not require KLayout')
                 return original(name,*args,**kwargs)
-            with patch('builtins.__import__',side_effect=no_klayout):r=write(snap,p)
+            from die_shift_studio.dxf_settings import DxfSettings
+            with patch('builtins.__import__',side_effect=no_klayout):r=write(snap,p,settings=DxfSettings(merge_layers=False))
             self.assertEqual(r['polygons'],2)
             raw=p.read_bytes();self.assertNotIn(b'\n',raw.replace(b'\r\n',b''));raw.decode('ascii')
             for kind in (b'\r\nARC\r\n',b'\r\nCIRCLE\r\n'):self.assertNotIn(kind,raw)

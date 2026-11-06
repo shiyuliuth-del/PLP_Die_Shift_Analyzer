@@ -90,7 +90,7 @@ class RiskPlane:
         self.contexts=OrderedDict()
         self.owners=tuple(sorted({w.owner for w in walls if w.owner>=0}))
 
-    def events(self,states,red,yellow):
+    def events(self,states,red,yellow,site_masks=None):
         if self.local is None:return
         n,ndie,_=states.shape
         local=self.local;gates=local['gates'];tol=self.analyzer.tol
@@ -126,10 +126,13 @@ class RiskPlane:
                     refs=tuple(sorted({ref for strand in g.strand_refs for ref in strand}))
                     row=self.analyzer._row(self.name,local,a,b,g.nominal_gap,gaps[j,i],ends[j,i].mean(axis=0),
                                            np.zeros(2),g.widths,refs,0,False,False)
+                    row['probability_key']=g.event_key
                     candidates.append((g,row))
                 for row in self.analyzer._distinct_throats(candidates,self.half):
                     if row['status']!=ADEQUATE:
                         (red[pos] if row['status']==BLOCKED else yellow[pos]).update(row['refs'])
+                        if site_masks is not None:
+                            key=row['probability_key'];site_masks[key]=site_masks.get(key,0)|(1<<pos)
             offset+=len(gaps)
 
 
@@ -138,9 +141,10 @@ class WidthEvents:
         self.analyzer=analyzer;self.params=params;self.model=analyzer.model
         n=len(self.model.bound.centers);zero=np.zeros((n,3))
         nominal=analyzer.frame({'states':zero},progress)
-        self.nominal=[set(),set()]
+        self.nominal=[set(),set()];self.nominal_sites=set()
         for row in nominal['rows']:
-            if row['status']!=ADEQUATE:self.nominal[row['status']!=BLOCKED].update(row['refs'])
+            if row['status']!=ADEQUATE:
+                self.nominal[row['status']!=BLOCKED].update(row['refs']);self.nominal_sites.add(row['probability_key'])
         self.planes=[RiskPlane(analyzer,p,params) for p in analyzer.planes.values()]
         # Build exact boundary candidates once; the displacement envelope includes
         # translated, rotated copper, external fan-out and off-centre pivots.
@@ -161,18 +165,22 @@ class WidthEvents:
             if not self.keepout.is_empty and geo.distance(self.keepout)<=travel+analyzer.tol:
                 self.intrusions.append((key,node['index'],geo,o))
 
-    def classify(self,states):
-        red=[set() for _ in states];yellow=[set() for _ in states]
-        for plane in self.planes:plane.events(states,red,yellow)
+    def classify(self,states,with_sites=False):
+        red=[set() for _ in states];yellow=[set() for _ in states];site_masks={} if with_sites else None
+        for plane in self.planes:plane.events(states,red,yellow,site_masks)
         for i in np.flatnonzero(~np.any(states,axis=(1,2))):
             red[i].update(self.nominal[0]);yellow[i].update(self.nominal[1])
+            if with_sites:
+                for key in self.nominal_sites:site_masks[key]=site_masks.get(key,0)|(1<<int(i))
         tol=max(1e-9,self.model.data.dbu_um*1e-6)
         for key,index,geo,owner,rule in self.edges:
             placed=([self.model.moved(geo,owner,z) for z in states] if owner>=0 else [geo]*len(states))
             fail=~shapely.covers(self.model.case['board'],placed) | (shapely.distance(placed,self.boundary)<rule-tol)
             for i in np.flatnonzero(fail):red[i].add((key,index))
+            if with_sites and fail.any():site_masks['edge',key,index]=sum(1<<int(i) for i in np.flatnonzero(fail))
         for key,index,geo,owner in self.intrusions:
             placed=([self.model.moved(geo,owner,z) for z in states] if owner>=0 else [geo]*len(states))
             fail=shapely.relate_pattern(placed,self.keepout,'T********')
             for i in np.flatnonzero(fail):red[i].add((key,index))
-        return red,yellow
+            if with_sites and fail.any():site_masks['keepout',key,index]=sum(1<<int(i) for i in np.flatnonzero(fail))
+        return (red,yellow,site_masks) if with_sites else (red,yellow)

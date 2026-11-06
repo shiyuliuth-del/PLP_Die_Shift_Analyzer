@@ -1,10 +1,10 @@
 {
-  "version": "V35",
+  "version": "V36",
   "status": "PASS",
-  "tested_at_utc": "2026-11-06T03:53:36.053867+00:00",
+  "tested_at_utc": "2026-11-06T06:33:14.846547+00:00",
   "scope": "Clean source checkout, local platform. Windows executable verification is recorded separately.",
   "platform": "linux",
-  "gui_suites": 17,
+  "gui_suites": 18,
   "runs": [
     {
       "args": [
@@ -20,7 +20,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "Ran 320 tests in 81.145s",
+        "Ran 327 tests in 86.981s",
         "",
         "OK"
       ]
@@ -52,7 +52,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "GUI_V20_PASS {'status': 'PASS', 'accepted': 2, 'modes': ['axial', 'axial'], 'animation_enabled_during_revisits': True, 'dashed_middle_band': True, 'first_animation_frames': 3, 'cached_animation_frames': 3, 'hidden_layer_hides_deformation': True, 'report_formula_rendered': True, 'repeated_pose_switches': 18, 'repeated_switch_median_ms': 696.3335025066044, 'project_switch_keeps_results': True, 'zero_restore_ms': 9.427907003555447, 'clear_all_projects_bytes': 0}"
+        "GUI_V20_PASS {'status': 'PASS', 'accepted': 2, 'modes': ['axial', 'axial'], 'animation_enabled_during_revisits': True, 'dashed_middle_band': True, 'first_animation_frames': 2, 'cached_animation_frames': 4, 'hidden_layer_hides_deformation': True, 'report_formula_rendered': True, 'repeated_pose_switches': 18, 'repeated_switch_median_ms': 724.0587144624442, 'project_switch_keeps_results': True, 'zero_restore_ms': 54.65502798324451, 'clear_all_projects_bytes': 0}"
       ]
     },
     {
@@ -72,7 +72,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "GUI_V23_CHANNEL_PASS {'status': 'PASS', 'extreme_and_m_key_pad_motion': True, 'independent_die_stacks': True, 'channel_counts': [3, 3, 2], 'three_risk_classes': True, 'project_roundtrip': True, 'legacy_defaults': True, 'reconstruction_gap_um': 35.0, 'reconstruction_seam_um': 32.0, 'reconstruction_cover_area_um2': 1120.0, 'animation_frames_seen': 61, 'cached_replay': True, 'layer_visibility': True, 'table_focus': True, 'report_formulas': True}"
+        "GUI_V23_CHANNEL_PASS {'status': 'PASS', 'extreme_and_m_key_pad_motion': True, 'independent_die_stacks': True, 'channel_counts': [3, 3, 2], 'three_risk_classes': True, 'project_roundtrip': True, 'legacy_defaults': True, 'reconstruction_gap_um': 35.0, 'reconstruction_seam_um': 32.0, 'reconstruction_cover_area_um2': 1120.0, 'animation_frames_seen': 33, 'cached_replay': True, 'layer_visibility': True, 'table_focus': True, 'report_formulas': True}"
       ]
     },
     {
@@ -199,6 +199,16 @@
       "status": "PASS",
       "summary": [
         "GUI_V35_PASS on-row fixed centre/no canvas loss, independent saved width integration, pinned labels, native picker, edited shifted DXF/all layers"
+      ]
+    },
+    {
+      "args": [
+        "tests/gui_v36.py"
+      ],
+      "env": {},
+      "status": "PASS",
+      "summary": [
+        "GUI_V36_PASS merged settings/default grid, saved export preferences, native picker, fixed-alpha probability fills, labels/precision/offscreen/cache and legacy defaults"
       ]
     },
     {
@@ -497,13 +507,27 @@
       "discrete_states": 3
     }
   ],
-  "runtime_implementation_commit": "ea1bfd6",
-  "final_runtime_commit": "df057df",
-  "snapshot_note": "The clean run includes the updated four-tab gui_smoke assertion; after staging, the only runtime-file diff was two comments in width_labels.py. No executable runtime statements changed.",
-  "gd55_dxf_verification": "results/dxf_V35.json",
+  "tested_source_commit": "3f4d2d381743a7a93406266d984bcce7be2a9af8",
   "source_archive": {
-    "files": 103,
-    "bytes": 1093195,
-    "sha256": "f1f0789105dae68b6745f759799373ff782a93972f6a3a70fa8f4025f7c51e67"
+    "files": 108,
+    "bytes": 1115967,
+    "sha256": "03ed6e9806f5305375cce788466f8b0456e7bbd6d60738fc861f246c44798f26"
+  },
+  "external_validation": [
+    "results/width_V36.json",
+    "results/dxf_V36.json"
+  ],
+  "additional_presentation_check": {
+    "commit": "9bcb8ea529ac9707cc264df86816d13cbc1ea27b",
+    "scope": "Fixed fill alpha for both evidence states, with matching dim/show behaviour at nominal and concrete poses; output-scope tooltip clarified afterwards",
+    "commands": [
+      "tests/gui_v36.py",
+      "tests/gui_v29.py"
+    ],
+    "status": "PASS",
+    "runtime_hashes": {
+      "die_shift_studio/width_overlay.py": "18fce47de42418ca928e0173167f0fa73ef7783348e51c3b625620eeae420058",
+      "die_shift_studio/dxf_controls.py": "a629928ed9fac3c431f87dc96d46f76afa8e7b763aa5d1e3c9d0f2c605138b15"
+    }
   }
 }

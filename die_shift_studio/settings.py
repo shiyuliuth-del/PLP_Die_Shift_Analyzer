@@ -22,7 +22,8 @@ class ViewSettings:
     width_label_font_pt:float=8.
     width_label_decimals:int=2
     width_yield_decimals:int=6
-    width_yield_method:str='importance'
+    width_yield_method:str='grid'
+    width_show_probability:bool=True
     width_yield_exponent:int=12
     width_yield_seed:int=510
     width_grid_nodes:int=5
@@ -136,7 +137,7 @@ class ViewSettings:
             v=getattr(q,key)
             if not isinstance(v,(int,float)) or not math.isfinite(v) or not lo<=v<=hi or (key in integers and int(v)!=v):
                 raise ValueError(f'设置 {key} 超出范围 {lo}—{hi}')
-        for key in ('show_annulus_range','show_spacing_range','show_low_contact','show_low_width','animation_enabled','animation_return_zero','probability_show_ranges','contact_marker_absolute','unadapted_marker_absolute','deformation_route_enabled','deformation_general_bands','repair_landing_pad'):
+        for key in ('width_show_probability','show_annulus_range','show_spacing_range','show_low_contact','show_low_width','animation_enabled','animation_return_zero','probability_show_ranges','contact_marker_absolute','unadapted_marker_absolute','deformation_route_enabled','deformation_general_bands','repair_landing_pad'):
             if not isinstance(getattr(q,key),bool):raise ValueError(key+'必须为布尔值')
         import re
         color=lambda v:isinstance(v,str) and re.fullmatch(r'#[0-9a-fA-F]{6}',v)
@@ -149,7 +150,7 @@ class ViewSettings:
         return cls(**data)
 
     def width_key(self):
-        return (True,'nominal-physical-throat-v34',self.drc_tolerance_um)
+        return (True,'nominal-physical-throat-v36',self.drc_tolerance_um)
 
     def numeric_key(self):
         return tuple(getattr(self,k) for k in ('acceleration','probability_method','sample_exponent','random_seed',

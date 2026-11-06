@@ -82,6 +82,7 @@ class Gate:
     strand_refs: tuple
     nominal_gap: float
     band: tuple | None = None
+    event_key: tuple | None = None
 
 
 def section_subset(plane,ids,wall_ids):
@@ -319,7 +320,7 @@ class WidthAnalyzer:
         self.section_cache=EphemeralCache();self.demands={}
         self.catalogue_store=cache_group.values if cache_group is not None else None
         if self.catalogue_store is not None:
-            self.catalogue_key=('width-catalogue-v34',model.data.geometry_id,model.data.top_name,
+            self.catalogue_key=('width-catalogue-v36',model.data.geometry_id,model.data.top_name,
                                 tuple(sorted(model.roles.items())),tuple(model.connections.order),
                                 self.width,self.space,self.annulus,self.tol)
         self.planes = self._planes()
@@ -662,6 +663,9 @@ class WidthAnalyzer:
                     plane['pieces']=shapely.from_wkb(wkb)
                 plane['gates']=gates
         gates, walls = plane['gates'], plane['walls']
+        if not plane.get('event_keys_ready'):
+            from .width_event_ids import assign
+            assign(name,plane,.65*(self.width+self.space),self.tol);plane['event_keys_ready']=True
         nominal = not np.any(states)
         if 'wall_templates' not in plane:
             shapes=np.asarray([w.geometry for w in walls],object)
@@ -705,7 +709,7 @@ class WidthAnalyzer:
             row=self._row(name,plane,a,b,g.nominal_gap,now,point,axis,g.widths,tuple(sorted(refs)),
                           max(evidence,default=0),any(evidence),not nominal and min(a.owner,b.owner)<-1)
             row['witness_um']=ends[k].tolist()
-            row['nominal_witness_um']=g.ends.tolist()
+            row['nominal_witness_um']=g.ends.tolist();row['probability_key']=g.event_key
             rows.append((g,row))
         rows=self._distinct_throats(rows,half_depth)
         if self.probability is not None:

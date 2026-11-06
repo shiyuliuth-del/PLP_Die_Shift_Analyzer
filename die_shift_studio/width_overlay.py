@@ -12,6 +12,7 @@ from .viewport import overlaps
 from .width_display import tint,low_ink
 from .width_labels import LabelLayout
 from .width_witness import pose_text
+from .width_risk_probability import lookup,lookup_union,probability_text,probability_color
 
 HEADERS = ['状态','固定 RDL','通道两侧','原可通','必须通过','现可通','原间距 / μm','现间距 / μm','保宽需 / μm','最小需 / μm','预期收窄 / μm','问题线路','位置 / μm']
 IGNORED='已忽略'
@@ -56,7 +57,7 @@ class ChannelRows(QtCore.QAbstractTableModel):
             return None
         r = self.rows[index.row()]
         if role==TOOLTIP:
-            return WidthOverlay.description(r)
+            return WidthOverlay.description(r)+(self.probability_formatter(r) if hasattr(self,'probability_formatter') else '')
         if role==BACKGROUND:
             color = QtGui.QColor(IGNORED_COLOR if ignored_row(r,self.ignored) else COLORS[r['status']])
             color.setAlpha(15 if low_risk(r) else 48)
@@ -112,6 +113,7 @@ class WidthOverlay:
         self.stamp = self.table_stamp = self.summary_stamp = None
         self.label_sides={};self.text_sizes={}
         window.canvas.mpl_connect('motion_notify_event',self.hover)
+        window.width_table.model().probability_formatter=self.probability_line
 
     def shown_summary(self):
         w=self.w;frame=w.current_frame or {}
@@ -135,6 +137,37 @@ class WidthOverlay:
         a.get_bbox_patch().set_edgecolor(color);a.get_bbox_patch().set_alpha(.33 if low else .94)
         a.set_zorder(15 if summary else 12.6);a.set_visible(True)
 
+    def line_probability(self,ref):
+        return lookup(self.w.width_yield.bank,'lines',ref)
+
+    def problem_probability(self,row):
+        bank=self.w.width_yield.bank
+        if not hasattr(self,'probability_unions') or self.probability_bank is not bank:
+            self.probability_bank=bank;self.probability_unions={}
+        keys=row.get('probability_keys')
+        if keys is None:
+            if 'indices' in row:
+                from .width_event_ids import edge_keys
+                keys=edge_keys(row)
+            else:keys=(row.get('probability_key'),)
+        keys=tuple(keys)
+        if keys not in self.probability_unions:self.probability_unions[keys]=lookup_union(bank,keys)
+        return self.probability_unions[keys]
+
+    def probability_line(self,row):
+        if not self.w.view_settings.width_show_probability:return ''
+        value=self.problem_probability(row)
+        frame=self.w.current_frame or {};changed=set()
+        for feature in ('deformation','reconstruction'):
+            for key,items in frame.get(feature,{}).get('replacements',{}).items():
+                changed.update((key,i) for q in items for i in q['indices'])
+        keys=row.get('probability_keys',())
+        if 'indices' in row:
+            from .width_event_ids import edge_keys
+            keys=edge_keys(row)
+        reference=any(k[0] in ('edge','keepout') and (k[1],k[2]) in changed for k in keys)
+        return ('\n原图问题概率：' if reference else '\n问题概率：')+probability_text(value,self.w.view_settings.width_yield_decimals)
+
     def summary_entry(self,ref,item,summary):
         places=self.w.view_settings.width_label_decimals
         if item['kind']=='channel':
@@ -147,7 +180,7 @@ class WidthOverlay:
         pose=item['index']
         if pose not in self.pose_texts:self.pose_texts[pose]=pose_text(summary['grid_key'],pose)
         status=summary['lines'][ref][0]
-        return status,f"{ref[0]} #{ref[1]+1} · {status}\n{body}\n"+self.pose_texts[pose]
+        return status,f"{ref[0]} #{ref[1]+1} · {status}\n{body}"+self.probability_line(item)+'\n'+self.pose_texts[pose]
 
     def label_anchor(self,geometry,target=None):
         w=self.w
@@ -199,7 +232,7 @@ class WidthOverlay:
 
     def draw_summary(self,summary,visible,modes,selected):
         w=self.w;mode=modes['描边']
-        stamp=(id(summary),visible,mode,w.view_bounds,w.ignored_width_lines)
+        stamp=(id(summary),visible,mode,w.view_bounds,w.ignored_width_lines,id(w.width_yield.bank))
         if stamp!=self.summary_stamp:
             paths=[];colors=[];faces=[];dashes=[]
             for (key,index),(severity,evidence) in summary['lines'].items():
@@ -212,7 +245,7 @@ class WidthOverlay:
                 edge=ink if ignored else (.45*ink+.43 if uncertain else .46*ink+.28)
                 factor=.62 if mode=='dim' else 1.
                 colors.append((*edge,(.61 if uncertain else .82)*factor))
-                faces.append((*ink,(.14 if uncertain else .20)*factor))
+                faces.append(tint(probability_color(ink,self.line_probability((key,index))),mode,.20))
                 dashes.append((0,(4,2.4)) if uncertain else 'solid')
             self.outlines.set_paths(paths);self.outlines.set_edgecolors(colors);self.outlines.set_facecolors(faces)
             self.outlines.set_linestyles(dashes or ['solid']);self.outlines.set_visible(bool(paths));self.summary_stamp=stamp
@@ -239,7 +272,7 @@ class WidthOverlay:
         modes=w.view_settings.width_display
         nominal=w.width_toggle.isChecked() and (w.current_frame or {}).get('nominal_global')
         selected=tuple(w.selection.selected)
-        stamp = (flags,selected,tuple(w.ax.get_xlim()),tuple(w.ax.get_ylim()),id(w._coupled_data),visible,tuple(modes.items()),w.view_settings.width_label_font_pt,w.view_settings.width_label_decimals,tuple(w.ax.bbox.bounds),w.figure.dpi,w.view_bounds,self.selected,id(w.current_frame),w.reconstruction_toggle.isChecked(),w.deformation_toggle.isChecked())
+        stamp = (flags,selected,id(w.width_yield.bank),w.view_settings.width_show_probability,w.view_settings.width_yield_decimals,tuple(w.ax.get_xlim()),tuple(w.ax.get_ylim()),id(w._coupled_data),visible,tuple(modes.items()),w.view_settings.width_label_font_pt,w.view_settings.width_label_decimals,tuple(w.ax.bbox.bounds),w.figure.dpi,w.view_bounds,self.selected,id(w.current_frame),w.reconstruction_toggle.isChecked(),w.deformation_toggle.isChecked())
         if self.stamp == stamp and (getattr(w,'_in_animation',False) or self.table_stamp==flags):
             return
         self.stamp = stamp
@@ -306,7 +339,7 @@ class WidthOverlay:
         edges=[q for v in edges if (q:=visible_keepout_intrusion(v,visible,w.geometry_cache)) is not None]
         self.edges.set_paths([w.geometry_patch(v['geometry']) for v in edges])
         edge_colors=[IGNORED_COLOR if all((v['layer'],i) in w.ignored_width_lines for i in v['indices']) else COLORS[BLOCKED] for v in edges]
-        self.edges.set_facecolor([low_ink(tint(c,modes['边距'],.40),low_risk(v)) for c,v in zip(edge_colors,edges)])
+        self.edges.set_facecolor([tint(probability_color(c,self.problem_probability(v)),modes['边距'],.40) for c,v in zip(edge_colors,edges)])
         self.edges.set_edgecolor([low_ink(tint(c,modes['边距']),low_risk(v)) for c,v in zip(edge_colors,edges)])
         self.edges.set_visible(bool(edges) and modes['边距']!='hide')
         # Use the displayed replacement geometry when a source wire was deformed.
@@ -318,7 +351,7 @@ class WidthOverlay:
                     for q in items:
                         changed.update({(k,i):q['geometry'] for i in q['indices']})
         refs = dict.fromkeys(ref for r in active if r['status']!=ADEQUATE for ref in r['refs'] if ref[0] in visible)
-        paths, inks = [], []
+        paths, inks, faces = [], [], []
         def dark(color):return tuple(.64*v for v in to_rgb(color))
         significant={ref for r in active if r['status']!=ADEQUATE and not low_risk(r) for ref in r['refs']}
         danger={ref for r in active if r['status']==BLOCKED for ref in r['refs']
@@ -329,15 +362,17 @@ class WidthOverlay:
                 paths.append(w.geometry_patch(g))
                 color=IGNORED_COLOR if (k,i) in w.ignored_width_lines else dark(COLORS[BLOCKED if (k,i) in danger else NARROW])
                 inks.append(low_ink(tint(color,modes['描边'],.8),(k,i) not in significant))
+                base=IGNORED_COLOR if (k,i) in w.ignored_width_lines else COLORS[BLOCKED if (k,i) in danger else NARROW]
+                faces.append(tint(probability_color(base,self.line_probability((k,i))),modes['描边'],.20))
         self.outlines.set_paths(paths)
-        self.outlines.set_edgecolors(inks)
+        self.outlines.set_edgecolors(inks);self.outlines.set_facecolors(faces)
         self.outlines.set_visible(bool(paths) and modes['描边']!='hide')
         # Fill only the material belonging to this risk row, clipped to the
         # actual rectangle. The original copper outside it keeps the dark edge.
         fill_stamp=(id(data),id(frame),w.deformation_toggle.isChecked(),w.reconstruction_toggle.isChecked())
         if getattr(self,'fill_stamp',None)!=fill_stamp:
             self.fill_stamp=fill_stamp;self.clips={}
-        fill_paths={s:[] for s in self.inset};fill_low={s:[] for s in self.inset}
+        fill_paths={s:[] for s in self.inset};fill_low={s:[] for s in self.inset};fill_prob={s:[] for s in self.inset}
         if modes['描边']!='hide' and modes['截面']!='hide':
             for r,rectangle in reversed(list(zip(shown,rectangles))):
                 if r['status']==ADEQUATE:continue
@@ -350,12 +385,12 @@ class WidthOverlay:
                     part=self.clips[token]
                     if part.area>0:
                         style=IGNORED if ref in w.ignored_width_lines else r['status']
-                        fill_paths[style].append(w.geometry_patch(part));fill_low[style].append(low_risk(r))
+                        fill_paths[style].append(w.geometry_patch(part));fill_low[style].append(low_risk(r));fill_prob[style].append(self.line_probability(ref))
         ink_mode='dim' if 'dim' in (modes['描边'],modes['截面']) else 'show'
         for status,artist in self.inset.items():
             color=IGNORED_COLOR if status==IGNORED else dark(COLORS[status])
             artist.set_paths(fill_paths[status])
-            artist.set_facecolor([low_ink(tint(color,ink_mode,.40),q) for q in fill_low[status]])
+            artist.set_facecolor([tint(probability_color(color,q),ink_mode,.40) for q in fill_prob[status]])
             artist.set_edgecolor([low_ink(tint(color,ink_mode,.5),q) for q in fill_low[status]])
             artist.set_visible(bool(fill_paths[status]))
         self.rows = shown
@@ -382,7 +417,7 @@ class WidthOverlay:
         order=[] if modes['标注']=='hide' else sorted((i for i,r in enumerate(label_rows) if not ignored_row(r,w.ignored_width_lines)),
                                 key=lambda i:(self.identity(label_rows[i])!=self.selected,low_risk(label_rows[i])))
         layout=LabelLayout(w.ax,label_rects,fontsize,self.text_sizes,modes['截面']!='hide') if order else None
-        texts=[self.label_text(r,w.view_settings.width_label_decimals)+('\n目标线路在当前视野外' if i in anchors else '') for i,r in enumerate(label_rows)] if order else []
+        texts=[self.label_text(r,w.view_settings.width_label_decimals)+self.probability_line(r)+('\n目标线路在当前视野外' if i in anchors else '') for i,r in enumerate(label_rows)] if order else []
         if layout:layout.prescreen(texts)
         count=0;next_sides={}
         for i in order:
@@ -452,7 +487,7 @@ class WidthOverlay:
                 w.canvas.setToolTip('')
             return
         hits = self.tree.query(Point(event.xdata,event.ydata),predicate='intersects')
-        text = self.description(self.rows[int(hits[0])]) if len(hits) and not ignored_row(self.rows[int(hits[0])],w.ignored_width_lines) else ''
+        text = self.description(self.rows[int(hits[0])])+self.probability_line(self.rows[int(hits[0])]) if len(hits) and not ignored_row(self.rows[int(hits[0])],w.ignored_width_lines) else ''
         if text!=w.canvas.toolTip():
             w.canvas.setToolTip(text)
 

@@ -59,7 +59,7 @@ class WidthYieldDisplay:
     def reset(self):
         self.timer.stop();self.key=None;self.bank=None;self.pending=None;self.rendered=None
         if self.worker:self.worker.cancelled.set()
-        self.label.clear();self.label.setToolTip('')
+        self.label.clear();self.label.setToolTip('');self.refresh_overlay()
         if self.w.result is not None and 'width_policy_yield' in self.w.result:
             self.w.result.pop('width_policy_yield');self.w.report_dirty=True
 
@@ -80,7 +80,7 @@ class WidthYieldDisplay:
         p=replace(p,target_nsigma=0)
         cfg=w.view_settings;roles=w.roles();order=w.ordered_layers()
         sampling=(cfg.width_yield_method,cfg.width_grid_nodes) if cfg.width_yield_method=='grid' else (cfg.width_yield_method,cfg.width_yield_exponent,cfg.width_yield_seed)
-        token=('width-yield-v35',logical_fingerprint((w.data.geometry_id,w.data.top_name,roles,order,asdict(p),
+        token=('width-yield-v36',logical_fingerprint((w.data.geometry_id,w.data.top_name,roles,order,asdict(p),
                cfg.drc_tolerance_um,sampling)))
         key=(id(w.cache_group),token)
         if self.key==key:
@@ -116,7 +116,7 @@ class WidthYieldDisplay:
         worker=Worker(work,self.w);self.worker=worker;self.w.watch_worker(worker,'整包宽度良率')
         def accept(bank):
             if self.key!=key or self.w._closing or bank is None:return
-            self.bank=bank;self.render()
+            self.bank=bank;self.render();self.refresh_overlay()
         def finish():
             self.worker=None;worker.deleteLater()
             if self.pending and not self.w._closing:self.timer.start()
@@ -125,6 +125,14 @@ class WidthYieldDisplay:
                 self.label.setText('宽度良率 · 无法计算');self.label.setToolTip(text.split('Traceback')[0].strip())
         worker.partial.connect(lambda _:accept(worker.take_partial()));worker.done.connect(accept)
         worker.failed.connect(failed);worker.finished.connect(finish);worker.start()
+
+    def refresh_overlay(self):
+        w=self.w
+        if not hasattr(w,'width_overlay') or not getattr(w,'current_frame',None):return
+        w.width_overlay.stamp=None;w.width_overlay.summary_stamp=None
+        if w.tabs.currentIndex()==0:
+            w.width_overlay.draw();w.render_scene()
+        else:w._layout_pending=True
 
     def render(self):
         if self.bank is None:return
@@ -161,5 +169,7 @@ class WidthYieldDisplay:
             self.w.result['width_policy_yield']=dict(values=v.tolist(),failure_probability=q['failure_probability'].tolist(),proven=q['proven'],failure_intervals=q['failure_intervals'],decimals=decimals,intervals=q['intervals'],method=q['method'],
                 samples=q['samples'],total=q['total'],scale_nsigma=self.bank['scale_nsigma'],
                 parameters=asdict(self.w.params()),ignored=[list(r) for r in sorted(ignored)],
-                gain_probability=q.get('gain_probability',0.),grid_nodes=q.get('grid_nodes'),local_checks=q.get('local_checks'),steps=q.get('steps'))
+                gain_probability=q.get('gain_probability',0.),grid_nodes=q.get('grid_nodes'),local_checks=q.get('local_checks'),steps=q.get('steps'),
+                risk_lines=[dict(layer=k,index=i,**v) for (k,i),v in self.bank.get('probability_lines',{}).items()],
+                probability_sites=len(self.bank.get('probability_sites',{})))
             self.w.report_dirty=True

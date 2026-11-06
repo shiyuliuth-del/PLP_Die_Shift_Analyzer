@@ -12,7 +12,7 @@ from die_shift_studio.stack import Connections
 from die_shift_studio.dxf_export import snapshot,write
 
 
-def verify(source):
+def verify(source,merge=True):
     data=read_gds(source)
     used=dict(zip(('127/0','128/0','3/0','4/0','5/0','6/0'),
                   ('封装边框','芯片边框','运动RDL','运动过孔','固定RDL','固定过孔')))
@@ -25,12 +25,14 @@ def verify(source):
         frozen=snapshot(data,cache,engine.frame(pose))
     finally:engine.close()
     with tempfile.TemporaryDirectory() as folder:
-        target=Path(folder)/'current.dxf';info=write(frozen,target)
+        from die_shift_studio.dxf_settings import DxfSettings
+        target=Path(folder)/'current.dxf';info=write(frozen,target,settings=DxfSettings(merge_layers=merge))
         doc=ezdxf.readfile(target);assert not doc.audit().errors
         assert doc.units==13 and not list(doc.modelspace().query('ARC CIRCLE'))
         entities=list(doc.modelspace());n=0
-        for key in sorted(frozen.layers,key=lambda v:tuple(map(int,v.split('/')))):
-            for encoded in frozen.layers[key]:
+        raw_layers=frozen.layers if not merge else {}
+        for key in sorted(raw_layers,key=lambda v:tuple(map(int,v.split('/')))):
+            for encoded in raw_layers[key]:
                 for polygon in shapely.get_parts(shapely.from_wkb(encoded)):
                     entity=entities[n];n+=1
                     assert entity.dxf.layer=='L'+key.replace('/','_D')
@@ -43,7 +45,21 @@ def verify(source):
                         for ring,loop in zip(rings,entity.paths):
                             np.testing.assert_array_equal([q.start for q in loop.edges],np.array(ring.coords)[:-1])
                             np.testing.assert_array_equal([q.end for q in loop.edges],np.array(ring.coords)[1:])
-        assert n==len(entities)
+        if not merge:assert n==len(entities)
+        decoded={}
+        for entity in entities:
+            if entity.dxftype()=='LWPOLYLINE':polygon=shapely.Polygon(entity.get_points('xy'))
+            else:
+                loops=[[tuple(edge.start) for edge in loop.edges] for loop in entity.paths]
+                polygon=shapely.Polygon(loops[0],loops[1:])
+            decoded.setdefault(entity.dxf.layer,[]).append(polygon)
+        double_xor={}
+        for key,values in frozen.layers.items():
+            name='L'+key.replace('/','_D')
+            expected=shapely.union_all([shapely.from_wkb(raw) for raw in values])
+            actual=shapely.union_all(decoded[name])
+            double_xor[key]=expected.symmetric_difference(actual).area
+            assert double_xor[key]<=max(1e-9,expected.area*1e-12),key
         options=k.LoadLayoutOptions();options.dxf_polyline_mode=2;options.dxf_dbu=data.dbu_um
         layout=k.Layout();layout.read(str(target),options);rows=[]
         for key,items in frozen.layers.items():
@@ -62,15 +78,16 @@ def verify(source):
             assert (actual-expected.sized(1)).is_empty() and (expected-actual.sized(1)).is_empty(),key
             rows.append(dict(layer=key,xor_dbu2=difference.area(),xor_um2=difference.area()*layout.dbu**2))
         assert hashlib.sha256(source.read_bytes()).hexdigest()==data.sha256
-        return dict(status='PASS',scope='All exported double nodes equal; integer-reader differences bounded and reported',
+        return dict(status='PASS',scope='Material union at double precision; raw nodes additionally checked with --no-merge; integer-reader residuals reported',
                     gds_sha256=data.sha256,pose=[-35,-35,-1],layer_count=len(rows),output_polygons=info['polygons'],
-                    integer_readback=rows,units=13,arc_entities=0,source_unchanged=True,exact_double_nodes=True,
+                    integer_readback=rows,double_precision_xor_um2=double_xor,units=13,arc_entities=0,source_unchanged=True,exact_double_nodes=not merge,merge_layers=merge,
+                    input_polygons=info['input_polygons'],merged_polygons=info['merged_polygons'],
                     all_readback_within_dbu=layout.dbu,klayout_version=k.__version__,ezdxf_version=ezdxf.__version__)
 
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('gds',type=Path)
-    parser.add_argument('--output',type=Path);args=parser.parse_args()
-    report=verify(args.gds);text=json.dumps(report,ensure_ascii=False,indent=2)+'\n'
+    parser.add_argument('--output',type=Path);parser.add_argument('--no-merge',action='store_true');args=parser.parse_args()
+    report=verify(args.gds,not args.no_merge);text=json.dumps(report,ensure_ascii=False,indent=2)+'\n'
     if args.output:args.output.write_text(text,encoding='utf8')
     print(text)

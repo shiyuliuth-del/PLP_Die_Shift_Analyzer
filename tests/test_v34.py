@@ -209,7 +209,7 @@ class KeepoutTests(unittest.TestCase):
         np.testing.assert_allclose(policy_yields(bank,[r,y])['values'],[.1,.1])
         e=fixture(True)
         try:
-            cfg=replace(ViewSettings(),yield_method='partition',yield_box_budget=1024)
+            cfg=replace(ViewSettings(),width_yield_method='importance',yield_method='partition',yield_box_budget=1024)
             bank=measure_width_yield(e.contact,e.p,cfg,None,lambda *_:None)
             ignored={('3/0',0)}
             q=policy_yields(bank,ignored)

@@ -58,7 +58,9 @@ def normalize_project(project):
     sections=p.setdefault('expanded_settings',[])
     if not isinstance(sections,list) or any(not isinstance(title,str) for title in sections):
         raise ValueError('工程设置栏目列表必须由标题字符串组成')
-    p['expanded_settings']=['无接触良率计算' if title in ('全输入无接触模型良率','全输入良率计算') else title for title in sections]
+    p['expanded_settings']=list(dict.fromkeys('无接触良率计算' if title in ('全输入无接触模型良率','全输入良率计算') else '宽度分析' if title in ('宽度分析 · 良率计算','宽度分析 · 元素显示') else title for title in sections))
+    from .dxf_settings import DxfSettings
+    p['dxf_options']=asdict(DxfSettings.from_dict(p.get('dxf_options')))
     if not isinstance(p.setdefault('dxf_directory',''),str):raise ValueError('DXF输出目录必须为文本')
     view=p.get('extreme_view',{})
     if not isinstance(view,dict):raise ValueError('工程极端情况视图必须是对象')

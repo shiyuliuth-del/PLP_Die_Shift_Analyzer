@@ -253,7 +253,7 @@ def _solve_throat(analyzer,name,plane,grid,target,partners,ambiguous,found,witne
             axis=(ends[i,1]-ends[i,0])/gap if gap>analyzer.tol else ref[i]/np.linalg.norm(ref[i])
             refs=tuple(sorted({v for lane in g.strand_refs for v in lane}))
             r=analyzer._row(name,target,a,b,g.nominal_gap,now[i],ends[i].mean(axis=0),axis,g.widths,refs,0,False,min(a.owner,b.owner)<-1)
-            r['nominal_witness_um']=g.ends.tolist()
+            r['nominal_witness_um']=g.ends.tolist();r['probability_key']=g.event_key
             base.append(r)
         if all(r['status']==ADEQUATE for r in base):continue
         # For these fixed endpoints, a third owner matters only through the
@@ -280,18 +280,18 @@ def _solve_throat(analyzer,name,plane,grid,target,partners,ambiguous,found,witne
                 pose_index=grid.index([allowed[i][0] if i in allowed else 0 for i in range(grid.count)])
 
                 direct=[(g,dict(r)) for i,(g,r) in enumerate(zip(gates,base)) if not mask>>i&1]
-                rows=analyzer._distinct_throats(direct,half);red=False;risk_refs=set()
+                rows=analyzer._distinct_throats(direct,half);red=False;risk_refs=set();risk_sites=set()
                 for r in rows:
                     if r['status']==ADEQUATE:continue
-                    red |= r['status']==BLOCKED;risk_refs.update(r['refs'])
+                    red |= r['status']==BLOCKED;risk_refs.update(r['refs']);risk_sites.add(r['probability_key'])
                     event=None
                     if analyzer.probability and not ambiguous:
                         event=analyzer.probability.classify(r,[next(w for w in walls if w.name==key) for key in r['pair']])
                     strongest(found,r['refs'],r['status'],event,binary,witnesses,channel_witness(r,pose_index))
-                resolved[mask]=(red,tuple(sorted(risk_refs)))
+                resolved[mask]=(red,tuple(sorted(risk_refs)),tuple(sorted(risk_sites)))
             clause=PoseClause(tuple(sorted(allowed.items())))
             if resolved[mask][0]:clauses.add(clause)
-            if collect and resolved[mask][1]:collect(clause,resolved[mask][1])
+            if collect and resolved[mask][1]:collect(clause,resolved[mask][1],resolved[mask][2])
     return total
 
 
