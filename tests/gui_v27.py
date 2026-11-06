@@ -48,7 +48,7 @@ with patch.object(WidthAnalyzer,'_measure',side_effect=AssertionError('display-o
     assert not any(map(low_risk,w.width_rows)) and w.current_frame['width_analysis']['counts']==raw
     w.setting_fields['width_label_decimals'].setValue(4);wait();w.setting_fields['show_low_width'].setChecked(True);wait()
     assert any(map(low_risk,w.width_rows))
-    w.controls.setCurrentIndex(2);w.setting_sections['宽度分析 · 元素显示'].setChecked(True);app.processEvents()
+    w.controls.setCurrentIndex(2);w.setting_sections['宽度分析'].setChecked(True);app.processEvents()
     size=w.setting_fields['width_label_font_pt'];digits=w.setting_fields['width_label_decimals']
     assert size.isVisible() and digits.isVisible() and size.pos().x()<digits.pos().x()
     w.controls.setCurrentIndex(0);app.processEvents()
