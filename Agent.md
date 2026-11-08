@@ -1,6 +1,6 @@
 # 多 Agent 协作与 GitHub 提交规范
 
-适用范围：本仓库全部源码、文档、示例和发布物。维护日期：2026-11-06。本文以 **V36（宽度概率显示与合并DXF）**编制；当前软件版本以`__init__.py`和README为准。原附件自身仍标记为V21，不能把它与此前已发布的V21标签混为一谈。
+适用范围：本仓库全部源码、文档、示例和发布物。维护日期：2026-11-02。本文以 **V26（离散极端组合与缓存状态）**编制；当前软件版本以`__init__.py`和README为准。原附件自身仍标记为V21，不能把它与此前已发布的V21标签混为一谈。
 
 ## 1. 唯一可信主线与需求优先级
 
@@ -56,9 +56,9 @@ QT_QPA_PLATFORM=offscreen python3 tests/gui_repair.py
 | 几何型变/DRC | V12–V20相关核心测试；失败保留源铜、原材料随动、固定端、连通、最终全局复核 |
 | 概率/安全盒/良率 | 解析或独立积分对照；0/有限k/∞、最大幅度、共同DIE状态与误差范围 |
 | GUI/缓存/调度 | `gui_smoke.py`、`gui_v14.py`、`gui_v20.py`、`gui_scheduler_v20.py`，再测当前界面、低容量缓存正反向复用、设置折叠、标签避让与极端表缓存色 |
-| 依赖/打包/后端 | `main.py --smoke-test`、安装的KLayout桌面后端、Windows 双击 BUILD.bat、源码 RUN.bat、在新目录验证目标机生成的 EXE |
+| 依赖/打包/后端 | `main.py --smoke-test`、安装的KLayout桌面后端、`TEST_WINDOWS.bat`（有Windows时） |
 
-使用 `python3 tools/package_release.py verify-source` 在干净源码目录运行完整回归。Windows 端单独执行 `tools/windows_acceptance.py`，核对真实结论后才能发布。实际GUI、KLayout、Windows、GPU或真实GD55未验证时，必须写明未验证/跳过原因。不得把“没有数据”“没有标记”“样本未命中”写成通过。
+完整发布使用 `python3 tools/package_release.py`，它会在全新解压目录中再次执行规定的检查。实际GUI、KLayout、Windows、GPU或真实GD55未验证时，必须写明未验证/跳过原因。不得把“没有数据”“没有标记”“样本未命中”写成通过。
 
 [已知问题](docs/KNOWN_ISSUES.md)中的复现不因现有测试全绿而关闭；修复时新增能够独立验证期望结果的回归，不能写一个断言来永久固化错误结果。
 
@@ -80,14 +80,14 @@ QT_QPA_PLATFORM=offscreen python3 tests/gui_repair.py
 - 合并后拉取 `main`，确认提交/版本和关键文件哈希；报告PR链接、合并SHA、测试与遗留问题。
 - 本轮提供PR模板和本地检查入口；没有把文档规范冒称成已启用的GitHub Actions或分支保护。仓库级审核人数、自动CI和保护策略应由维护者明确配置。
 
-## 7. 版本、Windows 软件包与发布
+## 7. 版本、源码ZIP与发布
 
-- 1102 接入标签为 V22，本轮为 V36，后续每轮依次递增。由集成者统一分配发布号；并行Agent不要各自占用同一个号。
+- 1102 接入标签为 V22，本轮为 V26，后续每轮依次递增。由集成者统一分配发布号；并行Agent不要各自占用同一个号。
 - 更新 `die_shift_studio/__init__.py`、README、当前使用说明、`AGENTS.md`入口链接及发布记录；旧tag及历史证据不改写。
-- 正式 Release ZIP 使用 `python3 tools/package_release.py make-source` 生成，包含应用源码、RUN.bat、BUILD.bat、依赖清单、GPU 核函数的 CUDA C 和 PTX 文本及 PyInstaller 规范。图标在目标电脑打包时从源码生成。校验值独立发布。完整 Git 检出保留开发资料和示例，自动源码归档与正式 ZIP 的源文件逐字节相同。
-- Windows 验收从正式源码 ZIP 解压后运行 BUILD.bat，验证窗口、工程保留、目录重建和源码启动，临时 EXE 不上传。下载后的源码资产核对文件清单、CRC、SHA-256 和 7-Zip。
+- 源码ZIP只包含运行源码、必要示例、规范/使用文档和验证记录，**不含图片（含SVG/PDF/图标）、日志、缓存、旧ZIP、exe**。图文报告保留在线，`.gitattributes`须令GitHub自动源代码归档同样排除图片。
+- 不能沿用输入附件内的旧 `SHA256SUMS.json` 或旧 `package_verification.json`。新包生成自己的清单，在独立解压目录运行测试，再做CRC、哈希和7-Zip检查。
 - 发布经任务授权后上传版本化ZIP与SHA-256文件。重新下载远端asset核对字节/哈希，检查GitHub自动zip/tar内容；不能只验证本地ZIP。
-- Windows 构建须使用 Windows 原生执行环境。源码运行阶段不联网安装，不锁定 Python 或包版本；在 Linux 运行源码回归单独记录。
+- 不在Linux下构建并声称交付Windows实机包。保留离线 `BUILD_WINDOWS.bat`；没有Windows实机时直接写明。
 
 ## 8. 每个任务的交接
 
