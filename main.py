@@ -20,6 +20,8 @@ if __name__=='__main__':
             report=dict(capabilities(),adapters=graphics_inventory())
             Path(args.gpu_info).write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf8')
             raise SystemExit(0)
+        from die_shift_studio.dependencies import verify
+        verify()
         if args.smoke_test:raise SystemExit(smoke(args.smoke_test))
         from die_shift_studio.gui import launch
         raise SystemExit(launch(args.project))

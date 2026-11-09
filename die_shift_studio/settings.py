@@ -89,8 +89,12 @@ class ViewSettings:
     repair_landing_pad:bool=False
     repair_patch_width_um:float=0.
     reconstruction_overlap_um:float=0.
+    reconstruction_search:bool=False
     reconstruction_length_um:float=0.
     reconstruction_width_um:float=0.
+    # Manual cut planes, one per chain, written as
+    # (layer, feature index, (via indices,), nx, ny, ox, oy).
+    reconstruction_cuts:tuple=()
     yield_method:str='monte_carlo'
     yield_sample_exponent:int=12
     yield_box_budget:int=4096
@@ -100,9 +104,31 @@ class ViewSettings:
     safe_box_starts:int=3
     safe_box_passes:int=2
 
+    @staticmethod
+    def _normalize_cuts(rows):
+        cuts={}
+        if not isinstance(rows,(list,tuple)):return ()
+        for row in rows:
+            try:
+                layer,index,vias,nx,ny,ox,oy=row
+                index=int(index)
+                if all(isinstance(v,(list,tuple)) for v in vias):
+                    refs=tuple(sorted((str(key),int(i)) for key,i in vias))
+                else:
+                    refs=tuple(sorted(int(i) for i in vias))
+                nx,ny,ox,oy=map(float,(nx,ny,ox,oy))
+                normal=math.hypot(nx,ny)
+                if not refs or index<0 or not normal or not all(map(math.isfinite,(normal,ox,oy))):continue
+            except (TypeError,ValueError,OverflowError):
+                continue
+            cuts[str(layer),index,refs]=(nx/normal,ny/normal,ox,oy)
+        return tuple((*key,*plane) for key,plane in cuts.items())
+
     @classmethod
     def from_dict(cls,values=None):
         values=dict(values or {})
+        if 'reconstruction_cuts' in values:
+            values['reconstruction_cuts']=cls._normalize_cuts(values['reconstruction_cuts'])
         values['width_display']=normalize_display(values.get('width_display',{}))
         for new,old in (('width_yield_exponent','yield_sample_exponent'),('width_yield_seed','random_seed')):
             if new not in values and old in values:values[new]=values[old]
@@ -137,7 +163,7 @@ class ViewSettings:
             v=getattr(q,key)
             if not isinstance(v,(int,float)) or not math.isfinite(v) or not lo<=v<=hi or (key in integers and int(v)!=v):
                 raise ValueError(f'设置 {key} 超出范围 {lo}—{hi}')
-        for key in ('width_show_probability','show_annulus_range','show_spacing_range','show_low_contact','show_low_width','animation_enabled','animation_return_zero','probability_show_ranges','contact_marker_absolute','unadapted_marker_absolute','deformation_route_enabled','deformation_general_bands','repair_landing_pad'):
+        for key in ('width_show_probability','show_annulus_range','show_spacing_range','show_low_contact','show_low_width','animation_enabled','animation_return_zero','probability_show_ranges','contact_marker_absolute','unadapted_marker_absolute','deformation_route_enabled','deformation_general_bands','repair_landing_pad','reconstruction_search'):
             if not isinstance(getattr(q,key),bool):raise ValueError(key+'必须为布尔值')
         import re
         color=lambda v:isinstance(v,str) and re.fullmatch(r'#[0-9a-fA-F]{6}',v)
@@ -159,6 +185,7 @@ class ViewSettings:
     def reconstruction_key(self):
         """Everything the reconstruction result depends on besides the pose."""
         return (True,self.reconstruction_length_um,self.reconstruction_width_um,
-                self.reconstruction_overlap_um,self.drc_tolerance_um)
+                self.reconstruction_overlap_um,self.drc_tolerance_um,
+                self.reconstruction_search,tuple(self.reconstruction_cuts))
     def deformation_key(self):
         return (self.drc_tolerance_um,self.acceleration)+tuple(getattr(self,f.name) for f in fields(self) if f.name.startswith('deformation_'))
