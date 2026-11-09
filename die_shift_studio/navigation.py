@@ -43,7 +43,7 @@ class Navigation:
         self.history();self.ax.set_xlim(limits[0]);self.ax.set_ylim(limits[1]);self.history()
         if not getattr(self.canvas,'_managed_viewport',False):self.canvas.draw_idle()
     def press(self,e):
-        if e.inaxes is not self.ax or self.busy():return
+        if getattr(e,'reconstruction_cut_handled',False) or e.inaxes is not self.ax or self.busy():return
         if e.button==MouseButton.MIDDLE:
             self.history();self.drag=(e.x,e.y,self.ax.get_xlim(),self.ax.get_ylim(),self.ax.transData.inverted().frozen())
         elif e.button==MouseButton.RIGHT and not getattr(self.canvas,'die_move_active',False):

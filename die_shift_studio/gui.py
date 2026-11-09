@@ -221,8 +221,9 @@ class MainWindow(W.QMainWindow):
         self.repair_data=None
         from .repair_overlay import RepairOverlay
         self.repair_overlay=RepairOverlay(self)
-        from .reconstruction_overlay import ReconstructionOverlay
+        from .reconstruction_overlay import ReconstructionOverlay, CutDrag
         self.reconstruction_overlay=ReconstructionOverlay(self)
+        self.cut_drag=CutDrag(self)
         self.job_watcher=QtCore.QFileSystemWatcher([str(self.jobs_dir)],self);self.job_watcher.directoryChanged.connect(self.refresh_jobs)
         self.cache_status_timer=QtCore.QTimer(self);self.cache_status_timer.setInterval(500);self.cache_status_timer.timeout.connect(self.refresh_cache_status);self.cache_status_timer.start()
         QtCore.QTimer.singleShot(0,self.discover_hardware)
@@ -393,7 +394,8 @@ class MainWindow(W.QMainWindow):
         self.width_table.selectionModel().currentRowChanged.connect(lambda index,_:self.width_overlay.locate(index.row()));self.preview_tabs.addTab(width_page,'宽度分析')
         self.reconstruction_page=W.QWidget();cv=W.QVBoxLayout(self.reconstruction_page);cv.setContentsMargins(3,3,3,3)
         self.reconstruction_summary=label('勾选“重构预演”后，软件按运动过孔自动划分固定RDL的移动区（同一网络的落盘合为一条串、只切一刀，切口垂直于这条串的走线；同一块固定RDL跨多个芯片时只取本 DIE 芯片边框以内的铜），按当前姿态移动，并用两个切口面的 4 个端点围成的多边形补上裂隙。');cv.addWidget(self.reconstruction_summary)
-        self.reconstruction_table=table(['固定RDL层','所属','网络','移动区面积 / μm²','位移 / μm','裂隙 / μm','补线面积 / μm²','切口缝长 / μm','状态']);cv.addWidget(self.reconstruction_table)
+        self.reconstruction_table=table(['固定RDL层','所属','网络','移动区面积 / μm²','位移 / μm','裂隙 / μm','补线面积 / μm²','切口缝长 / μm','间距 / μm','状态']);cv.addWidget(self.reconstruction_table)
+        clear_cuts=W.QPushButton('清除全部手动切口');clear_cuts.setToolTip('把图上拖动固定过的切口全部恢复成当前设置计算的自动位置。');clear_cuts.clicked.connect(self.clear_manual_cuts);cv.addWidget(clear_cuts)
         self.reconstruction_table.currentCellChanged.connect(lambda row,*_:self.reconstruction_overlay.locate(row));self.preview_tabs.addTab(self.reconstruction_page,'重构预演')
         right_split.addWidget(bottom);right_split.setSizes([560,240]);self.tabs.addTab(page,'结果图形')
         self.canvas._managed_viewport=True;self.navigation=Navigation(self.canvas,self.ax,self.show_shape_menu)
@@ -566,6 +568,10 @@ class MainWindow(W.QMainWindow):
         spin(drc_group,'repair_patch_width_um','补块直径 / μm（0=与过孔等宽）',0,10000,3)
         self.setting_fields['repair_patch_width_um'].setToolTip('“修复补块”所画直线补块的直径。0 表示每块补块取所连过孔的最小外形尺寸（最小外接矩形的短边），即与孔等宽；填正数则所有补块统一使用该直径。')
         recon=group('固定RDL重构预演')
+        search_cut=W.QCheckBox('自动搜索切口位置（D = 0）')
+        self.setting_fields['reconstruction_search']=search_cut
+        recon.addRow(search_cut);search_cut.toggled.connect(self.settings_changed)
+        search_cut.setToolTip('开启后比较有限个切口候选，优先选择满足有效线距的位置。正数 D 仍固定切口距离。')
         spin(recon,'reconstruction_length_um','切口距离 D / μm（0=自动）',0,100000,3)
         self.setting_fields['reconstruction_length_um'].setToolTip('切口线到落盘的距离：同一网络、彼此相距不远的多个落盘合为一条串，整条串只切一刀，这个距离从串里最远的那个落盘再往外量。0 表示自动取 2.5 个落盘直径（落盘直径按等面积圆的直径算），填正数则改用该长度。切口线始终垂直于这条串的走线（与走线两侧各成 90°）。同一块固定RDL跨多个芯片时，移动区只取本 DIE 芯片边框以内的铜，边框外的铜归相邻 DIE。')
         spin(recon,'reconstruction_overlap_um','重构落盘外扩 / μm',0,10000,3)
@@ -660,7 +666,7 @@ class MainWindow(W.QMainWindow):
         deform=updated.deformation_key()!=old_settings.deformation_key();numeric=(updated.numeric_key()!=self.view_settings.numeric_key());self.view_settings=updated;self.enable_settings();self.refresh_extreme_colors();self.cache_group.limit(updated.cache_max_entries);self.refresh_cache_status()
         live_motion=any(getattr(updated,k)!=getattr(old_settings,k) for k in ('animation_enabled','animation_return_zero','animation_duration_ms','animation_fps','animation_speed','animation_strategy'))
         repair_shape=(updated.repair_landing_pad!=old_settings.repair_landing_pad or updated.repair_patch_width_um!=old_settings.repair_patch_width_um)
-        reconstruction_shape=any(getattr(updated,k)!=getattr(old_settings,k) for k in ('reconstruction_length_um','reconstruction_width_um','reconstruction_overlap_um'))
+        reconstruction_shape=any(getattr(updated,k)!=getattr(old_settings,k) for k in ('reconstruction_length_um','reconstruction_width_um','reconstruction_overlap_um','reconstruction_search'))
         if numeric or updated.drc_tolerance_um!=old_settings.drc_tolerance_um:self.width_yield.refresh()
         if numeric:
             self.dirty=self.result is not None
@@ -751,8 +757,14 @@ class MainWindow(W.QMainWindow):
     def task_progress(self,worker,n,text):
         self._tasks[id(worker)]=(n,text);self.progress.show();self.progress.setRange(0,100);self.progress.setValue(n);self.progress.setFormat(f'{n}% · '+text[:36]);self.statusBar().showMessage(text)
         self.log_bus.emit(text)
-    def watch_worker(self,worker,name):
+    def watch_worker(self,worker,name,quiet=False):
         import time
+        if quiet:
+            # Interactive edits (dragging a cut line) must not flash the header
+            # progress bar on every release; keep only the status hint.
+            worker.progress.connect(lambda n,t:self.statusBar().showMessage(t))
+            worker.failed.connect(lambda text:self.log_bus.emit(name+'：'+text,'ERROR'))
+            return
         start=time.perf_counter();self.task_progress(worker,0,name+'：开始')
         worker.progress.connect(lambda n,t:self.task_progress(worker,n,t))
         worker.failed.connect(lambda text:self.log_bus.emit(name+'：'+text,'ERROR'))
@@ -1121,7 +1133,7 @@ class MainWindow(W.QMainWindow):
         self.transition.start(duration,steps,update,complete)
     def show_frame_status(self,frame):
         if frame and frame.get('reconstruction') and self.reconstruction_toggle.isChecked() and self.result is not None:
-            source=frame['reconstruction'];keep=('die','layer','index','net','movable_area_um2','shift_um','gap_um','bridge_length_um','bridge_area_um2','cut_distance_um','orphan')
+            source=frame['reconstruction'];keep=('die','layer','index','net','vias','movable_area_um2','shift_um','gap_um','bridge_length_um','bridge_area_um2','cut_distance_um','cut_clamped','clearance_um','conflict','conflict_net','manual','orphan')
             self.result['preview_reconstruction']=dict(states=frame['states'].tolist(),scope=source['scope'],summary=source['summary'],parameters=source.get('parameters',{}),pieces=[{k:q[k] for k in keep if k in q} for q in source['pieces']]);self.report_dirty=True
         self.update_width_report(frame)
         if frame and frame.get('drc_rules') and self.result is not None:
@@ -1245,6 +1257,14 @@ class MainWindow(W.QMainWindow):
             self.request_preview()
         else:
             self.repair_data=None;self.plot_layout(preserve=True)
+    def clear_manual_cuts(self,*_):
+        if not self.view_settings.reconstruction_cuts:return
+        from dataclasses import replace
+        self.view_settings=replace(self.view_settings,reconstruction_cuts=())
+        self.dirty=True
+        self.statusBar().showMessage('已清除全部手动切口')
+        self.request_preview()
+
     def reconstruction_changed(self,*_):
         if self.loading:return
         self.filter_changed(pending_ok=True)
@@ -1795,7 +1815,8 @@ class MainWindow(W.QMainWindow):
              float(self.view_settings.repair_patch_width_um))
         self.repair_data=self.session_values.get(key)
         return self.repair_data is not None
-    def request_preview(self,direct=False,settle=False):
+    def request_preview(self,direct=False,settle=False,quiet=False):
+        self._preview_quiet=bool(quiet)
         if not self.data:return
         self.schedule_coupled_filter();self.stop_animation()
         self.preview_ticket+=1;ticket=self.preview_ticket;self._prepared_motion=None
@@ -1949,7 +1970,7 @@ class MainWindow(W.QMainWindow):
             from .scheduling import job_budget
             with job_budget(admitted['threads'],admitted['processes']):return solve(progress)
         worker=Worker(work,self);worker.interactive_refinement=bool(direct and settle);worker.transient=bool(direct);worker.request_key=request_key;worker.view_ticket=ticket
-        self.preview_workers.append(worker);self.preview_worker=worker;self.watch_worker(worker,'预演计算')
+        self.preview_workers.append(worker);self.preview_worker=worker;self.watch_worker(worker,'预演计算',quiet=bool(getattr(self,'_preview_quiet',False)))
         self.log_bus.emit(admitted['reason']+f" · 活跃预演 {len(self.preview_workers)} · CPU {admitted['load'].get('cpu_percent')}% · 可用内存 {admitted['load']['available_memory_mb']} MiB")
         def partial(_):
             value=worker.take_partial()

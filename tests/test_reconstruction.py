@@ -469,7 +469,7 @@ class ReconstructionTests(unittest.TestCase):
             self.assertIn('自动划分', recon['scope'])
             self.assertIn('不代表产线', recon['scope'])
             self.assertEqual(recon['parameters'],
-                             dict(length_um=0., width_um=0., overlap_um=0.,
+                             dict(length_um=0., width_um=0., overlap_um=0., search_cut=False,
                                   landing_diameters=AUTO_LANDING_DIAMETERS))
             self.assertEqual(recon['summary']['width_um'], 0.)
             self.assertAlmostEqual(recon['summary']['cover_area_um2'], 1120., places=1)
@@ -477,6 +477,227 @@ class ReconstructionTests(unittest.TestCase):
             self.assertAlmostEqual(recon['summary']['max_shift_um'], 35., places=6)
         finally:
             engine.close()
+
+
+    def test_the_fixed_part_of_the_trace_completes_the_warm_trace(self):
+        engine, settings, data = example()
+        try:
+            frame = engine.frame(shifted(2, 35.))
+            piece = frame['reconstruction']['pieces'][0]
+            self.assertFalse(piece['fixed'].is_empty)
+            self.assertGreater(piece['fixed_area_um2'], 0.)
+            # 固定区不动的铜与移动区原位互不重叠，合起来正好是该图形留在名义
+            # 位置上的全部铜（暖色固定区 + 暖色移动后 = 一条完整走线）
+            movable = piece['movable']
+            self.assertLess(piece['fixed'].intersection(movable).area, 1e-6)
+            self.assertAlmostEqual(shapely.union_all([piece['fixed'], movable]).area,
+                                   piece['fixed_area_um2'] + piece['movable_area_um2'], places=6)
+            summary = frame['reconstruction']['summary']
+            self.assertAlmostEqual(summary['fixed_area_um2'], piece['fixed_area_um2'], places=6)
+        finally:
+            engine.close()
+
+    def test_an_unavoidable_short_is_marked(self):
+        # Example F at +35: the shifted pad reaches the neighbouring pad (5 um
+        # against a 10 um rule) whatever the cut position, because the motion
+        # itself carries the copper there. The piece is marked and carries the
+        # measured clearance, the offending net and the line to it.
+        engine, data, case = example(BRIDGE)
+        try:
+            recon = engine.frame(shifted(2, 35.))['reconstruction']
+            self.assertEqual(recon['summary']['conflicts'], 1)
+            piece = recon['pieces'][0]
+            self.assertTrue(piece['conflict'])
+            self.assertAlmostEqual(piece['clearance_um'], 5., places=6)
+            self.assertEqual(piece['conflict_net'], 1)
+            self.assertIsNotNone(piece['conflict_link'])
+            self.assertLess(piece['clearance_um'], recon['summary']['rule_space_um'])
+        finally:
+            engine.close()
+
+    def test_spacing_follows_the_reconstructed_neighbour(self):
+        """The dimension must describe the reconstructed layout, not the nominal one.
+
+        At the mixed pose the two pads travel toward each other, so the copper
+        that used to be 5 um away now overlaps. A nominal measurement would keep
+        reporting 5 um; the reconstruction has to report the overlap.
+        """
+        engine,_,_=example()
+        try:
+            frame=engine.frame(np.array([[35.,0.,0.],[-35.,0.,0.]]),lambda a,b:None,quick=True)
+            recon=frame['reconstruction']
+            self.assertTrue(recon['pieces'])
+            toler=engine.reconstructor.tol*2
+            for piece in recon['pieces']:
+                self.assertIsNotNone(piece['clearance_um'])
+                self.assertLessEqual(piece['clearance_um'],toler)
+                self.assertTrue(piece['conflict'])
+                self.assertIsNotNone(piece['conflict_link'])
+            self.assertGreaterEqual(recon['summary']['conflicts'],1)
+        finally:
+            engine.close()
+
+    def test_a_safe_piece_is_not_marked(self):
+        # Example L sits 15 um from the next net, exactly on the rule, so the
+        # piece is not marked — the mark is for a real violation of the rule.
+        engine, data, case = example(PLAIN)
+        try:
+            recon = engine.frame(shifted(2, 35.))['reconstruction']
+            self.assertEqual(recon['summary']['conflicts'], 0)
+            piece = recon['pieces'][0]
+            self.assertFalse(piece['conflict'])
+            self.assertAlmostEqual(piece['clearance_um'], 15., places=6)
+            self.assertAlmostEqual(recon['summary']['rule_space_um'], 15., places=6)
+        finally:
+            engine.close()
+
+    def plane_of(self, piece, move=0.):
+        """Manual plane of a piece: through its cut, moved ``move`` μm along the normal."""
+        parts = piece['cut'].geoms if hasattr(piece['cut'], 'geoms') else [piece['cut']]
+        line = max(parts, key=lambda q: q.length)
+        first, second = np.asarray(line.coords[0], float), np.asarray(line.coords[-1], float)
+        direction = second - first
+        span = float(np.linalg.norm(direction))
+        normal = np.array([-direction[1], direction[0]], float) / span
+        origin = (first + second) / 2.
+        fixed = piece['immovable'].centroid.coords[0]
+        if float(np.dot(normal, np.asarray(fixed, float) - origin)) < 0.:
+            normal = -normal
+        origin = origin + normal * move
+        return (piece['layer'], int(piece['index']), tuple(int(v) for v in piece['vias']),
+                float(normal[0]), float(normal[1]), float(origin[0]), float(origin[1]))
+
+    def test_a_dragged_cut_plane_pins_the_cut(self):
+        engine, data, case = example()
+        try:
+            base = engine.frame(shifted(2, 35.))['reconstruction']['pieces'][0]
+            self.assertFalse(base['manual'])
+            for move in (10., -10.):
+                plane = self.plane_of(base, move)
+                engine.configure_reconstruction(
+                    True, ViewSettings(reconstruction_cuts=(plane,)))
+                piece = engine.frame(shifted(2, 35.))['reconstruction']['pieces'][0]
+                self.assertTrue(piece['manual'])
+                self.assertAlmostEqual(piece['cut_distance_um'],
+                                       base['cut_distance_um'] + move, places=6)
+        finally:
+            engine.close()
+
+    def test_a_dragged_plane_inside_the_landing_is_pushed_back_to_its_edge(self):
+        engine, data, case = example()
+        try:
+            base = engine.frame(shifted(2, 35.))['reconstruction']['pieces'][0]
+            plane = self.plane_of(base, -base['cut_distance_um'] - 40.)
+            engine.configure_reconstruction(
+                True, ViewSettings(reconstruction_cuts=(plane,)))
+            piece = engine.frame(shifted(2, 35.))['reconstruction']['pieces'][0]
+            self.assertTrue(piece['manual'])
+            self.assertGreater(piece['cut_distance_um'], -1e-9)
+            self.assertLessEqual(piece['cut_distance_um'], 8. * engine.reconstructor.tol)
+        finally:
+            engine.close()
+
+    def test_a_drag_past_the_copper_end_stops_at_the_last_crossing(self):
+        engine, data, case = example()
+        try:
+            base = engine.frame(shifted(2, 35.))['reconstruction']['pieces'][0]
+            plane = self.plane_of(base, 20000.)
+            engine.configure_reconstruction(
+                True, ViewSettings(reconstruction_cuts=(plane,)))
+            recon = engine.frame(shifted(2, 35.))['reconstruction']
+            piece = recon['pieces'][0]
+            self.assertTrue(piece['manual'])
+            # The cut stays inside the feature it belongs to and the piece keeps
+            # its own movable copper, so a far drag cannot swallow the whole layer.
+            self.assertGreater(piece['cut_distance_um'], base['cut_distance_um'])
+            self.assertLess(piece['cut_distance_um'], 1230.)
+            self.assertLess(piece['movable_area_um2'], 44000.)
+            self.assertEqual(recon['summary']['manual_cuts'], 1)
+        finally:
+            engine.close()
+
+    def test_a_plane_beyond_the_copper_end_is_flagged_as_clamped(self):
+        engine, data, case = example()
+        try:
+            base = engine.frame(shifted(2, 35.))['reconstruction']['pieces'][0]
+            plane = self.plane_of(base, 20000.)
+            engine.configure_reconstruction(
+                True, ViewSettings(reconstruction_cuts=(plane,)))
+            piece = engine.frame(shifted(2, 35.))['reconstruction']['pieces'][0]
+            self.assertTrue(piece['manual'])
+            self.assertTrue(piece['cut_clamped'])
+            window = piece['cut_window']
+            self.assertLessEqual(piece['cut_distance_um'],
+                                 float(window['high']) - float(window['low']) + 1e-3)
+        finally:
+            engine.close()
+
+    def test_a_pinned_cut_can_be_dragged_again(self):
+        engine, data, case = example()
+        try:
+            base = engine.frame(shifted(2, 35.))['reconstruction']['pieces'][0]
+            engine.configure_reconstruction(
+                True, ViewSettings(
+                                   reconstruction_cuts=(self.plane_of(base, 10.),)))
+            first = engine.frame(shifted(2, 35.))['reconstruction']['pieces'][0]
+            self.assertAlmostEqual(first['cut_distance_um'], base['cut_distance_um'] + 10., places=6)
+            # Dragging the already pinned cut must move it again, not restart
+            # from the automatic choice (the guide line is clamped, the stored
+            # plane is not re-used as a limit).
+            engine.configure_reconstruction(
+                True, ViewSettings(
+                                   reconstruction_cuts=(self.plane_of(first, 20.),)))
+            second = engine.frame(shifted(2, 35.))['reconstruction']['pieces'][0]
+            self.assertAlmostEqual(second['cut_distance_um'], first['cut_distance_um'] + 20., places=6)
+        finally:
+            engine.close()
+
+    def test_search_targets_cache_and_final_clearance(self):
+        from unittest.mock import patch
+        for name in (CHANNEL, BRIDGE):
+            with self.subTest(example=name):
+                engine, _, _ = example(name, settings=ViewSettings(reconstruction_search=True))
+                r = engine.reconstructor
+                try:
+                    states = np.zeros((len(r.model.bound.centers), 3))
+                    states[0] = [35., 0., .01]; states[-1] = [-35., 10., -.01]
+                    targets = [ref for ref, vias in r.vias_by_target.items()
+                               if all(v['owner'] == 0 for v in vias)]
+                    self.assertTrue(targets)
+                    subset = r.frame(states, targets=targets)
+                    quick = r.frame(states, quick=True); full = r.frame(states)
+                    self.assertIsNot(quick, full)
+                    self.assertFalse(any(p['manual'] for p in full['pieces']))
+                    def geometry(frame, layer, index):
+                        return next(q['geometry'] for q in frame['replacements'][layer]
+                                    if index in q['indices'])
+                    for layer, index in targets:
+                        self.assertTrue(geometry(subset, layer, index).equals(geometry(full, layer, index)))
+                    peer = states.copy(); peer[-1] = [5., 5., .01]
+                    with patch.object(r, '_source_blocks', side_effect=AssertionError('unexpected repartition')):
+                        again = r.frame(peer, targets=targets)
+                    for layer, index in targets:
+                        self.assertTrue(geometry(again, layer, index).equals(geometry(subset, layer, index)))
+                    for layer, rows in full['replacements'].items():
+                        for row in rows:
+                            self.assertTrue(row['geometry'].equals(geometry(quick, layer, row['indices'][0])))
+                    for piece in full['pieces']:
+                        layer = piece['layer']
+                        replaced = {i: q['geometry'] for q in full['replacements'].get(layer, []) for i in q['indices']}
+                        others = [replaced.get(i, g) for i, g in enumerate(r.model.cache.layers[layer]['geometry'])
+                                  if int(r.model.nodes[r.model.ids[layer, i]]['net']) != piece['net']]
+                        if others:
+                            probe = shapely.union_all([piece['moved']] +
+                                                      ([piece['bridge']] if piece['bridge'] is not None else []))
+                            self.assertAlmostEqual(piece['clearance_um'], min(probe.distance(g) for g in others), places=9)
+                    layer, index = targets[0]
+                    source = r.model.cache.layers[layer]['geometry'][index]
+                    changed = {'replacements': {layer: [dict(indices=(index,), geometry=source.buffer(4.))]}}
+                    with patch.object(r, '_source_blocks', wraps=r._source_blocks) as partition:
+                        r.frame(states, changed, targets=[(layer, index)])
+                        self.assertTrue(partition.called)
+                finally:
+                    engine.close()
 
 
 if __name__ == '__main__':
