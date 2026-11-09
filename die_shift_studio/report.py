@@ -227,6 +227,7 @@ def report_document(r,motions=None,progress=lambda *_:None):
         detail=recon['summary'];parameters=recon.get('parameters',{})
         length=parameters.get('length_um',0)
         where=(f"再往外 {fmt(length)} μm" if length>0
+               else "有限候选搜索确定的位置" if parameters.get('search_cut')
                else f"{fmt(parameters.get('landing_diameters',0))} 个落盘直径处（自动）")
         step('当前姿态的固定RDL重构预演',
              f"软件按运动过孔自动划分固定RDL移动区：同一网络、彼此相距不远的落盘算作一条串，整条串只切一刀"
@@ -234,13 +235,15 @@ def report_document(r,motions=None,progress=lambda *_:None):
              f"移动区按所属 DIE 的刚体变换移动（同一块固定RDL跨多个芯片时只取本 DIE 芯片边框 128/0 以内的铜，"
              f"边框外的铜归相邻 DIE、留在原位）；裂隙用两个切口面的 4 个端点围成的多边形补上"
              f"（不论是否短路都补，外扩 {fmt(parameters.get('width_um',0))} μm，0 表示正好覆盖切口）；"
-             f"按当前姿态显示重构的固定 RDL",
+             f"按当前姿态显示重构铜及其同层异网净距",
              [r'P_{\rm move}=C\cap\{p:(p-o)\cdot n\geq 0\}',
               r"P'_{\rm move}=R_{\theta}(P_{\rm move}-c)+c+\Delta",
               r'Q=\mathrm{conv}\{F_{0},F_{1},F^{\prime}_{1},F^{\prime}_{0}\}'],
              f"移动区{detail['pieces']}段；补线{detail['bridges']}处；整块随动{detail['orphans']}块；"
              f"贴合（裂隙为0）{detail.get('flush',0)}段；"
-             f"移动面积合计{fmt(detail['movable_area_um2'])} μm²；补线面积合计{fmt(detail.get('cover_area_um2',0))} μm²；"
+             f"重构后与其他网络间距不足{detail.get('conflicts',0)}段（有效线距{fmt(detail.get('rule_space_um',0))} μm）；"
+             + (f"手动固定切口{detail.get('manual_cuts',0)}条串；" if detail.get('manual_cuts') else "")
+             + f"移动面积合计{fmt(detail['movable_area_um2'])} μm²；补线面积合计{fmt(detail.get('cover_area_um2',0))} μm²；"
              f"最大位移{fmt(detail['max_shift_um'])} μm",
              '同一块固定RDL上属于同一DIE、同一网络且彼此相距不超过判定距离的多个落盘视为一条串，只切一刀，切口不会落在两个相邻落盘之间。'
              '切片n垂直于该串的走线（与走线两侧各成90°），o为切口位置（由串里最远的落盘再往外量出），取含过孔的整条串一侧为移动区；'
@@ -251,17 +254,33 @@ def report_document(r,motions=None,progress=lambda *_:None):
              '整块随动表示该图形整体都成了移动区，没有同网不动铜可以接；'
              '裂隙为0（贴合）不是缺陷：被切开的这段铜沿DIE的运动方向继续延伸时，移动后必然压到留下的那段铜上，'
              '换任何切线位置都拉不开，软件把它标成“贴合（由补线覆盖）”，由补线多边形把两者相接的地方盖住。'
+             '启用自动搜索时，在有限候选中比较移动铜及补线与同层其他网络的净距，'
+             '优先取满足有效线距的位置；若已计算候选都不满足，就取其中净距较大者。显示按重构后的同层铜重新测量，'
+             '图上用尺寸箭头标出这段距离。'
+             '切口位置还可以在图上直接拖动固定：拖动切口线只沿它自己的法向移动，方向仍与走线成 90°，松开即按新的切口位置重算移动区、补线和间距检查；'
+             '右键或双击切口、或点“清除全部手动切口”，就把这条串恢复为当前设置计算的自动位置。'
              '自动划分是软件猜测，可能与人工划分不同；本项是重构预演，不代表产线实际做法、整图可布通或量产良率。'
              +recon.get('scope',''))
-        blocks.append(grid(['DIE','固定RDL层','图形','落盘数','网络','移动区面积 / μm²','位移 / μm','裂隙 / μm','补线面积 / μm²','切口缝长 / μm','状态'],
+        space=detail.get('rule_space_um',0.)
+        def state(q):
+            if q['orphan']:text='整块随动（无不动铜可接）'
+            elif q['gap_um'] is not None and q['gap_um']<=1e-6 and q.get('bridge_area_um2') is not None:text='贴合（由补线覆盖）'
+            elif q['gap_um'] is not None and q['gap_um']<=1e-6:text='贴合（直接相接）'
+            elif q.get('bridge_area_um2') is None:text='无需补线（无切口面）'
+            else:text='已补线'
+            clearance=q.get('clearance_um')
+            if clearance is not None and space:
+                if clearance<space-1e-6:text+='｜间距不足'
+                elif clearance<2.*space-1e-6:text+='｜间距临界'
+            if q.get('manual'):text+='｜手动切口'
+            return text
+        blocks.append(grid(['DIE','固定RDL层','图形','落盘数','网络','移动区面积 / μm²','位移 / μm','裂隙 / μm','补线面积 / μm²','切口缝长 / μm','间距 / μm','状态'],
             [[f"DIE{q['die']+1}",q['layer'],q['index']+1,len(q.get('vias',(1,))),q['net'],fmt(q['movable_area_um2']),fmt(q['shift_um']),
               '—' if q['gap_um'] is None else fmt(q['gap_um']),
               '—' if q.get('bridge_area_um2') is None else fmt(q['bridge_area_um2']),
               '—' if q['bridge_length_um'] is None else fmt(q['bridge_length_um']),
-              ('整块随动（无不动铜可接）' if q['orphan'] else
-               ('贴合（由补线覆盖）' if (q['gap_um'] is not None and q['gap_um']<=1e-6 and q.get('bridge_area_um2') is not None)
-                else ('贴合（直接相接）' if (q['gap_um'] is not None and q['gap_um']<=1e-6)
-                      else ('无需补线（无切口面）' if q.get('bridge_area_um2') is None else '已补线'))))] for q in recon['pieces'][:100]]))
+              '—' if q.get('clearance_um') is None else fmt(q['clearance_um']),
+              state(q)] for q in recon['pieces'][:100]]))
         if len(recon['pieces'])>100:blocks.append(f"<p>重构移动区共{len(recon['pieces'])}块，报告列出前100块；“重构预演”表可定位当前全部块。</p>")
     policy=r.get('width_policy_yield')
     if policy:

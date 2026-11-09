@@ -109,6 +109,7 @@ class GeometrySelection:
         self.apply_hits(self.hits(box(*bounds),contained=end[0]>=start[0]),mode)
 
     def down(self,event):
+        if getattr(event,'reconstruction_cut_handled',False):return
         if event.button!=1 or event.inaxes is not self.w.ax or self.w.navigation.busy():return
         from .navigation import pointer_modifiers
         modifiers=pointer_modifiers(event)
