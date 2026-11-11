@@ -2,6 +2,11 @@
 from dataclasses import dataclass,asdict,fields,field
 import math
 
+
+from .reconstruction import (FRAME_MARGIN_UM, SECOND_CUT_VIA_STOP_UM,
+                             SECOND_CUT_MIN_WIDTH_UM, SECOND_STAY_CLEAR_UM,
+                             WIDTH_SMOOTH_DELTA_UM)
+
 ELEMENTS={'固定RDL':'原始固定 RDL 线路','运动RDL':'原始运动 RDL 线路','固定过孔':'固定过孔实体','运动过孔':'运动过孔实体',
           '封装边框':'封装边框','芯片边框':'芯片边框','其他':'其他 GDS 图形','运动过孔孔盘':'运动孔盘',
           '固定过孔孔盘':'固定孔盘','固定障碍':'整块固定障碍','禁布区':'禁布区','截面':'通道矩形','描边':'风险线路描边',
@@ -92,9 +97,20 @@ class ViewSettings:
     reconstruction_search:bool=False
     reconstruction_length_um:float=0.
     reconstruction_width_um:float=0.
+
+    # 重构预演初始参数
+    reconstruction_frame_margin_um: float = FRAME_MARGIN_UM
+    reconstruction_smooth_delta_um: float = WIDTH_SMOOTH_DELTA_UM
+    reconstruction_second_stop_um: float = SECOND_CUT_VIA_STOP_UM
+    reconstruction_second_min_width_um: float = SECOND_CUT_MIN_WIDTH_UM
+    reconstruction_stay_clear_um: float = SECOND_STAY_CLEAR_UM
     # Manual cut planes, one per chain, written as
     # (layer, feature index, (via indices,), nx, ny, ox, oy).
     reconstruction_cuts:tuple=()
+    reconstruction_extra_cuts:tuple=()
+    reconstruction_second_cuts:tuple=()
+    reconstruction_dropped_cuts:tuple=()
+    reconstruction_enabled:bool=False
     yield_method:str='monte_carlo'
     yield_sample_exponent:int=12
     yield_box_budget:int=4096
@@ -129,6 +145,9 @@ class ViewSettings:
         values=dict(values or {})
         if 'reconstruction_cuts' in values:
             values['reconstruction_cuts']=cls._normalize_cuts(values['reconstruction_cuts'])
+        for key in ('reconstruction_extra_cuts','reconstruction_second_cuts','reconstruction_dropped_cuts'):
+            if key in values:
+                values[key]=cls._normalize_cuts(values[key])
         values['width_display']=normalize_display(values.get('width_display',{}))
         for new,old in (('width_yield_exponent','yield_sample_exponent'),('width_yield_seed','random_seed')):
             if new not in values and old in values:values[new]=values[old]
@@ -184,8 +203,14 @@ class ViewSettings:
 
     def reconstruction_key(self):
         """Everything the reconstruction result depends on besides the pose."""
-        return (True,self.reconstruction_length_um,self.reconstruction_width_um,
-                self.reconstruction_overlap_um,self.drc_tolerance_um,
-                self.reconstruction_search,tuple(self.reconstruction_cuts))
+        return (True,'frame-cuts-v2',self.drc_tolerance_um,
+                self.reconstruction_length_um,self.reconstruction_width_um,
+                self.reconstruction_overlap_um,
+                self.reconstruction_frame_margin_um, self.reconstruction_smooth_delta_um,
+                self.reconstruction_second_stop_um, self.reconstruction_second_min_width_um,
+                self.reconstruction_stay_clear_um,
+                tuple(self.reconstruction_cuts), tuple(self.reconstruction_extra_cuts),
+                tuple(self.reconstruction_second_cuts),
+                tuple(self.reconstruction_dropped_cuts))
     def deformation_key(self):
         return (self.drc_tolerance_um,self.acceleration)+tuple(getattr(self,f.name) for f in fields(self) if f.name.startswith('deformation_'))

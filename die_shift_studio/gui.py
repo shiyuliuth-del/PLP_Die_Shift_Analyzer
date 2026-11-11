@@ -393,9 +393,18 @@ class MainWindow(W.QMainWindow):
         self.width_table=ChannelTable();wv.addWidget(self.width_table)
         self.width_table.selectionModel().currentRowChanged.connect(lambda index,_:self.width_overlay.locate(index.row()));self.preview_tabs.addTab(width_page,'宽度分析')
         self.reconstruction_page=W.QWidget();cv=W.QVBoxLayout(self.reconstruction_page);cv.setContentsMargins(3,3,3,3)
-        self.reconstruction_summary=label('勾选“重构预演”后，软件按运动过孔自动划分固定RDL的移动区（同一网络的落盘合为一条串、只切一刀，切口垂直于这条串的走线；同一块固定RDL跨多个芯片时只取本 DIE 芯片边框以内的铜），按当前姿态移动，并用两个切口面的 4 个端点围成的多边形补上裂隙。');cv.addWidget(self.reconstruction_summary)
-        self.reconstruction_table=table(['固定RDL层','所属','网络','移动区面积 / μm²','位移 / μm','裂隙 / μm','补线面积 / μm²','切口缝长 / μm','间距 / μm','状态']);cv.addWidget(self.reconstruction_table)
-        clear_cuts=W.QPushButton('清除全部手动切口');clear_cuts.setToolTip('把图上拖动固定过的切口全部恢复成当前设置计算的自动位置。');clear_cuts.clicked.connect(self.clear_manual_cuts);cv.addWidget(clear_cuts)
+        self.reconstruction_summary=label('勾选“重构预演”后，软件按运动过孔自动划分固定RDL的移动区（同一网络的落盘合为一条串；第一刀落在本 DIE 芯片边框与这块铜的交线上，第二刀沿走线自动搜索、始终落在移动后的边框之外且离框 ≥10 μm；同一块固定RDL跨多个芯片时只取本 DIE 芯片边框以内的铜），按当前姿态移动，并用两刀之间的铜块补上这段缝。');cv.addWidget(self.reconstruction_summary)
+        self.reconstruction_table=table(['固定RDL层','所属','网络','移动区面积 / μm²','位移 / μm','裂隙 / μm','补线面积 / μm²','补块长度 / μm','切口缝长 / μm','间距 / μm','状态']);cv.addWidget(self.reconstruction_table)
+        row=W.QWidget();rv=W.QHBoxLayout(row);rv.setContentsMargins(0,0,0,0)
+        self.second_left=W.QPushButton('⟲ 第二刀');self.second_left.setToolTip('把选中补线的第二刀逆时针转 5°。')
+        self.second_right=W.QPushButton('第二刀 ⟳');self.second_right.setToolTip('把选中补线的第二刀顺时针转 5°。')
+        self.second_left.clicked.connect(lambda:self.rotate_selected_second(-5.))
+        self.second_right.clicked.connect(lambda:self.rotate_selected_second(5.))
+        self.second_left.setEnabled(False);self.second_right.setEnabled(False)
+        clear_cuts=W.QPushButton('清除全部手动切口');clear_cuts.setToolTip('把图上拖动固定过的切口全部恢复成软件自动搜索的位置。');clear_cuts.clicked.connect(self.clear_manual_cuts)
+        delete_cut=W.QPushButton('删除切口');delete_cut.setToolTip('删除选中那一行（那串）的手动切口与第二切口，恢复自动搜索；也可以直接右键/双击图上的切口线。');delete_cut.clicked.connect(self.delete_selected_cut)
+        for button in (self.second_left, self.second_right, clear_cuts, delete_cut): rv.addWidget(button)
+        cv.addWidget(row)
         self.reconstruction_table.currentCellChanged.connect(lambda row,*_:self.reconstruction_overlay.locate(row));self.preview_tabs.addTab(self.reconstruction_page,'重构预演')
         right_split.addWidget(bottom);right_split.setSizes([560,240]);self.tabs.addTab(page,'结果图形')
         self.canvas._managed_viewport=True;self.navigation=Navigation(self.canvas,self.ax,self.show_shape_menu)
@@ -568,15 +577,25 @@ class MainWindow(W.QMainWindow):
         spin(drc_group,'repair_patch_width_um','补块直径 / μm（0=与过孔等宽）',0,10000,3)
         self.setting_fields['repair_patch_width_um'].setToolTip('“修复补块”所画直线补块的直径。0 表示每块补块取所连过孔的最小外形尺寸（最小外接矩形的短边），即与孔等宽；填正数则所有补块统一使用该直径。')
         recon=group('固定RDL重构预演')
-        search_cut=W.QCheckBox('自动搜索切口位置（D = 0）')
-        self.setting_fields['reconstruction_search']=search_cut
-        recon.addRow(search_cut);search_cut.toggled.connect(self.settings_changed)
-        search_cut.setToolTip('开启后比较有限个切口候选，优先选择满足有效线距的位置。正数 D 仍固定切口距离。')
-        spin(recon,'reconstruction_length_um','切口距离 D / μm（0=自动）',0,100000,3)
-        self.setting_fields['reconstruction_length_um'].setToolTip('切口线到落盘的距离：同一网络、彼此相距不远的多个落盘合为一条串，整条串只切一刀，这个距离从串里最远的那个落盘再往外量。0 表示自动取 2.5 个落盘直径（落盘直径按等面积圆的直径算），填正数则改用该长度。切口线始终垂直于这条串的走线（与走线两侧各成 90°）。同一块固定RDL跨多个芯片时，移动区只取本 DIE 芯片边框以内的铜，边框外的铜归相邻 DIE。')
-        spin(recon,'reconstruction_overlap_um','重构落盘外扩 / μm',0,10000,3)
-        spin(recon,'reconstruction_width_um','补线外扩 / μm（0=只覆盖切口）',0,10000,3)
-        self.setting_fields['reconstruction_width_um'].setToolTip('补线多边形向外扩张的量；0 表示补线正好是两面切口的 4 个端点围成的多边形。补线不论裂隙大小都会生成，只有两面完全重合或缝隙已被铜盖住时才不重复补。')
+        spin(recon,'reconstruction_frame_margin_um','第二刀离芯片边框最小距离 / μm',0,1000,2)
+        self.setting_fields['reconstruction_frame_margin_um'].setToolTip('第二刀在移动后的芯片边框之外与边框距离')
+        spin(recon,'reconstruction_second_stop_um','第二刀离固定落盘的间隙 / μm',0,1000,2)
+        self.setting_fields['reconstruction_second_stop_um'].setToolTip('建议固定区Overlap_R')
+        spin(recon,'reconstruction_second_min_width_um','第二刀最短长度 / μm',0,1000,2)
+        self.setting_fields['reconstruction_second_min_width_um'].setToolTip('建议大于等于最小线宽')
+        spin(recon,'reconstruction_stay_clear_um','固定焊盘压进芯片判定余量 / μm',0,1000,2)
+        self.setting_fields['reconstruction_stay_clear_um'].setToolTip('建议固定区Overlap_R')
+        spin(recon,'reconstruction_smooth_delta_um','线宽突变阈值 / μm',0,100,2)
+        self.setting_fields['reconstruction_smooth_delta_um'].setToolTip('D_w = 2tanθ, θ为对称route单边突变角度')
+        # search_cut=W.QCheckBox('自动搜索切口位置（D = 0）')
+        # self.setting_fields['reconstruction_search']=search_cut
+        # recon.addRow(search_cut);search_cut.toggled.connect(self.settings_changed)
+        # search_cut.setToolTip('开启后比较有限个切口候选，优先选择满足有效线距的位置。正数 D 仍固定切口距离。')
+        # spin(recon,'reconstruction_length_um','切口距离 D / μm（0=自动）',0,100000,3)
+        # self.setting_fields['reconstruction_length_um'].setToolTip('切口线到落盘的距离：同一网络、彼此相距不远的多个落盘合为一条串，整条串只切一刀，这个距离从串里最远的那个落盘再往外量。0 表示自动取 2.5 个落盘直径（落盘直径按等面积圆的直径算），填正数则改用该长度。切口线始终垂直于这条串的走线（与走线两侧各成 90°）。同一块固定RDL跨多个芯片时，移动区只取本 DIE 芯片边框以内的铜，边框外的铜归相邻 DIE。')
+        # spin(recon,'reconstruction_overlap_um','重构落盘外扩 / μm',0,10000,3)
+        # spin(recon,'reconstruction_width_um','补线外扩 / μm（0=只覆盖切口）',0,10000,3)
+        # self.setting_fields['reconstruction_width_um'].setToolTip('补线多边形向外扩张的量；0 表示补线正好是两面切口的 4 个端点围成的多边形。补线不论裂隙大小都会生成，只有两面完全重合或缝隙已被铜盖住时才不重复补。')
         drawing=group('接触标记');spin(drawing,'intrusion_alpha','侵入面积不透明度',.05,.85,2)
         for _,key,title,_,_ in RANGES:
             check=W.QCheckBox('显示'+title+'虚线');self.setting_fields[key]=check;drawing.addRow(check)
@@ -666,7 +685,7 @@ class MainWindow(W.QMainWindow):
         deform=updated.deformation_key()!=old_settings.deformation_key();numeric=(updated.numeric_key()!=self.view_settings.numeric_key());self.view_settings=updated;self.enable_settings();self.refresh_extreme_colors();self.cache_group.limit(updated.cache_max_entries);self.refresh_cache_status()
         live_motion=any(getattr(updated,k)!=getattr(old_settings,k) for k in ('animation_enabled','animation_return_zero','animation_duration_ms','animation_fps','animation_speed','animation_strategy'))
         repair_shape=(updated.repair_landing_pad!=old_settings.repair_landing_pad or updated.repair_patch_width_um!=old_settings.repair_patch_width_um)
-        reconstruction_shape=any(getattr(updated,k)!=getattr(old_settings,k) for k in ('reconstruction_length_um','reconstruction_width_um','reconstruction_overlap_um','reconstruction_search'))
+        reconstruction_shape=False
         if numeric or updated.drc_tolerance_um!=old_settings.drc_tolerance_um:self.width_yield.refresh()
         if numeric:
             self.dirty=self.result is not None
@@ -1258,11 +1277,88 @@ class MainWindow(W.QMainWindow):
         else:
             self.repair_data=None;self.plot_layout(preserve=True)
     def clear_manual_cuts(self,*_):
-        if not self.view_settings.reconstruction_cuts:return
+        extras=getattr(self.view_settings,'reconstruction_extra_cuts',())
+        dropped=getattr(self.view_settings,'reconstruction_dropped_cuts',())
+        if not self.view_settings.reconstruction_cuts and not extras and not dropped:return
         from dataclasses import replace
-        self.view_settings=replace(self.view_settings,reconstruction_cuts=())
-        self.dirty=True
-        self.statusBar().showMessage('已清除全部手动切口')
+        # Also restores the automatic cuts that were deleted, so one button undoes
+        # every hand edit of the cut lines.
+        self.view_settings=replace(self.view_settings,reconstruction_cuts=(),
+                                   reconstruction_extra_cuts=(),reconstruction_dropped_cuts=())
+        self.statusBar().showMessage('已清除全部手动切口，并恢复被删除的自动切口')
+        self.request_preview()
+
+    def _selected_reconstruction_piece(self):
+        """Piece under the line the user last clicked, else the table row."""
+        overlay=getattr(self,'reconstruction_overlay',None)
+        piece=None
+        if overlay is not None:
+            piece=overlay.piece_for(getattr(overlay,'selected',None))
+        if piece is None:
+            frame=self.current_frame or {}
+            pieces=(frame.get('reconstruction') or {}).get('pieces') or []
+            table=getattr(self,'reconstruction_table',None)
+            row=table.currentRow() if table is not None else -1
+            if 0<=row<len(pieces):piece=pieces[row]
+        return piece
+
+    def rotate_selected_second(self,degrees):
+        piece=self._selected_reconstruction_piece()
+        if piece is None:
+            self.statusBar().showMessage('先点一下要旋转的那块补线，再点 ⟲/⟳')
+            return
+        from dataclasses import replace
+        from die_shift_studio.reconstruction_overlay import _rotate_second
+        before=getattr(self.view_settings,'reconstruction_second_cuts',())
+        updated=_rotate_second(self.view_settings,piece,degrees)
+        if getattr(updated, 'reconstruction_second_cuts', ()) == before:
+            line = piece.get('extra_cut')
+            if line is None or line.is_empty:
+                self.statusBar().showMessage('这块不是边框刀补块')
+            else:
+                self.statusBar().showMessage('第二刀角度没有变化')
+            return
+        self.view_settings=updated
+        self.statusBar().showMessage(f'第二刀旋转 {degrees:+.0f}°')
+        self.request_preview()
+        from die_shift_studio.reconstruction_overlay import _buttons
+        _buttons(self, True)
+
+
+    def delete_selected_cut(self,*_):
+        """Delete the manual cuts of the chain on the selected table row."""
+        frame=self.current_frame or {}
+        pieces=(frame.get('reconstruction') or {}).get('pieces') or []
+        table=getattr(self,'reconstruction_table',None)
+        row=table.currentRow() if table is not None else -1
+        if not (0<=row<len(pieces)):
+            self.statusBar().showMessage('先在重构表格里选中一行，再删除那一串的切口')
+            return
+        piece=pieces[row]
+        key=(piece['layer'],int(piece['index']),tuple(sorted(int(v) for v in piece['vias'])))
+        from dataclasses import replace
+        def keep(rows):
+            return tuple(c for c in rows
+                         if (c[0],int(c[1]),tuple(sorted(int(v) for v in c[2])))!=key)
+        cuts=keep(self.view_settings.reconstruction_cuts)
+        extras=keep(getattr(self.view_settings,'reconstruction_extra_cuts',()))
+        dropped=getattr(self.view_settings,'reconstruction_dropped_cuts',())
+        manual=(len(cuts)<len(self.view_settings.reconstruction_cuts)
+                or len(extras)<len(getattr(self.view_settings,'reconstruction_extra_cuts',())))
+        if manual:
+            self.view_settings=replace(self.view_settings,reconstruction_cuts=cuts,
+                                       reconstruction_extra_cuts=extras)
+            self.statusBar().showMessage(f'已删除 {piece["layer"]} #{piece["index"]} 的手动切口，恢复自动搜索')
+        else:
+            # No hand-pinned cut here: delete the automatic one, so that stretch
+            # of copper is not cut at all and simply stays where it is.
+            self.view_settings=replace(self.view_settings,reconstruction_cuts=cuts,
+                                       reconstruction_extra_cuts=extras,
+                                       reconstruction_dropped_cuts=tuple(dropped)+((piece['layer'],
+                                                     int(piece['index']),tuple(sorted(int(v) for v in piece['vias']))),))
+            self.statusBar().showMessage(
+                f'已删除 {piece["layer"]} #{piece["index"]} 的自动切口：这段铜不再切开、留在原位；'
+                '在“清除全部手动切口”里可以恢复')
         self.request_preview()
 
     def reconstruction_changed(self,*_):
