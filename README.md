@@ -1,17 +1,12 @@
-# Die Shift Analyze V37
+# Die Shift Analyze V27
 
-当前唯一长期主线为 **main**，规范仓库为 [shiyuliuth-del/PLP_Die_Shift_Analyzer](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer)（末尾有r）。V22接入用户2026-11-02提供的 `1102.zip`；V24 支持单点 PATH 圆、Q 属性编辑、封装边距与相邻孔盘三档分析，V25 修复手动回零，按实际穿线窄口定位并避让宽度标签，增加 Windows 无控制台源码入口。V26 支持每轴三值的完整多芯片离散目录，增加极端足迹、缓存深浅提示和硬件自适应批量计算。V27 默认重点组合，每页最多 256 个非零姿态，支持一键复原，并按具体过孔和宽度窄口的事件概率分别淡显或隐藏。V28 增加极端情况筛选、空白首行的全组合风险轮廓、保留滚动位置的复原，以及 Shift 追加和 Ctrl 扣除选择。∞ 级直接显示当前过孔实体。V29 支持在零位点选或多选淡填充风险线路，显示可回放工况与缺口；极端表缓存底色进一步调淡，当前行显示连续边框。V30 验证了带图标的 Windows 单文件构建，新增两个独立的过孔范围开关和交互优化。V31 正式发布源码，用户在目标 Windows 环境双击 BUILD.bat 完成打包。V32 的 EXE 直接调用 NVIDIA 驱动，不收集 CuPy 和整套 CUDA 数学库；可独立查看打包大小与逐项 GPU 自检结果。V33 增加右键图形菜单、忽略宽度线路以及全输入宽度良率。V34 改为两项居中良率，系统偏差与相关性移到设置，禁布区按可贴边不可进入参与宽度分析。
+当前唯一长期主线为 **main**，规范仓库为 [shiyuliuth-del/PLP_Die_Shift_Analyzer](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer)（末尾有r）。V22接入用户2026-11-02提供的 `1102.zip`；V24 支持单点 PATH 圆、Q 属性编辑、封装边距与相邻孔盘三档分析，V25 修复手动回零，按实际穿线窄口定位并避让宽度标签，增加 Windows 无控制台源码入口。V26 支持每轴三值的完整多芯片离散目录，增加极端足迹、缓存深浅提示和硬件自适应批量计算。V27 让重构预演的补块在走线弯折之前收口、补齐原先被漏掉的窄缝、并保证补块沿走线方向至少 30 μm（表中新增“补块长度”一列）。
 
 **参与开发前必读：** [AGENTS.md](AGENTS.md) → [Agent.md](Agent.md) → [设计要求](docs/DESIGN_REQUIREMENTS.md) → [1102交接记录](docs/BASELINE_1102.md) → [已知问题](docs/KNOWN_ISSUES.md)。提交使用[PR模板](.github/pull_request_template.md)，合并后清理自己的任务分支。
 
 GDS芯片偏移分析，长度单位为μm。当前包含运动归属、概率/Space Map、原材料型变、固定 RDL 通道容量、直线修复补块与切分重构预演；各功能按自己的几何来源和验证范围解释。
 
-- [V37 重构切口拖动、有限搜索与重构铜净距](docs/V37_使用说明.md)
-- [V36 合并DXF与宽度概率显示](docs/V36_使用说明.md)
-- [V35 尾部良率、全情况网格、DXF与图内标签](docs/V35_使用说明.md)
-- [V34 两项联合良率与禁布区通道](docs/V34_使用说明.md)
-- [V33 右键菜单与忽略记录](docs/V33_使用说明.md)
-- [V32 源码包、显卡诊断与构建体积](docs/V32_使用说明.md)
+- [本版使用说明（随源码提供）](docs/V27_使用说明.md)
 - [研究报告](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/blob/main/DIE_SHIFT评估报告.md)
 - [1102接入与验证记录](docs/BASELINE_1102.md)
 - [首次V21历史图文验证（旧宽度口径）](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/blob/V21/docs/V21_操作与验证说明.md)
@@ -24,9 +19,9 @@ GDS芯片偏移分析，长度单位为μm。当前包含运动归属、概率/S
 python3 main.py
 ```
 
-从 [Release](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/releases) 下载源码 ZIP，完整解压后，在 Windows 电脑双击 `BUILD.bat` 生成 `dist/Die_Shift_Analyze.exe`。要直接运行源码，双击 `RUN.bat`。Linux 源码通过 `python3 main.py` 启动。
+Linux可运行`bash run.sh`。Windows 双击 `RUN.vbs` 无控制台启动（系统已关联图形版 Python 时也可双击 `main.pyw`）：使用已有Python环境，自动识别KLayout模块或已安装的桌面程序，**不联网、不创建空环境、不补装依赖**。可用`DIE_SHIFT_PYTHON`指定已有完整解释器；KLayout通常从PATH、环境变量、注册表或常用安装目录找到，也支持`DIE_SHIFT_KLAYOUT`指定exe路径。仅安装KLayout不能替代本应用的NumPy、Qt等依赖；已有环境不完整时会明确提示。
 
-打包电脑使用已有 Python、PyInstaller 和运行依赖；`BUILD.bat` 会检查环境后构建。构建与启动不限定 Python 和包的版本，运行端不会联网补装依赖。可用 `DIE_SHIFT_PYTHON` 指向已有解释器。Windows 构建验证包括实际窗口、图标、工程目录和离线几何运算。
+`TEST_WINDOWS.bat`检查默认与强制桌面后端。`BUILD_WINDOWS.bat`在已有完整PyInstaller环境中离线构建EXE，源包同时包含桌面调用宏。此次仅输出源码包；已验证Linux上的真实KLayout桌面进程，未执行Windows实机验证。
 
 ## 操作
 
@@ -82,10 +77,10 @@ python3 -m die_shift_studio --project examples/示例C_多芯片晶圆接口.jso
 python3 tools/validate_gd55_v20.py --gds /path/to/GD55_9-21.gds --out results/gd55_material_V20.json
 QT_QPA_PLATFORM=offscreen python3 tests/gui_v21.py
 python3 tools/validate_width_v24.py --gds /path/to/GD55_9-21.gds
-python3 tools/package_release.py verify-source
+python3 tools/package_release.py
 ```
 
-当前标签为 `V32`。正式 ZIP 只包含源码、运行与打包脚本、依赖清单和构建规范，SHA-256 单独发布。完整开发文档、示例和测试保留在 Git 检出，GitHub 自动源码归档提供运行源码和构建配置。
+本地Git首个提交保留v0.4.0基线`fef0933`，本版标签`V27`；本版源码快照发布到用户指定的GitHub仓库，历史大型分析数据不上传。发布ZIP包含文件哈希与独立解压后的验证记录。附件图纸本身不打入通用包。
 
 全输入模型良率统计全部真实运动孔接口同时无异网接触的概率，包含安全内盒外状态；默认蒙特卡洛与99%联合置信区间，也可选不随机采样的状态盒积分。各DIE独立、同DIE各孔共用姿态。仅针对原始固定RDL接口，不代表含其他缺陷的实际生产良率。设置中可调整样本量或确定性预算。
 
@@ -99,6 +94,4 @@ V20：不再采用新增孔盘包络或拼接新铜作为适配成功依据；�
 
 V24 的宽度分析按完整孔盘的投影划分相邻开口，线路默认低亮。示例 P 演示单点 PATH 圆、Q 编辑、刚性孔盘与边距违规，工程 O 可复现三档颜色。工程保存显示开关，旧工程采用默认值。[V24 操作与手算示例](docs/V24_使用说明.md) · [历轮协作记录](docs/Agents.md)
 
-普通右键单击打开选中图形的简略信息，拖框缩放。宽度分析中可忽略或取消忽略选中的问题线路，浅绿色表示已忽略。图片上方与坐标同一行居中显示“全修正良率”和“不修正良率”。宽度分析可独立设置尾部增强采样或全情况有限网格。风险标签移出视野时留在图内并指向最近边缘。输出菜单支持不恢复圆弧的DXF几何输出。[V35 计算与输出口径](docs/V35_使用说明.md)
-
-零位渐变可独立开关并复用缓存。窄口矩形上方显示两行标注，其中“预期收窄”以 μm 给出线路合计需减少的宽度。
+普通右键单击居中、拖框缩放。零位渐变可独立开关并复用缓存。窄口矩形上方显示两行标注，其中“预期收窄”以 μm 给出线路合计需减少的宽度。

@@ -1,0 +1,13 @@
+Traceback (most recent call last):
+  File "D:\Dieshift\v1107v1\main.py", line 19, in <module>
+    raise SystemExit(launch(args.project))
+                     ^^^^^^^^^^^^^^^^^^^^
+  File "D:\Dieshift\v1107v1\die_shift_studio\gui.py", line 2239, in launch
+    window=MainWindow();window.show()
+           ^^^^^^^^^^^^
+  File "D:\Dieshift\v1107v1\die_shift_studio\gui.py", line 184, in __init__
+    self._build()
+  File "D:\Dieshift\v1107v1\die_shift_studio\gui.py", line 364, in _build
+    clear_regions,clear_cuts,delete_cut):rv.addWidget(button)
+    ^^^^^^^^^^^^^
+NameError: name 'clear_regions' is not defined
