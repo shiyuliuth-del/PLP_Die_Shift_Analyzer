@@ -15,6 +15,7 @@ immovable copper left to hold on to, so no seam is left to cover.
 """
 import numpy as np
 import shapely
+from .reconstruction import normalize_via_refs, cut_identity_matches
 # import shapely.Point
 from matplotlib.collections import LineCollection, PatchCollection
 from matplotlib.patches import FancyArrowPatch, Rectangle
@@ -22,7 +23,7 @@ from matplotlib.patches import Circle, FancyArrowPatch, Rectangle
 from matplotlib.lines import Line2D
 
 # 第一刀是否允许手工拖动。第二刀体系与本开关无关，单独工作。
-DRAG_FIRST_CUT = False
+DRAG_FIRST_CUT = True
 # 冷色＝原来的位置（移动区原位、切口线），暖色＝重构后的铜与补线，这样
 # “动过的”和“没动的”一眼分得开，不会和固定RDL本身的浅蓝混在一起。
 FIXED_FILL = '#eba96a'
@@ -40,6 +41,7 @@ SPACE_COLORS = {'不足': '#d55e70', '临界': '#ddb15c', '充足': '#70af9c'}
 MAX_DIMENSIONS = 200
 # Manual 动区/静区: boxes the user drew to override the software's split.
 
+REGION_COLORS = {'move': '#2f7bd6', 'stay': '#c2571f'}
 REGION_LABELS = {'move': '动区', 'stay': '静区'}
 # Dead ends of a chain: the two landings a chain starts and stops at.
 # Chain ends: the landing the chain starts from moves with the die, the one it
@@ -70,6 +72,7 @@ class ReconstructionOverlay:
         self.arrow_artists = []
 
         self.end_artists = []
+        self.region_artists = []
         self.hover = None
         self.hover_key = None
         self._pick_cache = (None, [])
@@ -89,7 +92,7 @@ class ReconstructionOverlay:
     def highlight(self, picked):
         """Bright outline under the pointer, so the cut that can be dragged is obvious."""
         w = self.w
-        if self.hover is None:
+        if self.hover is None or self.hover.axes is not w.ax:
             from matplotlib.lines import Line2D
             self.hover = Line2D([], [], color='#1f9ad6', lw=4.4, alpha=.9,
                                 solid_capstyle='round', zorder=13.1)
@@ -101,7 +104,7 @@ class ReconstructionOverlay:
             return False
         piece, points, kind = picked
         key = (piece['layer'], int(piece['index']),
-               tuple(sorted(int(v) for v in piece['vias'])), kind)
+               normalize_via_refs(piece.get('via_refs',piece['vias'])), kind)
         changed = key != self.hover_key
         self.hover_key = key
         if points is None or len(points) < 2:
@@ -123,7 +126,7 @@ class ReconstructionOverlay:
     def _key(piece):
         """Identity of one chain: its layer, its fixed-RDL feature, its landings."""
         return (piece['layer'], int(piece['index']),
-                tuple(sorted(int(v) for v in piece['vias'])))
+                normalize_via_refs(piece.get('via_refs',piece['vias'])))
 
     def data(self):
         frame = getattr(self.w, 'current_frame', None)
@@ -131,7 +134,7 @@ class ReconstructionOverlay:
 
     def draw(self):
         w = self.w
-        if self.movable is None or self.movable.axes is None:
+        if self.movable is None or self.movable.axes is not w.ax:
             self.movable = PatchCollection([], facecolors=MOVABLE_FILL, edgecolors=MOVABLE_EDGE,
                                            linewidths=.8, linestyles=(0, (4, 2)), alpha=.20, zorder=9.3)
             self.fixed = PatchCollection([], facecolors=FIXED_FILL, edgecolors=FIXED_EDGE,
@@ -163,7 +166,8 @@ class ReconstructionOverlay:
             self.stamp = None
         data = self.data() if self.active() else None
 
-        stamp = (id(data), tuple(k for k, b in w.visible_boxes.items() if b.isChecked()), w.view_bounds, self.selected)
+        regions = tuple(getattr(w.view_settings,'reconstruction_regions',()) or ())
+        stamp = (regions,id(data), tuple(k for k, b in w.visible_boxes.items() if b.isChecked()), w.view_bounds, self.selected)
         if stamp != self.stamp:
             self.stamp = stamp
             # origin, target, bridge, cut, still, manual, extra, moved_lines, seam_lines = ([], [], [], [],
@@ -241,6 +245,24 @@ class ReconstructionOverlay:
             self.moved_cuts.set_visible(bool(moved_lines))
             # Manual 动区/静区 boxes: translucent, dashed, one per row of
 
+            for artist in self.region_artists:
+                try:
+                    artist.remove()
+                except Exception:
+                    pass
+            self.region_artists = []
+            for layer, bounds, role in regions:
+                if layer not in w.visible_boxes or not w.visible_boxes[layer].isChecked():
+                    continue
+                if not _in_view(tuple(bounds), w.view_bounds):
+                    continue
+                colour = REGION_COLORS.get(role, '#555555')
+                x0, y0, x1, y1 = bounds
+                rect = Rectangle((x0, y0), x1 - x0, y1 - y0, facecolor=colour, alpha=.10,
+                                 edgecolor=colour, lw=1.5, linestyle=(0, (5, 3)),
+                                 zorder=9.85)
+                w.ax.add_patch(rect)
+                self.region_artists.append(rect)
             # 链的两个尽头：起点、终点各一色；终点若落在芯片边框外的固定区，
             # 画成实心点，只是“另一端”时画空心圈。
             for artist in self.end_artists:
@@ -575,9 +597,10 @@ def _pin_second(settings, piece, x, y, direction):
     layer=piece.get('layer'); index=piece.get('index')
     if layer is None or index is None:
         return settings
-    key=(layer,int(index),tuple(sorted(int(v) for v in piece.get('vias') or ())))
+    key=(layer,int(index),normalize_via_refs(piece.get('via_refs',piece.get('vias') or ())))
     rows=tuple(q for q in (getattr(settings,'reconstruction_second_cuts',()) or ())
-               if (q[0],int(q[1]),tuple(sorted(int(v) for v in q[2])))!=key)
+               if not (str(q[0])==str(key[0]) and int(q[1])==key[1]
+                       and cut_identity_matches(q[2],key[2])))
     rows=rows+((key[0],key[1],key[2],float(direction[0]),float(direction[1]),
                 float(x),float(y)),)
     return replace(settings,reconstruction_second_cuts=rows)
@@ -602,7 +625,7 @@ def _rotate_second(settings, piece, degrees):
 
 def _buttons(window,enabled):
     """Enable the ⟲/⟳ second-cut buttons that stand in for a drag."""
-    for name in ('second_left','second_right'):
+    for name in ('second_left','second_right','cut_left','cut_right'):
         button=getattr(window,name,None)
         if button is not None:button.setEnabled(bool(enabled))
 
@@ -677,6 +700,9 @@ class CutDrag:
         if getattr(w.canvas, 'die_move_active', False) or getattr(w, '_in_animation', False):
             return
         overlay = w.reconstruction_overlay
+        if event.xdata is None or event.ydata is None:return
+        region=getattr(w,"region_select",None)
+        if region is not None and region.mode is not None:return
         picked = overlay.pick(event.xdata, event.ydata, self._tolerance())
         if picked is None:
             if overlay.selected is not None:
@@ -688,6 +714,9 @@ class CutDrag:
             overlay.clear_hover()
             return
         piece, points, kind = picked
+        if kind in ('cut','moved') and len(_lines(piece.get('cut')))!=1:
+            w.statusBar().showMessage('多个切口的合并区域不能拖动第一刀')
+            return
         if kind in ('cut', 'moved') and not DRAG_FIRST_CUT:
             w.statusBar().showMessage('第一刀不再支持拖动：请拖第二刀（绿色），或用 ⟲/⟳ 旋转')
             return
@@ -718,7 +747,7 @@ class CutDrag:
             # grows -- which is exactly “只会改变切口，无法改变桥接区”.
             normal = np.asarray(piece['cut_window']['normal'], float)
         key = (piece['layer'], int(piece['index']),
-               tuple(sorted(int(v) for v in piece['vias'])))
+               normalize_via_refs(piece.get('via_refs',piece['vias'])))
         if event.button == 3 or event.dblclick:
             self.clear(key, piece, kind)
             return
@@ -741,7 +770,7 @@ class CutDrag:
                           start=np.array([event.xdata, event.ydata], float),
                           pixel=np.array([event.x, event.y], float), moved=False,
                           along=float(np.dot(np.array([event.xdata, event.ydata], float) - origin, normal)))
-        if self.line is None:
+        if self.line is None or self.line.axes is not w.ax:
             from matplotlib.lines import Line2D
             self.line = Line2D([], [], color='#b3432f', lw=2.6, zorder=13.0)
             w.ax.add_line(self.line)
@@ -833,6 +862,7 @@ class CutDrag:
         along = float(np.dot(cursor - state['origin'], state['normal']))
         origin = state['origin'] + state['normal'] * (along - state['along'])
         self._paint(self._clamp(state, origin))
+        self.w.canvas.draw_idle()
 
     def release(self, event):
         state = self.state
@@ -846,71 +876,212 @@ class CutDrag:
             # A plain click on the cut must not pin it: only a drag does.
             self.w.statusBar().showMessage('按住切口线拖动可以固定这条串的切口位置')
             return
-        cursor = np.array([event.xdata, event.ydata], float) if event.xdata is not None else state['start']
+        self.w.canvas.draw_idle()
+        if event.inaxes is not self.w.ax or event.xdata is None or event.ydata is None:return
+        cursor = np.array([event.xdata, event.ydata], float)
         along = float(np.dot(cursor - state['origin'], state['normal']))
         origin = state['origin'] + state['normal'] * (along - state['along'])
         origin = self._clamp(state, origin)
         self.commit(state, origin)
 
     def commit(self, state, origin):
-        w = self.w
-        from dataclasses import replace
-        key = state['key'];
-        normal = state['normal'];
-        kind = state.get('kind', 'cut')
-        if kind != 'extra':
-            return  # 只有第二刀可提交
-        rows = [c for c in getattr(w.view_settings, 'reconstruction_second_cuts', ())
-                if (c[0], int(c[1]), tuple(sorted(int(v) for v in c[2]))) != key]
-        along = np.array([-normal[1], normal[0]], float)  # 线方向（与草稿线平行）
-        rows.append((key[0], int(key[1]), key[2], float(along[0]), float(along[1]),
-                     float(origin[0]), float(origin[1])))
-        w.view_settings = replace(w.view_settings, reconstruction_second_cuts=tuple(rows))
-        w.statusBar().showMessage('已移动这条第二刀：补线区随之加长或缩短；按 ⟲/⟳ 可旋转')
-        # w.view_settings=base
+        w=self.w
+        kind=state.get('kind','cut')
+        if kind=='moved':
+            cut=state['piece'].get('cut')
+            if cut is None or cut.is_empty:return
+            delta=float(np.dot(np.asarray(origin)-state['start_origin'],state['normal']))
+            origin=np.asarray(cut.centroid.coords[0])+state['normal']*delta
+        w.view_settings=_store_cut(w.view_settings,state['piece'],state['normal'],origin,kind)
+        w.dirty=True
         w.reconstruction_overlay.stamp=None
-        w.request_preview()
+        w.statusBar().showMessage('已固定切口位置；右键或双击恢复自动位置')
+        w.request_preview(quiet=True)
 
     def clear(self, key, piece, kind='cut'):
-        w = self.w
-        # Deleting a cut also ends the selection, so the two cut lines of that
-        # bridge stop being drawn and the ◀/▶ buttons go grey again.  The
-        # selection lives on the overlay, not on this drag handler.
-        overlay = w.reconstruction_overlay
-        overlay.selected = None
-        overlay.selected_kind = None
-        overlay.stamp = None
-        _buttons(w, False)
         from dataclasses import replace
-        same = lambda c: (c[0], int(c[1]), tuple(sorted(int(v) for v in c[2]))) == key
-        if kind == 'extra':
-            now = getattr(w.view_settings, 'reconstruction_extra_cuts', ())
-            rows = tuple(c for c in now if not same(c))
-            if len(rows) == len(now):
-                w.statusBar().showMessage('这一处本来就是统一加宽的')
-                return
-            w.view_settings = replace(w.view_settings, reconstruction_extra_cuts=rows)
-            w.statusBar().showMessage('已删除这条第二切口，恢复统一加宽')
-            w.request_preview()
-            return
-        # The cut itself: drop the manual plane if there is one, otherwise delete
-        # the automatic cut of this chain (that stretch of copper simply stays).
-        now = getattr(w.view_settings, 'reconstruction_cuts', ())
-        rows = tuple(c for c in now if not same(c))
-        if len(rows) != len(now):
-            w.view_settings = replace(w.view_settings,
-                                      reconstruction_second_cuts=tuple(
-                                          c for c in getattr(w.view_settings,
-                                                             'reconstruction_second_cuts', ())
-                                          if (c[0], int(c[1]),
-                                              tuple(sorted(int(v) for v in c[2]))) != key))
-            w.statusBar().showMessage('已恢复这条第二刀的自动位置')
+        w=self.w
+        overlay=w.reconstruction_overlay
+        overlay.selected=None;overlay.selected_kind=None;overlay.stamp=None
+        _buttons(w,False)
+        which='reconstruction_second_cuts' if kind=='extra' else 'reconstruction_cuts'
+        def keep(c):
+            return not (str(c[0])==str(key[0]) and int(c[1])==int(key[1])
+                        and cut_identity_matches(c[2],key[2]))
+        changes={which:tuple(c for c in getattr(w.view_settings,which,()) if keep(c))}
+        if kind=='extra':
+            changes['reconstruction_extra_cuts']=tuple(c for c in getattr(w.view_settings,'reconstruction_extra_cuts',()) if keep(c))
         else:
-            dropped = tuple(getattr(w.view_settings, 'reconstruction_dropped_cuts', ())) + (
-                (key[0], int(key[1]), key[2]),)
-            w.view_settings = replace(w.view_settings, reconstruction_dropped_cuts=dropped)
-            w.statusBar().showMessage('已删除这条自动切口：这段铜不再被切开')
+            changes['reconstruction_dropped_cuts']=tuple(c for c in getattr(w.view_settings,'reconstruction_dropped_cuts',()) if keep(c))
+        w.view_settings=replace(w.view_settings,**changes)
+        w.dirty=True
+        w.statusBar().showMessage('已恢复该切口的自动位置')
         w.request_preview()
 
 
+def _store_cut(settings,piece,normal,origin,kind='cut'):
+    from dataclasses import replace
+    key=ReconstructionOverlay._key(piece)
+    which='reconstruction_second_cuts' if kind=='extra' else 'reconstruction_cuts'
+    def keep(c):
+        return not (str(c[0])==str(key[0]) and int(c[1])==key[1]
+                    and cut_identity_matches(c[2],key[2]))
+    base=settings
+    if kind!='extra':
+        # Freeze the far edge while moving the first edge independently.
+        far=piece.get('extra_cut')
+        if far is not None and not far.is_empty:
+            coords=shapely.get_coordinates(far)
+            direction=coords[-1]-coords[0]
+            if np.linalg.norm(direction)>1e-9:
+                anchor=np.asarray(far.centroid.coords[0])
+                base=_pin_second(base,piece,anchor[0],anchor[1],direction)
+    vector=np.array([-normal[1],normal[0]]) if kind=='extra' else normal
+    rows=[c for c in getattr(base,which,()) if keep(c)]
+    rows.append((key[0],key[1],key[2],float(vector[0]),float(vector[1]),float(origin[0]),float(origin[1])))
+    dropped=tuple(c for c in getattr(base,'reconstruction_dropped_cuts',()) if keep(c))
+    return replace(base,**{which:tuple(rows)},reconstruction_dropped_cuts=dropped)
 
+
+def nudge_cut(settings,piece,step,kind='cut'):
+    line=piece.get('extra_cut') if kind=='extra' else piece.get('cut')
+    if line is None or line.is_empty:return settings
+    parts=list(line.geoms) if hasattr(line,'geoms') else [line]
+    # A merged, multi-seam piece has no unambiguous first plane.
+    if kind!='extra' and len(parts)!=1:return settings
+    line=max(parts,key=lambda q:q.length)
+    coords=shapely.get_coordinates(line)
+    direction=coords[-1]-coords[0]
+    length=float(np.linalg.norm(direction))
+    if length<=1e-9:return settings
+    normal=np.array([-direction[1],direction[0]])/length
+    origin=np.asarray(line.centroid.coords[0])+normal*float(step)
+    return _store_cut(settings,piece,normal,origin,kind)
+
+
+class RegionSelect:
+    """Box-select a 动区 (movable) or 静区 (stays put) on the reconstruction page.
+
+    The rectangles are stored per fixed-RDL layer in
+    ``view_settings.reconstruction_regions`` and applied after the automatic
+    split, so the software's guess stays visible wherever the user has not
+    overridden it. Commit re-runs the preview quietly, like the cut drag.
+    """
+
+    def __init__(self, window):
+        self.w = window
+        self.mode = None
+        self.state = None
+        self.rect = None
+        for name, fn in [('button_press_event', self.press),
+                         ('motion_notify_event', self.move),
+                         ('button_release_event', self.release)]:
+            window.canvas.mpl_connect(name, fn)
+
+    def set_mode(self, mode):
+        """'move', 'stay' or None (off)."""
+        self.mode = mode
+        if mode is None:
+            self._drop()
+            self.w.statusBar().showMessage('已退出手动区域框选')
+
+    def _drop(self):
+        if self.rect is not None:
+            try:
+                self.rect.remove()
+            except Exception:
+                pass
+            self.rect = None
+        self.state = None
+
+    def _point(self, event):
+        if event.xdata is None or event.ydata is None:
+            return None
+        return float(event.xdata), float(event.ydata)
+
+    def press(self, event):
+        if self.mode is None or event.button != 1 or event.inaxes is not self.w.ax:
+            return
+        point = self._point(event)
+        if point is None:
+            return
+        if not self.w.reconstruction_toggle.isChecked():return
+        # The canvas rubber band and the cut drag listen to the same press.
+        selection = getattr(self.w, 'selection', None)
+        if selection is not None:
+            selection.press = None
+            if getattr(selection, 'rubber', None) is not None:
+                try:
+                    selection.rubber.remove()
+                except Exception:
+                    pass
+                selection.rubber = None
+        self.state = {'start': point, 'current': point}
+        colour = REGION_COLORS.get(self.mode, '#555555')
+        self.rect = Rectangle(point, 0., 0., facecolor=colour, alpha=.12,
+                              edgecolor=colour, lw=1.5, linestyle=(0, (5, 3)),
+                              zorder=12.2)
+        self.w.ax.add_patch(self.rect)
+        self.w.statusBar().showMessage(f'框选{REGION_LABELS[self.mode]}：松开鼠标即写入')
+        return True
+
+    def move(self, event):
+        if self.state is None or self.rect is None or event.button != 1:
+            return
+        point = self._point(event)
+        if point is None:
+            return
+        self.state['current'] = point
+        self.w.canvas.draw_idle()
+        x0, y0 = self.state['start']
+        x1, y1 = point
+        self.rect.set_xy((min(x0, x1), min(y0, y1)))
+        self.rect.set_width(abs(x1 - x0))
+        self.rect.set_height(abs(y1 - y0))
+        return True
+
+    def release(self, event):
+        if self.state is None:
+            return
+        state = self.state
+        self.state = None
+        if self.rect is not None:
+            try:
+                self.rect.remove()
+            except Exception:
+                pass
+            self.rect = None
+        self.w.canvas.draw_idle()
+        if event.inaxes is not self.w.ax or self._point(event) is None:return True
+        state['current']=self._point(event)
+        x0, y0 = state['start']
+        x1, y1 = state['current']
+        if abs(x1 - x0) <= 0. or abs(y1 - y0) <= 0.:
+            self.w.statusBar().showMessage('框选太小，没有写入')
+            return True
+        layers = self._layers()
+        if not layers:
+            self.w.statusBar().showMessage('当前没有可划分的固定RDL，先勾选“重构预演”')
+            return True
+        bounds = (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+        from dataclasses import replace
+        regions = list(getattr(self.w.view_settings, 'reconstruction_regions', ()) or ())
+        for layer in layers:
+            regions.append((layer, bounds, self.mode))
+        self.w.view_settings = replace(self.w.view_settings, reconstruction_regions=tuple(regions))
+        self.w.dirty=True
+        self.w.statusBar().showMessage(
+            f'已写入 {len(layers)} 个图层的{REGION_LABELS[self.mode]}；可继续框选，或点“清除全部手动区域”恢复')
+        self.w.request_preview(quiet=True)
+        return True
+
+    def _layers(self):
+        try:
+            data = self.w.reconstruction_overlay.data()
+        except Exception:
+            data = None
+        layers = sorted({q['layer'] for q in (data or {}).get('pieces', [])
+                         if q['layer'] in self.w.visible_boxes and self.w.visible_boxes[q['layer']].isChecked()})
+        if layers:
+            return layers
+        return []
