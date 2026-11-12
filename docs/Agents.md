@@ -245,3 +245,8 @@ V23 的 Linux 复算覆盖 GD55 三颗芯片、267 个保留对象、每姿态 6
 - [PR #21](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/pull/21)合并须以最终准确头的Windows clean/with-cupy双绿为门禁，早先两头成功不替代最终头。源码资产、校验值和回下载结果见[V38 Release](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/releases/tag/V38)；不上传图片、私有图纸或EXE。合并后仅保留main，旧临时工作树未提交内容保持原样。
 
 - 最终源码干净聚合复验仍为295项核心/18组GUI/两后端/17工程通过；新增连续两次拖动在前一任务未完成时不丢端点，操作者状态与可变工作引擎解耦。原图区域共同量化后的分割通过斜线接缝测试，实图DXF回读无HATCH。
+
+
+### V38 本地历史收尾
+
+清理时核对到本地finish分支的a669d9c/eef76cd未以同一提交身份进入main。a669d9c的运行模块、main.py、tests、tools与workflow与主线已有祖先897899f逐文件一致，运行子树均为0d5e0ebda3d6f88f8c30abd2104e5c0aaa265df2；eef仅追加旧V37验收记录。采用仅保留历史的合并，不恢复旧代码或用旧验证覆盖V38。此收尾的程序、测试、构建配置与已验收ebec646保持完全一致；源码ZIP仍为104文件，SHA-256 fffdbcc8538ea5db3b1989d1b82a3093c2f45b076937dd1c6bff45fa51f119ea。旧临时工作树的工作文件与索引均按指纹核对保留，随后解除旧分支引用。
