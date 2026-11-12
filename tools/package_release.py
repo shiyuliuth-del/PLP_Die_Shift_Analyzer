@@ -11,7 +11,7 @@ from die_shift_studio import __version__
 def check_source():
     """Stage a clean test checkout. Test helpers and projects do not enter the release."""
     gui=['gui_smoke','gui_v14','gui_scheduler_v20','gui_repair',
-         'gui_v24','gui_v25','gui_v26','gui_v27','gui_v28','gui_v29','gui_v30','gui_v32','gui_v33','gui_v34','gui_v35','gui_v36','gui_v38','gui_branch_integration']
+         'gui_v24','gui_v25','gui_v26','gui_v27','gui_v28','gui_v29','gui_v30','gui_v32','gui_v33','gui_v34','gui_v35','gui_v36','gui_v38','gui_v39','gui_branch_integration']
     env=dict(os.environ,QT_QPA_PLATFORM='offscreen',OPENBLAS_NUM_THREADS='1',PYTHONUTF8='1')
     subprocess.run([sys.executable,'tools/check_contribution.py'],cwd=ROOT,env=env,check=True)
     records=[]
@@ -24,6 +24,7 @@ def check_source():
             relative=Path(os.fsdecode(value));dst=stage/relative;dst.parent.mkdir(parents=True,exist_ok=True)
             shutil.copy2(ROOT/relative,dst)
         (stage/'results').mkdir();(stage/'figures').mkdir()
+        runtime_hash=hashlib.sha256(b''.join(p.read_bytes() for p in sorted((stage/'die_shift_studio').glob('*.py')))).hexdigest()
         commands=[(['-m','unittest','discover','-s','tests','-p','test_*.py','-v'],{})]
         commands.extend(([f'tests/{fn}.py'],{}) for fn in gui)
         commands.extend([(['main.py','--smoke-test','results/default.json'],{}),
@@ -44,7 +45,7 @@ def check_source():
             records.append(record)
     out=dict(version=__version__,status='PASS',tested_at_utc=datetime.now(timezone.utc).isoformat(),
              scope='Clean source checkout, local platform. Windows executable verification is recorded separately.',
-             platform=sys.platform,gui_suites=len(gui),runs=records)
+             platform=sys.platform,verified_runtime_sha256=runtime_hash,gui_suites=len(gui),runs=records)
     (ROOT/'docs/package_verification.json').write_text(json.dumps(out,ensure_ascii=False,indent=2)+'\n',encoding='utf8')
 
 SOURCE_FILES={'main.py','RUN.bat','BUILD.bat','Die_Shift_Analyze.spec','requirements.txt'}

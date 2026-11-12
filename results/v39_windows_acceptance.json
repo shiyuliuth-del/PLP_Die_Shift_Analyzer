@@ -1,0 +1,23 @@
+{
+  "head_sha": "7e6b2e62ed72ed9d3cb0502c35f660e62688457a",
+  "status": "completed",
+  "conclusion": "success",
+  "url": "https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/actions/runs/43209459236",
+  "jobs": [
+    {
+      "name": "build (with-cupy)",
+      "status": "completed",
+      "conclusion": "success",
+      "startedAt": "2026-11-12T11:28:38Z",
+      "completedAt": "2026-11-12T11:35:57Z"
+    },
+    {
+      "name": "build (clean)",
+      "status": "completed",
+      "conclusion": "success",
+      "startedAt": "2026-11-12T11:28:37Z",
+      "completedAt": "2026-11-12T11:35:44Z"
+    }
+  ],
+  "scope": "GitHub Windows hosted builds: clean and with-cupy, actual source archive and extracted BUILD.bat. Temporary EXE tested but not distributed. Does not attest RTX A5000 physical execution."
+}

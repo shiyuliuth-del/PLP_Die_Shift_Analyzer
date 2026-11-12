@@ -127,7 +127,7 @@ def close():
     global _backend
     with _lock:
         if _backend is not None:_backend.close();_backend=None
-    compute.cache_clear();native_ops._REGIONS.clear()
+    compute.cache_clear();any_violation.cache_clear();native_ops._REGIONS.clear()
 atexit.register(close)
 
 def _encode(geometry,dbu):
@@ -152,7 +152,7 @@ def _encode(geometry,dbu):
 @lru_cache(maxsize=192)
 def compute(op,wkb,dbu,distance=0.,other=None):
     request=dict(op=op,a=_encode(shapely.from_wkb(wkb),dbu))
-    if op in ('width','space','notch','separation'):request['distance']=max(1,math.ceil(distance/dbu-1e-9))
+    if op.removesuffix('_any') in ('width','space','notch','separation'):request['distance']=max(1,math.ceil(distance/dbu-1e-9))
     if op=='round':request['radius']=round(distance/dbu)
     if other is not None:request['b']=_encode(shapely.from_wkb(other),dbu)
     result=backend().execute(request);polygons=[]
@@ -163,3 +163,9 @@ def compute(op,wkb,dbu,distance=0.,other=None):
 
 def geometry(op,poly,dbu,distance=0.,other=None):
     return compute(op,poly.wkb,float(dbu),float(distance),other.wkb if other is not None else None)[0]
+
+@lru_cache(maxsize=2048)
+def any_violation(op,wkb,dbu,distance,other=None):
+    # Native early-exit preserves the exact edge-pair predicates while avoiding
+    # marker polygon construction/union/serialization for probability decisions.
+    return compute(op+'_any',wkb,float(dbu),float(distance),other)[1]>0

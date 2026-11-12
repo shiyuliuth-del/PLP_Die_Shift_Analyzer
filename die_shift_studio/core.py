@@ -238,6 +238,8 @@ def read_gds(path, top_name=None, progress: Callable=lambda *_: None):
     data.ignored_geometry=ignored
     from .geometry_errors import sanitize_data
     sanitize_data(data)
+    from .gds_merge import merge_import
+    data=merge_import(data)
     from .recognition import recognize,TAGS
     tags={};ambiguous=set()
     for label in cell.get_labels(apply_repetitions=True,depth=None):
@@ -282,7 +284,8 @@ def _polygons(data,roles,role):
     for key,values in data.layers.items():
         if roles.get(key)==role:
             for value in values:
-                poly=Polygon(value)
+                from .gds_merge import filled_polygon
+                poly=filled_polygon(value,True)
                 out.append(poly)
     return out
 
