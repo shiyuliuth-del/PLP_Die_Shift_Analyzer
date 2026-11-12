@@ -1,7 +1,7 @@
 {
   "version": "V38",
   "status": "PASS",
-  "tested_at_utc": "2026-11-12T05:43:23.217817+00:00",
+  "tested_at_utc": "2026-11-12T06:34:19.449430+00:00",
   "scope": "Clean source checkout, local platform. Windows executable verification is recorded separately.",
   "platform": "linux",
   "gui_suites": 18,
@@ -20,7 +20,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "Ran 293 tests in 19.675s",
+        "Ran 295 tests in 28.945s",
         "",
         "OK (skipped=2)"
       ]
@@ -542,5 +542,6 @@
       ],
       "discrete_states": 3
     }
-  ]
+  ],
+  "verified_runtime_sha256": "aeb56a1697a743e695c4bd93bc3d36e86154143f145a8b69034dcf5355c4b21e"
 }

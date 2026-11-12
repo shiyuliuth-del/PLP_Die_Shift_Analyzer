@@ -21,7 +21,7 @@ EMPTY=shapely.Polygon()
 def parts(g):
     if g is None or g.is_empty:return []
     if g.geom_type=='Polygon':return [g]
-    return [p for p in shapely.get_parts(g) if p.geom_type=='Polygon' and not p.is_empty]
+    return [p for child in getattr(g,'geoms',()) for p in parts(child)]
 
 
 @lru_cache(maxsize=192)
@@ -165,7 +165,7 @@ class RoutePlan:
         candidates=[g for g in pieces if g.intersection(self.land).area>=self.land.area-eps]
         candidates=[g for g in candidates if all(g.intersection(a).area<=eps for a in self.anchors)]
         if len(pieces)<2 or len(candidates)!=1:result=None
-        else:result=candidates[0],face
+        else:result=candidates[0],face,shapely.union_all([g for g in pieces if g is not candidates[0]])
         if len(self.cache)>512:self.cache.clear()
         self.cache[key]=result
         return result
@@ -174,15 +174,20 @@ class RoutePlan:
         """Return disjoint A/B/C and their real shared boundaries, or no partition."""
         outer=self.prefix(b)
         if outer is None:return None
-        moving_plus,far=outer
+        moving_plus,far,b_shape=outer
         if a==0.:
-            c=EMPTY;near=shapely.Point(self.route.coords[0])
+            c=EMPTY;near=shapely.Point(self.route.coords[0]);a_shape=moving_plus
         else:
-            inner=self.prefix(a)
-            if inner is None:return None
-            c,near=inner
-            if c.difference(moving_plus).area>max(self.tolerance**2,c.area*1e-8):return None
-        a_shape=moving_plus.difference(c);b_shape=self.source.difference(moving_plus)
+            near=self.section(a)
+            if near is None:return None
+            xy=np.asarray(near.coords);v=xy[-1]-xy[0];v/=max(np.linalg.norm(v),1e-12)
+            blade=shapely.LineString([xy[0]-v*self.tolerance*16,xy[-1]+v*self.tolerance*16])
+            try:pieces=parts(split(moving_plus,blade))
+            except (ValueError,shapely.errors.GEOSException):return None
+            epsilon=max(self.tolerance**2,self.land.area*1e-7)
+            movable=[g for g in pieces if g.intersection(self.land).area>=self.land.area-epsilon]
+            if len(movable)!=1 or len(pieces)<2:return None
+            c=movable[0];a_shape=shapely.union_all([g for g in pieces if g is not c])
         if a_shape.is_empty or b_shape.is_empty:return None
         union=shapely.union_all([a_shape,b_shape,c])
         if union.symmetric_difference(self.source).area>max(self.tolerance**2,self.source.area*1e-8):return None
@@ -282,19 +287,28 @@ def warp(part,plan,center,state):
                 return len(rect)<4 or min(np.linalg.norm(np.diff(rect,axis=0),axis=1))<=plan.tolerance*2
             if all(thin(g) for g in scraps) and sum(g.area for g in scraps)<=plan.tolerance*active.length*2:
                 active=main
-    if not active.is_valid or active.is_empty:return None,'动区发生折叠，保留原始图形：'+shapely.is_valid_reason(active)
-    result={k:shapely.set_precision(g,plan.tolerance) for k,g in {'A':active,'B':part['B'],'C':translated}.items()}
-    full=shapely.union_all(list(result.values()))
-    if len(parts(full))!=len(parts(plan.source)) or not full.is_valid or sum(len(q.interiors) for q in parts(full))!=sum(len(q.interiors) for q in parts(plan.source)):return None,'重构连接不能闭合，保留原始图形'
-    # Quantisation can create sub-DBU seam slivers. Only slivers confined to
-    # the two true seams may be clipped; other overlap is a genuine fold.
+    if active.is_empty:return None,'动区退化为空图形，保留原始图形'
+    if not active.is_valid:return None,'动区发生折叠，保留原始图形：'+shapely.is_valid_reason(active)
+    raw={'A':active,'B':part['B'],'C':translated}
     near=part['near'] if a==0 else shapely.transform(part['near'],lambda xy:rigid_transform(xy,center,state))
     seam=shapely.union_all([near,part['far']]).buffer(plan.tolerance*2)
     allowance=max(plan.tolerance**2,plan.source.area*1e-10)
     for x,y in (('A','B'),('A','C'),('B','C')):
-        overlap=result[x].intersection(result[y])
+        overlap=raw[x].intersection(raw[y])
         if overlap.difference(seam).area>allowance:return None,'动区与相邻区域反向交叠，保留原始图形'
-    result['A']=result['A'].difference(shapely.union_all([result['B'],result['C']]))
+    # Snap the JOINT copper once, rather than independently rounding two copies
+    # of every seam. This removes sub-DBU gaps without creating new cut edges.
+    full=shapely.set_precision(shapely.union_all(list(raw.values())),plan.tolerance)
+    expected_holes=sum(len(q.interiors) for q in parts(plan.source))
+    holes=[shapely.Polygon(r) for q in parts(full) for r in q.interiors]
+    if len(holes)>expected_holes:
+        repairs=[g for g in holes if g.area<=plan.tolerance*g.length and g.difference(seam).area<=plan.tolerance**2*.01]
+        if repairs:full=shapely.union_all([full,*repairs])
+    if len(parts(full))!=len(parts(plan.source)) or not full.is_valid or sum(len(q.interiors) for q in parts(full))!=expected_holes:
+        return None,'重构连接不能闭合，保留原始图形'
+    fixed=shapely.intersection(full,shapely.set_precision(raw['B'],plan.tolerance))
+    rigid=shapely.intersection(full,shapely.set_precision(raw['C'],plan.tolerance)).difference(fixed)
+    result={'A':full.difference(shapely.union_all([fixed,rigid])),'B':fixed,'C':rigid}
     size=int(sum(shapely.get_num_coordinates(g) for g in result.values()))*24+512
     if size<=plan.memo_budget:
         plan.pose_memo[memo_key]=(dict(result),None,size);plan.memo_bytes+=size

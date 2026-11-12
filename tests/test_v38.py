@@ -136,6 +136,17 @@ class V38Tests(unittest.TestCase):
             with self.assertRaises(ValueError):write_regions(bad,{}, {},out)
             self.assertEqual(out.read_bytes(),b'previous')
 
+    def test_slanted_quantised_seams_close_without_new_holes(self):
+        for angle in (13.3,37.7,89.99):
+            u=np.array([np.cos(np.radians(angle)),np.sin(np.radians(angle))]);end=u*800
+            source=LineString([[0,0],end]).buffer(17).union(Point(0,0).buffer(30)).union(Point(end).buffer(30))
+            plan=RoutePlan('5/0',0,0,(('4/0',0),),source,LineString([[0,0],end]),Point(0,0).buffer(25),(Point(end).buffer(25),),.001,3)
+            part=plan.partition(45.123,745.678);self.assertIsNotNone(part)
+            for pose in ((-35,-35,-.01745),(35,35,.01745)):
+                regions,error=warp(part,plan,np.zeros(2),np.asarray(pose));self.assertIsNone(error,(angle,error))
+                full=shapely.union_all(list(regions.values()))
+                self.assertEqual(full.geom_type,'Polygon');self.assertEqual(len(full.interiors),0)
+
     def test_warp_cache_is_immutable_and_clear_releases_meshes(self):
         e,d,c=fixture()
         try:
@@ -178,6 +189,8 @@ class V38Tests(unittest.TestCase):
                     if not q['valid']:
                         self.assertTrue(q['warning'])
                         self.assertTrue(q['regions']['B'].equals(q['route_plan'].source))
+                        if q['cut'] is not None:
+                            self.assertTrue(q['moved_cut'].equals(transform(q['cut'],e.bound.centers[q['die']],np.asarray(pose))))
         finally:e.close()
 
     def test_legacy_defaults_and_retired_preview_cannot_reactivate(self):

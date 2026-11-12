@@ -292,7 +292,7 @@ class Reconstructor:
             part,manual,regions,error,warning=prepared;valid=True
             if part is not None:
                 if error:regions={k:part[k] for k in 'ABC'};warning=error;valid=False
-                near=part['near'];moved_cut=transform(near,self.model.bound.centers[owner],states[owner]) if valid else near
+                near=part['near'];moved_cut=transform(near,self.model.bound.centers[owner],states[owner])
                 far=part['far'];a,b=part['a'],part['b']
             elif entry['orphan']:
                 part=dict(A=EMPTY,B=EMPTY,C=source)
@@ -326,7 +326,7 @@ class Reconstructor:
                 support=shapely.union_all([q['nominal_regions']['A'],q['nominal_regions']['C']])
                 if occupied.intersection(support).area>max(self.tol**2,source.area*1e-8):ambiguous=True
                 occupied=occupied.union(support)
-            fixed=shapely.set_precision(source.difference(occupied),self.tol) if np.any(states) else source.difference(occupied)
+            fixed=ps[0]['regions']['B'] if len(ps)==1 else (shapely.set_precision(source.difference(occupied),self.tol) if np.any(states) else source.difference(occupied))
             if ambiguous or any(not q['valid'] for q in ps):
                 reason='多个DIE动区重叠；保留原图' if ambiguous else next(q['warning'] for q in ps if not q['valid'])
                 for q in ps:q.update(valid=False,warning=reason,regions=dict(A=EMPTY,B=source,C=EMPTY),bridge=EMPTY,moved=EMPTY,fixed=source)

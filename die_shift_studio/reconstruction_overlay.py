@@ -38,7 +38,7 @@ def _segment_distance(points,x,y):
 
 class ReconstructionOverlay:
     def __init__(self,window):
-        self.w=window;self.artists={};self.stamp=self.table_stamp=None
+        self.w=window;self.artists={};self.cuts=None;self.stamp=self.table_stamp=None
         self.selected=self.selected_kind=None;self.hover=None;self.hover_key=None
         self.end_artists=[];self.region_artists=[];self.arrow_artists=[]
     def active(self):return self.w.reconstruction_toggle.isChecked()
@@ -49,11 +49,8 @@ class ReconstructionOverlay:
     def piece_for(self,key):return next((q for q in self.pieces() if self._key(q)==key),None)
     def draw(self):
         w=self.w
-        if not self.artists or next(iter(self.artists.values())).axes is not w.ax:
+        if self.cuts is None or self.cuts.axes is not w.ax:
             self.artists={}
-            for k in 'BCA':
-                self.artists[k]=PatchCollection([],facecolor=COLORS[k],edgecolor=COLORS[k],alpha=.66,linewidths=.5,zorder=9+('BCA'.index(k))*.1)
-                w.ax.add_collection(self.artists[k])
             self.warning=PatchCollection([],facecolor='none',edgecolor=WARNING_COLOR,linestyles='--',linewidths=1.1,zorder=9.4);w.ax.add_collection(self.warning)
             self.cuts=LineCollection([],colors=CUT_COLOR,linewidths=2.2,zorder=11.5);w.ax.add_collection(self.cuts)
             self.second_cuts=LineCollection([],colors=SECOND_CUT_COLOR,linewidths=2.2,zorder=11.6);w.ax.add_collection(self.second_cuts)
@@ -61,16 +58,16 @@ class ReconstructionOverlay:
             self.stamp=None
         data=self.data() if self.active() else None
         vis=tuple(k for k,v in w.visible_boxes.items() if v.isChecked())
-        stamp=(id(data),vis,w.view_bounds)
+        order=tuple(w.ordered_layers());stamp=(id(data),vis,w.view_bounds,order)
         if stamp==self.stamp:return
-        self.stamp=stamp;paths={k:[] for k in 'ABC'};first=[];second=[];dots=[];warnings=[];seen=set()
+        self.stamp=stamp;paths={};first=[];second=[];dots=[];warnings=[];seen=set()
         for q in self.pieces():
             if not _in_view(q['route_plan'].source.bounds if q.get('route_plan') else q['fixed'].bounds,w.view_bounds) and not any(not g.is_empty and _in_view(g.bounds,w.view_bounds) for g in q['regions'].values()):continue
             for k,g in q['regions'].items():
                 if g.is_empty:continue
                 ident=(q['layer'],q['index'],k)
                 if k=='B' and ident in seen:continue
-                seen.add(ident);paths[k].append(w.geometry_patch(g))
+                seen.add(ident);paths.setdefault((q['layer'],k),[]).append(w.geometry_patch(g))
             if q.get('warning'):
                 g=shapely.union_all(list(q['regions'].values()))
                 if not g.is_empty:warnings.append(w.geometry_patch(g))
@@ -78,7 +75,13 @@ class ReconstructionOverlay:
             if near is not None and near.geom_type=='Point':dots.append(near.coords[0])
             else:first.extend(_lines(near))
             second.extend(_lines(q.get('extra_cut')))
-        for k,artist in self.artists.items():artist.set_paths(paths[k]);artist.set_visible(bool(paths[k]))
+        for key in paths:
+            if key not in self.artists:
+                k=key[1];artist=PatchCollection([],facecolor=COLORS[k],edgecolor=COLORS[k],alpha=.66,linewidths=.5)
+                w.ax.add_collection(artist);self.artists[key]=artist
+        for (layer,k),artist in self.artists.items():
+            shapes=paths.get((layer,k),[]);artist.set_paths(shapes);artist.set_visible(bool(shapes))
+            artist.set_zorder(2+(order.index(layer) if layer in order else 0)/max(1,len(order))+.001*('BCA'.index(k)+1))
         self.warning.set_paths(warnings);self.warning.set_visible(bool(warnings))
         self.cuts.set_segments(first);self.cuts.set_visible(bool(first))
         self.second_cuts.set_segments(second);self.second_cuts.set_visible(bool(second))
@@ -172,12 +175,15 @@ class CutDrag:
             if state['kind']!='extra':
                 from .selection import inverse_geometry
                 cursor=np.asarray(inverse_geometry(shapely.Point(cursor),frame['rotation_centers'][owner],frame['states'][owner]).coords[0])
-            engine=self.w.engine;reconstructor=getattr(engine,'reconstructor',None)
-            if reconstructor is not None:
-                updated,part=reconstructor.edited(piece,1 if state['kind']=='extra' else 0,cursor)
-                state['updated']=replace(self.w.view_settings,reconstruction_intervals=updated.reconstruction_intervals);state['part']=part
+            plan=piece.get('route_plan')
+            if plan is not None:
+                which=1 if state['kind']=='extra' else 0
+                part,clamped=plan.edit(*piece['interval'],which,float(plan.route.project(shapely.Point(cursor))))
                 if part is not None:
-                    line=part['far'] if state['kind']=='extra' else transform(part['near'],frame['rotation_centers'][owner],frame['states'][owner])
+                    rows=[r for r in self.w.view_settings.reconstruction_intervals if (r[0],r[1],r[2],normalize_via_refs(r[3]))!=plan.key]
+                    rows.append((*plan.key,plan.identity,part['a'],part['b']))
+                    state['updated']=replace(self.w.view_settings,reconstruction_intervals=tuple(rows));state['part']=part
+                    line=part['far'] if which else transform(part['near'],frame['rotation_centers'][owner],frame['states'][owner])
                     self.w.reconstruction_overlay.highlight((piece,_lines(line)[0],state['kind']))
                     if self.w.view_settings.reconstruction_live:self._live(part)
         self.w.render_scene()
@@ -186,7 +192,7 @@ class CutDrag:
         state=self.state;old=state['frame'];piece=state['piece'];plan=piece['route_plan']
         regions,error=warp(part,plan,old['rotation_centers'][piece['die']],old['states'][piece['die']])
         if error:
-            self.w.statusBar().showMessage(error);return
+            self.w.statusBar().showMessage(error);regions=piece['regions']
         moved_cut=transform(part['near'],old['rotation_centers'][piece['die']],old['states'][piece['die']])
         replacement=dict(piece,regions=regions,nominal_regions={k:part[k] for k in 'ABC'},moved=regions['C'],movable=part['C'],fixed=regions['B'],bridge=regions['A'],
                          cut=part['near'],moved_cut=moved_cut,extra_cut=part['far'],span=part['A'],interval=(part['a'],part['b']))
@@ -196,18 +202,26 @@ class CutDrag:
     def release(self,event):
         if self.state is None:return
         if event.xdata is not None and event.ydata is not None and self.state['moved']:self.latest=np.array([event.xdata,event.ydata])
-        self._tick();state=self.state;self.state=None;self.latest=None;self.timer.stop()
+        self._tick();state=self.state
+        if state.get('part') is not None:self._live(state['part'])
+        self.state=None;self.latest=None;self.timer.stop()
         self.w.reconstruction_overlay.clear_hover()
         if not state['moved']:return
-        self.w.view_settings=state['updated'];self.w.current_frame=state['frame']
+        self.w.view_settings=state['updated']
         self.w.invalidate_reconstruction_edit();self.w.request_preview(quiet=True)
+    def cancel(self):
+        if self.state is None:return False
+        original=self.state['frame'];self.state=None;self.latest=None;self.timer.stop()
+        self.w.current_frame=original;self.w.reconstruction_overlay.clear_hover()
+        self.w.reconstruction_overlay.stamp=None;self.w.reconstruction_overlay.draw();self.w.render_scene()
+        return True
     def leave(self,event=None):
         if self.state is None:self.w.reconstruction_overlay.clear_hover()
     def clear(self,key,piece,kind='cut'):
         which=1 if kind=='extra' else 0;plan=piece.get('route_plan')
         if plan is None:return
         a,b=piece['interval'];target=plan.nominal_second if which else plan.nominal_first
-        settings,_=self.w.engine.reconstructor.edited(piece,which,plan.route.interpolate(target).coords[0])
+        settings=_store_cut(self.w.view_settings,piece,None,plan.route.interpolate(target).coords[0],'extra' if which else 'cut')
         self.w.view_settings=settings;self.w.invalidate_reconstruction_edit();self.w.request_preview(quiet=True)
 
 

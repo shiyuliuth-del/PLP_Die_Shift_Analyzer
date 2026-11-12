@@ -2,6 +2,7 @@
 import os,sys,tempfile,time,json
 from pathlib import Path
 from dataclasses import replace
+from unittest.mock import patch
 import numpy as np
 from matplotlib.backend_bases import MouseEvent
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
@@ -46,9 +47,23 @@ try:
  w.run_evaluation();wait();w.reconstruction_toggle.setChecked(True);wait()
  w.manual_states=np.array([[25.,10.,.01],[0,0,0]]);w.request_preview();wait()
  q=next(q for q in w.current_frame['reconstruction']['pieces'] if q['die']==0 and q['route_plan'] is not None)
- a,b=q['interval'];q1=drag(q,0,a+60)
+ for (layer,kind),artist in w.reconstruction_overlay.artists.items():
+  assert w.layer_artists[layer].get_zorder()<artist.get_zorder()<w.layer_artists[layer].get_zorder()+.01
+ a,b=q['interval']
+ before=w.view_settings.reconstruction_intervals
+ pos=np.asarray(q['moved_cut'].centroid.coords[0]);w.ax.set_xlim(pos[0]-100,pos[0]+100);w.ax.set_ylim(pos[1]-100,pos[1]+100);w.plot_layout(preserve=True);w.canvas.draw()
+ event('button_press_event',pos);assert w.cut_drag.state is not None
+ w.escape_action();assert w.cut_drag.state is None and w.view_settings.reconstruction_intervals==before
+ q1=drag(q,0,a+60)
  assert q1['interval'][1]==b and q1['interval'][0]>a+50,q1['interval']
  q2=drag(q1,1,b-50);assert q2['interval'][0]==q1['interval'][0] and q2['interval'][1]<b-40
+ # A second edit before the first worker completes must retain the first end.
+ with patch.object(w,'request_preview'):
+  qfast=drag(q2,0,q2['interval'][0]+10)
+  qfast2=drag(qfast,1,qfast['interval'][1]-10)
+  assert qfast2['interval'][0]==qfast['interval'][0]
+ w.request_preview();wait()
+ q2=next(p for p in w.current_frame['reconstruction']['pieces'] if p['die']==0)
  # Live preference is applied immediately and does not alter the final result.
  w.setting_fields['reconstruction_live'].setChecked(False);app.processEvents()
  q3=drag(q2,0,q2['interval'][0]+20,live=False)

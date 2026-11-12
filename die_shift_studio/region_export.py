@@ -78,4 +78,5 @@ def write_regions(snapshot,reconstruction,roles,path,progress=lambda *_:None,*,s
         if os.path.exists(temp):os.unlink(temp)
     progress(100,'动静区DXF输出完成')
     return dict(path=str(path),polygons=len(shapes),layers=len(names),sha256=digest,ignored=snapshot.ignored_count,
-                input_polygons=inputs,merged_polygons=merged,flattened=True,merge_layers=options.merge_layers,scale=options.scale,regions=True)
+                input_polygons=inputs,merged_polygons=merged,flattened=True,merge_layers=options.merge_layers,scale=options.scale,regions=True,
+                unresolved_regions=sum(not q.get('valid',True) for q in reconstruction.get('pieces',())))

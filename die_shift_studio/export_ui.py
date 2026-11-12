@@ -6,7 +6,7 @@ from .qt_compat import QtWidgets as W,run_dialog,ACCEPTED
 def export_dxf(window,regions=False):
     if window.data is None:
         window.error('请先打开GDS');return
-    if window.worker is not None:
+    if window.worker is not None or getattr(window,'preview_workers',None) or getattr(window,'preview_pending',None) or getattr(getattr(window,'cut_drag',None),'state',None):
         window.error('图纸操作尚未完成，请完成后再输出');return
     if regions and (window.case is None or window.engine is None):
         window.error('请先设置封装、芯片及金属层用途，并完成一次重构预演');return
@@ -57,6 +57,9 @@ def export_dxf(window,regions=False):
         return result
     def complete(result):
         message=f"DXF已输出：{result['path']} · {result['polygons']}个图形，{result['layers']}层；Flatten已完成，Merge {'开启' if result['merge_layers'] else '关闭'}（{result['input_polygons']}→{result['merged_polygons']}）；比例{result['scale']:g}，单位μm。"
+        if result.get('regions'):
+            message+=' A/B/C仅含真实轮廓，无HATCH。'
+            if result.get('unresolved_regions'):message+=f" {result['unresolved_regions']}个重构区域未通过几何检查，保留原图并归入B层；请查看重构预演警告。"
         if result['ignored']:message+=f"已跳过导入时未能识别的{result['ignored']}个图形。"
         window.log_bus.emit(message);window.statusBar().showMessage(message)
     window.start_worker(work,complete)

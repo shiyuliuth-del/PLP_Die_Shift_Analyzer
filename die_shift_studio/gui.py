@@ -866,6 +866,7 @@ class MainWindow(W.QMainWindow):
             else:digest=logical_fingerprint((result.get('parameters'),result.get('contact_analysis'),result.get('issues')))
         return logical_fingerprint((data.geometry_id,data.top_name,roles,order,motions,asdict(params),digest))
     def clear_preview(self):
+        if hasattr(self,'cut_drag'):self.cut_drag.cancel()
         self._width_grid_summary=None;self._problem_tag=None;self._coupled_key=None;self._coupled_data=None
         if self.filter_job:self.filter_job.cancelled.set()
         self.extremes=None;self.active_preview=None;self.owner_cache=None;self.page_items=[];self._extreme_paint={};self.preview_page=0;self.state_result=None
@@ -1356,16 +1357,17 @@ class MainWindow(W.QMainWindow):
 
     def reconstruction_changed(self,*_):
         if self.loading:return
-        if not self.reconstruction_toggle.isChecked():self.exit_region_mode()
+        if not self.reconstruction_toggle.isChecked():self.exit_region_mode();self.cut_drag.cancel()
         self.filter_changed(pending_ok=True)
         if self.reconstruction_toggle.isChecked():
-            self.statusBar().showMessage('重构预演：按串联落盘自动划分固定RDL移动区（跨芯片时限定在本 DIE 芯片边框内）、按姿态移动、用切口 4 端点多边形补上裂隙…')
+            self.statusBar().showMessage('重构预演：建立原图共用动区，核对全部离散极端；蓝色与玫红两端可独立拖动…')
             self.request_preview()
         else:
             # Refresh the displayed frame after removing the reconstruction overlay.
             if self.width_toggle.isChecked():self.request_preview()
             else:self.plot_layout(preserve=True)
     def escape_action(self):
+        if hasattr(self,'cut_drag') and self.cut_drag.cancel():return
         self.exit_region_mode()
         if hasattr(self,'navigation'):self.navigation.cancel_zoom()
         if hasattr(self,'mouse_die') and self.mouse_die.exit():return
