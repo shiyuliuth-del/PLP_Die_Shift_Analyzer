@@ -239,15 +239,18 @@ def warp(part,plan,center,state):
     a,b=part['a'],part['b'];start=a if a>0 else plan.land_end
     span=b-start
     if span<=plan.tolerance:return None,'动区过短，保留原始图形'
+    field_key=('field',round(a,8),round(b,8))
     def move(points):
-        s=project(plan.route,points);t=np.clip((s-start)/span,0,1)
-        w=1-(10*t**3-15*t**4+6*t**5)
-        # The true cut sections, not an approximate graph projection, define
-        # the shared seams exactly, including unequal widths and corner nodes.
-        pt=shapely.points(points)
-        if a>0:w=np.where(shapely.distance(pt,part['near'])<plan.tolerance*.1,1.,w)
-        w=np.where(shapely.distance(pt,part['far'])<plan.tolerance*.1,0.,w)
-        return points+w[:,None]*(rigid_transform(points,center,state)-points)
+        saved=plan.cache.get(field_key)
+        if saved is None:
+            s=project(plan.route,points);t=np.clip((s-start)/span,0,1)
+            w=1-(10*t**3-15*t**4+6*t**5)
+            pt=shapely.points(points)
+            if a>0:w=np.where(shapely.distance(pt,part['near'])<plan.tolerance*.1,1.,w)
+            w=np.where(shapely.distance(pt,part['far'])<plan.tolerance*.1,0.,w)
+            saved=points.copy(),w[:,None];plan.cache[field_key]=saved
+        xy,weight=saved
+        return xy+weight*(rigid_transform(xy,center,state)-xy)
     # One segmentation of each nominal piece is reusable through the route cache.
     key=('mesh',round(a,8),round(b,8))
     mesh=plan.cache.get(key)

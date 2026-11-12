@@ -1620,7 +1620,7 @@ class MainWindow(W.QMainWindow):
         return origin
     def refresh_legend(self):
         stamp=(tuple((k,self.visible_boxes[k].isChecked(),str(self.style_for(k))) for k in self.ordered_layers()),
-               self.view_settings.show_annulus_range,self.view_settings.show_spacing_range,self.current_frame is not None,(self.current_frame or {}).get('width_summary') is not None,self.target_sigma.currentText(),False,self.probability_toggle.isChecked(),id(self.probability_data),self.view_settings.probability_cmap,self.view_settings.probability_alpha,self.view_settings.probability_gamma,self.view_settings.probability_show_ranges,self.view_settings.probability_ranges,self.view_settings.probability_target_color,self.view_settings.contact_marker_color,self.view_settings.unadapted_marker_color,self.width_toggle.isChecked(),self.width_sufficient_toggle.isChecked(),self.ignored_width_lines,self.repair_toggle.isChecked(),self.reconstruction_toggle.isChecked(),bool(self.current_frame and self.current_frame.get('motion_issues')))
+               self.view_settings.show_annulus_range,self.view_settings.show_spacing_range,self.show_issues.isChecked(),self.current_frame is not None,(self.current_frame or {}).get('width_summary') is not None,self.target_sigma.currentText(),False,self.probability_toggle.isChecked(),id(self.probability_data),self.view_settings.probability_cmap,self.view_settings.probability_alpha,self.view_settings.probability_gamma,self.view_settings.probability_show_ranges,self.view_settings.probability_ranges,self.view_settings.probability_target_color,self.view_settings.contact_marker_color,self.view_settings.unadapted_marker_color,self.width_toggle.isChecked(),self.width_sufficient_toggle.isChecked(),self.ignored_width_lines,self.repair_toggle.isChecked(),self.reconstruction_toggle.isChecked(),bool(self.current_frame and self.current_frame.get('motion_issues')))
         if stamp==self._legend_stamp:return
         self._legend_stamp=stamp
         if self.legend is not None:self.legend.remove()
@@ -1648,20 +1648,20 @@ class MainWindow(W.QMainWindow):
                     if title!='宽度足够' or self.width_sufficient_toggle.isChecked():
                         handles.append(Patch(facecolor='none',edgecolor=tint(color,modes['截面']),label=title))
         if self.reconstruction_toggle.isChecked():
-            handles += [Patch(facecolor='#9fb3c8',edgecolor='#5d7894',alpha=.20,hatch='//',label='重构：移动区原位（冷色，移走后空出）'),
-                        Patch(facecolor='#e07a2f',edgecolor='#8f4712',alpha=.78,label='重构：重构后的铜（暖色）'),
-                        Patch(facecolor='#f5b955',edgecolor='#a86f16',alpha=.80,label='重构：补线（切口 4 端点围成）'),
-                        Line2D([],[],color='#8a4b3a',ls=(0,(6,3)),label='重构：切口线')]
+            from .reconstruction_overlay import COLORS,CUT_COLOR,SECOND_CUT_COLOR,WARNING_COLOR
+            handles += [Patch(facecolor=COLORS[k],alpha=.66,label=k+' '+title) for k,title in [('A','动区'),('B','静区'),('C','平移区')]]
+            handles += [Line2D([],[],color=CUT_COLOR,lw=2,label='运动侧边界 / 整孔盘蓝点'),Line2D([],[],color=SECOND_CUT_COLOR,lw=2,label='固定侧边界'),Patch(facecolor='none',edgecolor=WARNING_COLOR,ls='--',label='动区约束警告')]
         if self.current_frame and self.current_frame.get('motion_issues'):handles.append(Line2D([],[],color='#bf862c',ls='--',label='运动归属未定：保持名义位置'))
         if getattr(self.data,'ignored_geometry',[]):handles.append(Line2D([],[],color='#d72b91',ls='--',lw=.7,label='忽略的无效图形'))
         if self.current_frame is not None:
             for _,option,title,color,alpha in RANGES:
                 if getattr(self.view_settings,option):handles.append(Line2D([],[],color=color,alpha=alpha,ls='--',label=title))
-            handles.append(Line2D([],[],color='#92979e',ls='--',label='当前孔中心→接触位置'))
+            if self.show_issues.isChecked():handles.append(Line2D([],[],color='#92979e',ls='--',label='当前孔中心→接触位置'))
         binary=bool(self.probability_data and self.probability_data.get('binary'))
         if self.probability_toggle.isChecked() and binary:
             handles.append(Patch(facecolor=self.probability_colormap()(1.),alpha=self.view_settings.probability_alpha,label='当前姿态过孔实体覆盖 100%'))
         if self.probability_toggle.isChecked() and self.probability_data and not binary:
+            handles.append(Line2D([],[],color='#677a9a80',ls='--',lw=.65,label='离散极端实体足迹'))
             maximum=max((float(q['probability'].max()) for q in self.probability_data['maps']),default=0)
             norm=matplotlib.colors.PowerNorm(self.view_settings.probability_gamma,0,1)
             for value,title in ((.001,'覆盖概率0.1%（低概率已增强）'),(maximum,f'覆盖概率最大{maximum:.1%}')):
@@ -1897,7 +1897,7 @@ class MainWindow(W.QMainWindow):
             key=(signature,deform,settings.deformation_key(),drc,settings.numeric_key(),width,recon)
             cached=self.cache_group.nominal.get(key)
         ready=(not self.probability_toggle.isChecked() or self.probability_data is not None) and (not self.space_toggle.isChecked() or self.space_data is not None)
-        ready=ready and (not self.footprint_toggle.isChecked() or self.footprint_data is not None)
+        ready=ready and (not self.footprint_toggle.isChecked() or math.isinf(p.target_nsigma) or self.footprint_data is not None)
         if width[0] and self.extremes is not None and self._width_grid_summary is None:ready=False
         global_ready=show_frame or not (deform and self.result and math.isfinite(p.target_nsigma)) or bool(cached and cached.get('global_deformation'))
         matches=[e for e in self.session_engines.values() if getattr(e,'signature',None)==signature]

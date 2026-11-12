@@ -224,13 +224,24 @@ class Reconstructor:
         if hit is not None:return hit
         entries=self._plans_for_all_poses(progress);pieces=[];features={}
         selected=None if targets is None else set(map(tuple,targets))
-        for number,entry in enumerate(entries):
+        # Independent source features share no mutable geometry. GEOS releases
+        # the GIL for warp/validation, so larger frames use the existing hardware
+        # admission policy rather than serially processing every route.
+        def render(entry):
+            if selected is not None and (entry['layer'],entry['index']) not in selected:return None
+            part,manual=self.interval(entry)
+            if part is None:return part,manual,None,None
+            regions,error=warp(part,entry['plan'],self.model.bound.centers[entry['owner']],states[entry['owner']])
+            return part,manual,regions,error
+        from .resources import parallel_map
+        rendered=parallel_map(render,entries) if len(entries)>16 else list(map(render,entries))
+        for number,(entry,prepared) in enumerate(zip(entries,rendered)):
+
             layer,index,owner=entry['layer'],entry['index'],entry['owner'];source=entry['source'];plan=entry['plan']
             if selected is not None and (layer,index) not in selected:continue
             if self._cover_lookup(self.dropped,None,layer,index,entry['refs']):continue
-            part,manual=self.interval(entry);warning=entry['warning'];valid=True
+            part,manual,regions,error=prepared;warning=entry['warning'];valid=True
             if part is not None:
-                regions,error=warp(part,plan,self.model.bound.centers[owner],states[owner])
                 if error:regions={k:part[k] for k in 'ABC'};warning=error;valid=False
                 near=part['near'];moved_cut=transform(near,self.model.bound.centers[owner],states[owner]) if valid else near
                 far=part['far'];a,b=part['a'],part['b']
