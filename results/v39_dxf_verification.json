@@ -1,0 +1,57 @@
+{
+  "entities": 2505,
+  "all_open": true,
+  "identical_shared_endpoints": true,
+  "unmatched_endpoints": 0,
+  "geometry_metrics": {
+    "7/0": {
+      "length_error_um": 2.9103830456733704e-11,
+      "hausdorff_um": 4.556346636343676e-13
+    },
+    "6/0": {
+      "length_error_um": 3.092281986027956e-11,
+      "hausdorff_um": 0.0
+    },
+    "5/0": {
+      "length_error_um": 2.9103830456733704e-10,
+      "hausdorff_um": 5.684341886080802e-14
+    },
+    "4/0": {
+      "length_error_um": 7.275957614183426e-12,
+      "hausdorff_um": 0.0
+    },
+    "3/0": {
+      "length_error_um": 2.9103830456733704e-11,
+      "hausdorff_um": 0.0
+    },
+    "2/0": {
+      "length_error_um": 2.7284841053187847e-11,
+      "hausdorff_um": 0.0
+    },
+    "1/0": {
+      "length_error_um": 2.6193447411060333e-10,
+      "hausdorff_um": 0.0
+    },
+    "122/0": {
+      "length_error_um": 1.4551915228366852e-11,
+      "hausdorff_um": 0.0
+    },
+    "127/0": {
+      "length_error_um": 0.0,
+      "hausdorff_um": 0.0
+    },
+    "128/0": {
+      "length_error_um": 0.0,
+      "hausdorff_um": 0.0
+    }
+  },
+  "seconds": 35.410415501042735,
+  "sha256": "279cc7506d6b8711787f23faebcdbd2689d12321bffa5489f3a82aecec050176",
+  "optimized_seconds": 2.7229263019980863,
+  "unoptimized_seconds": 35.410415501042735,
+  "identical_file_bytes_after_optimization": true,
+  "scope": "Linux CPU. Final committed export: exact shared endpoints, open chains, perimeter and distance against independently frozen source boundary. Optimization timings use the earlier fixed snapshot, with simultaneous GUI regressions; optimized and unoptimized bytes were identical.",
+  "verification_sha": "7e6b2e62ed72ed9d3cb0502c35f660e62688457a",
+  "optimization_comparison_entities": 2509,
+  "optimization_comparison_sha256": "5d383454ae20d8a4885cbd386a8dc98989afe7d2d7abd66f0f8bb7bfda3d056f"
+}
