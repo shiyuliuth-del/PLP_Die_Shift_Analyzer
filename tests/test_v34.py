@@ -94,27 +94,6 @@ class KeepoutTests(unittest.TestCase):
                 self.assertEqual(next(v for v in q if v['kind']=='禁布区侵入')['intrusion_area_um2'],80.)
         finally:e.close()
 
-    def test_tangent_is_consistent_in_geometry_and_deformation_checks(self):
-        from types import SimpleNamespace
-        from die_shift_studio.state_check import check_state
-        from die_shift_studio.deformation import DeformationPreview
-        e=fixture(True)
-        try:
-            for dx,expected in ((0,False),(-1,True)):
-                z=np.array([[dx,0.,0.]])
-                frame=e.frame(z)
-                fast=frame['checks'][1]
-                slow=check_state(e.contact.data,e.contact.case,e.roles,e.p,None,z,
-                                 {k:v['polygons'] for k,v in frame['layers'].items()},1)
-                for q in (fast,slow):
-                    self.assertEqual(any('侵入禁布区' in r['kind'] for r in q['failures']),expected)
-            subject=SimpleNamespace(model=e.contact,p=e.p,reference_components={})
-            c=SimpleNamespace(key='5/0',indices=(1,),poly=box(120,0,130,10),net=-999)
-            for x,expected in ((120,False),(119,True)):
-                bad=DeformationPreview.candidate_violations(subject,c,box(x,0,130,10),[],[],
-                                                            np.zeros((1,3)),[],None,cheap=True)
-                self.assertEqual(any(q['kind']=='禁布区侵入' for q in bad),expected)
-        finally:e.close()
 
     def test_merge_overlapping_regions_preserves_holes_and_source_refs(self):
         e=fixture(extra_keepouts=(box(110,-80,130,80),))

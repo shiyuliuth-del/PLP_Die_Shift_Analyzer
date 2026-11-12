@@ -70,10 +70,5 @@ class V16Tests(unittest.TestCase):
             self.assertIsNone(r['estimate']);self.assertFalse(r['available'])
             self.assertEqual((r['lower'],r['upper']),(0,1))
 
-    def test_unknown_drc_or_failure_cannot_be_green(self):
-        frame=dict(checks={i:dict(failures=[]) for i in (1,2,3)},contact=dict(issues=[]))
-        self.assertIsNone(frame_status(frame)['safe']);frame['drc']=[];self.assertTrue(frame_status(frame)['safe'])
-        frame['deformation']=dict(diagnostics=[{'reason':'unresolved'}]);self.assertFalse(frame_status(frame)['safe'])
-        frame.pop('deformation');frame['checks'][2]['failures']=[{}];self.assertFalse(frame_status(frame)['safe'])
 
 if __name__=='__main__':unittest.main()

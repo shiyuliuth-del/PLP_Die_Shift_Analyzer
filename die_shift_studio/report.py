@@ -48,7 +48,7 @@ def report_document(r,motions=None,progress=lambda *_:None):
          [r'C=C_{\mathrm{die}}+c_{\mathrm{relative}}',r'T_z(P)=C+R(\theta)(P-C)+D'],
          '；'.join(f"DIE {row['die']}：{row.get('rotation_origin_mode','center')}，旋转中心{row.get('rotation_origin_um')} μm" for row in r['dies']),
          'Cdie为名义芯片最小外接矩形中心；正中心时crelative=(0,0)，角点取该矩形的实际顶点（按图纸Y分为上下两点，再按X分左右），自定义按图纸X/Y轴输入相对Cdie的μm坐标。C始终为源图参考点，不从偏移后图形重新求取。D=(DX,DY)为用户输入平移，R为逆时针旋转矩阵；芯片自身中心、边框、扇出线路和过孔均用同一C。')
-    step('刚体偏移与控制区域' ,f'最小包围a={p.annulus_um:g} μm；固定线距s={p.line_space_um:g} μm',
+    step('刚体偏移与控制区域' ,f'运动RDL包围={p.moving_annulus_um:g} μm；固定RDL包围a={p.annulus_um:g} μm；固定线距s={p.line_space_um:g} μm',
          [r'x^{\prime}=C_x+D_x+(x-C_x)\cos\theta-(y-C_y)\sin\theta',
           r'y^{\prime}=C_y+D_y+(x-C_x)\sin\theta+(y-C_y)\cos\theta',
           r'V_a=T_z(V)\oplus\mathcal{B}_a,\quad V_s=T_z(V)\oplus\mathcal{B}_{a+s}',
@@ -104,7 +104,7 @@ def report_document(r,motions=None,progress=lambda *_:None):
         step('当前姿态过孔实体覆盖','V 为运动过孔的源图形，T 为所选姿态的刚体变换，q 为图中位置。',
              [r'C(q)=\mathbf{1}\{q\in T_z(V)\}'], '实体内为100%，其余位置为0%。Space Map 使用工艺线距。')
     else:
-        step('过孔实体覆盖概率',f'方法={cfg.probability_method}；样本数=2^{cfg.sample_exponent}；积分阶数={cfg.quadrature_order}；网格={cfg.probability_cell_um:g} μm（0自动）',
+        step('极端足迹：实体覆盖概率',f'方法={cfg.probability_method}；样本数=2^{cfg.sample_exponent}；积分阶数={cfg.quadrature_order}；网格={cfg.probability_cell_um:g} μm（0自动）',
              [r'p_V(q)=\int_{\mathcal{H}}\mathbf{1}\{q\in T_z(V)\}f_T(z)\,dz',
               r'\widehat p_{V,G}=\frac{1}{N}\sum_{n=1}^{N}\frac{|G\cap T_{z_n}(V)|}{|G|},\quad\int p_V(q)\,dq=|V|',
               r'\widehat p_{V,G}\simeq\sum_j\omega_j(H*K_j)_G',
@@ -120,46 +120,16 @@ def report_document(r,motions=None,progress=lambda *_:None):
               r'S(P)=s+\min(Q_N,Q_H)'],
              '整DIE及其外部随动金属显示需求；整包模式其他区域为基础线距；0级使用硬边界QH；∞模式仅显示基础线距',
              'P为原始位置（μm），C为所属DIE的实际旋转中心，R为二维旋转矩阵，A/b为原/均值旋转相对坐标，J为位移Jacobian，λmax为2×2协方差矩阵最大特征值；其计算为(v11+v22+√((v11−v22)²+4v12²))/2。M为DIE数，F为3自由度卡方CDF（代码用逆生存函数避免消减）；Z为截断归一化质量。QN为条件置信包络，QH为硬输入范围的确定性上界，Bθ此处用rad。取两者较小仍是保守上界。S不包含孔半径或包围量，不直接用来替代接触概率判定。∞没有统计补偿量。')
-    step('预演分析：来源图形的局部连续型变',f'连续性={cfg.deformation_continuity}；方式={cfg.deformation_method}；曲线误差={cfg.deformation_tolerance_um:g} μm；固定线宽w={p.line_width_um:g} μm、线距s={p.line_space_um:g} μm',
-         [r'r_a=\frac{a}{\cos(\pi/128)}+2\delta,\quad L_i=V_i\oplus\mathcal{B}_{r_a},\quad G_0=G\cup\bigcup_i L_i',
-          r'r_i=\max_{x\in\mathrm{vertices}(L_i)}\|x-c_i\|+2\delta',
-          r't_i(P)=\min\!\left(1,\max\!\left(0,\frac{\|P-c_i\|-r_i}{L}\right)\right)',
-          r'w_{C1}(t)=1-3t^2+2t^3,\quad w_{C2}(t)=1-10t^3+15t^4-6t^5',
-          r'W_d(P)=1-\prod_{i\in d}(1-w_i(P))',
-          r'\Psi_B(P)=P+\sum_d W_d(P)[T_d(P)-P]',
-          r'A(w)=\frac{1-\cos(\gamma w)+\cot(\gamma/2)\sin(\gamma w)}{2}',
-          r'B(w)=\frac{\cot(\gamma/2)[1-\cos(\gamma w)]-\sin(\gamma w)}{2}',
-          r'\Psi_A(P)=P+\sum_d[A(W_d)\Delta_d+B(W_d)J_{90}\Delta_d],\quad\Delta_d=T_d(P)-P'],
-         '只在真实动孔—固定RDL接口适配；每个有位移的接口都尝试，接受合法型变后重新检查并迭代释放接口。统计风险不作为具体状态的永久冻结条件。每个显示帧重新校验；只显示全部约束通过的候选，最终全层DRC未通过则恢复原图。深色表示运动与适配部分，适配段有虚线描边。',
-         'P为固定RDL原位置，ci为运动孔原中心（区别于所属DIE中心Cd）；G为原固定铜区，Vi为运动过孔；先用Li补足名义所需孔盘得到G0。a为包围量，δ为源DBU，圆弧每象限32段；ra补偿内接弦和量化误差。ri从Li顶点到孔中心的最大距离加2δ求得，不再附加两倍线宽。包围是型变后输出约束，不以源孔盘不足拒绝适配。L为候选过渡宽度，以最大孔中心行程的2倍、固定线宽的2倍和5 μm三者最大值为基数，按设置的递增倍率g生成L=L0g^j，j=0至搜索级数减1，选择首个全部约束通过的最短候选；不是全局最优布线证明。wi为该孔权重，Wd把同DIE的多个孔光滑合并，Td为真实刚体变换，Dd为平移，R为旋转矩阵。贝塞尔方式混合位移，圆弧方式沿原点到刚体目标点间的圆弧行进，圆心角γ由设置的度数换成rad，正负随该DIE转角（零角取正）；A/B为弦向及垂向系数，J90将向量逆时针旋转90°。只有平移时两方式也不同。C1/C2指位移场在刚体区、固定区交界的一阶/二阶导数连续；铜内角低于设置时尝试扩大局部圆角，并重复全套校验；原GDS折角不被承诺全部变光滑，离散多边形也不声称数学上严格C2。无折叠充分界、固定连接端不动、按带符号容差得到的型变后最小线宽和固定铜异网线距、按工艺原值计算的其他动孔控制区、包围、封装、禁布区和拓扑均校验。曲线自适应细分后按源DBU量化；宽度/线距使用近似平行（≤5°）的非相邻边对规则，实际短接不受角度过滤；有效长度阈值向上取整到DBU；不在用户容差之外额外放宽。型变结果只作当前工况预演，不修改原GDS，也不改变前述原图统计概率。')
-    step('方向性孔盘、无折叠证明与逐帧动画','实际铜区域、补足包围量后的运动孔盘、固定过孔、用户连续性与插值设置',
-         [r't=\min(1,\max(0,(P-b)\cdot u/L)),\quad\Psi(P)=P+w(t)[T(P)-P]',
-          r'J_{11}>0,\quad J_{22}>0,\quad\det J>0'],
-         '短宽孔盘增加方向性过渡；径向场按相交支撑区计算充分界。所有接受结果继续检查完整固定RDL，失败恢复原图。',
-         'b为过渡起点，u为指向固定端的单位向量，L为过渡长度；J为局部坐标中Ψ的雅可比矩阵，Jij=∂Ψi/∂Pj；运动端为补足包围量后的整个孔盘，不只包含裸孔。方向性局部候选从实际两端间隙生成，不要求圆形支撑区绕开固定端。贝塞尔权重的全截面场在覆盖整个源铜的局部坐标矩形上，对两个主对角元及行列式建立解析正下界（严格大于0.02），满足P矩阵充分条件才放行；否则仍拒绝。必要时尝试峰值斜率1.25的分段C2积分权重，避免把较大的横向剪切误判为折叠。此证明只排除映射折叠，不替代线宽线距验收。细分仅作用于型变影响边，固定或刚体边保持原顶点；候选本征DRC按几何指纹复用，异网检查仅截取规则距离外加保护边距的相关区域。动画先构造并校验每个中间状态，计算时间与播放时间分开；算完连续播放和边算边显示均支持，相同条件复用完整动画缓存。只显示已完成检查的帧；未通过的型变线路恢复原图并标记。不在两张铜图之间插值生成未检查形状。')
-    step('三段追溯与全局DRC','来源铜连通区、运动/固定过孔；最小线宽线距、连续性与内角设置',
-         [r'S=L_0\left(\frac{w_0}{w_{\min}}\right)^{1/4},\quad g=\beta_g\max(w_0,w_{\min}),\quad L_{\max}=L_0-2g',
-          r't(P)=\min\!\left(1,\max\!\left(0,\frac{(P-b)\cdot u}{L}\right)\right)',
-          r'\phi=\arccos\!\left(\frac{|e_1\cdot e_2|}{\|e_1\|\,\|e_2\|}\right),\quad\phi\leq5^{\circ}',
-          r'Q=\left(\sum_{j=1}^{m}A_j,\ m,\ \operatorname{Area}(G^{\prime}\bigtriangleup G)\right)'],
-         '局部孔盘调整无通过结果时，沿实际连通铜图形寻找运动段、适配段、固定段；固定端不动。独立DRC开关控制粉色违规显示，关闭开关不改变判定。',
-         'L0/w0是候选对边的共同长度/间距；S为长宽排序值，βg为设置的拐角端部预留倍数，g为两端避开拐角的保留长度，Lmax为可用长度，wmin为固定最小线宽。先居中取Lmax，再尝试0.75/0.5倍及偏中心位置，候选预算由设置控制；同时增加完整投影截面法处理弯曲、宽孔盘及分支，截面前为运动段、后为固定段。设置允许关闭这类通用截面。b为适配起点，u为指向固定端的单位向量，L为适配长度，P为源点；运动段W=1、固定段W=0，适配段使用前述C1/C2权重与贝塞尔/圆弧公式。e1/e2为两条非零边的方向；只检查近似平行、非共享顶点的边，粉色定位真实不足段；实际异网相交始终算短接。没有完全合格结果时，对合法拓扑候选按Q字典序选取：Aj为第j组违规区域面积（μm²），m为违规组数，最后一项为改动铜面积；这是有限搜索中的最佳候选，不是合格解或全局最优证明。Q仅用于内部搜索排序；不合格候选不会显示。最终再次检查所有候选与候选、候选与恢复原图之间的冲突，迭代回退至稳定。交互帧复核已有结构，停止操作后完整搜索；所有标记与图形用同一当前状态。')
-    step('中段连接：双侧固定平台与整截面过渡','来源连通铜、实际运动孔和两侧固定连接；既有连续性和曲线误差设置',
-         [r's=(P-o)\cdot u,\quad \Psi(P)=P+w(s)[T(P)-P]',
-          r'w(s)=w_a+(w_b-w_a)\left[1-w_{Ck}\!\left(\frac{s-a}{b-a}\right)\right]'],
-         '运动平台w=1、固定平台w=0；截面同权重，保持中段孔两侧连接；适配段用虚线描边。无证明或最终DRC失败时恢复原图。',
-         'P为源铜点，o为源铜顶点均值，u为候选轴单位方向，s为投影距离（μm）；a/b为相邻固定/运动约束投影区间间的过渡端点。wa/wb为两端0或1平台值，wCk为前述C1/C2权重，区间外保持平台。方向来自主轴、源边方向及连接端方向；允许多个交替平台。所有平台必须完整覆盖对应过孔约束且不互相冲突。最终仍检查所有孔包围、固定端和异网净距。')
-    step('原始材料随动与分支铜内追溯','原始连通铜G、运动孔盘与相连源边界点P、固定连接A、每颗DIE的刚体变换T',
-         [r'\Psi(P)=P+w(P)[T(P)-P],\quad G^{\prime}=\Psi(G)',
-          r'e_{\mathrm{move}}=\max_{P\in\mathcal{L}}\|\Psi(P)-T(P)\|',
-          r'e_{\mathrm{edge}}=\max_{P\in\mathcal{L}\cap\partial G}d(\Psi(P),\partial G^{\prime})'],
-         '原孔盘连同连接铜型变；增加原材料点与最终轮廓复核。验收失败恢复原图并说明，禁止仅叠加新孔盘伪装随动。',
-         'G为来源铜，必要时先在名义位置补足最小包围量；L为原孔盘边缘及一小段连接源边界采样，间距不超过工艺线宽的1/4。对短共享岛，靠近固定孔的连接颈允许渐变，仅将明确属于运动端的源弧作为刚体约束。P为原始材料点，Ψ为同一连续位移场，w在运动段为1、固定段为0；原孔盘点的刚体误差不得超过max(2DBU,0.1×曲线误差)，最终输出边缘和材料包含误差不得超过曲线误差+2DBU。优先使用整截面场；常规五次过渡压缩过急时，尝试两端平滑、中央近线性的C2积分权重，端部比例0.2、0.08、0.025，最大斜率分别为1/(1-r)。分支候选在源铜约束三角网中求运动端到固定端的图路径距离d，使用w=wCk((d-a)/(b-a))，a/b是运动平台与固定平台之间的距离端点。候选需通过无折叠约束、轮廓有效性、孔洞/固定锚和全图DRC复核；网格内方向分段变化，不宣称整片曲面处处C2。材料证书是有间距的源边界核验，不是连续体力学仿真。')
-    step('同网分接口与最终组合验收','当前可适配接口集合R、未选接口、全部异网铜与控制区',
-         [r'A_R=A\cup\bigcup_{i\notin R}V_i',
-          r'\Delta_j=(G^{\prime}\cap C_j)\backslash[(G\cap C_j)\oplus\mathcal{B}_{\delta}],\quad\Delta_j=\varnothing'],
-         '同网部分接口独立适配，未适配接口保留原始位置；每个接口均输出状态与原因。',
-         'Vi为名义过孔，AR将未选择的接口加入固定锚；Cj为其他网络运动孔的包围量加线距控制区，δ为一个DBU的量化保护。允许源图既有接触，但禁止新增接触接口或扩大侵入超过量化边界。全部候选组合后再次做线宽、线距、角度和锚点复核，失败迭代回退；未求得有效解不等于证明几何不可行。')
+    step('共用动区与重构预演','原始固定RDL、名义连接关系、全部输入偏移边界、两端手动位置',
+         [r'G=A\cup B\cup C,\quad A^\circ\cap B^\circ=A^\circ\cap C^\circ=B^\circ\cap C^\circ=\varnothing',
+          r't=\mathrm{clip}\!\left(\frac{s(P)-s_0}{s_1-s_0},0,1\right),\quad w(t)=1-10t^3+15t^4-6t^5',
+          r'P_A^\prime=P+w(t)[T(P)-P],\quad P_B^\prime=P,\quad P_C^\prime=T(P)'],
+         'A动区、B固定连接静区、C运动连接平移区；原图路径与端点对所有姿态共用。',
+         'G是原始固定铜；s(P)为P到名义铜内追溯路径的投影弧长，s0/s1是有序端点。T为所属DIE的刚体变换，w为零端部导数的过渡权重。孔盘全纳入A时，运动端权重平台覆盖完整孔盘。端点不得交换，拐角内部吸附到预留外。自动比较拓扑可切分的直段，优先最长且满足全输入位移包络余量的候选；不是全局路由最优证明。预演检查有效性、连通和区域交叠，失败保留原图并标紫色；异网净距按最终铜测量，完整DRC需单独启用。')
+    step('动静区DXF轮廓','当前完成铜形、同一A/B/C区域定义、输出范围/Merge/孔洞拆层/比例',
+         [r'E_K=\partial G^\prime\cap K^\prime,\quad K\in\{A,B,C\},\qquad \bigcup_K E_K=\partial G^\prime'],
+         '固定RDL层名追加A/B/C；仅保留真实边界的开放折线，不输出内部切割边或HATCH。',
+         '∂为外边界及孔洞边界。各区的折线在同一接口端点对接，叠加后才还原完整闭合轮廓。其他图层保持原层名；源GDS和工程几何均不由输出选项修改。')
     step('工程缓存与无位移恢复',f'当前工程普通缓存上限={cfg.cache_max_entries}；GDS内容、层序/用途、偏移、工艺与计算设置',
          [],'按实际内容复用状态、概率、Space Map及已验证动画；无位移帧固定保留。',
          '缓存上限按一个工程的普通结果条目数计，达到上限时淘汰最久未使用条目；固定无位移结果不占普通额度。取消的动画保留已完成帧，重试接着计算；反向切换复用已验证路径帧。目标状态缓存独立于过渡动画，缓存命中优先显示。后台按当前CPU和内存余量至多并行两项预演，计算引擎独占，结果缓存共享；高负载排队，过时结果只入缓存不覆盖新画面。工程切换保留本次运行中各工程缓存；清理菜单可清当前或全部工程，文件大小每0.5秒刷新。主动重新方案评估清当前工程，关闭软件清全部会话缓存，不从用户工程反序列化缓存文件。')
@@ -218,49 +188,10 @@ def report_document(r,motions=None,progress=lambda *_:None):
              'd为DIE编号；Bx,d和By,d是μm单边最大幅度，BO,d是度，k为目标级别。有限k采用截断联合正态，∞为名义位置二值判断。')
         blocks.append(grid(['DIE','Bx / μm','By / μm','BO / °','σx / μm','σy / μm','σθ / rad'],
             [[i+1,*v,v[0]/p.scale_nsigma,v[1]/p.scale_nsigma,math.radians(v[2])/p.scale_nsigma] for i,v in enumerate(p.die_bounds)]))
-    adaptive=r.get('adaptive_preview')
-    if adaptive:
-        if not adaptive.get('statistics_match_saved_evaluation',True):blocks.append('<p>本表使用当前预演参数，与上次方案评估快照不同；重新点击方案评估可同步。目标σ='+h(fmt(adaptive['target_sigma']))+'；包围/固定线宽/固定线距（μm）='+h(str([adaptive['annulus_um'],adaptive['line_width_um'],adaptive['line_space_um']]))+'；逐芯片幅度（μm、μm、°）='+h(str(adaptive['die_bounds']))+'</p>')
-        blocks.append('<h3>预演分析的迭代结果</h3><p>'+h(adaptive['continuous_probability'])+'</p>'+grid(['代表状态','初始不足','最终不足','释放','迭代轮数'],[[q['name'],q['initial'],q['remaining'],q['released'],len(q['iterations'])] for q in adaptive['states']]))
     recon=r.get('preview_reconstruction')
     if recon:
         detail=recon['summary'];parameters=recon.get('parameters',{})
-        length=parameters.get('length_um',0)
-        where=(f"再往外 {fmt(length)} μm" if length>0
-               else "有限候选搜索确定的位置" if parameters.get('search_cut')
-               else f"{fmt(parameters.get('landing_diameters',0))} 个落盘直径处（自动）")
-        step('当前姿态的固定RDL重构预演',
-             f"软件按运动过孔自动划分固定RDL移动区：同一网络、彼此相距不远的落盘算作一条串，整条串只切一刀"
-             f"（切口垂直于该串的走线，量到串里最远的落盘再往外 {where}）；"
-             f"移动区按所属 DIE 的刚体变换移动（同一块固定RDL跨多个芯片时只取本 DIE 芯片边框 128/0 以内的铜，"
-             f"边框外的铜归相邻 DIE、留在原位）；裂隙用两个切口面的 4 个端点围成的多边形补上"
-             f"（不论是否短路都补，外扩 {fmt(parameters.get('width_um',0))} μm，0 表示正好覆盖切口）；"
-             f"按当前姿态显示重构铜及其同层异网净距",
-             [r'P_{\rm move}=C\cap\{p:(p-o)\cdot n\geq 0\}',
-              r"P'_{\rm move}=R_{\theta}(P_{\rm move}-c)+c+\Delta",
-              r'Q=\mathrm{conv}\{F_{0},F_{1},F^{\prime}_{1},F^{\prime}_{0}\}'],
-             f"移动区{detail['pieces']}段；补线{detail['bridges']}处；整块随动{detail['orphans']}块；"
-             f"贴合（裂隙为0）{detail.get('flush',0)}段；"
-             f"重构后与其他网络间距不足{detail.get('conflicts',0)}段（有效线距{fmt(detail.get('rule_space_um',0))} μm）；"
-             + (f"手动固定切口{detail.get('manual_cuts',0)}条串；" if detail.get('manual_cuts') else "")
-             + f"移动面积合计{fmt(detail['movable_area_um2'])} μm²；补线面积合计{fmt(detail.get('cover_area_um2',0))} μm²；"
-             f"最大位移{fmt(detail['max_shift_um'])} μm",
-             '同一块固定RDL上属于同一DIE、同一网络且彼此相距不超过判定距离的多个落盘视为一条串，只切一刀，切口不会落在两个相邻落盘之间。'
-             '切片n垂直于该串的走线（与走线两侧各成90°），o为切口位置（由串里最远的落盘再往外量出），取含过孔的整条串一侧为移动区；'
-             '若该固定RDL跨多个芯片，移动区再与本DIE的芯片边框（128/0）取交集，边框外的铜归相邻DIE留在原位，边框线本身也是一条切口。'
-             'c为该DIE的旋转中心，Δ为该DIE的位移（含转角θ）。'
-             'g_seam为移动区切口线与固定区切口线的间距（裂隙宽度）；补线Q为两个切口面的4个端点（每面两个：F0、F1 与它们随DIE移动后的 F1′、F0′）围成的四边形，'
-             '因此不论裂隙大小（是否短路）都会补，只有两面完全重合或缝隙已被铜盖住时才不重复补。'
-             '整块随动表示该图形整体都成了移动区，没有同网不动铜可以接；'
-             '裂隙为0（贴合）不是缺陷：被切开的这段铜沿DIE的运动方向继续延伸时，移动后必然压到留下的那段铜上，'
-             '换任何切线位置都拉不开，软件把它标成“贴合（由补线覆盖）”，由补线多边形把两者相接的地方盖住。'
-             '启用自动搜索时，在有限候选中比较移动铜及补线与同层其他网络的净距，'
-             '优先取满足有效线距的位置；若已计算候选都不满足，就取其中净距较大者。显示按重构后的同层铜重新测量，'
-             '图上用尺寸箭头标出这段距离。'
-             '切口位置还可以在图上直接拖动固定：拖动切口线只沿它自己的法向移动，方向仍与走线成 90°，松开即按新的切口位置重算移动区、补线和间距检查；'
-             '右键或双击切口、或点“清除全部手动切口”，就把这条串恢复为当前设置计算的自动位置。'
-             '自动划分是软件猜测，可能与人工划分不同；本项是重构预演，不代表产线实际做法、整图可布通或量产良率。'
-             +recon.get('scope',''))
+        blocks.append('<p>共用动区 '+str(detail['pieces'])+' 处；警告 '+str(detail.get('warnings',0))+' 处。'+h(recon.get('scope',''))+'</p>')
         space=detail.get('rule_space_um',0.)
         def state(q):
             if q['orphan']:text='整块随动（无不动铜可接）'

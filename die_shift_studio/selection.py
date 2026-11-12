@@ -42,7 +42,7 @@ class GeometrySelection:
 
     def replacements(self):
         w=self.w
-        return w.current_frame.get('deformation',{}).get('replacements',{}) if w.current_frame and w.deformation_toggle.isChecked() else {}
+        return w.current_frame.get('reconstruction',{}).get('replacements',{}) if w.current_frame and w.reconstruction_toggle.isChecked() else {}
 
     def hits(self,shape,contained=False,point=False):
         w=self.w

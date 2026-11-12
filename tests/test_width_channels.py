@@ -199,12 +199,13 @@ class ChannelTests(unittest.TestCase):
             old=normalize_project(dict(schema_version=version,settings={'width_overlap_um':7.,'width_mode':'landing',
                                   'width_search_radius_um':45.,'width_gap_threshold_um':22.,'drc_tolerance_um':-1.}))
             self.assertEqual(old['overlays'],OVERLAY_DEFAULTS)
-            self.assertEqual(old['settings']['reconstruction_overlap_um'],7.)
+            self.assertNotIn('reconstruction_overlap_um',old['settings'])
+            self.assertEqual(old['parameters']['moving_annulus_um'],old['parameters']['annulus_um'])
             self.assertEqual(old['settings']['drc_tolerance_um'],-1.)
             self.assertFalse(any(k in old['settings'] for k in ('width_overlap_um','width_mode','width_gap_threshold_um','width_search_radius_um')))
         p=normalize_project(dict(schema_version=5,overlays=dict(width=True),settings={'reconstruction_enabled':True,
                             'reconstruction_overlap_um':9.,'width_overlap_um':4.}))
         self.assertTrue(p['overlays']['width'] and p['overlays']['reconstruction'])
-        self.assertEqual(p['settings']['reconstruction_overlap_um'],9.)
+        self.assertNotIn('reconstruction_overlap_um',p['settings'])
         self.assertEqual(normalize_project(p),p)
         with self.assertRaises(ValueError):normalize_project(dict(schema_version=5,overlays={'width':'false'}))

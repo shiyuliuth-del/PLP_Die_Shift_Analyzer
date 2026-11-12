@@ -105,12 +105,12 @@ def main():
         doc=ezdxf.readfile(target);assert doc.header['$FILLMODE']==1 and doc.units==13
         assert all(e.dxf.layer=='L4_D0' and e.dxftype()=='HATCH' for e in doc.modelspace())
         assert w.width_yield.bank is before
-        w.setting_sections['DXF输出参数'].setChecked(True)
+        w.setting_sections['DXF'].setChecked(True)
         w.setting_fields['width_show_probability'].setChecked(False);settle()
         path=folder/'saved.dshift.json';w.write_project(path);record=json.loads(path.read_text())
         assert record['dxf_options']['scale']==2 and record['dxf_options']['layer_scope']=='visible'
         w.load_project(path);settle()
-        assert w.dxf_settings.scale==2 and w.setting_sections['DXF输出参数'].isChecked()
+        assert w.dxf_settings.scale==2 and w.setting_sections['DXF'].isChecked()
         assert not w.view_settings.width_show_probability
         assert w.view_settings.width_yield_method=='grid'
         q.pop('expanded_settings');q['settings'].pop('width_show_probability',None)

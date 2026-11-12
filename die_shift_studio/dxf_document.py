@@ -250,7 +250,7 @@ def _write_outline(writer, loop, layer, handle, owner):
         (0, "LWPOLYLINE"), (5, handle), (330, owner),
         (100, "AcDbEntity"), (8, layer), (410, "Model"),
         (6, "CONTINUOUS"), (370, -1), (100, "AcDbPolyline"),
-        (90, len(vertices)), (70, 1), (43, 0.0), (38, 0.0), (39, 0.0),
+        (90, len(vertices)), (70, 1 if loop.get("closed", True) else 0), (43, 0.0), (38, 0.0), (39, 0.0),
     ))
     for point in vertices:
         writer.extend(((10, point[0]), (20, point[1])))

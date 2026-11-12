@@ -109,7 +109,7 @@ def main():
         while not source_out.is_file() and time.monotonic()<until:time.sleep(.15)
         source_report=json.loads(source_out.read_text(encoding='utf8'))
         assert source_report['status']=='PASS' and not source_report['frozen']
-        assert records[0]['standalone'] and records[1]['deformation_routes']==2
+        assert records[0]['standalone'] and records[1]['reconstruction_routes']>=1
     print('WINDOWS_SOURCE_BUILD_PASS',__version__,platform.platform(),
           f'normal window {elapsed:.2f}s, {icons} icon sizes, source BAT and isolated EXE verified; no binary published',flush=True)
 

@@ -8,8 +8,6 @@ from shapely.geometry import box,Polygon,Point
 from die_shift_studio.core import read_gds,build_case,Parameters
 from die_shift_studio.fast_preview import GeometryCache,PreviewEngine
 from die_shift_studio.contact import ContactModel
-from die_shift_studio.deformation import DeformationPreview,warp_polygon
-from die_shift_studio.route_adaptation import straight_candidates,RouteField,routed_fields
 from die_shift_studio.drc import rule_region,separation_region,GlobalDRC
 from die_shift_studio.settings import ViewSettings
 ROOT=Path(__file__).resolve().parents[1]
@@ -21,50 +19,6 @@ def fixture():
     return d,q,c,cache,p,m
 
 class V12Tests(unittest.TestCase):
-    def test_small_motion_inside_original_pad_still_adapts_for_enclosure_range(self):
-        d,q,c,cache,p,m=fixture();z=np.array([[1.,1,0],[0,0,0]])
-        r=next(r for r in m.records if r['owner']==0)
-        for annulus in (0,2,8,12,25):
-            pp=replace(p,annulus_um=annulus);dp=DeformationPreview(m,pp,{},ViewSettings())
-            source=next(c for c in dp.components if any(r['owner']==0 for r in c.records)).poly
-            moved=m.moved(r['poly'],0,z);self.assertTrue(source.covers(moved))
-            f=dp.frame(z,m.current(z,pp));self.assertEqual(f['accepted_count'],1,(annulus,f['diagnostics']))
-            v=f['replacements']['5/0'][0];self.assertTrue(v['verified']);self.assertGreater(v['geometry'].symmetric_difference(source).area,.01)
-            self.assertGreaterEqual(v['geometry'].boundary.distance(moved)+.001,annulus)
-            self.assertTrue(v['geometry'].covers(moved))
-    def test_three_part_tracks_actual_folded_copper_and_keeps_fixed_anchor(self):
-        d,q,c,cache,p,m=fixture();z=np.array([[1.,1,0],[0,35,0]])
-        for method in ('bezier','arc'):
-            for continuity in ('C1','C2'):
-                dp=DeformationPreview(m,p,{},ViewSettings(deformation_method=method,deformation_continuity=continuity))
-                # Exercise the traced fallback itself; the default V18 search
-                # can now solve this case with a whole-section field earlier.
-                from unittest.mock import patch
-                with patch('die_shift_studio.axial_adaptation.axial_candidates',return_value=iter(())), patch('die_shift_studio.material_field.material_candidates',return_value=iter(())):
-                    f=dp.frame(z,m.current(z,p))
-                self.assertEqual(f['accepted_count'],2,f['diagnostics'])
-                self.assertFalse(f['violations']);v=next(v for v in f['replacements']['5/0'] if v['mode']=='three_part')
-                self.assertGreater(v['span_um'],500);self.assertGreater(v['adaptation'].area,20000)
-                self.assertAlmostEqual(v['adaptation'].centroid.x,450,delta=8)
-                component=next(co for co in dp.components if co.indices==v['indices'])
-                for anchor in component.anchors:self.assertTrue(v['geometry'].covers(anchor.buffer(3)))
-                # A bend near the moving end moves rigidly; the far fixed end does not.
-                self.assertTrue(v['geometry'].covers(Point(0,985)))
-                self.assertLess(v['geometry'].intersection(box(850,320,940,700)).symmetric_difference(component.poly.intersection(box(850,320,940,700))).area,.001)
-    def test_straight_cut_join_endpoint_derivatives_and_branches(self):
-        d,q,c,cache,p,m=fixture();dp=DeformationPreview(m,p,{},ViewSettings());co=dp.components[1]
-        candidate=next(straight_candidates(co.poly,co.records,co.anchors,20,.001));moving,band,start,u,length,width=candidate
-        z=np.array([[0.,0,0],[0,35,0]])
-        for continuity in ('C1','C2'):
-            f=RouteField(co.records,m.bound.centers,z,ViewSettings(deformation_continuity=continuity),*candidate)
-            for t in (0.,1.):
-                h=.01;xy=start+u*length*t
-                points=np.array([xy-u*h,xy,xy+u*h]);shift=f(points)-points
-                self.assertLess(np.linalg.norm(shift[2]-shift[0])/(2*h),1e-5)
-                if continuity=='C2':self.assertLess(np.linalg.norm(shift[0]-2*shift[1]+shift[2])/h**2,1e-5)
-        # Cuts cannot detach / drag a fixed anchor or secretly jump a gap.
-        none=list(straight_candidates(co.poly,co.records,[*co.anchors,co.records[0]['poly']],20,.001))
-        self.assertFalse(none)
     def test_drc_ignores_adjacent_corner_edges_but_finds_narrow_parallel_neck(self):
         needle=Polygon([(0,0),(100,0),(100,1)])
         self.assertTrue(rule_region(needle,10,.001).is_empty)
@@ -104,13 +58,5 @@ class V12Tests(unittest.TestCase):
         *_,m=fixture();g=box(-10,-10,10,10).difference(box(-5,-5,5,5)).union(box(20,0,30,10))
         moved=m.moved(g,0,np.array([[3.,7,.1],[0,0,0]]));self.assertAlmostEqual(moved.area,g.area)
         self.assertEqual(sum(len(q.interiors) for q in moved.geoms),1)
-    def test_unverified_best_shape_is_restored_and_all_final_markers_use_source(self):
-        d,q,c,cache,p,m=fixture();cfg=ViewSettings(deformation_min_angle_deg=179)
-        dp=DeformationPreview(m,p,{},cfg);z=np.array([[1.,1,0],[0,35,0]]);f=dp.frame(z,m.current(z,p))
-        self.assertEqual(f['best_effort_count'],0);self.assertGreater(f['unresolved_count'],0);self.assertTrue(f['diagnostics']);self.assertTrue(f['violations'])
-        self.assertFalse(f['replacements']);self.assertEqual(len(f['interfaces']),2)
-        for vs in f['replacements'].values():
-            for v in vs:self.assertTrue(v['geometry'].is_valid)
-        actual=m.current(z,p,f['replacements']);self.assertEqual(f['blocked_count'],len({(v['source_layer'],v['source_index']) for v in actual['issues']}))
 
 if __name__=='__main__':unittest.main()

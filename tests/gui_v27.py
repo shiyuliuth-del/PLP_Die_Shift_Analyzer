@@ -75,6 +75,7 @@ record=dict(schema_version=5,gds_path=str(gds),top_cell='TOP',roles={'1/0':'封�
         layer_order=['10/0','40/0'],parameters=dict(single_bound_x_um=35,single_bound_y_um=0,bound_angle_deg=0,
         annulus_um=10,line_space_um=5,target_nsigma=2),settings=dict(animation_enabled=False))
 job=root/'contact.dshift.json';job.write_text(json.dumps(record));w.load_project(job);wait();w.run_evaluation();wait()
+w.setting_fields['show_low_contact'].setChecked(True);w.show_issues.setChecked(True);wait()
 assert any(r.get('low_probability') for r in w.filtered_issues)
 w.manual_fields['dx'].setValue(34);QTest.mouseClick(w.manual_button,left);wait()
 assert w.filtered_issues and all(r['kind']=='已发生接触' and r['low_probability'] for r in w.filtered_issues)
@@ -93,6 +94,7 @@ for layer,b in [(1,(-1500,-1500,1500,1500)),(2,(-1000,-1000,1000,1000)),(10,(-5,
     cell.add(gdstk.rectangle(b[:2],b[2:],layer=layer))
 paired=root/'paired.gds';lib.write_gds(paired);record['gds_path']=str(paired);job.write_text(json.dumps(record))
 w.load_project(job);wait();w.run_evaluation();wait()
+w.setting_fields['show_low_contact'].setChecked(True);wait()
 assert w.result['issues'] and len(w.filtered_issues)==2 and all(q['low_probability'] for q in w.filtered_issues)
 w.setting_fields['show_low_contact'].setChecked(False);wait()
 assert not w.filtered_issues and w.result['issues'] and not w.issue_artists[1].get_visible()

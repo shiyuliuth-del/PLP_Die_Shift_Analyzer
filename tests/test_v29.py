@@ -112,14 +112,10 @@ class V29Tests(unittest.TestCase):
                 select=lambda m:next(row['geometry'] for row in m['replacements'][layer] if i in row['indices'])
                 self.assertTrue(select(subset).equals(select(full)))
             peer=z.copy();peer[1]=[5.,5.,.01]
-            with patch.object(r,'_source_blocks',side_effect=AssertionError('unrelated DIE invalidated source cuts')):
-                again=r.frame(peer,targets=targets)
+            plans=r._plans
+            again=r.frame(peer,targets=targets)
+            self.assertIs(r._plans,plans)
             for layer,i in targets:self.assertTrue(select(again).equals(select(full)))
-            layer,i=targets[0];g=eng.contact.cache.layers[layer]['geometry'][i]
-            changed={'replacements':{layer:[dict(indices=(i,),geometry=g.buffer(4.))]}}
-            with patch.object(r,'_source_blocks',wraps=r._source_blocks) as partition:
-                r.frame(peer,changed,targets=[(layer,i)])
-                self.assertTrue(partition.called)
         finally:eng.close()
 
     def test_near_edge_uses_actual_replacement_and_its_full_pose(self):

@@ -54,7 +54,7 @@ class ShapeProperties(W.QDialog):
         refs=list(window.selection.selected)
         frame=window.current_frame or {}
         self.replacements={}
-        for toggle,key in ((window.deformation_toggle,'deformation'),(window.reconstruction_toggle,'reconstruction')):
+        for toggle,key in ((window.reconstruction_toggle,'reconstruction'),):
             if toggle.isChecked():
                 for layer,items in frame.get(key,{}).get('replacements',{}).items():
                     for q in items:

@@ -35,10 +35,7 @@ class IntegrationSettingsTests(unittest.TestCase):
 
     def test_numeric_controls_validate_and_invalidate_cache(self):
         base=ViewSettings()
-        for key in ('reconstruction_extra_um','reconstruction_smooth_window_um',
-                    'reconstruction_frame_margin_um','reconstruction_smooth_delta_um',
-                    'reconstruction_second_stop_um','reconstruction_second_min_width_um',
-                    'reconstruction_stay_clear_um'):
+        for key in ('reconstruction_corner_guard_um',):
             with self.subTest(key=key):
                 changed=ViewSettings.from_dict({key:getattr(base,key)+1})
                 self.assertNotEqual(changed.reconstruction_key(),base.reconstruction_key())
