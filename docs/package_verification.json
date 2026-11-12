@@ -1,10 +1,10 @@
 {
-  "version": "V37",
+  "version": "V38",
   "status": "PASS",
-  "tested_at_utc": "2026-11-09T05:20:26.861150+00:00",
+  "tested_at_utc": "2026-11-12T05:43:23.217817+00:00",
   "scope": "Clean source checkout, local platform. Windows executable verification is recorded separately.",
   "platform": "linux",
-  "gui_suites": 19,
+  "gui_suites": 18,
   "runs": [
     {
       "args": [
@@ -20,7 +20,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "Ran 340 tests in 60.016s",
+        "Ran 293 tests in 19.675s",
         "",
         "OK (skipped=2)"
       ]
@@ -32,6 +32,8 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
+        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
         "GUI_SMOKE_PASS: Jobs and stack drag; latest-state preview; manual DIE offsets; control boundaries; foreign-network contacts/location; layer z-order; default-view legend; via-area occupancy; preserved results; infinity serialization; wheel protection; ignored-geometry layer markers; typeset report; full-DIE Space Map; source visibility; window aspect ratio"
       ]
     },
@@ -42,17 +44,9 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
+        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
         "{\"status\": \"PASS\", \"ctrl_wheel_zooms_only\": true, \"plain_wheel_rotates_only\": true, \"pivot_controls_and_save\": true, \"absolute_marker_scale\": true, \"range_levels\": [1, 3, 6], \"zero_retains_last_scale\": true, \"no_errors\": true}"
-      ]
-    },
-    {
-      "args": [
-        "tests/gui_v20.py"
-      ],
-      "env": {},
-      "status": "PASS",
-      "summary": [
-        "GUI_V20_PASS {'status': 'PASS', 'accepted': 2, 'modes': ['axial', 'axial'], 'animation_enabled_during_revisits': True, 'dashed_middle_band': True, 'first_animation_frames': 3, 'cached_animation_frames': 3, 'hidden_layer_hides_deformation': True, 'report_formula_rendered': True, 'repeated_pose_switches': 18, 'repeated_switch_median_ms': 694.0035580009862, 'project_switch_keeps_results': True, 'zero_restore_ms': 13.819744002830703, 'clear_all_projects_bytes': 0}"
       ]
     },
     {
@@ -62,17 +56,9 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
+        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
         "{'status': 'PASS', 'high_load_queued': True, 'low_load_parallel': True, 'stale_result_did_not_overwrite': True, 'cached_return_without_worker': True, 'engine_count': 2}"
-      ]
-    },
-    {
-      "args": [
-        "tests/gui_v21.py"
-      ],
-      "env": {},
-      "status": "PASS",
-      "summary": [
-        "GUI_V23_CHANNEL_PASS {'status': 'PASS', 'extreme_and_m_key_pad_motion': True, 'independent_die_stacks': True, 'channel_counts': [3, 3, 2], 'three_risk_classes': True, 'project_roundtrip': True, 'legacy_defaults': True, 'reconstruction_gap_um': 35.0, 'reconstruction_seam_um': 32.0, 'reconstruction_cover_area_um2': 1120.0, 'animation_frames_seen': 53, 'cached_replay': True, 'layer_visibility': True, 'table_focus': True, 'report_formulas': True}"
       ]
     },
     {
@@ -82,6 +68,8 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
+        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
         "GUI_REPAIR_PASS: straight-line patch drawn, per-via default diameter, post-patch DRC attributed, row click-through navigation to patch and violation, layer visibility, cached poses and landing option"
       ]
     },
@@ -104,6 +92,8 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
+        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
         "GUI_V25_PASS cached mouse/numeric/zero motions, no disk churn; folded Jobs; resized/panned callouts clear real rectangles (1 visible)."
       ]
     },
@@ -114,6 +104,8 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
+        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
         "GUI_V26_PASS 729-state pagination, frozen DIE, cache depth, clearing and exact footprint visibility/Job restore."
       ]
     },
@@ -124,6 +116,8 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
+        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
         "GUI_V27_PASS focused pages, compact controls, manual/M restore, Job migration, 2/6 sigma independent contact/width styles and retained binary outcomes"
       ]
     },
@@ -134,6 +128,8 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
+        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
         "GUI_V28_PASS native Shift/Ctrl picking, filtering, unchanged scroll position, exact infinity footprints and nominal outlines"
       ]
     },
@@ -144,6 +140,8 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
+        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
         "GUI_V29_PASS real multi-select and remove, replayable offsets, zero-only fills, hidden sources and four-sided row border"
       ]
     },
@@ -166,6 +164,8 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
+        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
         "GUI_V32_PASS selected NVIDIA, CPU fallback preserves saved preference, queued worker shutdown"
       ]
     },
@@ -188,6 +188,8 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
+        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
         "GUI_V34_PASS fixed centred two yields, bias settings/old Jobs, keepout intrusion, hide/display independence, report"
       ]
     },
@@ -198,6 +200,8 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
+        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
         "GUI_V35_PASS on-row fixed centre/no canvas loss, independent saved width integration, pinned labels, native picker, edited shifted DXF/all layers"
       ]
     },
@@ -208,19 +212,33 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
+        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
         "GUI_V36_PASS merged settings/default grid, saved export preferences, native picker, fixed-alpha probability fills, labels/precision/offscreen/cache and legacy defaults"
       ]
     },
     {
       "args": [
-        "tests/gui_recon_drag.py"
+        "tests/gui_v38.py"
       ],
       "env": {},
       "status": "PASS",
       "summary": [
-        "clamp ok 1109.088 window 10.004 1229.996",
-        "reset ok",
-        "GUI_RECON_DRAG_PASS: drag, re-drag, clamp, right-click/double-click reset, save/reopen, clear all"
+        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
+        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
+        "GUI_V38_PASS: two real drags, live on/off, shared pose, project, controls"
+      ]
+    },
+    {
+      "args": [
+        "tests/gui_branch_integration.py"
+      ],
+      "env": {},
+      "status": "PASS",
+      "summary": [
+        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
+        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
+        "GUI_BRANCH_INTEGRATION_PASS: preserved controls, real bidirectional region events, edit retention, cache refresh, save/reopen, clear all"
       ]
     },
     {
@@ -231,7 +249,10 @@
       ],
       "env": {},
       "status": "PASS",
-      "summary": []
+      "summary": [
+        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
+        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \""
+      ]
     },
     {
       "args": [
@@ -243,7 +264,10 @@
         "DIE_SHIFT_NATIVE_BACKEND": "desktop"
       },
       "status": "PASS",
-      "summary": []
+      "summary": [
+        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
+        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \""
+      ]
     },
     {
       "args": [

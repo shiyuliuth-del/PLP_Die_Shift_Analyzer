@@ -75,7 +75,7 @@ class Reconstructor:
         self.block_cache=EphemeralCache(budget=16*1024**2,max_entries=2048)
         self.tol=max(1e-6,model.data.dbu_um);self._rule_width,self.rule_space=effective_rules(parameters,settings)
         self.overlap_um=parameters.annulus_um;self.length_um=self.width_um=self.extra_um=0.
-        self.vias=[];self.stays=[];self.vias_by_target={};self._plans=None
+        self.vias=[];self.stays=[];self.vias_by_target={};self._plans=None;self.manual_quality={}
         self.plan_pool=plan_pool if plan_pool is not None else {}
         self.cuts={(str(l),int(i),normalize_via_refs(v)):(nx,ny,x,y) for l,i,v,nx,ny,x,y in settings.reconstruction_cuts}
         self.extra_cuts={(str(l),int(i),normalize_via_refs(v)):(nx,ny,x,y) for l,i,v,nx,ny,x,y in settings.reconstruction_extra_cuts}
@@ -94,7 +94,12 @@ class Reconstructor:
                 self.vias.append(item)
                 for ref in targets:self.vias_by_target.setdefault(tuple(ref),[]).append(item)
 
-    def close(self):self.cache.close();self.block_cache.clear()
+    def close(self):
+        self.cache.close();self.block_cache.clear()
+        for entry in self._plans or ():
+            plan=entry.get('plan')
+            if plan is not None:plan.cache.clear();plan.pose_memo.clear();plan.memo_bytes=0
+
 
     def _own_frame(self,owner):
         # Physical chip geometry is independent of a custom rotation pivot.
@@ -115,15 +120,36 @@ class Reconstructor:
             for owner in sorted({v['owner'] for v in vias if v['owner']>=0}):
                 mine=[v for v in vias if v['owner']==owner]
                 groups.append((layer,index,owner,mine,vias))
+        # Buffered foreign copper contains every possible position in the full
+        # independent multi-DIE input box. It is a conservative feasibility check,
+        # not a claim to have finitely enumerated a continuous distribution.
+        envelopes={}
+        for layer,role in self.model.roles.items():
+            if role!='固定RDL':continue
+            values=[];nets=[]
+            for index,source in enumerate(self.model.cache.layers[layer]['geometry']):
+                radius=0.
+                for owner in {v['owner'] for v in self.vias_by_target.get((layer,index),()) if v['owner']>=0}:
+                    mu,b=mean_and_bounds(self.p.for_die(owner),len(self.model.bound.centers))
+                    r=float(np.max(np.linalg.norm(shapely.get_coordinates(source)-self.model.bound.centers[owner],axis=1)))
+                    radius=max(radius,float(np.linalg.norm(abs(mu[:2])+b[:2])+2*r*np.sin(min(np.pi,abs(mu[2])+b[2])/2)))
+                values.append(source.buffer((radius+2*self.tol)/np.cos(np.pi/48),quad_segs=12) if radius else source)
+                nets.append(int(self.model.nodes[self.model.ids[layer,index]]['net']))
+            envelopes[layer]=(shapely.STRtree(values),nets)
+        self._envelopes=envelopes
+        from .resources import resource_profile
+        memo_budget=max(128*1024,min(2*1024**2,int(resource_profile()['available_memory_mb']*1024**2*.08/max(1,len(groups)))))
         def build(task):
             layer,index,owner,mine,all_vias=task
             source=self.model.cache.layers[layer]['geometry'][index]
             refs=normalize_via_refs((v['key'],v['index']) for v in mine)
             net=int(self.model.nodes[self.model.ids[layer,index]]['net'])
-            land=shapely.intersection(source,shapely.union_all([v['land'] for v in mine]))
-            fixed=[v['poly'].buffer(self.p.annulus_um,quad_segs=16).intersection(source) for v in self.stays
+            from .landing_geometry import embedded_pad
+            landing=lambda v:embedded_pad(v['poly'],source,v['poly'].buffer(self.p.annulus_um,quad_segs=32),self.tol).intersection(source) if source.geom_type=='Polygon' else v['poly'].buffer(self.p.annulus_um,quad_segs=32).intersection(source)
+            land=shapely.union_all([landing(v) for v in mine])
+            fixed=[landing(v) for v in self.stays
                    if v['net']==net and source.intersects(v['poly'])]
-            fixed.extend(v['land'].intersection(source) for v in all_vias if v['owner']!=owner)
+            fixed.extend(landing(v) for v in all_vias if v['owner']!=owner)
             fixed=[g for g in fixed if not g.is_empty]
             base=dict(layer=layer,index=index,owner=owner,refs=refs,source=source,land=land,net=net,mine=mine,anchors=fixed)
             if not fixed:return dict(base,plan=None,orphan=True,warning='无固定连接端，整块按所属DIE平移')
@@ -133,7 +159,7 @@ class Reconstructor:
             for via in sorted(mine,key=lambda v:-np.linalg.norm(v['center']-end))[:8]:
                 line=trace(source,via['center'],end,self._rule_width)
                 if line is None:continue
-                plan=RoutePlan(layer,index,owner,refs,source,line,land,tuple(fixed),self.tol,self.settings.reconstruction_corner_guard_um)
+                plan=RoutePlan(layer,index,owner,refs,source,line,land,tuple(fixed),self.tol,self.settings.reconstruction_corner_guard_um,memo_budget=memo_budget)
                 # Opposite moving terminals share a nominal middle seam. Neither
                 # owner's transition may consume the other owner's half-route.
                 if not any(v['net']==net and source.intersects(v['poly']) for v in self.stays):
@@ -156,12 +182,17 @@ class Reconstructor:
                 for pose in catalogue.locals[owner]:
                     _,error=warp(part,plan,self.model.bound.centers[owner],pose)
                     invalid+=bool(error)
-                ranked.append((invalid,-length,plan))
-                if not invalid:break  # first passing candidate is the longest
-            invalid,_,plan=min(ranked,key=lambda q:q[:2])
+                tree,nets=envelopes[layer]
+                sweep=shapely.union_all([part['A'],part['C']]).buffer((travel+self.rule_space+2*self.tol)/np.cos(np.pi/48),quad_segs=12)
+                neighbours=tree.query(sweep,predicate='intersects')
+                certified=not any(nets[int(j)]!=net for j in neighbours)
+                ranked.append((invalid,not certified,-length,plan))
+                if not invalid and certified:break  # first passing candidate is the longest
+            invalid,space_unproven,_,plan=min(ranked,key=lambda q:q[:3])
             warning=plan.warning
+            if space_unproven:warning=(warning+'；' if warning else '')+'全输入多DIE包络未证明线距充足，按当前几何复核'
             if invalid:warning=f'共有{invalid}/{len(catalogue.locals[owner])}个本DIE极端不能保持合法区域；当前可用最长候选'
-            return dict(base,plan=plan,orphan=False,warning=warning,extreme_checks=len(catalogue.locals[owner]),extreme_invalid=invalid)
+            return dict(base,plan=plan,orphan=False,warning=warning,extreme_checks=len(catalogue.locals[owner]),extreme_invalid=invalid,all_die_space_certified=not space_unproven)
         # Route construction is pose-independent and reused after every handle edit.
         from .session_cache import logical_fingerprint
         key=logical_fingerprint((self.model.data.geometry_id,self.model.roles,self.model.connections.order,
@@ -203,6 +234,23 @@ class Reconstructor:
                 if changed:a,b=changed['a'],changed['b'];manual=True
         return plan.partition(a,b),manual
 
+    def _manual_warning(self,entry,part):
+        plan=entry['plan'];key=(plan.key,part['a'],part['b'])
+        if key in self.manual_quality:return self.manual_quality[key]
+        from .statistics import ExtremeCatalog,mean_and_bounds
+        from .reconstruction_route import warp
+        poses=ExtremeCatalog(self.model.case,self.p).locals[plan.owner]
+        invalid=sum(warp(part,plan,self.model.bound.centers[plan.owner],pose)[1] is not None for pose in poses)
+        mu,b=mean_and_bounds(self.p.for_die(plan.owner),len(self.model.bound.centers))
+        support=shapely.union_all([part['A'],part['C']]);radius=np.linalg.norm(shapely.get_coordinates(support)-self.model.bound.centers[plan.owner],axis=1).max()
+        travel=np.linalg.norm(abs(mu[:2])+b[:2])+2*radius*np.sin(min(np.pi,abs(mu[2])+b[2])/2)
+        sweep=support.buffer((travel+self.rule_space+2*self.tol)/np.cos(np.pi/48),quad_segs=12)
+        tree,nets=self._envelopes[plan.layer]
+        unproven=any(nets[int(i)]!=entry['net'] for i in tree.query(sweep,predicate='intersects'))
+        text=f'手动动区在{invalid}/{len(poses)}个本DIE极端不能保持合法区域' if invalid else ''
+        if unproven:text+=('；' if text else '')+'全输入多DIE包络未证明线距充足，按当前几何复核'
+        self.manual_quality[key]=text;return text
+
     def edited(self,piece,which,nominal_point):
         """Project a mouse position to one nominal endpoint; the other is immutable."""
         from dataclasses import replace
@@ -230,9 +278,10 @@ class Reconstructor:
         def render(entry):
             if selected is not None and (entry['layer'],entry['index']) not in selected:return None
             part,manual=self.interval(entry)
-            if part is None:return part,manual,None,None
+            if part is None:return part,manual,None,None,entry['warning']
             regions,error=warp(part,entry['plan'],self.model.bound.centers[entry['owner']],states[entry['owner']])
-            return part,manual,regions,error
+            warning=self._manual_warning(entry,part) if manual else entry['warning']
+            return part,manual,regions,error,warning
         from .resources import parallel_map
         rendered=parallel_map(render,entries) if len(entries)>16 else list(map(render,entries))
         for number,(entry,prepared) in enumerate(zip(entries,rendered)):
@@ -240,7 +289,7 @@ class Reconstructor:
             layer,index,owner=entry['layer'],entry['index'],entry['owner'];source=entry['source'];plan=entry['plan']
             if selected is not None and (layer,index) not in selected:continue
             if self._cover_lookup(self.dropped,None,layer,index,entry['refs']):continue
-            part,manual,regions,error=prepared;warning=entry['warning'];valid=True
+            part,manual,regions,error,warning=prepared;valid=True
             if part is not None:
                 if error:regions={k:part[k] for k in 'ABC'};warning=error;valid=False
                 near=part['near'];moved_cut=transform(near,self.model.bound.centers[owner],states[owner]) if valid else near
@@ -286,7 +335,7 @@ class Reconstructor:
                 for q in ps:q['fixed']=fixed;q['regions']['B']=fixed;q['fixed_area_um2']=fixed.area
                 geometry=shapely.union_all([fixed,*[q['regions'][k] for q in ps for k in 'AC']])
             from .reconstruction_route import parts
-            if not geometry.is_valid or len(parts(geometry))!=len(parts(source)):
+            if not geometry.is_valid or len(parts(geometry))!=len(parts(source)) or sum(len(q.interiors) for q in parts(geometry))!=sum(len(q.interiors) for q in parts(source)):
                 geometry=source
                 for q in ps:q.update(valid=False,warning='最终几何未通过连通检查；保留原图',regions=dict(A=EMPTY,B=source,C=EMPTY),bridge=EMPTY,moved=EMPTY,fixed=source)
             out.setdefault(layer,[]).append(dict(indices=(index,),geometry=geometry,net=feature['net'],movable=occupied,moved=shapely.union_all([q['moved'] for q in ps])))
@@ -295,21 +344,29 @@ class Reconstructor:
             replaced={q['indices'][0]:q['geometry'] for q in out[layer]}
             copper=[replaced.get(i,g) for i,g in enumerate(self.model.cache.layers[layer]['geometry'])]
             nets=[int(self.model.nodes[self.model.ids[layer,i]]['net']) for i in range(len(copper))]
-            trees={};measures={}
-            for q in (q for q in pieces if q['layer']==layer):
-                net=q['net'];idx=q['index']
-                if net not in trees:
-                    others=[i for i,n in enumerate(nets) if n!=net]
-                    trees[net]=(shapely.STRtree([copper[i] for i in others]),others)
-                tree,others=trees[net]
-                if not others:continue
-                if idx not in measures:
-                    probe=replaced[idx]
+            trees={}
+            layer_pieces=[q for q in pieces if q['layer']==layer]
+            for net in {q['net'] for q in layer_pieces}:
+                others=[i for i,n in enumerate(nets) if n!=net]
+                trees[net]=(shapely.STRtree([copper[i] for i in others]),others)
+            def measure(item):
+                idx,net=item;tree,others=trees[net]
+                if not others:return idx,None
+                probe=replaced[idx]
+                # Actual overlaps need no nearest-boundary search. Preparing the
+                # one probe amortises the batched predicate over candidate nets.
+                nearby=tree.query(probe)
+                shapely.prepare(probe)
+                hit=nearby[shapely.intersects(probe,tree.geometries[nearby])]
+                if len(hit):i=others[int(hit[0])];gap=0.
+                else:
                     indices,distances=tree.query_nearest(probe,return_distance=True,all_matches=False)
                     i=others[int(indices[0])];gap=float(distances[0])
-                    measures[idx]=dict(clearance_um=gap,conflict=gap<self.rule_space-self.tol,conflict_net=nets[i],
-                                       conflict_link=shapely.get_coordinates(shapely.shortest_line(probe,copper[i])).tolist())
-                q.update(measures[idx]);conflicts+=int(q['conflict'])
+                return idx,dict(clearance_um=gap,conflict=gap<self.rule_space-self.tol,conflict_net=nets[i],
+                                conflict_link=shapely.get_coordinates(shapely.shortest_line(probe,copper[i])).tolist())
+            measures=dict(parallel_map(measure,sorted({(q['index'],q['net']) for q in layer_pieces})))
+            for q in layer_pieces:
+                if measures[q['index']] is not None:q.update(measures[q['index']]);conflicts+=int(q['conflict'])
         result=dict(complete=True,pieces=pieces,replacements=out,scope='全输入位移包络下选择名义追溯动区，所有姿态共用。未通过拓扑或折叠检查时保留原图；不代表产线签认或完整DRC。',
                     parameters=dict(length_um=0.,width_um=0.,overlap_um=self.p.annulus_um,landing_diameters=AUTO_LANDING_DIAMETERS,shared_nominal=True),
                     summary=dict(pieces=len(pieces),bridges=sum(not q['bridge'].is_empty for q in pieces),orphans=sum(q['orphan'] for q in pieces),conflicts=conflicts,

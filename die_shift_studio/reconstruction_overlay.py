@@ -102,7 +102,8 @@ class ReconstructionOverlay:
         q,xy,kind=picked;self.hover.set_data(xy.T);self.hover.set_visible(True)
         self.hover.set_color(SECOND_CUT_COLOR if kind=='extra' else CUT_COLOR)
         self.hover.set_marker('o' if np.linalg.norm(xy[-1]-xy[0])<1e-8 else '');self.hover.set_markersize(11)
-        self.w.canvas.draw_idle();return True
+        if getattr(self.w,'cut_drag',None) is None or self.w.cut_drag.state is None:self.w.canvas.draw_idle()
+        return True
     def clear_hover(self):self.highlight(None)
     def fill_table(self,data):
         if getattr(self.w,'cut_drag',None) and self.w.cut_drag.state is not None:return
@@ -179,7 +180,7 @@ class CutDrag:
                     line=part['far'] if state['kind']=='extra' else transform(part['near'],frame['rotation_centers'][owner],frame['states'][owner])
                     self.w.reconstruction_overlay.highlight((piece,_lines(line)[0],state['kind']))
                     if self.w.view_settings.reconstruction_live:self._live(part)
-        self.w.canvas.draw_idle()
+        self.w.render_scene()
     def _live(self,part):
         from .reconstruction_route import warp
         state=self.state;old=state['frame'];piece=state['piece'];plan=piece['route_plan']

@@ -42,6 +42,7 @@ class V38Tests(unittest.TestCase):
             self.assertLess(shapely.union_all(list(regs.values())).symmetric_difference(src).area,1e-6)
             for a,b in ('AB','AC','BC'):self.assertLess(regs[a].intersection(regs[b]).area,1e-7)
             self.assertTrue(regs['C'].covers(e.contact.cache.layers['4/0']['geometry'][0]))
+            self.assertTrue(regs['C'].covers(Point(0,0).buffer(29.8)), 'detected source landing must remain rigid')
             self.assertTrue(regs['B'].covers(e.contact.cache.layers['6/0']['geometry'][0]))
         finally:e.close()
 
@@ -134,6 +135,17 @@ class V38Tests(unittest.TestCase):
             bad=Snapshot({'5/0':(LineString([(0,0),(1,1)]).wkb,)},'T',None,0)
             with self.assertRaises(ValueError):write_regions(bad,{}, {},out)
             self.assertEqual(out.read_bytes(),b'previous')
+
+    def test_warp_cache_is_immutable_and_clear_releases_meshes(self):
+        e,d,c=fixture()
+        try:
+            r=e.reconstructor;entry=r._plans_for_all_poses(lambda *_:None)[0];plan=entry['plan'];part,_=r.interval(entry)
+            state=np.array([10.,10.,.01]);first,err=warp(part,plan,e.bound.centers[0],state);self.assertIsNone(err)
+            saved=first['B'];first['B']=shapely.Polygon()
+            second,err=warp(part,plan,e.bound.centers[0],state);self.assertTrue(second['B'].equals(saved))
+            self.assertTrue(plan.pose_memo)
+            r.close();self.assertFalse(plan.pose_memo or plan.cache)
+        finally:e.close()
 
     def test_two_enclosures_follow_receiving_rdl_and_not_visibility(self):
         from die_shift_studio.drc import GlobalDRC

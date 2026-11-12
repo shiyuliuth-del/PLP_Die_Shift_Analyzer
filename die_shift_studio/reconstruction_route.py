@@ -7,6 +7,7 @@ No nearest-chip assignment is performed here. Units are micrometres.
 from dataclasses import dataclass,field
 from functools import lru_cache
 import hashlib
+from collections import OrderedDict
 import heapq
 import math
 import numpy as np
@@ -98,9 +99,11 @@ class RoutePlan:
     nominal_first:float=0.
     nominal_second:float=0.
     warning:str=''
+    memo_budget:int=1024*1024
     cache:dict=field(default_factory=dict,repr=False)
 
     def __post_init__(self):
+        self.pose_memo=OrderedDict();self.memo_bytes=0
         self.xy=np.asarray(self.route.coords)
         self.lengths=np.linalg.norm(np.diff(self.xy,axis=0),axis=1)
         self.marks=np.r_[0,np.cumsum(self.lengths)]
@@ -117,7 +120,7 @@ class RoutePlan:
                 self.corners.append((float(self.marks[i]),radius))
 
     def __getstate__(self):
-        state=dict(self.__dict__);state['cache']={};return state
+        state=dict(self.__dict__);state['cache']={};state['pose_memo']=OrderedDict();state['memo_bytes']=0;return state
 
     @property
     def key(self):return self.layer,self.index,self.owner,self.refs
@@ -236,6 +239,10 @@ def warp(part,plan,center,state):
     """Move original material; C is rigid and A tapers continuously into B."""
     from .preview import rigid_transform
     if not np.any(state):return dict(A=part['A'],B=part['B'],C=part['C']),None
+    memo_key=(part['a'],part['b'],np.asarray(center,float).tobytes(),np.asarray(state,float).tobytes())
+    if memo_key in plan.pose_memo:
+        saved=plan.pose_memo[memo_key];plan.pose_memo.move_to_end(memo_key)
+        return dict(saved[0]),saved[1]
     a,b=part['a'],part['b'];start=a if a>0 else plan.land_end
     span=b-start
     if span<=plan.tolerance:return None,'动区过短，保留原始图形'
@@ -278,7 +285,7 @@ def warp(part,plan,center,state):
     if not active.is_valid or active.is_empty:return None,'动区发生折叠，保留原始图形：'+shapely.is_valid_reason(active)
     result={k:shapely.set_precision(g,plan.tolerance) for k,g in {'A':active,'B':part['B'],'C':translated}.items()}
     full=shapely.union_all(list(result.values()))
-    if len(parts(full))!=len(parts(plan.source)) or not full.is_valid:return None,'重构连接不能闭合，保留原始图形'
+    if len(parts(full))!=len(parts(plan.source)) or not full.is_valid or sum(len(q.interiors) for q in parts(full))!=sum(len(q.interiors) for q in parts(plan.source)):return None,'重构连接不能闭合，保留原始图形'
     # Quantisation can create sub-DBU seam slivers. Only slivers confined to
     # the two true seams may be clipped; other overlap is a genuine fold.
     near=part['near'] if a==0 else shapely.transform(part['near'],lambda xy:rigid_transform(xy,center,state))
@@ -288,4 +295,9 @@ def warp(part,plan,center,state):
         overlap=result[x].intersection(result[y])
         if overlap.difference(seam).area>allowance:return None,'动区与相邻区域反向交叠，保留原始图形'
     result['A']=result['A'].difference(shapely.union_all([result['B'],result['C']]))
+    size=int(sum(shapely.get_num_coordinates(g) for g in result.values()))*24+512
+    if size<=plan.memo_budget:
+        plan.pose_memo[memo_key]=(dict(result),None,size);plan.memo_bytes+=size
+        while plan.memo_bytes>plan.memo_budget or len(plan.pose_memo)>32:
+            _,old=plan.pose_memo.popitem(last=False);plan.memo_bytes-=old[2]
     return result,None
