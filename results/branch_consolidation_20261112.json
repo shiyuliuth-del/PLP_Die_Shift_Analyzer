@@ -1,0 +1,405 @@
+{
+  "scope": "Consolidate audited branches into main, preserving history. Known inherited failures remain; not a release or all-green certification.",
+  "pr": "https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/pull/20",
+  "source_refs": [
+    {
+      "branch": "main",
+      "commit": "6f8d8474456109815f4fc2e88f204ac7f66a33a4"
+    },
+    {
+      "branch": "codex/integrate-four-branches-20261111",
+      "commit": "1d6bf9d0087f6cd3c8d01e2f57276cdecee5f962"
+    },
+    {
+      "branch": "v1110v1_2ndcut&bridge",
+      "commit": "98c81b7ed7d68a57935f494ca870192f2f2d0a79"
+    },
+    {
+      "branch": "v1110v3_2ndcut_move",
+      "commit": "d966789215e2a37d3d90efe2f4d5a2b2b8fa0d5e"
+    },
+    {
+      "branch": "v1111v1_light",
+      "commit": "a40b5c7a8a83909f28541d00c013d49942049045"
+    },
+    {
+      "branch": "v1111v2_merged",
+      "commit": "ff1eef5086634e9b0bfc75a500e3289c3f8e814d"
+    }
+  ],
+  "tested_local_commit": "77507800e4c36949260a505f9880d14f1efb9a04",
+  "runtime_tree_sha": "00cf5f257137a8c7e74aec81a250c20e54c4a581",
+  "test_tree_sha": "4d8b5019daf737e887b4519b0fb1e71321c50746",
+  "unit": {
+    "tests": 361,
+    "passed": 337,
+    "failures": 15,
+    "errors": 6,
+    "skipped": 3,
+    "new_failure_ids": [],
+    "resolved_failure_ids": [],
+    "failure_ids": [
+      "test_a_narrow_seam_is_still_covered (test_reconstruction.ReconstructionTests.test_a_narrow_seam_is_still_covered)",
+      "test_a_plate_shared_by_two_chips_is_split_at_the_frame (test_reconstruction.ReconstructionTests.test_a_plate_shared_by_two_chips_is_split_at_the_frame)",
+      "test_a_safe_piece_is_not_marked (test_reconstruction.ReconstructionTests.test_a_safe_piece_is_not_marked)",
+      "test_a_shared_plate_that_moves_onto_the_middle_needs_no_cover (test_reconstruction.ReconstructionTests.test_a_shared_plate_that_moves_onto_the_middle_needs_no_cover)",
+      "test_an_unavoidable_short_is_marked (test_reconstruction.ReconstructionTests.test_an_unavoidable_short_is_marked)",
+      "test_close_landings_share_one_cut_beyond_the_farthest_one (test_reconstruction.ReconstructionTests.test_close_landings_share_one_cut_beyond_the_farthest_one)",
+      "test_cover_polygon_is_built_from_the_four_cut_face_corners (test_reconstruction.ReconstructionTests.test_cover_polygon_is_built_from_the_four_cut_face_corners)",
+      "test_cut_meets_a_45_degree_route_at_a_right_angle (test_reconstruction.ReconstructionTests.test_cut_meets_a_45_degree_route_at_a_right_angle)",
+      "test_explicit_distance_replaces_the_auto_landing_diameters (test_reconstruction.ReconstructionTests.test_explicit_distance_replaces_the_auto_landing_diameters)",
+      "test_movable_part_keeps_its_shape_and_the_seam_gap_is_the_shift (test_reconstruction.ReconstructionTests.test_movable_part_keeps_its_shape_and_the_seam_gap_is_the_shift)",
+      "test_reconstruction_moves_real_copper_independently_of_channel_capacity (test_reconstruction.ReconstructionTests.test_reconstruction_moves_real_copper_independently_of_channel_capacity)",
+      "test_scope_and_parameters_state_that_the_split_is_a_guess (test_reconstruction.ReconstructionTests.test_scope_and_parameters_state_that_the_split_is_a_guess)",
+      "test_spacing_follows_the_reconstructed_neighbour (test_reconstruction.ReconstructionTests.test_spacing_follows_the_reconstructed_neighbour)",
+      "test_view_settings_key_drives_the_reconstruction (test_reconstruction.ReconstructionTests.test_view_settings_key_drives_the_reconstruction)",
+      "test_whole_feature_follows_the_die_when_the_cut_falls_past_it (test_reconstruction.ReconstructionTests.test_whole_feature_follows_the_die_when_the_cut_falls_past_it)"
+    ],
+    "error_ids": [
+      "test_a_drag_past_the_copper_end_stops_at_the_last_crossing (test_reconstruction.ReconstructionTests.test_a_drag_past_the_copper_end_stops_at_the_last_crossing)",
+      "test_a_dragged_cut_plane_pins_the_cut (test_reconstruction.ReconstructionTests.test_a_dragged_cut_plane_pins_the_cut)",
+      "test_a_dragged_plane_inside_the_landing_is_pushed_back_to_its_edge (test_reconstruction.ReconstructionTests.test_a_dragged_plane_inside_the_landing_is_pushed_back_to_its_edge)",
+      "test_a_pinned_cut_can_be_dragged_again (test_reconstruction.ReconstructionTests.test_a_pinned_cut_can_be_dragged_again)",
+      "test_a_plane_beyond_the_copper_end_is_flagged_as_clamped (test_reconstruction.ReconstructionTests.test_a_plane_beyond_the_copper_end_is_flagged_as_clamped)",
+      "test_cut_is_straight_across_a_stepped_trace (test_reconstruction.ReconstructionTests.test_cut_is_straight_across_a_stepped_trace)"
+    ]
+  },
+  "new_precedence_tests": {
+    "tests": 6,
+    "passed": 6,
+    "pre_fix_failures": 4
+  },
+  "previous_integration_tests": {
+    "tests": 15,
+    "passed": 15
+  },
+  "runs": [
+    {
+      "name": "contribution",
+      "exit_code": 0,
+      "seconds": 0.114,
+      "command": [
+        "python3",
+        "tools/check_contribution.py"
+      ]
+    },
+    {
+      "name": "unit",
+      "exit_code": 1,
+      "seconds": 87.105,
+      "tests": 361,
+      "failures": 15,
+      "errors": 6,
+      "skipped": 3,
+      "skip_reasons": [
+        "test_user_gds_522_vertex_shape_restored_against_klayout_area (test_v060.Revision060Tests.test_user_gds_522_vertex_shape_restored_against_klayout_area) ... skipped 'External user GDS is not bundled; set DIE_SHIFT_TEST_GDS'",
+        "test_installed_desktop_backend_matches_module_without_dependency_install (test_v14.V14Tests.test_installed_desktop_backend_matches_module_without_dependency_install) ... skipped 'Installed KLayout unavailable on this target'",
+        "test_gd55_three_die_joint_events_match_complete_frames (test_v33.SceneParityTests.test_gd55_three_die_joint_events_match_complete_frames) ... skipped 'External GD55 is supplied by the local acceptance run'"
+      ],
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_*.py",
+        "-v"
+      ]
+    },
+    {
+      "name": "gui_branch_integration",
+      "exit_code": 0,
+      "seconds": 3.041,
+      "command": [
+        "python3",
+        "tests/gui_branch_integration.py"
+      ]
+    },
+    {
+      "name": "gui_v21",
+      "exit_code": 1,
+      "seconds": 54.988,
+      "reason": "Expected pieces/bridges/orphans=(1,0,1), actual=(1,0,0); same inherited assertion.",
+      "command": [
+        "python3",
+        "tests/gui_v21.py"
+      ]
+    },
+    {
+      "name": "gui_recon_drag",
+      "exit_code": 1,
+      "seconds": 3.738,
+      "reason": "cut=None; AttributeError: 'NoneType' object has no attribute 'length'; same inherited fixture assumption.",
+      "command": [
+        "python3",
+        "tests/gui_recon_drag.py"
+      ]
+    },
+    {
+      "name": "gui_repair",
+      "exit_code": 0,
+      "seconds": 4.62,
+      "command": [
+        "python3",
+        "tests/gui_repair.py"
+      ]
+    },
+    {
+      "name": "gui_v36",
+      "exit_code": 0,
+      "seconds": 7.529,
+      "command": [
+        "python3",
+        "tests/gui_v36.py"
+      ]
+    },
+    {
+      "name": "gui_smoke",
+      "exit_code": 0,
+      "seconds": 30.448,
+      "command": [
+        "python3",
+        "tests/gui_smoke.py"
+      ]
+    },
+    {
+      "name": "smoke",
+      "exit_code": 0,
+      "seconds": 12.505,
+      "command": [
+        "python3",
+        "main.py",
+        "--smoke-test",
+        "results/smoke-result.json"
+      ]
+    },
+    {
+      "name": "gpu_info",
+      "exit_code": 0,
+      "seconds": 1.272,
+      "command": [
+        "python3",
+        "main.py",
+        "--gpu-info",
+        "results/gpu-result.json"
+      ]
+    },
+    {
+      "name": "aggregate_verify_source",
+      "exit_code": 1,
+      "seconds": 88.763,
+      "tests": 361,
+      "failures": 15,
+      "errors": 6,
+      "skipped": 3,
+      "command": [
+        "python3",
+        "tools/package_release.py",
+        "verify-source"
+      ]
+    }
+  ],
+  "cli": [
+    {
+      "project": "示例A_小芯片大孔盘.dshift.json",
+      "exit_code": 0,
+      "seconds": 2.13,
+      "package_states": 27,
+      "discrete_states": 27,
+      "checked": true,
+      "passed": true
+    },
+    {
+      "project": "示例B_大芯片局部重构.dshift.json",
+      "exit_code": 0,
+      "seconds": 1.42,
+      "package_states": 27,
+      "discrete_states": 27,
+      "checked": true,
+      "passed": true
+    },
+    {
+      "project": "示例C_多芯片晶圆接口.dshift.json",
+      "exit_code": 0,
+      "seconds": 2.61,
+      "package_states": 729,
+      "discrete_states": 729,
+      "checked": true,
+      "passed": true
+    },
+    {
+      "project": "示例D_芯片外扇出.dshift.json",
+      "exit_code": 0,
+      "seconds": 1.53,
+      "package_states": 729,
+      "discrete_states": 729,
+      "checked": true,
+      "passed": true
+    },
+    {
+      "project": "示例E_连续型变与约束.dshift.json",
+      "exit_code": 0,
+      "seconds": 1.56,
+      "package_states": 19683,
+      "discrete_states": 19683,
+      "checked": true,
+      "passed": true
+    },
+    {
+      "project": "示例F_逐芯片幅度与迭代窗口.dshift.json",
+      "exit_code": 0,
+      "seconds": 1.21,
+      "package_states": 81,
+      "discrete_states": 81,
+      "checked": true,
+      "passed": true
+    },
+    {
+      "project": "示例G_小偏移与三段追溯.dshift.json",
+      "exit_code": 0,
+      "seconds": 1.09,
+      "package_states": 729,
+      "discrete_states": 729,
+      "checked": true,
+      "passed": true
+    },
+    {
+      "project": "示例H_不可修复时恢复原图.dshift.json",
+      "exit_code": 0,
+      "seconds": 1.52,
+      "package_states": 729,
+      "discrete_states": 729,
+      "checked": true,
+      "passed": true
+    },
+    {
+      "project": "示例I_旋转中心与全范围概率.dshift.json",
+      "exit_code": 0,
+      "seconds": 1.17,
+      "package_states": 729,
+      "discrete_states": 729,
+      "checked": true,
+      "passed": true
+    },
+    {
+      "project": "示例J_短宽孔盘与DRC容差.dshift.json",
+      "exit_code": 0,
+      "seconds": 1.37,
+      "package_states": 27,
+      "discrete_states": 27,
+      "checked": true,
+      "passed": true
+    },
+    {
+      "project": "示例K_中段连接与平滑孔盘.dshift.json",
+      "exit_code": 0,
+      "seconds": 1.29,
+      "package_states": 27,
+      "discrete_states": 27,
+      "checked": true,
+      "passed": true
+    },
+    {
+      "project": "示例L_同网部分适配与既有接触.dshift.json",
+      "exit_code": 0,
+      "seconds": 1.51,
+      "package_states": 81,
+      "discrete_states": 81,
+      "checked": true,
+      "passed": true
+    },
+    {
+      "project": "示例M_不同芯片底层与Pad随动.dshift.json",
+      "exit_code": 0,
+      "seconds": 1.24,
+      "package_states": 729,
+      "discrete_states": 729,
+      "checked": true,
+      "passed": true
+    },
+    {
+      "project": "示例N_三线路窄通道宽度.dshift.json",
+      "exit_code": 0,
+      "seconds": 2.25,
+      "package_states": 729,
+      "discrete_states": 729,
+      "checked": true,
+      "passed": true
+    },
+    {
+      "project": "示例O_运动网络三线路通道.dshift.json",
+      "exit_code": 0,
+      "seconds": 1.81,
+      "package_states": 729,
+      "discrete_states": 729,
+      "checked": true,
+      "passed": true
+    },
+    {
+      "project": "示例P_单点PATH与相邻孔盘.dshift.json",
+      "exit_code": 0,
+      "seconds": 2.09,
+      "package_states": 27,
+      "discrete_states": 27,
+      "checked": true,
+      "passed": true
+    },
+    {
+      "project": "示例R_禁布区贴边与联合良率.dshift.json",
+      "exit_code": 0,
+      "seconds": 1.31,
+      "package_states": 3,
+      "discrete_states": 3,
+      "checked": true,
+      "passed": true
+    }
+  ],
+  "source_package": {
+    "files": 108,
+    "sha256": "62ff33e85a6ff20c89e6b88cf8e128d764c8414ac05471d7061fda7121d8a720",
+    "crc": "PASS",
+    "runs": [
+      {
+        "mode": "--smoke-test",
+        "exit_code": 0
+      },
+      {
+        "mode": "--gpu-info",
+        "exit_code": 0
+      }
+    ],
+    "published": false
+  },
+  "windows_initial_head": {
+    "sha": "1d6bf9d0087f6cd3c8d01e2f57276cdecee5f962",
+    "url": "https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/actions/runs/43141041791",
+    "clean": "failure",
+    "with_cupy": "failure",
+    "failed_step": "Verify integrated cut editing and source entry compatibility",
+    "reconstruction": {
+      "tests": 26,
+      "failures": 15,
+      "errors": 6
+    },
+    "build_and_exe_acceptance": "not_run"
+  },
+  "final_ci": "See PR #20 checks for exact final head; initial checks do not certify a later commit.",
+  "not_validated": [
+    "Native Windows BUILD.bat and EXE runtime",
+    "Real NVIDIA/CUDA hardware",
+    "External user GDS/GD55",
+    "Installed KLayout desktop backend"
+  ],
+  "branch_cleanup": "Only after main contains each unchanged source head; actual remote deletion must be independently verified.",
+  "aggregate_verify_source": {
+    "status": "FAIL",
+    "stage": "full core tests",
+    "tests": 361,
+    "failures": 15,
+    "errors": 6,
+    "skipped": 3,
+    "later_stages": "not run by aggregate tool; selected GUI, CLI and smoke independently run"
+  }
+}

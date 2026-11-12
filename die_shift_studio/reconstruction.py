@@ -516,14 +516,10 @@ class Reconstructor:
 
     def _pinned_second(self, rows, layer, index, vias):
         """The stored second-cut line of this piece, or None."""
-        want = normalize_via_refs(vias)
-        ordered=sorted(rows or (),key=lambda row:not (normalize_via_refs(row[2]) and isinstance(normalize_via_refs(row[2])[0],tuple)))
-        for row in ordered:
-            if str(row[0]) != str(layer) or int(row[1]) != int(index):
-                continue
-            got = self._qualified_refs(layer, index, row[2])
-            if got and set(want) <= set(got):
-                return (float(row[5]), float(row[6]), float(row[3]), float(row[4]))
+        candidates=((row[0],row[1],row[2],row) for row in (rows or ()))
+        row=next(self._matching_cut_rows(candidates,layer,index,vias),None)
+        if row is not None:
+            return (float(row[5]), float(row[6]), float(row[3]), float(row[4]))
         return None
 
     def _measure_second(self, polygon, plane):
@@ -1460,18 +1456,30 @@ class Reconstructor:
             resolved.extend(matches)
         return normalize_via_refs(resolved)
 
+    def _matching_cut_rows(self, candidates, layer, index, chain):
+        """Prefer exact qualified edits, then covers, then safe legacy rows.
+
+        A previously merged piece can leave a covering row before a newer
+        chain-specific edit. Insertion order must not hide that exact edit.
+        """
+        want=set(normalize_via_refs(chain))
+        matches=[]
+        for l,i,refs,value in candidates:
+            if str(l)!=str(layer) or int(i)!=int(index):continue
+            refs=normalize_via_refs(refs)
+            got=set(self._qualified_refs(layer,index,refs))
+            if not got or not want<=got:continue
+            legacy=not isinstance(refs[0],tuple)
+            matches.append(((legacy,got!=want),value))
+        for _,value in sorted(matches,key=lambda match:match[0]):
+            yield value
+
     def _cover_lookup(self,exact,rows,layer,index,chain):
-        want=set(chain)
         if isinstance(exact,(set,frozenset)):
             candidates=((l,i,v,True) for l,i,v in exact)
         else:
             candidates=((l,i,v,value) for (l,i,v),value in (exact or {}).items())
-        candidates=sorted(candidates,key=lambda row:not (normalize_via_refs(row[2]) and isinstance(normalize_via_refs(row[2])[0],tuple)))
-        for l,i,refs,value in candidates:
-            if str(l)==str(layer) and int(i)==int(index):
-                got=self._qualified_refs(layer,index,refs)
-                if got and want<=set(got):return value
-        return None
+        return next(self._matching_cut_rows(candidates,layer,index,chain),None)
 
     def _apply_regions(self, layer, polygon, blocks):
         """Apply explicit boxes once per feature, never once per DIE.
