@@ -55,7 +55,9 @@ class ExportTests(unittest.TestCase):
                 expected=shapely.union_all(cache.layers[key]['geometry'])
                 self.assertLess(expected.symmetric_difference(shapes['L'+key.replace('/','_D')]).area,1e-10)
             self.assertTrue(result['flattened'] and result['merge_layers'])
-            self.assertLess(result['merged_polygons'],result['input_polygons'])
+            # V39 assembles fracture fragments during import; export may already receive the merged solids.
+            self.assertLessEqual(result['merged_polygons'],result['input_polygons'])
+            self.assertTrue(data.merge_notes)
             self.assertEqual(before,source.read_bytes())
 
     def test_overlap_holes_scale_entities_and_fill_preferences(self):

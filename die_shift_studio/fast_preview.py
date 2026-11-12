@@ -11,10 +11,11 @@ from .preview import rigid_transform,default_motion
 
 
 def polygons_from_arrays(arrays):
-    if isinstance(arrays,np.ndarray) and arrays.ndim==3:return shapely.polygons(arrays)
     groups={};result=np.empty(len(arrays),object)
     for i,a in enumerate(arrays):groups.setdefault(len(a),[]).append(i)
     for indices in groups.values():result[indices]=shapely.polygons(np.asarray([arrays[i] for i in indices]))
+    invalid=~shapely.is_valid(result)
+    if np.any(invalid):result[invalid]=shapely.buffer(result[invalid],0.)
     return result
 
 class GeometryCache:

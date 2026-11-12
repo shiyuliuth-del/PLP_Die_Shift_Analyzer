@@ -47,6 +47,9 @@ class FixedRules:
         self.board=model.case.get('board');self.inside=self.board.buffer(-self.space) if self.board is not None else None
         from .width_keepout import forbidden
         self.keepout=forbidden(model)
+        self.contexts={};self.hard_memo={}
+        from .session_cache import logical_fingerprint
+        self.identity=logical_fingerprint((model.data.geometry_id,model.roles,model.connections.order,self.width,self.space,p.annulus_um))
 
     def geometries(self,replacements):
         changed={}
@@ -88,6 +91,75 @@ class FixedRules:
         from .native_backend import any_violation
         return not (any_violation('width',g.wkb,self.dbu,self.width) or any_violation('space',g.wkb,self.dbu,self.space))
 
+    def context(self,plan):
+        tag=(plan.key,plan.identity)
+        if tag in self.contexts:return self.contexts[tag]
+        key=self.refnet[plan.layer,plan.index];refs=self.nets[key]
+        neighbourhood=plan.source.buffer(2*max(self.width,self.space)+2*self.dbu)
+        rest=shapely.union_all([self.model.nodes[self.model.ids[r]]['poly'].intersection(neighbourhood) for r in refs
+                               if r!=(plan.layer,plan.index) and self.model.nodes[self.model.ids[r]]['poly'].intersects(neighbourhood)])
+        vias=[v for v in self.vias[key] if v[1] in (-1,plan.owner) and self.model.nodes[self.model.ids[v[0]]]['poly'].intersects(plan.source)]
+        others=[g for k,g in self.original.items() if k[0]==key[0] and k!=key]
+        value=(key,rest,vias,others,shapely.STRtree(others));self.contexts[tag]=value;return value
+
+    def best_regions(self,plan,part,center,pose,style):
+        """Keep endpoints fixed; compare finite style-preserving curve candidates.
+
+        The reference neighbours are nominal and fixed, so this decision depends
+        only on the owning DIE. Final posed neighbours are checked separately.
+        """
+        from .reconstruction_route import warp
+        from .turn_connection import VARIANTS
+        token=('rule-choice-v39',self.identity,style,part['a'],part['b'],np.asarray(center).tobytes(),np.asarray(pose).tobytes())
+        if token in plan.pose_memo:
+            value,_,_=plan.pose_memo[token];plan.pose_memo.move_to_end(token)
+            geos,error,score=value;return None if geos is None else dict(geos),error,score
+        regions,error=warp(part,plan,center,pose,style)
+        if error:return None,error,(float('inf'),float('inf'))
+        key,rest,vias,others,tree=self.context(plan);states=np.zeros((len(self.model.bound.centers),3));states[plan.owner]=pose
+        def quality(candidate):
+            from .native_backend import any_violation
+            copper=shapely.union_all([rest,*candidate.values()]);kinds=set();amount=0.
+            for op,value in (('width',self.width),('space',self.space)):
+                if any_violation(op,copper.wkb,self.dbu,value):kinds.add(op)
+            for ref,owner,required in vias:
+                missing=self.model.moved(required,owner,states).difference(copper).area
+                if missing>self.dbu*self.dbu:kinds.add('enclosure');amount+=missing/max(self.width*self.space,1e-12)
+            if self.board is not None and (not self.board.covers(copper) or copper.distance(self.board.boundary)<self.space-self.dbu*.001):
+                kinds.add('board');amount+=copper.difference(self.inside).area/max(self.width*self.space,1e-12)
+            if not self.keepout.is_empty and shapely.relate_pattern(copper,self.keepout,'T********'):
+                kinds.add('keepout');amount+=copper.intersection(self.keepout).area/max(self.width*self.space,1e-12)
+            for j in tree.query(copper,predicate='dwithin',distance=self.space):
+                other=others[int(j)]
+                if self.pair_fails(copper,other):
+                    kinds.add('foreign');gap=copper.distance(other)
+                    amount+=(self.space-gap)/self.space+(copper.intersection(other).area/max(self.width*self.space,1e-12) if gap==0 else 0)
+            return (len(kinds),amount)
+        score=quality(regions);best=regions;best_score=score
+        hard_key=(plan.identity,part['a'],part['b'])
+        if hard_key not in self.hard_memo:
+            seam=shapely.union_all([part['near'],part['far']]);permanent=False
+            for g in (part['B'],part['C']):
+                if g.is_empty:continue
+                for op,value in (('width',self.width),('space',self.space)):
+                    bad=rule_region(g,max(self.dbu,value-4*self.dbu),self.dbu,op)
+                    if not bad.is_empty and bad.distance(seam)>max(self.width,self.space)*2:permanent=True
+            self.hard_memo[hard_key]=permanent
+        permanent=self.hard_memo[hard_key]
+        if score[0] and style!='linear' and np.any(pose) and not permanent:
+            for v in range(1,len(VARIANTS)+1):
+                alternate,reason=warp(part,plan,center,pose,style,v)
+                if reason:continue
+                candidate_score=quality(alternate)
+                if candidate_score<best_score:best,best_score=alternate,candidate_score
+                if best_score[0]==0:break
+        size=sum(int(shapely.get_num_coordinates(g))*24 for g in best.values())+512
+        if size<=plan.memo_budget:
+            plan.pose_memo[token]=((dict(best),None,best_score),None,size);plan.memo_bytes+=size
+            while plan.memo_bytes>plan.memo_budget or len(plan.pose_memo)>32:
+                _,old=plan.pose_memo.popitem(last=False);plan.memo_bytes-=old[2]
+        return dict(best),None,best_score
+
     def check(self,replacements,states,progress=lambda *_:None):
         geos=self.geometries(replacements);out=[];keys=list(geos)
         for n,key in enumerate(keys):
@@ -113,23 +185,11 @@ class FixedRules:
         final integrator checks actual independently reconstructed neighbours.
         """
         from .reconstruction_route import warp
-        key=self.refnet[plan.layer,plan.index];refs=self.nets[key]
-        neighbourhood=plan.source.buffer(2*max(self.width,self.space)+2*self.dbu)
-        rest=shapely.union_all([self.model.nodes[self.model.ids[r]]['poly'].intersection(neighbourhood) for r in refs if r!=(plan.layer,plan.index) and self.model.nodes[self.model.ids[r]]['poly'].intersects(neighbourhood)])
-        vias=[v for v in self.vias[key] if self.model.nodes[self.model.ids[v[0]]]['poly'].intersects(plan.source)]
-        others=[g for k,g in self.original.items() if k[0]==key[0] and k!=key]
-        tree=shapely.STRtree(others);failure=0.;count=0
-        states=np.zeros((grid.count,3));weights=grid.weights[plan.owner]
+        failure=0.;count=0;weights=grid.weights[plan.owner]
         for i in np.argsort(-weights):
             if weights[i]<=0:continue
-            states[plan.owner]=grid.locals[plan.owner][i]
-            regions,error=warp(part,plan,self.model.bound.centers[plan.owner],states[plan.owner],style)
-            bad=bool(error)
-            if not bad:
-                copper=shapely.union_all([rest,*regions.values()])
-                bad=not self.passes(key,copper,states,vias)
-                if not bad:
-                    bad=any(self.pair_fails(copper,others[int(j)]) for j in tree.query(copper,predicate='dwithin',distance=self.space))
+            regions,error,score=self.best_regions(plan,part,self.model.bound.centers[plan.owner],grid.locals[plan.owner][i],style)
+            bad=bool(error) or score[0]>0
             if bad:failure+=float(weights[i]);count+=1
             if failure>limit+1e-15:break
         return float(failure),count

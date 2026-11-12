@@ -18,7 +18,7 @@ def independent_components(book,entries,p,style):
     Keeping it in one numerical factor would unnecessarily form a huge DIE
     Cartesian product. Curved biarcs use the unsplit conservative fallback.
     """
-    if style=='arc':return book
+    if style!='linear':return book
     from copy import copy
     from collections import defaultdict
     from .statistics import mean_and_bounds
@@ -51,7 +51,7 @@ def independent_components(book,entries,p,style):
     return result
 
 
-def measure_reconstruction_yield(reconstructor,p,cfg,progress):
+def measure_reconstruction_yield(reconstructor,p,cfg,progress,local_cache=None,partial=None):
     r=reconstructor;book=r.rules
     entries=r._plans_for_all_poses(lambda n,t:progress(round(n*.15),t))
     book=independent_components(book,entries,p,cfg.reconstruction_style)
@@ -61,15 +61,32 @@ def measure_reconstruction_yield(reconstructor,p,cfg,progress):
     for entry in entries:
         if entry['plan'] is not None or entry['orphan']:owners[book.refnet[entry['layer'],entry['index']]].add(entry['owner'])
     owners={k:tuple(sorted(o for o in v if len(choices[o])>1 or np.any(grid.locals[o][choices[o][0]]))) for k,v in owners.items()}
-    tables={};clauses=set();checks=0
+    tables={};clauses=set();checks=0;reused=0
     def clause(dependencies,digits):return PoseClause(tuple((owner,(int(digit),)) for owner,digit in zip(dependencies,digits)))
     keys=list(book.nets)
+    zero=np.zeros((grid.count,3))
+    keys.sort(key=lambda k:(book.passes(k,book.original[k],zero,[]),math.prod(len(choices[o]) for o in owners[k]),k))
     local_total=sum(math.prod(len(choices[o]) for o in owners[k]) for k in keys)
     always_failed=None
     for key in keys:
         deps=owners[key];rows={}
         targets=book.nets[key]
-        for digits in product(*(choices[o] for o in deps)):
+        from .session_cache import logical_fingerprint
+        definitions=[]
+        for entry in entries:
+            if (entry['layer'],entry['index']) not in targets:continue
+            part,_=r.interval(entry)
+            definitions.append((entry['owner'],entry['source'].wkb_hex,entry['orphan'],
+                                None if part is None else tuple(part[k].wkb_hex for k in 'ABC')))
+        factor_key=logical_fingerprint((r.rules.identity,'branch2',tuple(targets),book.original[key].wkb_hex,definitions,cfg.reconstruction_style,
+                    tuple((o,grid.locals[o].tobytes().hex(),book.model.bound.centers[o].tobytes().hex()) for o in deps),book.width,book.space,book.dbu,
+                    None if book.board is None else book.board.wkb_hex,book.keepout.wkb_hex))
+        hit=local_cache.get(factor_key) if local_cache is not None else None
+        if hit is not None:
+            rows=hit;reused+=len(rows)
+            for digits,(geo,bad) in rows.items():
+                if bad:clauses.add(clause(deps,digits))
+        for digits in (() if hit is not None else product(*(choices[o] for o in deps))):
             states=np.zeros((grid.count,3))
             for owner,digit in zip(deps,digits):states[owner]=grid.locals[owner][digit]
             frame=r.frame(states,targets=targets,diagnostics=False)
@@ -79,10 +96,19 @@ def measure_reconstruction_yield(reconstructor,p,cfg,progress):
                 for q in values:
                     for i in q['indices']:changed[layer,i]=q['geometry']
             geo=shapely.union_all([changed.get(ref,r.model.nodes[r.model.ids[ref]]['poly']) for ref in targets])
-            bad=not book.passes(key,geo,states,[]);rows[digits]=(geo,bad)
+            bad=any(q.get('connection_failed') for q in frame['pieces']) or not book.passes(key,geo,states,[]);rows[digits]=(geo,bad)
             if bad:clauses.add(clause(deps,digits))
             checks+=1;progress(15+round(50*checks/max(1,local_total)),f'重构良率 · 局部规则 {checks:,}/{local_total:,}')
         tables[key]=rows
+        if hit is None and local_cache is not None:
+            size=sum(len(g.wkb)+128 for g,bad in rows.values())
+            local_cache.put(factor_key,rows,size=size)
+        if partial is not None:
+            upper,lower_failure=weighted_pair(ProblemIndex(grid,sorted(clauses,key=lambda c:c.allowed)),grid.weights)
+            partial(dict(method='grid',value=upper,failure=lower_failure,partial=True,grid_nodes=grid.nodes,
+                         total=grid.combinations,local_checks=checks,pair_checks=0,reused_local_checks=reused,
+                         scale_nsigma=p.scale_nsigma,scope='已完成的固定RDL规则因子；其余因子仍在检查。',
+                         limitation='显示有限网格良率的当前上界，不能当作最终通过率。'))
         if rows and all(bad for g,bad in rows.values()):
             always_failed=key;break  # proven failure for all states of one factor
     enclosure_checks=0
@@ -126,7 +152,7 @@ def measure_reconstruction_yield(reconstructor,p,cfg,progress):
     success,failure=weighted_pair(index,grid.weights)
     progress(100,'重构良率完成：完整有限网格；不是连续空间的精确穷尽')
     return dict(method='grid',value=success,failure=failure,grid_nodes=grid.nodes,
-                total=grid.combinations,local_checks=checks,pair_checks=pair_checks,enclosure_checks=enclosure_checks,early_failure_net=always_failed,
+                total=grid.combinations,local_checks=checks,pair_checks=pair_checks,enclosure_checks=enclosure_checks,early_failure_net=always_failed,reused_local_checks=reused,
                 scale_nsigma=p.scale_nsigma,mass_error=grid.mass_error,steps=grid.steps,
-                scope='全部固定RDL的线宽/线距、相连过孔包围量、封装边距与禁布区；按最终重构几何。',
+                scope='重构连接成立，全部固定RDL的线宽/线距、相连过孔包围量、封装边距与禁布区；按最终重构几何。',
                 limitation='完整有限网格积分估计，连续空间误差需提高节点数复核；不包含未建模的制造缺陷。')

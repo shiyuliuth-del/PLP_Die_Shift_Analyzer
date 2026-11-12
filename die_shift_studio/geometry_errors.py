@@ -59,6 +59,10 @@ def sanitize_data(data):
                 if not np.isfinite(points).all():raise ValueError('含非有限坐标')
                 if np.max(np.abs(points))>1e9:raise ValueError('坐标超出支持范围 ±1e9 μm')
                 poly=Polygon(points)
+                meta=source[index] if index<len(source) else None
+                if meta and meta.get('kind')=='polygon' and meta.get('winding'):
+                    from .gds_merge import filled_polygon
+                    filled_polygon(points,True);valid.append(array);metadata.append(meta);continue
                 if poly.is_valid and poly.area>0:
                     valid.append(array);metadata.append(source[index] if index<len(source) else None);continue
                 reason=shapely.is_valid_reason(poly)

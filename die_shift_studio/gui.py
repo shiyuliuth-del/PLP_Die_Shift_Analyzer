@@ -329,7 +329,7 @@ class MainWindow(W.QMainWindow):
         self.filter_job=None;self._coupled_key=None;self._coupled_data=None;self._coupled_error=False
         self.width_toggle=W.QCheckBox('宽度分析');self.width_toggle.setToolTip('按实际线路穿越数量检查局部通道容量：矩形颜色显示宽度余量，轮廓高亮风险线路；不代表全局可布通证明。');corner_layout.addWidget(self.width_toggle);self.width_toggle.toggled.connect(self.width_changed)
         self.repair_toggle=W.QCheckBox('修复补块');self.repair_toggle.setToolTip('设备方修复模型：过孔偏移后脱离固定RDL时，在固定RDL层按偏移量拉直线补块，并对补块后的图形做DRC；补块是简化模型，不代表设备实际修复合格。');corner_layout.addWidget(self.repair_toggle);self.repair_toggle.toggled.connect(self.repair_changed)
-        self.reconstruction_toggle=W.QCheckBox('重构预演');self.reconstruction_toggle.setToolTip('沿原始走线划分A动区、B静区、C平移区；所有偏移状态共用端点。拖动蓝色/玫红边界可分别调整，动区轮廓可输出DXF。');corner_layout.addWidget(self.reconstruction_toggle);self.reconstruction_toggle.toggled.connect(self.reconstruction_changed)
+        self.reconstruction_toggle=W.QCheckBox('重构预演');self.reconstruction_toggle.setToolTip('沿原始走线划分A动区、B静区、C平移区；所有偏移状态共用端点。拖动蓝色/黄色边界可分别调整，动区轮廓可输出DXF。');corner_layout.addWidget(self.reconstruction_toggle);self.reconstruction_toggle.toggled.connect(self.reconstruction_changed)
         self.preview_tabs.setCornerWidget(corner)
         self.probability_toggle.toggled.connect(self.footprint_changed);self.space_toggle.toggled.connect(self.space_changed)
         extreme_page=W.QWidget();ep=W.QVBoxLayout(extreme_page);ep.setContentsMargins(0,0,0,0)
@@ -397,7 +397,7 @@ class MainWindow(W.QMainWindow):
         self.width_table=ChannelTable();wv.addWidget(self.width_table)
         self.width_table.selectionModel().currentRowChanged.connect(lambda index,_:self.width_overlay.locate(index.row()));self.preview_tabs.addTab(width_page,'宽度分析')
         self.reconstruction_page=W.QWidget();cv=W.QVBoxLayout(self.reconstruction_page);cv.setContentsMargins(3,3,3,3)
-        self.reconstruction_summary=label('启用后，蓝色/玫红边界分别控制共用动区两端，紫色轮廓表示约束无法满足。');cv.addWidget(self.reconstruction_summary)
+        self.reconstruction_summary=label('启用后，蓝色/黄色边界分别控制共用动区两端，紫色轮廓表示约束无法满足。');cv.addWidget(self.reconstruction_summary)
         self.reconstruction_table=table(['固定RDL层','所属','网络','移动区面积 / μm²','位移 / μm','裂隙 / μm','补线面积 / μm²','补块长度 / μm','切口缝长 / μm','间距 / μm','状态']);cv.addWidget(self.reconstruction_table)
         row=W.QWidget();rv=W.QHBoxLayout(row);rv.setContentsMargins(0,0,0,0)
         self.region_move=W.QPushButton('框选动区');self.region_move.setCheckable(True)
@@ -574,7 +574,7 @@ class MainWindow(W.QMainWindow):
         self.setting_fields['reconstruction_grid_nodes'].setToolTip('完整有限网格，按区间概率质量积分；增大节点可检查连续空间误差。不是等概率极端计数。')
         live=W.QCheckBox('实时反馈动区变化');self.setting_fields['reconstruction_live']=live;recon.addRow(live);live.toggled.connect(self.settings_changed)
         spin(recon,'reconstruction_corner_guard_um','拐角吸附预留 / μm',0,1000,2)
-        recon.addRow(label('动区沿原图追溯路径定义，所有姿态共用。蓝色近端与玫红远端分别拖动；蓝点表示整个运动孔盘纳入动区。'))
+        recon.addRow(label('动区沿原图追溯路径定义，所有姿态共用。蓝色近端与黄色远端分别拖动；蓝点表示整个运动孔盘纳入动区。'))
         drawing=group('接触标记');
         low=W.QCheckBox('显示低概率接触位置');self.setting_fields['show_low_contact']=low;drawing.addRow(low);low.toggled.connect(self.settings_changed)
         markers=W.QCheckBox('显示接触位置');self.setting_fields['show_contact_markers']=markers;drawing.addRow(markers);markers.toggled.connect(self.settings_changed)
@@ -855,7 +855,7 @@ class MainWindow(W.QMainWindow):
             from . import native_backend
             native_backend.close();self._clear_native_when_idle=False
             from .reconstruction_rules import intrinsic
-            intrinsic.cache_clear();self.reconstruction_yield.plan_pool.clear();self.constraint_feedback.context=None
+            intrinsic.cache_clear();self.reconstruction_yield.plan_pool.clear();self.reconstruction_yield.factor_pool.clear();self.constraint_feedback.context=None
         for group_ in self.parked_groups:
             if group_ is self.cache_group:continue
             group_.park_frames()
@@ -941,7 +941,8 @@ class MainWindow(W.QMainWindow):
             data=read_gds(path,top,progress)
             if isinstance(data,dict):return data
             settings=project if project and (not project.get('sha256') or project['sha256']==data.sha256) else {}
-            data=edited_snapshot(data,settings.get('node_edits',[]))
+            from .gds_merge import restore_project_geometry
+            data,settings=restore_project_geometry(data,settings);data.restored_project=settings
             roles=settings.get('roles',data.auto_roles)
             progress(35,'构建几何索引与图层缓存');data.geometry_cache=GeometryCache(data)
             data.prepared_roles=roles;data.prepared_auto=automatic_parameters(data,roles)
@@ -956,6 +957,7 @@ class MainWindow(W.QMainWindow):
                 return
             if settings and settings.get('sha256') and settings['sha256']!=data.sha256:
                 self.error('GDS已改变，请重新设置图层。');settings=None
+            if settings is not None:settings=getattr(data,'restored_project',settings)
             self.set_data(data,settings,project_path=project_path)
             self.project_path=Path(project_path).resolve() if settings and project_path and Path(project_path).resolve().parent==self.jobs_dir.resolve() else None
             self.refresh_jobs()
@@ -964,9 +966,13 @@ class MainWindow(W.QMainWindow):
         self.exit_region_mode()
         from .session_cache import logical_fingerprint
         project=normalize_project(project) if project else {}
+        if project and project.get('geometry_indexing')!='merged-v39':
+            from .gds_merge import restore_project_geometry
+            data,project=restore_project_geometry(data,project)
         if data.node_edits!=project.get('node_edits',[]):
             data=edited_snapshot(data,project.get('node_edits',[]))
         for message in data.import_warnings:self.log_bus.emit(message,'WARNING')
+        for message in getattr(data,'merge_notes',()):self.log_bus.emit(message)
         cache_settings=ViewSettings.from_dict(project.get('settings'))
         cache_id=logical_fingerprint((str(Path(project_path or data.path).resolve()),data.sha256,data.top_name))
         self.switch_project_cache(cache_id,cache_settings.cache_max_entries)
@@ -1357,7 +1363,7 @@ class MainWindow(W.QMainWindow):
         changes={name:tuple(row for row in getattr(self.view_settings,name) if not matches(row)) for name in names}
         manual=any(changes[name]!=getattr(self.view_settings,name) for name in names)
         dropped=tuple(row for row in self.view_settings.reconstruction_dropped_cuts if not matches(row))
-        changes['reconstruction_intervals']=tuple(r for r in self.view_settings.reconstruction_intervals if (r[0],r[1],r[2])!=(piece['layer'],piece['index'],piece['die']))
+        changes['reconstruction_intervals']=tuple(r for r in self.view_settings.reconstruction_intervals if (r[0],r[1],r[2],r[4])!=(piece['layer'],piece['index'],piece['die'],piece.get('route_identity')))
         manual=manual or changes['reconstruction_intervals']!=self.view_settings.reconstruction_intervals
         self.view_settings=replace(self.view_settings,**changes,reconstruction_dropped_cuts=dropped)
         self.invalidate_reconstruction_edit()
@@ -1370,7 +1376,7 @@ class MainWindow(W.QMainWindow):
         if not self.reconstruction_toggle.isChecked():self.exit_region_mode();self.cut_drag.cancel()
         self.filter_changed(pending_ok=True)
         if self.reconstruction_toggle.isChecked():
-            self.statusBar().showMessage('重构预演：建立原图共用动区，核对全部离散极端；蓝色与玫红两端可独立拖动…')
+            self.statusBar().showMessage('重构预演：建立原图共用动区，核对全部离散极端；蓝色与黄色两端可独立拖动…')
             self.request_preview()
         else:
             # Refresh the displayed frame after removing the reconstruction overlay.
@@ -1662,7 +1668,7 @@ class MainWindow(W.QMainWindow):
         if self.reconstruction_toggle.isChecked():
             from .reconstruction_overlay import COLORS,CUT_COLOR,SECOND_CUT_COLOR,WARNING_COLOR
             handles += [Patch(facecolor=COLORS[k],alpha=.66,label=k+' '+title) for k,title in [('A','动区'),('B','静区'),('C','平移区')]]
-            handles += [Line2D([],[],color=CUT_COLOR,lw=2,label='运动侧边界 / 整孔盘蓝点'),Line2D([],[],color=SECOND_CUT_COLOR,lw=2,label='固定侧边界'),Patch(facecolor='none',edgecolor=WARNING_COLOR,ls='--',label='动区约束警告')]
+            handles += [Line2D([],[],color=CUT_COLOR,lw=2,label='运动侧边界 / 整孔盘蓝点'),Line2D([],[],color=SECOND_CUT_COLOR,lw=2,label='固定侧边界 / 整孔盘黄点'),Patch(facecolor='#df4b50',edgecolor='#b92d39',alpha=.38,label='重构问题（单击查看）')]
         if self.current_frame and self.current_frame.get('motion_issues'):handles.append(Line2D([],[],color='#bf862c',ls='--',label='运动归属未定：保持名义位置'))
         if getattr(self.data,'ignored_geometry',[]):handles.append(Line2D([],[],color='#d72b91',ls='--',lw=.7,label='忽略的无效图形'))
         if self.current_frame is not None:
@@ -2546,6 +2552,7 @@ class MainWindow(W.QMainWindow):
     def project_settings(self):
         return dict(schema_version=5,app_version=__version__,sha256=self.data.sha256,top_cell=self.data.top_name,
                     roles=self.roles(),parameters=asdict(self.params()),settings=asdict(self.view_settings),node_edits=list(self.data.node_edits),
+                    geometry_indexing=getattr(self.data,'geometry_indexing','legacy'),legacy_node_edits=list(getattr(self.data,'legacy_node_edits',[])),
                     dxf_directory=self.dxf_directory,dxf_options=asdict(self.dxf_settings),
                     ignored_width_lines=dict(sha256=self.data.sha256,top_cell=self.data.top_name,refs=[list(r) for r in sorted(self.ignored_width_lines)]),
                     extreme_view=dict(filter_problems=self.problem_filter.isChecked(),mode='focus' if self.grid_mode.currentIndex() else 'all',page_size=EXTREME_PAGE_SIZE,page=(self.preview_page if self.extremes is not None else self._initial_extreme_page)+1),

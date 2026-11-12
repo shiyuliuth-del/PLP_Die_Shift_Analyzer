@@ -10,6 +10,7 @@ from die_shift_studio.resources import resource_profile
 from die_shift_studio.reconstruction_route import warp
 import numpy as np,shapely
 from collections import Counter
+code_hash=hashlib.sha256(b''.join(p.read_bytes() for p in sorted((ROOT/'die_shift_studio').glob('*.py')))).hexdigest()
 path=args.gds;d=read_gds(path);roles={k:'不参与' for k in d.layers};roles.update({'127/0':'封装边框','128/0':'芯片边框','3/0':'运动RDL','4/0':'运动过孔','5/0':'固定RDL','6/0':'固定过孔'})
 c=build_case(d,roles,layer_order=['6/0','5/0','4/0','3/0']);p=Parameters();e=PreviewEngine(GeometryCache(d),c,roles,{},p,None,c['connections']);e.configure_reconstruction(True,ViewSettings());r=e.reconstructor;rows=[];export=None;start=time.perf_counter()
 base=r.frame(np.zeros((len(c['dies']),3)));cold=time.perf_counter()-start;intervals=[q['interval'] for q in base['pieces']]
@@ -44,6 +45,5 @@ q=next(q for q in base['pieces'] if q['route_plan'] and q['valid'] and q['interv
 plan=q['route_plan'];timings=[]
 for delta in np.linspace(1,30,30):
  t=time.perf_counter();cfg,part=r.edited(q,0,plan.route.interpolate(q['interval'][0]+delta).coords[0]);warp(part,plan,r.model.bound.centers[q['die']],np.array([-35.,-35.,-np.pi/180]));timings.append(1000*(time.perf_counter()-t))
-code_hash=hashlib.sha256(b''.join(p.read_bytes() for p in sorted((ROOT/'die_shift_studio').glob('*.py')))).hexdigest()
-record=dict(export=export,reconstruction_yield=yield_result,yield_seconds=yield_seconds,point_regression=dict(point=[-1164,-127],layer="5/0",source_index=17,painting_equals_replacements=True),code_sha256=code_hash,version='V39',source_sha256=d.sha256,hardware=resource_profile(),cold_nominal_plan_seconds=cold,rows=rows,local_drag_geometry_ms=dict(median=float(np.median(timings)),maximum=max(timings)),scope='Linux CPU; local geometry time excludes Qt paint and final full DRC; no CUDA performance claim')
+record=dict(export=export,reconstruction_yield=yield_result,yield_seconds=yield_seconds,point_regression=dict(point=[-1164,-127],layer="5/0",source_index=d.raw_to_merged.get(("5/0",17),17),legacy_source_index=17,painting_equals_replacements=True),code_sha256=code_hash,version='V39',source_sha256=d.sha256,hardware=resource_profile(),cold_nominal_plan_seconds=cold,rows=rows,local_drag_geometry_ms=dict(median=float(np.median(timings)),maximum=max(timings)),scope='Linux CPU; local geometry time excludes Qt paint and final full DRC; no CUDA performance claim')
 args.output.open('w',encoding='utf8').write(json.dumps(record,ensure_ascii=False,indent=2));print('COLD',cold,'DRAG',record['local_drag_geometry_ms'],flush=True);e.close()

@@ -23,10 +23,11 @@ def event(name,xy):
  w.canvas.callbacks.process(name,ev);app.processEvents()
 
 def drag(q,which,mark,live=True):
- plan=q['route_plan'];line=q['extra_cut'] if which else q['moved_cut'];start=np.array(line.centroid.coords[0]);end=np.array(plan.route.interpolate(mark).coords[0])
+ plan=q['route_plan'];line=q['extra_cut'] if which else q['moved_cut'];actual=np.array(line.centroid.coords[0]);handle=w.reconstruction_overlay.handle_geometries([q]).get((w.reconstruction_overlay._key(q),'extra' if which else 'moved'),line);start=np.array(handle.centroid.coords[0]);end=np.array(plan.route.interpolate(mark).coords[0])
  if not which:
   from die_shift_studio.preview import rigid_transform
   end=rigid_transform(end,w.current_frame['rotation_centers'][q['die']],w.current_frame['states'][q['die']])
+ end+=start-actual
  lo=np.minimum(start,end)-70;hi=np.maximum(start,end)+70;w.ax.set_xlim(lo[0],hi[0]);w.ax.set_ylim(lo[1],hi[1]);w.plot_layout(preserve=True);w.canvas.draw()
  event('button_press_event',start);assert w.cut_drag.state is not None,('miss',which,start)
  event('motion_notify_event',end)

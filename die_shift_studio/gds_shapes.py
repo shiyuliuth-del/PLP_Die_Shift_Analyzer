@@ -108,6 +108,7 @@ def import_shapes(cell,dbu):
 def shape_nodes(data,key,index):
     meta=data.shape_info.get(key,[])
     source=meta[index] if index<len(meta) else None
+    if source is not None and source.get('kind')=='polygon':return '多边形',outline(data.layers[key][index]),source
     if source is not None:
         return ('单点 PATH 圆' if len(source['nodes'])==1 else 'PATH'),np.asarray(source['nodes']),source
     xy=outline(data.layers[key][index])
@@ -127,7 +128,7 @@ def build_outline(points,source,dbu):
         raise ValueError('节点坐标必须是有限的 X、Y（μm），范围 ±1e9')
     if np.any(np.all(np.diff(xy,axis=0)==0,axis=1)):
         raise ValueError('相邻节点不能重合')
-    if source:
+    if source and source.get('kind')!='polygon':
         if len(xy)==1:
             boundary=circle(xy[0],source['width'],dbu)
         else:
@@ -140,9 +141,8 @@ def build_outline(points,source,dbu):
         boundary=outline(xy)
         if len(boundary)<3:
             raise ValueError('多边形至少需要三个不同的节点')
-    poly=Polygon(boundary)
-    if not poly.is_valid or poly.area<=0:
-        raise ValueError('编辑后的轮廓自交、退化或没有面积')
+    from .gds_merge import filled_polygon
+    filled_polygon(boundary,bool(source and source.get('winding')))
     return np.asarray(boundary,float)
 
 
@@ -178,7 +178,7 @@ def edited_snapshot(data,edits):
         changed.add((key,index))
         updated.node_edits.append(dict(layer=key,index=index,original=entry['original'],nodes=xy.tolist()))
     updated.node_edits.sort(key=lambda e:(e['layer'],e['index']))
-    updated.edit_digest=hashlib.sha256(json.dumps(updated.node_edits,separators=(',',':'),allow_nan=False).encode()).hexdigest()
+    updated.edit_digest=hashlib.sha256(json.dumps([base.edit_digest,updated.node_edits],separators=(',',':'),allow_nan=False).encode()).hexdigest()
     for attr in ('geometry_cache','prepared_case','prepared_auto','prepared_roles'):
         updated.__dict__.pop(attr,None)
     updated._sanitized_token=tuple((k,id(v),len(v)) for k,v in updated.layers.items())

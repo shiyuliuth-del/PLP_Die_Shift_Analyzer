@@ -20,6 +20,7 @@ on:
       - 'tests/gui_v38.py'
       - 'tests/gui_v39.py'
       - 'tests/test_v38.py'
+      - 'tests/test_v39*.py'
       - 'tests/test_branch_integration.py'
       - 'tests/cuda_test_driver.cpp'
       - 'main.py'
@@ -136,6 +137,8 @@ jobs:
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" tests/gui_v38.py
           if errorlevel 1 exit /b 1
+          "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p "test_v39*.py" -v
+          if errorlevel 1 exit /b %errorlevel%
           "%DIE_SHIFT_PYTHON%" tests/gui_v39.py
       - name: Exercise the one-click BUILD.bat from the extracted source
         shell: cmd

@@ -64,23 +64,55 @@ def _side_tangent(source,point,direction,tol):
     return tangent if tangent@direction>=0 else -tangent
 
 
-def endpoint_active(part,plan,center,state,style):
+def connection_data(part,plan,center,state):
     from .preview import rigid_transform
-    active_part=part;landing=shapely.Polygon()
-    if part['a']==0:
+    active_part=part;landing=shapely.Polygon();fixed_landing=shapely.Polygon()
+    if part['a']==0 or part['far'].geom_type=='Point':
         # The blue point is a UI handle, never a zero-width electrical neck.
         # Preserve the whole original landing as part of A; connect beyond it.
         active_part=None
         for offset in (16,32,64):
-            start=plan.land_end+plan.tolerance*offset
-            if start>=part['b']:break
-            active_part=plan.partition(start,part['b'])
+            start=plan.land_end+plan.tolerance*offset if part['a']==0 else part['a']
+            end=plan.fixed_start-plan.tolerance*offset if part['far'].geom_type=='Point' else part['b']
+            if start>=end:break
+            active_part=plan.partition(start,end)
             if active_part is not None:break
         if active_part is None:raise ValueError('整孔盘外没有可连接的截面')
-        landing=shapely.transform(active_part['C'],lambda p:rigid_transform(p,center,state))
+        if part['a']==0:landing=shapely.transform(active_part['C'],lambda p:rigid_transform(p,center,state))
+        if part['far'].geom_type=='Point':fixed_landing=active_part['B']
     near=_face_ends(plan,active_part['near'],active_part['a'])
     far=_face_ends(plan,active_part['far'],active_part['b'])
     moved=rigid_transform(near,center,state)
+    co,si=np.cos(state[2]),np.sin(state[2]);t0=plan.tangent(active_part['a'])
+    t0=np.array([co*t0[0]-si*t0[1],si*t0[0]+co*t0[1]])
+    return active_part,landing,fixed_landing,near,moved,far,t0,plan.tangent(active_part['b'])
+
+
+def linear_gap(part,plan,center,state):
+    try:_,_,_,_,moved,far,t0,t1=connection_data(part,plan,center,state)
+    except ValueError:return -float('inf')
+    direction=t0+t1;length=float(np.linalg.norm(direction))
+    if length<1e-12:return -float('inf')
+    # Test BOTH sides, not just the centres: a rotated face can cross on one side
+    # while its midpoint is still in the correct order.
+    return float(np.min((far-moved)@(direction/length)))
+
+
+def assemble_strip(strip,landing,fixed_landing,moved,far,tolerance):
+    """A return loop must not re-enter a preserved pad away from its real seam."""
+    seam=shapely.union_all([shapely.LineString(moved),shapely.LineString(far)]).buffer(2*tolerance)
+    for terminal in (landing,fixed_landing):
+        overlap=strip.intersection(terminal).difference(seam)
+        if overlap.area>tolerance*tolerance or overlap.length>4*tolerance:
+            raise ValueError('连接段在截面外进入刚性孔盘')
+    if landing.intersection(fixed_landing).area>tolerance*tolerance:
+        raise ValueError('运动孔盘与固定孔盘重叠')
+    return shapely.union_all([strip,landing,fixed_landing])
+
+
+def endpoint_active(part,plan,center,state,style):
+    active_part,landing,fixed_landing,near,moved,far,_,_=connection_data(part,plan,center,state)
+    if style=='linear' and linear_gap(part,plan,center,state)<=plan.tolerance*8:raise ValueError('直线端点贴紧或交错')
     sides=[]
     for i in range(2):
         if style=='linear':side=np.array([moved[i],far[i]])
@@ -93,4 +125,4 @@ def endpoint_active(part,plan,center,state,style):
         sides.append(side)
     strip=shapely.Polygon(np.vstack([sides[0],sides[1][::-1]]))
     if not strip.is_valid:raise ValueError('连接轮廓发生反向交叉')
-    return shapely.union_all([strip,landing]) if not landing.is_empty else strip
+    return assemble_strip(strip,landing,fixed_landing,moved,far,plan.tolerance)

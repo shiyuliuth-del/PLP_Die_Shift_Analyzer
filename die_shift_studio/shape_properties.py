@@ -102,7 +102,7 @@ class ShapeProperties(W.QDialog):
             keys=tuple(self.group.currentData());self.group_nodes[keys]+=difference
             self.group.setItemText(self.group.currentIndex(),' · '.join(keys)+f'（{len(self.groups[keys])} 个，{self.group_nodes[keys]} 个节点）')
             kind,_,source=shape_nodes(self.data,*self.ref)
-            width=f" · PATH 宽度 {source['width']:g} μm" if source else ''
+            width=f" · PATH 宽度 {source['width']:g} μm" if source and 'width' in source else ''
             self.summary.setText(f'{kind} · {count} 个节点{width} · 顶层 Cell 坐标')
         self.header.setText(f'已选择 {len(self.counts)} 个源图形 · {len(self.groups)} 类 · 共 {self.total_nodes} 个名义节点')
 

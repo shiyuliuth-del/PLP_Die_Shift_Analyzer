@@ -3,7 +3,7 @@ import os,sys,tempfile,time,json
 from pathlib import Path
 from dataclasses import replace
 from unittest.mock import patch
-import numpy as np
+import numpy as np,shapely
 from matplotlib.backend_bases import MouseEvent
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
@@ -17,16 +17,18 @@ def wait():
   time.sleep(.005)
  else:raise AssertionError('timeout')
  assert not errors,errors
+ assert '[ERROR]' not in w.runtime_view.toPlainText(),w.runtime_view.toPlainText()[-6000:]
 
 def event(name,xy):
  px,py=w.ax.transData.transform(xy);ev=MouseEvent(name,w.canvas,px,py,button=1)
  w.canvas.callbacks.process(name,ev);app.processEvents()
 
 def drag(q,which,mark,live=True):
- plan=q['route_plan'];line=q['extra_cut'] if which else q['moved_cut'];start=np.array(line.centroid.coords[0]);end=np.array(plan.route.interpolate(mark).coords[0])
+ plan=q['route_plan'];line=q['extra_cut'] if which else q['moved_cut'];actual=np.array(line.centroid.coords[0]);handle=w.reconstruction_overlay.handle_geometries([q]).get((w.reconstruction_overlay._key(q),'extra' if which else 'moved'),line);start=np.array(handle.centroid.coords[0]);end=np.array(plan.route.interpolate(mark).coords[0])
  if not which:
   from die_shift_studio.preview import rigid_transform
   end=rigid_transform(end,w.current_frame['rotation_centers'][q['die']],w.current_frame['states'][q['die']])
+ end+=start-actual
  lo=np.minimum(start,end)-70;hi=np.maximum(start,end)+70;w.ax.set_xlim(lo[0],hi[0]);w.ax.set_ylim(lo[1],hi[1]);w.plot_layout(preserve=True);w.canvas.draw()
  event('button_press_event',start);assert w.cut_drag.state is not None,('miss',which,start)
  event('motion_notify_event',end)
@@ -71,17 +73,24 @@ try:
   combo.setCurrentIndex(combo.findData(style));wait()
   assert w.current_frame['reconstruction']['parameters']['connection_style']==style
  assert '重构良率' in w.width_yield.label.text()
- assert w.reconstruction_yield.bank and w.reconstruction_yield.bank['total']>0
+ assert w.reconstruction_yield.bank and w.reconstruction_yield.bank['total']>0,w.runtime_view.toPlainText()[-6000:]
  q2=next(p for p in w.current_frame['reconstruction']['pieces'] if p['die']==0)
  # Whole landing point pulses while stationary hover and while dragging.
  qpoint=drag(q2,0,0)
  assert qpoint['moved_cut'].geom_type=='Point'
- point=np.array(qpoint['moved_cut'].coords[0]);event('motion_notify_event',point)
+ point=np.array(w.reconstruction_overlay.handle_geometries([qpoint])[w.reconstruction_overlay._key(qpoint),'moved'].coords[0]);event('motion_notify_event',point)
  app.processEvents();assert w.reconstruction_overlay.pulse_timer.isActive()
  values=[]
  for _ in range(12):
   app.processEvents();time.sleep(.02);values.append(w.reconstruction_overlay.hover.get_markersize())
  assert max(values)-min(values)>.4
+ qboth=drag(qpoint,1,qpoint['route_plan'].length)
+ assert qboth['extra_cut'].geom_type=='Point'
+ point=np.array(w.reconstruction_overlay.handle_geometries([qboth])[w.reconstruction_overlay._key(qboth),'extra'].coords[0]);event('motion_notify_event',point)
+ app.processEvents();assert w.reconstruction_overlay.pulse_timer.isActive()
+ assert w.reconstruction_overlay.hover.get_marker()=='o'
+ qpoint=drag(qboth,1,qboth['route_plan'].fixed_start-80)
+ assert qpoint['extra_cut'].geom_type=='LineString'
  q2=drag(qpoint,0,100)
  assert q2['interval'][0]>0
  # Live preference is applied immediately and does not alter the final result.
@@ -96,6 +105,21 @@ try:
  assert current['interval']==q3['interval']
  w.setting_fields['show_contact_markers'].setChecked(True);app.processEvents();assert w.show_issues.isChecked()
  w.show_issues.setChecked(False);app.processEvents();assert not w.view_settings.show_contact_markers
+ # A concrete failed straight join is red and offers the width-style popup.
+ combo=w.setting_fields['reconstruction_style'];combo.setCurrentIndex(combo.findData('linear'));wait()
+ w.manual_states=np.array([[8000.,8000.,0.],[0,0,0]]);w.request_preview();wait()
+ bad=next(p for p in w.current_frame['reconstruction']['pieces'] if p.get('problem_reasons'))
+ center=bad['problem_region'].representative_point().coords[0]
+ w.ax.set_xlim(center[0]-60,center[0]+60);w.ax.set_ylim(center[1]-60,center[1]+60);w.plot_layout(preserve=True);w.canvas.draw()
+ assert w.reconstruction_overlay.problems.get_visible()
+ # The real click must open the problem menu, not a detached custom panel.
+ candidates=shapely.get_coordinates(bad['problem_region'].boundary)
+ pick=next((xy for xy in [center,*candidates[::max(1,len(candidates)//20)]] if (hit:=w.reconstruction_overlay.pick(*xy,w.cut_drag._tolerance())) and hit[2]=='problem'),None)
+ assert pick is not None
+ event('button_press_event',pick);app.processEvents()
+ assert getattr(w,'_reconstruction_problem_menu',None) and w._reconstruction_problem_menu.isVisible()
+ assert any('重构问题' in action.text() for action in w._reconstruction_problem_menu.actions())
+ w._reconstruction_problem_menu.close();app.processEvents()
  w.fit_plot();w.plot_layout(preserve=True);w.canvas.draw()
  if os.environ.get('DSA_QA_SCREENSHOT'):w.grab().save(os.environ['DSA_QA_SCREENSHOT'])
  print('GUI_V39_PASS: four styles, saved options, animated point hover/drag, constraints, whole-input yield')

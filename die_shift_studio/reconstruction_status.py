@@ -7,6 +7,9 @@ from .session_cache import logical_fingerprint
 class ReconstructionYieldDisplay:
     def __init__(self,w):
         self.w=w;self.worker=None;self.pending=None;self.key=None;self.bank=None;self.plan_pool={}
+        from .session_cache import EphemeralCache
+        from .resources import resource_profile
+        self.factor_pool=EphemeralCache(budget=min(128*1024**2,int(resource_profile()['available_memory_mb']*1024**2*.06)),max_entries=512)
         self.timer=QtCore.QTimer(w);self.timer.setSingleShot(True);self.timer.setInterval(220);self.timer.timeout.connect(self.start)
     def reset(self):
         self.key=None;self.bank=None;self.pending=None;self.timer.stop()
@@ -20,7 +23,7 @@ class ReconstructionYieldDisplay:
         try:p=replace(w.params(),target_nsigma=0)
         except ValueError:self.reset();return
         cfg=settings or w.view_settings
-        token=('reconstruction-yield-v39',logical_fingerprint((w.data.geometry_id,w.data.top_name,w.roles(),w.ordered_layers(),asdict(p),cfg.reconstruction_key(),cfg.reconstruction_grid_nodes)))
+        token=('reconstruction-yield-v39-branch2',logical_fingerprint((w.data.geometry_id,w.data.top_name,w.roles(),w.ordered_layers(),asdict(p),cfg.reconstruction_key(),cfg.reconstruction_grid_nodes)))
         key=(id(w.cache_group),token)
         if key==self.key:self.render();return
         self.reset();self.key=key
@@ -50,23 +53,23 @@ class ReconstructionYieldDisplay:
                 geom=cache or GeometryCache(data);con=Connections(data,roles,order,geom.geometries)
                 case=build_case(data,roles,connections=con);model=ContactModel(data,case,roles,con,geom,parameters=p)
                 engine=Reconstructor(model,p,cfg,plan_pool=self.plan_pool)
-                try:return measure_reconstruction_yield(engine,p,cfg,progress)
+                try:return measure_reconstruction_yield(engine,p,cfg,progress,self.factor_pool,worker.publish)
                 finally:engine.close()
             with job_budget(admitted['threads'],admitted['processes']):return group.values.get_or_compute(key[1],calculate)
         worker=Worker(work,self.w);self.worker=worker;self.w.watch_worker(worker,'重构良率')
         def accept(bank):
-            if self.key==key and not self.w._closing:self.bank=bank;self.render()
+            if bank is not None and self.key==key and not self.w._closing:self.bank=bank;self.render()
         def failed(text):
             if self.key==key and not worker.cancelled.is_set():self.w.width_yield.label.set_extra('重构良率 · 无法计算',text.split('Traceback')[0])
         def finish():
             self.worker=None;worker.deleteLater()
             if self.pending and not self.w._closing:self.timer.start()
-        worker.done.connect(accept);worker.failed.connect(failed);worker.finished.connect(finish);worker.start()
+        worker.partial.connect(lambda _:accept(worker.take_partial()));worker.done.connect(accept);worker.failed.connect(failed);worker.finished.connect(finish);worker.start()
     def render(self):
         if self.bank is None:return
         from .width_yield import percentage_text
         b=self.bank;decimals=self.w.view_settings.width_yield_decimals
-        text='重构良率 ≈'+percentage_text(b['value'],b['failure'],decimals)
+        text='重构良率 '+('≤' if b.get('partial') else '≈')+percentage_text(b['value'],b['failure'],decimals)+('（检查中）' if b.get('partial') else '')
         tip=f"{b['scope']}\n每轴{b['grid_nodes']}节点，完整联合网格{b['total']:,}个姿态；局部{b['local_checks']:,}次、异网{b['pair_checks']:,}次。\n{b['limitation']}\n0/∞沿用最近有限概率尺度：{b['scale_nsigma']:g}σ。"
         self.w.width_yield.label.set_extra(text,tip)
         if self.w.result is not None:self.w.result['reconstruction_yield']=b;self.w.report_dirty=True
@@ -102,7 +105,9 @@ class ConstraintFeedback:
         def accept(violations):
             w=self.w
             if ticket!=self.ticket or w.current_frame is not frame or w._closing:return
-            data=dict(frame['reconstruction'],violations=violations,constraints_complete=True)
+            data=dict(frame['reconstruction'],pieces=[dict(q) for q in frame['reconstruction']['pieces']],violations=violations,constraints_complete=True)
+            from .reconstruction import decorate_problems
+            decorate_problems(data)
             w.current_frame=dict(frame,reconstruction=data)
             w.reconstruction_overlay.draw();w.render_scene()
             w.statusBar().showMessage(f'重构约束：{len(violations)} 组违规' if violations else '当前固定RDL线宽、线距及过孔包围量检查通过')

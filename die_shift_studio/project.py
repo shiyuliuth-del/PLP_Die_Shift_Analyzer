@@ -46,6 +46,9 @@ def normalize_project(project):
     from dataclasses import asdict
     p['parameters']=asdict(Parameters.from_dict(pars,require_rdl=False))
     p.setdefault('stage_hints',{k:r for k,r in p['roles'].items() if r in ('运动过孔','晶圆段输出接口')} if p.get('schema_version',1)<3 else {})
+    if p.get('geometry_indexing','legacy') not in ('legacy','merged-v39'):raise ValueError('工程图形索引模式无效')
+    legacy_edits=p.get('legacy_node_edits',[])
+    if not isinstance(legacy_edits,list) or any(not isinstance(q,dict) or not {'layer','index','original','nodes'}<=q.keys() for q in legacy_edits):raise ValueError('旧源片节点编辑格式无效')
     from .settings import ViewSettings
     from dataclasses import asdict
     edits=p.setdefault('node_edits',[])

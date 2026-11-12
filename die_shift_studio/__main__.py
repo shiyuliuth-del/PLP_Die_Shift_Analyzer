@@ -16,7 +16,8 @@ data=read_gds(source,project.get('top_cell'))
 if isinstance(data,dict):parser.error('工程须选择顶层Cell')
 if project.get('sha256') and data.sha256!=project['sha256']:parser.error('源GDS已改变，请重新核对工程')
 from .gds_shapes import edited_snapshot
-data=edited_snapshot(data,project.get('node_edits',[]))
+from .gds_merge import restore_project_geometry
+data,project=restore_project_geometry(data,project)
 for warning in data.import_warnings:
     print('警告 · '+warning,file=sys.stderr)
 roles=project.get('roles',data.auto_roles)

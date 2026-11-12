@@ -198,7 +198,7 @@ def report_document(r,motions=None,progress=lambda *_:None):
         step('动区连接样式',f"连接样式：{STYLES.get(style,style)}；共用原图两端截面。",
              [r'P^{\prime}(s)=P(s)+w(t)\left[T(P(s))-P(s)\right],\quad t=\frac{s-s_0}{s_1-s_0}',
               r'w_1(t)=1-3t^2+2t^3,\qquad w_2(t)=1-10t^3+15t^4-6t^5'],
-             '一阶/二阶分别使用三次/五次位移权重；直线直接连接两侧对应交点，圆弧使用相切双圆弧。',
+             '一阶/二阶默认使用三次/五次位移权重，交错时比较匹配端部切向的三次/五次贝塞尔回头候选；直线连接对应交点且贴紧限位，圆弧使用分段相切双圆弧。蓝黄两端均可保留整孔盘。合法但违规的候选标红；无法连接时移除连接段、保留两端，红色提示不作为铜或DXF输出。',
              'P为原图边界点，s为沿名义追溯路径的弧长，s₀、s₁为共同端点，t截断到[0,1]；T为该DIE刚体变换。w₁端部一阶导数为0，w₂端部一阶/二阶导数为0。整孔盘模式保留原孔盘实体，在孔盘外接线，不能把蓝点当成零宽导体。')
         def state(q):
             if q['orphan']:text='整块随动（无不动铜可接）'
@@ -227,7 +227,7 @@ def report_document(r,motions=None,progress=lambda *_:None):
         step('重构良率',f"完整输入分布；每轴{q['grid_nodes']}节点，整包{q['total']:,}个有限网格姿态。",
              [r'Y_{\rm recon}=\sum_{\boldsymbol j}\left[\prod_d m_{d,j_d}\right]\mathbf{1}\!\left(\bigcap_r\{g_r(G(\boldsymbol z_{\boldsymbol j}))\geq0\}\right)',
               r'm_{d,j}=\int_{C_{d,j}} f_d(x,y,\theta)\,dx\,dy\,d\theta'],
-             '重构良率 ≈'+percentage_text(q['value'],q['failure'],6),
+             '重构良率 '+('上界≤' if q.get('partial') else '≈')+percentage_text(q['value'],q['failure'],6),
              'd为DIE编号；j_d是该芯片的网格节点，C_d,j为相邻中点划分的概率单元；f_d是输入幅度内归一化的联合截断正态，保留XY相关性。G为该整包姿态下实际重构图形；r包括固定RDL线宽、线距、连接过孔包围量、封装边距和禁布区；g_r≥0表示该规则通过。所有线路共用所属DIE状态；按电网络和相互作用对分解事件并集，不能相乘各孔边缘良率。'+q['limitation'])
     policy=r.get('width_policy_yield')
     if policy:

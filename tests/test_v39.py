@@ -195,4 +195,18 @@ class V39Tests(unittest.TestCase):
         self.assertTrue(any(p.contains_point((50,50)) for p in paths))
         self.assertTrue(any(p.contains_point((150,50)) for p in paths))
 
+    def test_yield_reuses_local_factors_without_writing_grid_frames(self):
+        from die_shift_studio.session_cache import EphemeralCache
+        e,_,_=fixture()
+        try:
+            r=e.reconstructor;cfg=ViewSettings();r.frame(np.zeros((1,3)))
+            cache=EphemeralCache();updates=[];original=len(r.cache)
+            first=measure_reconstruction_yield(r,e.p,cfg,lambda *_:None,cache,updates.append)
+            second=measure_reconstruction_yield(r,e.p,cfg,lambda *_:None,cache)
+            self.assertEqual(len(r.cache),original)
+            self.assertGreater(second['reused_local_checks'],0)
+            self.assertEqual(first['value'],second['value']);self.assertEqual(first['failure'],second['failure'])
+            self.assertTrue(updates and all(v['partial'] and v['value']>=first['value'] for v in updates))
+        finally:e.close()
+
 if __name__=='__main__':unittest.main()
