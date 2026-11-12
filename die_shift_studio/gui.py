@@ -221,9 +221,11 @@ class MainWindow(W.QMainWindow):
         self.repair_data=None
         from .repair_overlay import RepairOverlay
         self.repair_overlay=RepairOverlay(self)
-        from .reconstruction_overlay import ReconstructionOverlay, CutDrag
+        from .reconstruction_overlay import ReconstructionOverlay, CutDrag, RegionSelect
         self.reconstruction_overlay=ReconstructionOverlay(self)
         self.cut_drag=CutDrag(self)
+        self.region_select=RegionSelect(self)
+        self.canvas.mpl_connect('key_press_event',lambda e:self.exit_region_mode() if str(e.key).lower()=='m' else None)
         self.job_watcher=QtCore.QFileSystemWatcher([str(self.jobs_dir)],self);self.job_watcher.directoryChanged.connect(self.refresh_jobs)
         self.cache_status_timer=QtCore.QTimer(self);self.cache_status_timer.setInterval(500);self.cache_status_timer.timeout.connect(self.refresh_cache_status);self.cache_status_timer.start()
         QtCore.QTimer.singleShot(0,self.discover_hardware)
@@ -393,9 +395,22 @@ class MainWindow(W.QMainWindow):
         self.width_table=ChannelTable();wv.addWidget(self.width_table)
         self.width_table.selectionModel().currentRowChanged.connect(lambda index,_:self.width_overlay.locate(index.row()));self.preview_tabs.addTab(width_page,'宽度分析')
         self.reconstruction_page=W.QWidget();cv=W.QVBoxLayout(self.reconstruction_page);cv.setContentsMargins(3,3,3,3)
-        self.reconstruction_summary=label('勾选“重构预演”后，软件按运动过孔自动划分固定RDL的移动区（同一网络的落盘合为一条串；第一刀落在本 DIE 芯片边框与这块铜的交线上，第二刀沿走线自动搜索、始终落在移动后的边框之外且离框 ≥10 μm；同一块固定RDL跨多个芯片时只取本 DIE 芯片边框以内的铜），按当前姿态移动，并用两刀之间的铜块补上这段缝。');cv.addWidget(self.reconstruction_summary)
+        self.reconstruction_summary=label('勾选“重构预演”后，软件按运动过孔自动划分固定RDL的移动区（同一网络的落盘合为一条串；第一刀落在本 DIE 芯片边框与这块铜的交线上，第二刀沿走线自动搜索、落在移动后的边框之外并满足设置中的最小离框距离；同一块固定RDL跨多个芯片时只取本 DIE 芯片边框以内的铜），按当前姿态移动，并用两刀之间的铜块补上这段缝。');cv.addWidget(self.reconstruction_summary)
         self.reconstruction_table=table(['固定RDL层','所属','网络','移动区面积 / μm²','位移 / μm','裂隙 / μm','补线面积 / μm²','补块长度 / μm','切口缝长 / μm','间距 / μm','状态']);cv.addWidget(self.reconstruction_table)
         row=W.QWidget();rv=W.QHBoxLayout(row);rv.setContentsMargins(0,0,0,0)
+        self.region_move=W.QPushButton('框选动区');self.region_move.setCheckable(True)
+        self.region_stay=W.QPushButton('框选静区');self.region_stay.setCheckable(True)
+        for button,mode in ((self.region_move,'move'),(self.region_stay,'stay')):
+            button.toggled.connect(lambda on,mode=mode:self.region_mode(mode,on))
+            button.setToolTip('在当前重构的固定RDL图层上框选区域；框内按所属 DIE 设置动区或静区。')
+        self.clear_regions=W.QPushButton('清除全部手动区域');self.clear_regions.clicked.connect(self.clear_manual_regions)
+        self.cut_left=W.QPushButton('◀ 切口');self.cut_right=W.QPushButton('切口 ▶')
+        self.cut_left.clicked.connect(lambda:self.nudge_selected_cut(-5.))
+        self.cut_right.clicked.connect(lambda:self.nudge_selected_cut(5.))
+        for button in (self.cut_left,self.cut_right):button.setToolTip('选中切口沿法向微调 5 μm，保留另一刀的位置。')
+        region_row=W.QHBoxLayout()
+        for button in (self.region_move,self.region_stay,self.clear_regions,self.cut_left,self.cut_right):region_row.addWidget(button)
+        cv.addLayout(region_row)
         self.second_left=W.QPushButton('⟲ 第二刀');self.second_left.setToolTip('把选中补线的第二刀逆时针转 5°。')
         self.second_right=W.QPushButton('第二刀 ⟳');self.second_right.setToolTip('把选中补线的第二刀顺时针转 5°。')
         self.second_left.clicked.connect(lambda:self.rotate_selected_second(-5.))
@@ -577,6 +592,8 @@ class MainWindow(W.QMainWindow):
         spin(drc_group,'repair_patch_width_um','补块直径 / μm（0=与过孔等宽）',0,10000,3)
         self.setting_fields['repair_patch_width_um'].setToolTip('“修复补块”所画直线补块的直径。0 表示每块补块取所连过孔的最小外形尺寸（最小外接矩形的短边），即与孔等宽；填正数则所有补块统一使用该直径。')
         recon=group('固定RDL重构预演')
+        spin(recon,'reconstruction_extra_um','桥接区额外长度 / μm',0,10000,3)
+        spin(recon,'reconstruction_smooth_window_um','切口避让窗口 / μm',0,1000,2)
         spin(recon,'reconstruction_frame_margin_um','第二刀离芯片边框最小距离 / μm',0,1000,2)
         self.setting_fields['reconstruction_frame_margin_um'].setToolTip('第二刀在移动后的芯片边框之外与边框距离')
         spin(recon,'reconstruction_second_stop_um','第二刀离固定落盘的间隙 / μm',0,1000,2)
@@ -657,7 +674,7 @@ class MainWindow(W.QMainWindow):
     def settings_changed(self,*_):
         if self.loading:return
         values={k:(w.currentData() if isinstance(w,W.QComboBox) else w.isChecked() if isinstance(w,W.QCheckBox) else w.value()) for k,w in self.setting_fields.items()}
-        updated=ViewSettings.from_dict(values)
+        updated=ViewSettings.from_dict(dict(asdict(self.view_settings),**values))
         width_inputs=('width_yield_method','width_yield_exponent','width_yield_seed','width_grid_nodes')
         if all(getattr(updated,k)==getattr(self.view_settings,k) for k in values if k not in width_inputs):
             self.view_settings=updated;self.enable_settings();self.width_yield.refresh();return
@@ -678,14 +695,15 @@ class MainWindow(W.QMainWindow):
             return
         intent=self._motion_intent if self.transition.timer.isActive() else None
         self.stop_animation()
-        old_settings=self.view_settings;updated=ViewSettings.from_dict(values)
+        old_settings=self.view_settings;updated=ViewSettings.from_dict(dict(asdict(self.view_settings),**values))
         from .drc_rules import effective_rules
         try:effective_rules(self.params(),updated)
         except ValueError as exc:self.load_view_settings();self.error(str(exc));return
         deform=updated.deformation_key()!=old_settings.deformation_key();numeric=(updated.numeric_key()!=self.view_settings.numeric_key());self.view_settings=updated;self.enable_settings();self.refresh_extreme_colors();self.cache_group.limit(updated.cache_max_entries);self.refresh_cache_status()
         live_motion=any(getattr(updated,k)!=getattr(old_settings,k) for k in ('animation_enabled','animation_return_zero','animation_duration_ms','animation_fps','animation_speed','animation_strategy'))
         repair_shape=(updated.repair_landing_pad!=old_settings.repair_landing_pad or updated.repair_patch_width_um!=old_settings.repair_patch_width_um)
-        reconstruction_shape=False
+        reconstruction_shape=updated.reconstruction_key()!=old_settings.reconstruction_key()
+        if reconstruction_shape:self.invalidate_reconstruction_edit()
         if numeric or updated.drc_tolerance_um!=old_settings.drc_tolerance_um:self.width_yield.refresh()
         if numeric:
             self.dirty=self.result is not None
@@ -952,6 +970,7 @@ class MainWindow(W.QMainWindow):
         path,_=W.QFileDialog.getOpenFileName(self,'输入GDS','','GDSII (*.gds *.gdsii *.GDS)')
         if path:self.load_gds(path)
     def load_gds(self,path,top=None,project=None,project_path=None):
+        self.exit_region_mode()
         def read_and_prepare(progress):
             data=read_gds(path,top,progress)
             if isinstance(data,dict):return data
@@ -976,6 +995,7 @@ class MainWindow(W.QMainWindow):
             self.refresh_jobs()
         self.start_worker(read_and_prepare,accepted)
     def set_data(self,data,project=None,project_path=None):
+        self.exit_region_mode()
         from .session_cache import logical_fingerprint
         project=normalize_project(project) if project else {}
         if data.node_edits!=project.get('node_edits',[]):
@@ -1165,6 +1185,10 @@ class MainWindow(W.QMainWindow):
         if frame and self.deformation_toggle.isChecked() and 'deformation' in frame:
             q=frame['deformation'];message+=f" · 型变 {q['accepted_count']} 个铜连通区，未解 {len(q['diagnostics'])} 个"
         if frame and frame.get('deformation',{}).get('search_quality')=='interactive':message+=' · 交互候选已复核，停止操作后完整搜索'
+        if frame and self.reconstruction_toggle.isChecked():
+            ambiguous=(frame.get('reconstruction') or {}).get('summary',{}).get('regions_ambiguous',0)
+            if ambiguous:
+                message+=f' · {ambiguous} 处手动动区归属不明确，未应用；请缩小框选范围，避开多个 DIE 的共同区域'
         if frame and frame.get('motion_issues'):message+=f" · {len(frame['motion_issues'])}个运动图形归属待确认，已用橙色虚线标记"
         if frame and frame.get('width_analysis') and self.width_toggle.isChecked():
             q=frame['width_analysis']['counts'];message+=f" · 保宽足够 {q['宽度足够']}，需收窄 {q['需局部收窄']}，宽度不足 {q['宽度不足']}"
@@ -1276,15 +1300,58 @@ class MainWindow(W.QMainWindow):
             self.request_preview()
         else:
             self.repair_data=None;self.plot_layout(preserve=True)
+    def region_mode(self,mode,on):
+        if self.loading:return
+        if on:
+            self.mouse_die.exit();self.navigation.cancel_zoom()
+            other=self.region_stay if mode=='move' else self.region_move
+            other.blockSignals(True);other.setChecked(False);other.blockSignals(False)
+            self.region_select.set_mode(mode)
+            self.statusBar().showMessage('拖动方框设置手动区域；按 Escape 退出')
+        else:self.region_select.set_mode(None)
+
+    def exit_region_mode(self):
+        if not hasattr(self,'region_select'):return
+        self.region_select.set_mode(None)
+        for button in (self.region_move,self.region_stay):
+            button.blockSignals(True);button.setChecked(False);button.blockSignals(False)
+
+    def invalidate_reconstruction_edit(self):
+        """Reject old coupled/extreme evidence after a reconstruction edit."""
+        self.dirty=True;self.report_dirty=True
+        self._coupled_key=None;self._coupled_data=None;self._coupled_error=False
+        self._problem_tag=None
+        if self.filter_job:self.filter_job.cancelled.set()
+        self.refresh_extreme_colors()
+        self.filter_changed(pending_ok=True)
+
+    def clear_manual_regions(self,*_):
+        self.exit_region_mode()
+        if not self.view_settings.reconstruction_regions:return
+        self.view_settings=replace(self.view_settings,reconstruction_regions=())
+        self.invalidate_reconstruction_edit();self.request_preview()
+
+    def nudge_selected_cut(self,step):
+        piece=self._selected_reconstruction_piece()
+        if piece is None:
+            self.statusBar().showMessage('先选择一条切口或重构表格行');return
+        from .reconstruction_overlay import nudge_cut
+        kind=getattr(self.reconstruction_overlay,'selected_kind',None) or 'cut'
+        updated=nudge_cut(self.view_settings,piece,step,kind)
+        if updated.reconstruction_key()==self.view_settings.reconstruction_key():
+            self.statusBar().showMessage('当前切口不能继续移动');return
+        self.view_settings=updated;self.invalidate_reconstruction_edit();self.request_preview(quiet=True)
+
     def clear_manual_cuts(self,*_):
         extras=getattr(self.view_settings,'reconstruction_extra_cuts',())
         dropped=getattr(self.view_settings,'reconstruction_dropped_cuts',())
-        if not self.view_settings.reconstruction_cuts and not extras and not dropped:return
+        if not any((self.view_settings.reconstruction_cuts,extras,dropped,self.view_settings.reconstruction_second_cuts)):return
         from dataclasses import replace
         # Also restores the automatic cuts that were deleted, so one button undoes
         # every hand edit of the cut lines.
         self.view_settings=replace(self.view_settings,reconstruction_cuts=(),
-                                   reconstruction_extra_cuts=(),reconstruction_dropped_cuts=())
+                                   reconstruction_extra_cuts=(),reconstruction_second_cuts=(),reconstruction_dropped_cuts=())
+        self.invalidate_reconstruction_edit()
         self.statusBar().showMessage('已清除全部手动切口，并恢复被删除的自动切口')
         self.request_preview()
 
@@ -1319,6 +1386,7 @@ class MainWindow(W.QMainWindow):
                 self.statusBar().showMessage('第二刀角度没有变化')
             return
         self.view_settings=updated
+        self.invalidate_reconstruction_edit()
         self.statusBar().showMessage(f'第二刀旋转 {degrees:+.0f}°')
         self.request_preview()
         from die_shift_studio.reconstruction_overlay import _buttons
@@ -1335,34 +1403,24 @@ class MainWindow(W.QMainWindow):
             self.statusBar().showMessage('先在重构表格里选中一行，再删除那一串的切口')
             return
         piece=pieces[row]
-        key=(piece['layer'],int(piece['index']),tuple(sorted(int(v) for v in piece['vias'])))
-        from dataclasses import replace
-        def keep(rows):
-            return tuple(c for c in rows
-                         if (c[0],int(c[1]),tuple(sorted(int(v) for v in c[2])))!=key)
-        cuts=keep(self.view_settings.reconstruction_cuts)
-        extras=keep(getattr(self.view_settings,'reconstruction_extra_cuts',()))
-        dropped=getattr(self.view_settings,'reconstruction_dropped_cuts',())
-        manual=(len(cuts)<len(self.view_settings.reconstruction_cuts)
-                or len(extras)<len(getattr(self.view_settings,'reconstruction_extra_cuts',())))
-        if manual:
-            self.view_settings=replace(self.view_settings,reconstruction_cuts=cuts,
-                                       reconstruction_extra_cuts=extras)
-            self.statusBar().showMessage(f'已删除 {piece["layer"]} #{piece["index"]} 的手动切口，恢复自动搜索')
-        else:
-            # No hand-pinned cut here: delete the automatic one, so that stretch
-            # of copper is not cut at all and simply stays where it is.
-            self.view_settings=replace(self.view_settings,reconstruction_cuts=cuts,
-                                       reconstruction_extra_cuts=extras,
-                                       reconstruction_dropped_cuts=tuple(dropped)+((piece['layer'],
-                                                     int(piece['index']),tuple(sorted(int(v) for v in piece['vias']))),))
-            self.statusBar().showMessage(
-                f'已删除 {piece["layer"]} #{piece["index"]} 的自动切口：这段铜不再切开、留在原位；'
-                '在“清除全部手动切口”里可以恢复')
+        from .reconstruction import normalize_via_refs,cut_identity_matches
+        refs=normalize_via_refs(piece.get('via_refs') or piece['vias'])
+        def matches(row):
+            if str(row[0])!=str(piece['layer']) or int(row[1])!=int(piece['index']):return False
+            return cut_identity_matches(row[2],refs)
+        names=('reconstruction_cuts','reconstruction_extra_cuts','reconstruction_second_cuts')
+        changes={name:tuple(row for row in getattr(self.view_settings,name) if not matches(row)) for name in names}
+        manual=any(changes[name]!=getattr(self.view_settings,name) for name in names)
+        dropped=tuple(row for row in self.view_settings.reconstruction_dropped_cuts if not matches(row))
+        if not manual:dropped+=((piece['layer'],int(piece['index']),refs),)
+        self.view_settings=replace(self.view_settings,**changes,reconstruction_dropped_cuts=dropped)
+        self.invalidate_reconstruction_edit()
+        self.statusBar().showMessage('已恢复自动切口' if manual else '已删除自动切口；清除全部手动切口可恢复')
         self.request_preview()
 
     def reconstruction_changed(self,*_):
         if self.loading:return
+        if not self.reconstruction_toggle.isChecked():self.exit_region_mode()
         self.filter_changed(pending_ok=True)
         if self.reconstruction_toggle.isChecked():
             self.statusBar().showMessage('重构预演：按串联落盘自动划分固定RDL移动区（跨芯片时限定在本 DIE 芯片边框内）、按姿态移动、用切口 4 端点多边形补上裂隙…')
@@ -1378,6 +1436,7 @@ class MainWindow(W.QMainWindow):
             self.statusBar().showMessage('预演分析已启用；先运行方案评估，再选择极端情况。');return
         self.request_preview()
     def escape_action(self):
+        self.exit_region_mode()
         if hasattr(self,'navigation'):self.navigation.cancel_zoom()
         if hasattr(self,'mouse_die') and self.mouse_die.exit():return
         self.selection.clear()

@@ -97,6 +97,9 @@ class ViewSettings:
     reconstruction_search:bool=False
     reconstruction_length_um:float=0.
     reconstruction_width_um:float=0.
+    reconstruction_extra_um:float=0.
+    reconstruction_smooth_window_um:float=20.
+    reconstruction_regions:tuple=()
 
     # 重构预演初始参数
     reconstruction_frame_margin_um: float = FRAME_MARGIN_UM
@@ -140,14 +143,44 @@ class ViewSettings:
             cuts[str(layer),index,refs]=(nx/normal,ny/normal,ox,oy)
         return tuple((*key,*plane) for key,plane in cuts.items())
 
+    @staticmethod
+    def _normalize_regions(rows):
+        """Normalize finite manual boxes, preserving override order."""
+        if not isinstance(rows,(list,tuple)):return ()
+        regions=[]
+        for row in rows:
+            try:
+                layer,bounds,role=row
+                x0,y0,x1,y1=map(float,bounds)
+                if role not in ('move','stay') or not all(map(math.isfinite,(x0,y0,x1,y1))):continue
+                if x0==x1 or y0==y1:continue
+            except (TypeError,ValueError,OverflowError):continue
+            regions.append((str(layer),(min(x0,x1),min(y0,y1),max(x0,x1),max(y0,y1)),role))
+        return tuple(regions)
+
+    @staticmethod
+    def _normalize_dropped(rows):
+        if not isinstance(rows,(list,tuple)):return ()
+        normalized=[]
+        for row in rows:
+            try:
+                # Older files may contain a full cut plane rather than an identity.
+                layer,index,vias=row[:3]
+                cut=ViewSettings._normalize_cuts(((layer,index,vias,1.,0.,0.,0.),))
+                if cut and cut[0][:3] not in normalized:normalized.append(cut[0][:3])
+            except (TypeError,ValueError,IndexError):continue
+        return tuple(normalized)
+
     @classmethod
     def from_dict(cls,values=None):
         values=dict(values or {})
         if 'reconstruction_cuts' in values:
             values['reconstruction_cuts']=cls._normalize_cuts(values['reconstruction_cuts'])
-        for key in ('reconstruction_extra_cuts','reconstruction_second_cuts','reconstruction_dropped_cuts'):
+        for key in ('reconstruction_extra_cuts','reconstruction_second_cuts'):
             if key in values:
                 values[key]=cls._normalize_cuts(values[key])
+        values['reconstruction_regions']=cls._normalize_regions(values.get('reconstruction_regions',()))
+        values['reconstruction_dropped_cuts']=cls._normalize_dropped(values.get('reconstruction_dropped_cuts',()))
         values['width_display']=normalize_display(values.get('width_display',{}))
         for new,old in (('width_yield_exponent','yield_sample_exponent'),('width_yield_seed','random_seed')):
             if new not in values and old in values:values[new]=values[old]
@@ -176,7 +209,11 @@ class ViewSettings:
                       deformation_joint_rounds=(0,32),deformation_workers=(0,16),safe_box_precision=(.0001,.1),
                       safe_box_budget=(32,32768),safe_box_starts=(1,6),safe_box_passes=(1,8),repair_patch_width_um=(0,10000),
                       reconstruction_overlap_um=(0,10000),
-                      reconstruction_length_um=(0,100000),reconstruction_width_um=(0,10000))
+                      reconstruction_length_um=(0,100000),reconstruction_width_um=(0,10000),
+                      reconstruction_extra_um=(0,10000),reconstruction_smooth_window_um=(0,1000),
+                      reconstruction_frame_margin_um=(0,1000),reconstruction_smooth_delta_um=(0,1000),
+                      reconstruction_second_stop_um=(0,1000),reconstruction_second_min_width_um=(0,1000),
+                      reconstruction_stay_clear_um=(0,1000))
         integers.update(('width_yield_exponent','width_yield_seed','width_grid_nodes','cache_max_entries','yield_sample_exponent','yield_box_budget','safe_box_budget','safe_box_starts','safe_box_passes','deformation_iterations','deformation_local_steps','deformation_route_candidates','deformation_joint_rounds','deformation_workers'))
         for key,(lo,hi) in limits.items():
             v=getattr(q,key)
@@ -203,9 +240,10 @@ class ViewSettings:
 
     def reconstruction_key(self):
         """Everything the reconstruction result depends on besides the pose."""
-        return (True,'frame-cuts-v2',self.drc_tolerance_um,
+        return (True,'frame-cuts-regions-v3',self.drc_tolerance_um,
                 self.reconstruction_length_um,self.reconstruction_width_um,
-                self.reconstruction_overlap_um,
+                self.reconstruction_overlap_um,self.reconstruction_extra_um,
+                self.reconstruction_smooth_window_um,tuple(self.reconstruction_regions),
                 self.reconstruction_frame_margin_um, self.reconstruction_smooth_delta_um,
                 self.reconstruction_second_stop_um, self.reconstruction_second_min_width_um,
                 self.reconstruction_stay_clear_um,

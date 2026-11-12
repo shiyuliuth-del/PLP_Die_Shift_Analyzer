@@ -2,7 +2,7 @@
 import numpy as np
 import shapely
 from shapely.prepared import prep
-from .session_cache import SessionCache
+from .session_cache import SessionCache, EphemeralCache
 from .preview import rigid_transform
 from .drc_rules import effective_rules
 import shapely.ops
@@ -34,7 +34,8 @@ SECOND_TURN_MIN_STEPS = 10
 POUR_WIDTH_UM=120.
 NECK_RATIO=.55
 
-SCOPE=('说明占位')
+SCOPE=('重构预演为自动划分假设：默认按芯片边框及有效第二刀划分、刚体移动并桥接；'
+       '手动切口与动区/静区覆盖自动划分。不代表产线签认、全局可布通或完整DRC通过。')
 
 
 def transform(geometry,center,state):
@@ -73,10 +74,29 @@ def line_parts(geometry):
     return [q for q in getattr(geometry,'geoms',[]) if q.geom_type=='LineString' and not q.is_empty]
 
 
+def normalize_via_refs(vias):
+    """Canonical identity, retaining legacy integer-only project rows."""
+    values = tuple(vias or ())
+    if values and isinstance(values[0], (tuple, list)):
+        return tuple(sorted({(str(v[0]), int(v[1])) for v in values}))
+    return tuple(sorted({int(v) for v in values}))
+
+
+def cut_identity_matches(row_refs, piece_refs):
+    row, piece = normalize_via_refs(row_refs), normalize_via_refs(piece_refs)
+    if row == piece:
+        return True
+    return bool(row and piece and isinstance(row[0], int)
+                and isinstance(piece[0], tuple)
+                and row == tuple(sorted(v[1] for v in piece)))
+
+
 class Reconstructor:
-    _blocks_cache = {}
     def __init__(self,model,parameters,settings,cache_group=None):
         self.model=model;self.p=parameters;self.settings=settings;self.cache=SessionCache(group=cache_group)
+        self.block_cache=EphemeralCache(budget=16*1024**2,max_entries=2048)
+        self.regions=[(str(layer),shapely.box(*bounds),str(role))
+                      for layer,bounds,role in (getattr(settings,"reconstruction_regions",()) or ())]
         self.tol=max(1e-9,model.data.dbu_um)
         self._rule_width,self.rule_space=effective_rules(parameters,settings)
         self.length_um=max(0.,float(getattr(settings,'reconstruction_length_um',0.)))
@@ -96,12 +116,12 @@ class Reconstructor:
         self._last_planes={}
         for row in getattr(settings,'reconstruction_cuts',()) or ():
             layer,index,vias,nx,ny,ox,oy=row
-            self.cuts[(str(layer),int(index),tuple(sorted(int(v) for v in vias)))]=(
+            self.cuts[(str(layer),int(index),normalize_via_refs(vias))]=(
                 float(nx),float(ny),float(ox),float(oy))
         self.extra_cuts = {}
         for row in getattr(settings, 'reconstruction_extra_cuts', ()) or ():
             layer, index, vias, nx, ny, ox, oy = row
-            self.extra_cuts[(str(layer), int(index), tuple(sorted(int(v) for v in vias)))] = (
+            self.extra_cuts[(str(layer), int(index), normalize_via_refs(vias))] = (
                 float(nx), float(ny), float(ox), float(oy))
         self.second_cuts = tuple(getattr(settings, 'reconstruction_second_cuts', ()) or ())  # ← 新增
         self._cut_rows = {}
@@ -110,7 +130,7 @@ class Reconstructor:
         self._extra_rows={}
         for (layer,index,vias),plane in self.extra_cuts.items():
             self._extra_rows.setdefault((layer,index),[]).append((vias,plane))
-        self.dropped={(str(layer),int(index),tuple(sorted(int(v) for v in vias)))
+        self.dropped={(str(layer),int(index),normalize_via_refs(vias))
                       for layer,index,vias in (getattr(settings,'reconstruction_dropped_cuts',()) or ())}
         self.vias=[]
         for key,role in model.roles.items():
@@ -135,7 +155,14 @@ class Reconstructor:
                                        net=int(model.nodes[model.ids[key, index]]['net']),
                                        center=np.asarray(poly.centroid.coords[0], float)))
 
-    def close(self):self.cache.close()
+        self.vias_by_target={}
+        for via in self.vias:
+            for ref in via['targets']:
+                self.vias_by_target.setdefault(ref,[]).append(via)
+
+    def close(self):
+        self.cache.close()
+        self.block_cache.clear()
 
     def _copper(self,layer,index,replacements):
         # Accepted deformation already moved some fixed copper; start from it.
@@ -177,9 +204,12 @@ class Reconstructor:
         """How far away a candidate is still "close" for the safety test."""
         return max(2.*self.rule_space,10.)
 
-    def _foreign_gap(self,geometry,tree,nets,limit):
+    def _foreign_gap(self,geometry,tree,nets,limit=None):
         if geometry is None or geometry.is_empty or tree is None or not nets:
             return None,None
+        if limit is None:
+            which=int(tree.nearest(geometry))
+            return which,float(shapely.distance(geometry,nets[which][1]))
         bounds=geometry.bounds
         near=shapely.box(bounds[0]-limit,bounds[1]-limit,bounds[2]+limit,bounds[3]+limit)
         hits=tree.query(near)
@@ -486,18 +516,11 @@ class Reconstructor:
 
     def _pinned_second(self, rows, layer, index, vias):
         """The stored second-cut line of this piece, or None."""
-        want = tuple(sorted(int(v) for v in (vias or ())))
-        fallback = None
-        for row in rows or ():
-            if str(row[0]) != str(layer) or int(row[1]) != int(index):
-                continue
-            got = tuple(sorted(int(v) for v in (row[2] or ())))
-            plane = (float(row[5]), float(row[6]), float(row[3]), float(row[4]))
-            if not want or got == want:
-                return plane
-            if fallback is None:
-                fallback = plane  # 同一块铜上只有一条链时照样生效
-        return fallback
+        candidates=((row[0],row[1],row[2],row) for row in (rows or ()))
+        row=next(self._matching_cut_rows(candidates,layer,index,vias),None)
+        if row is not None:
+            return (float(row[5]), float(row[6]), float(row[3]), float(row[4]))
+        return None
 
     def _measure_second(self, polygon, plane):
         """The chord this line cuts out of the trace: both ends on the copper."""
@@ -1418,47 +1441,109 @@ class Reconstructor:
                     window=dict(pivot=[float(best['pivot'][0]),float(best['pivot'][1])],
                                 normal=[float(best['normal'][0]),float(best['normal'][1])],
                                 low=float(best['low']),high=float(best['high'])))
-    @staticmethod
-    def _cover_lookup(exact,rows,layer,index,chain):
-        """Row for this chain: its own key first, else a row whose vias contain
-        the chain — the GUI pins cuts on merged pieces."""
+    def _source_blocks(self, polygon, cluster, states, owner, others=(), **kwargs):
+        """Uncached source partition; pose-local entries wrap this operation."""
+        return self._block(polygon, cluster, states, owner, others, **kwargs)
+
+    def _qualified_refs(self, layer, index, refs):
+        refs=normalize_via_refs(refs)
+        if not refs or isinstance(refs[0],tuple):return refs
+        available=self.vias_by_target.get((str(layer),int(index)),())
+        resolved=[]
+        for number in refs:
+            matches={(str(v['key']),int(v['index'])) for v in available if v['index']==number}
+            if len(matches)!=1:return ()  # Never guess an ambiguous legacy layer.
+            resolved.extend(matches)
+        return normalize_via_refs(resolved)
+
+    def _matching_cut_rows(self, candidates, layer, index, chain):
+        """Prefer exact qualified edits, then covers, then safe legacy rows.
+
+        A previously merged piece can leave a covering row before a newer
+        chain-specific edit. Insertion order must not hide that exact edit.
+        """
+        want=set(normalize_via_refs(chain))
+        matches=[]
+        for l,i,refs,value in candidates:
+            if str(l)!=str(layer) or int(i)!=int(index):continue
+            refs=normalize_via_refs(refs)
+            got=set(self._qualified_refs(layer,index,refs))
+            if not got or not want<=got:continue
+            legacy=not isinstance(refs[0],tuple)
+            matches.append(((legacy,got!=want),value))
+        for _,value in sorted(matches,key=lambda match:match[0]):
+            yield value
+
+    def _cover_lookup(self,exact,rows,layer,index,chain):
         if isinstance(exact,(set,frozenset)):
-            if (layer,index,chain) in exact:return True
-            want=set(chain)
-            for other_layer,other_index,vias in exact:
-                if (str(other_layer)==str(layer) and int(other_index)==int(index)
-                        and want<=set(vias)):return True
-            return None
-        row=exact.get((layer,index,chain)) if exact else None
-        if row is not None:return row
-        if rows:
-            want=set(chain)
-            for vias,value in rows.get((layer,index),()):
-                if want<=set(vias):return value
-        return None
+            candidates=((l,i,v,True) for l,i,v in exact)
+        else:
+            candidates=((l,i,v,value) for (l,i,v),value in (exact or {}).items())
+        return next(self._matching_cut_rows(candidates,layer,index,chain),None)
 
+    def _apply_regions(self, layer, polygon, blocks):
+        """Apply explicit boxes once per feature, never once per DIE.
 
+        Stay wins over move; landings always follow their own DIE. A move box
+        with equally plausible owners is reported rather than moved twice.
+        """
+        used=ambiguous=0
+        for key,box,role in self.regions:
+            if key!=layer or role not in ('move','stay'):continue
+            part=shapely.intersection(box,polygon)
+            if part.is_empty or part.area<=self.tol**2:continue
+            if role=='stay':
+                for block in blocks:
+                    block['movable']=shapely.difference(block['movable'],part)
+                    block['region']=True
+                used+=1
+                continue
+            scores=[float(shapely.intersection(part,q['movable']).area) for q in blocks]
+            best=max(scores,default=0.)
+            candidates=[q for q,score in zip(blocks,scores) if abs(score-best)<=self.tol**2]
+            if best<=self.tol**2:
+                distances=[float(part.distance(shapely.union_all([v['land'] for v in q['cluster']]))) for q in blocks]
+                nearest=min(distances,default=float('inf'))
+                candidates=[q for q,d in zip(blocks,distances) if abs(d-nearest)<=self.tol]
+            if not candidates or len({q['owner'] for q in candidates})!=1:
+                ambiguous+=1
+                continue
+            chosen=candidates[0]
+            # Do not steal copper or landings claimed by another DIE.
+            other=[q['movable'] for q in blocks if q['owner']!=chosen['owner']]
+            if other:part=shapely.difference(part,shapely.union_all(other))
+            chosen['movable']=shapely.union_all([chosen['movable'],part])
+            chosen['region']=True
+            used+=1
+        stays=[shapely.intersection(box,polygon) for key,box,role in self.regions if key==layer and role=='stay']
+        for block in blocks:
+            if not block.get('region'):continue
+            movable=block['movable']
+            if stays:movable=shapely.difference(movable,shapely.union_all(stays))
+            landings=shapely.union_all([v['land'] for v in block['cluster']])
+            block['movable']=shapely.intersection(shapely.union_all([movable,landings]),polygon)
+            # A box boundary is not the automatic chip-frame seam.
+            block.update(seam=False,follows=False,faces=[],pairs=[],second=None,frame=None)
+        return used,ambiguous
 
     def frame(self,states,deformation=None,progress=lambda *_:None,quick=False,*,targets=None):
         states=np.asarray(states,float)
         replacements=(deformation or {}).get('replacements',{}) or {}
         fingerprint=tuple((k,tuple(v['indices']),v['geometry'].wkb)
                           for k,items in sorted(replacements.items()) for v in items)
-        key=(states.tobytes(),fingerprint)
+        frame_key=(states.tobytes(),fingerprint)
         # ``targets`` limits the work to the refs the coupled sweep asks about,
         # so that run must not land in (or come from) the whole-board cache.
-        hit=self.cache.get(key) if targets is None else None
+        hit=self.cache.get(frame_key) if targets is None else None
         if hit is not None:return hit
         progress(0,f'重构预演：{len(self.vias)} 个落在固定RDL上的运动过孔')
         groups={}
-        for via in self.vias:
-            owner=via['owner']
-            if owner<0 or not np.any(states[owner]):continue
-            for layer,index in via['targets']:
-                groups.setdefault((owner,layer,index),[]).append(via)
-        if targets is not None:
-            wanted={(str(k),int(i)) for k,i in targets}
-            groups={k:v for k,v in groups.items() if (str(k[1]),int(k[2])) in wanted}
+        refs=self.vias_by_target if targets is None else sorted({(str(k),int(i)) for k,i in targets})
+        for layer,index in refs:
+            for via in self.vias_by_target.get((layer,index),()):
+                owner=via['owner']
+                if owner>=0 and np.any(states[owner]):
+                    groups.setdefault((owner,layer,index),[]).append(via)
         features={}
         # regions_used=0;regions_unused=0
 
@@ -1529,7 +1614,7 @@ class Reconstructor:
                 # the same net: cutting past it would put that landing on the far
                 # side of a seam it does not belong to.
                 others=[v['land'] for other in chains if other is not cluster for v in other]
-                chain=tuple(sorted(int(v['index']) for v in cluster))
+                chain=normalize_via_refs((v['key'],v['index']) for v in cluster)
                 # 只要这块铜一部分在芯片内、一部分在框外，它就必须按芯片边框
                 # 下第一刀。原先还要求“孔心全在框内”，跨框的走线孔心常压在框
                 # 线上，于是整块退回旧搜索，第二刀就朝“留在原位的那侧”长进了
@@ -1540,11 +1625,6 @@ class Reconstructor:
                            and shapely.intersection(polygon, frame).area > self.tol ** 2)
                 clip = frame if crosses else None
                 plane=self._cover_lookup(self.cuts,self._cut_rows,layer,index,chain)
-                if plane is None and quick:
-                    # While the pose animates, keep the cut where the last full
-                    # frame put it: re-running the safety search for every
-                    # animation step is what made the preview crawl.
-                    plane=self._last_planes.get((layer,index,chain))
                 # Dragging one chain's cut must not re-run the (expensive)
                 # search for every other chain: cache each chain's block by
                 # everything that can change its result.
@@ -1552,25 +1632,22 @@ class Reconstructor:
                 extra_plane=self._cover_lookup(self.extra_cuts,self._extra_rows,layer,int(index),chain)
                 cache_key=(id(self.model),layer,int(index),int(owner),
                            chain,plane,extra_plane,clip is not None,
-                           round(float(states[owner][0]),6),
-                           round(float(states[owner][1]),6),
-                           round(float(states[owner][2]),9),
+                           states[owner].tobytes(),
                            float(self.length_um),float(self.width_um),float(self.rule_space),
-                           float(self.tol),hash(fingerprint))
-                entry=self._blocks_cache.get(cache_key)
-                if entry is not None and entry[0] is self.model:
-                    block=None if entry[1] is None else dict(entry[1])
+                           float(self.tol),fingerprint)
+                entry=self.block_cache.get(cache_key)
+                if entry is not None:
+                    block=None if entry[0] is None else dict(entry[0])
                 else:
-                    block=self._block(polygon,cluster,states,owner,others,
+                    block=self._source_blocks(polygon,cluster,states,owner,others,
                                       foreign=neighbours,plane=plane,extra_plane=extra_plane,
                                       clip=clip)
-                    if len(self._blocks_cache)>1200:
-                        self._blocks_cache={k:v for k,v in self._blocks_cache.items()
-                                            if v[0] is self.model}
-                    self._blocks_cache[cache_key]=(self.model,None if block is None else dict(block))
+                    self.block_cache.put(cache_key,(None if block is None else dict(block),))
                 if block is None:continue
                 if not quick and block.get('plane'):
                     self._last_planes[(layer,index,chain)]=block['plane']
+                if block.get('manual') and block.get('faces'):
+                    block['seam']=True
                 block.update(owner=owner,cluster=cluster)
                 blocks.append(block)
             if not blocks:continue
@@ -1643,6 +1720,10 @@ class Reconstructor:
                 q['threshold'] = threshold
             feature['blocks'].extend(blocks)
             if order%64==0:progress(round(60*order/max(1,len(groups))),f'重构预演：划分移动区 {order}/{len(groups)}')
+        regions_used=regions_ambiguous=0
+        for (layer,index),feature in features.items():
+            used,ambiguous=self._apply_regions(layer,feature['original'],feature['blocks'])
+            regions_used+=used;regions_ambiguous+=ambiguous
         # Copper that nobody moves, per layer: one fixed-RDL polygon often
         # overlaps another (a wide pour with a narrow trace drawn over it), so a
         # feature-local view counts copper that another feature is about to carry
@@ -1678,7 +1759,7 @@ class Reconstructor:
                     cuts.append(dict(face=face,
                                      frame=block.get('frame_moved') or block.get('frame'),
                                      moving=block.get('movable'),
-                                     vias=[v['index'] for v in (block.get('cluster') or ())],
+                                     vias=normalize_via_refs((v['key'],v['index']) for v in (block.get('cluster') or ())),
                                      anchors=list(block.get('anchors_out')
                                                   or block.get('anchors') or ()),
                                      owner=block  #
@@ -1873,7 +1954,10 @@ class Reconstructor:
                     # copper used to fill.
                     pressed=bool(gap<=self.tol and overlap>max(1.,self.tol**2))
 
-                    faces=self._region_faces(movable,original,block.get('faces',[]),block.get('frame'))
+                    if block.get('region'):
+                        faces=line_parts(shapely.intersection(movable.boundary,stationary.boundary))
+                    else:
+                        faces=self._region_faces(movable,original,block.get('faces',[]),block.get('frame'))
 
                     if faces:
                         # Only a face on the final movable boundary is a seam: a
@@ -2307,6 +2391,8 @@ class Reconstructor:
                                    fixed=fixed_part, immovable=stationary, bridge=bridge, cut=piece_cut,
                                    frame_seam=bool(block.get('seam')), follows=bool(block.get('follows')),
                                    vias=[int(v['index']) for v in block['cluster']],
+                                   via_refs=normalize_via_refs((v['key'],v['index']) for v in block['cluster']),
+                                   region=bool(block.get('region')),
                                    chain_ends=[start, end],
                                    chain_anchor=end_anchor,
                                    seam=[None if anchor is None else [float(anchor[0]), float(anchor[1])],
@@ -2354,7 +2440,7 @@ class Reconstructor:
         # traces that no longer exist. Re-measure every piece against the final
         # geometry of the other nets on its own layer.
         final={}
-        for layer,items in layer_items.items():
+        for layer,items in (layer_items.items() if targets is None else ()):
             replaced={}
             for q in out.get(layer,[]):
                 for i in q['indices']:replaced[int(i)]=q['geometry']
@@ -2374,7 +2460,7 @@ class Reconstructor:
             piece['conflict_net']=None;piece['conflict_link']=None
             if not others or tree is None:continue
             probe=shapely.union_all([piece['moved']]+([piece['bridge']] if piece['bridge'] is not None else []))
-            which,gap_foreign=self._foreign_gap(probe,tree,others,self._conflict_limit())
+            which,gap_foreign=self._foreign_gap(probe,tree,others)
             if gap_foreign is None:continue
             piece['clearance_um']=float(gap_foreign)
             piece['conflict']=bool(gap_foreign<self.rule_space-self.tol)
@@ -2403,7 +2489,7 @@ class Reconstructor:
                                     landing_diameters=AUTO_LANDING_DIAMETERS),
                     stays=[[round(float(s['center'][0]), 3), round(float(s['center'][1]), 3)]
                            for s in self.stays],
-                    summary=dict(pieces=len(pieces), chains=chain_total, stays=len(self.stays), stays_out=stays_out,
+                    summary=dict(regions_used=regions_used,regions_ambiguous=regions_ambiguous,pieces=len(pieces), chains=chain_total, stays=len(self.stays), stays_out=stays_out,
                                  fixed_ends=fixed_ends, fixed_covered=fixed_covered, fixed_points=len(fixed_points),
                                  fixed_sample=fixed_sample,
                                  fixed_regions=fixed_regions, fixed_first=fixed_first,
@@ -2434,7 +2520,7 @@ class Reconstructor:
                                  bridge_extra_um=self.extra_um,dropped_cuts=len(self.dropped),
                                  landing_diameters=AUTO_LANDING_DIAMETERS))
         if targets is None:
-            if not np.any(states) and not fingerprint:self.cache.pin(key)
-            self.cache[key]=result
+            if not np.any(states) and not fingerprint:self.cache.pin(frame_key)
+            if not quick:self.cache[frame_key]=result
         progress(100,'重构预演完成')
         return result

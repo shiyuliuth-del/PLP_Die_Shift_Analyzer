@@ -1,0 +1,497 @@
+{
+  "scope": "Independent integration; main and source refs unchanged; not a release or all-green certification.",
+  "source_refs": [
+    {
+      "branch": "main",
+      "commit": "6f8d8474456109815f4fc2e88f204ac7f66a33a4",
+      "url": "https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/tree/6f8d8474456109815f4fc2e88f204ac7f66a33a4"
+    },
+    {
+      "branch": "v1110v1_2ndcut&bridge",
+      "commit": "98c81b7ed7d68a57935f494ca870192f2f2d0a79",
+      "url": "https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/tree/98c81b7ed7d68a57935f494ca870192f2f2d0a79"
+    },
+    {
+      "branch": "v1110v3_2ndcut_move",
+      "commit": "d966789215e2a37d3d90efe2f4d5a2b2b8fa0d5e",
+      "url": "https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/tree/d966789215e2a37d3d90efe2f4d5a2b2b8fa0d5e"
+    },
+    {
+      "branch": "v1111v1_light",
+      "commit": "a40b5c7a8a83909f28541d00c013d49942049045",
+      "url": "https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/tree/a40b5c7a8a83909f28541d00c013d49942049045"
+    },
+    {
+      "branch": "v1111v2_merged",
+      "commit": "ff1eef5086634e9b0bfc75a500e3289c3f8e814d",
+      "url": "https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/tree/ff1eef5086634e9b0bfc75a500e3289c3f8e814d"
+    }
+  ],
+  "runtime_tree_sha": "99f5642181cc8f52159f917496fdf6c920fbd193",
+  "test_tree_sha": "1e75ab8aaec5305e8bc9262757296fb88628be2e",
+  "environment": {
+    "platform": "Linux",
+    "python": "3.12.14",
+    "qt": "offscreen",
+    "packages": {
+      "numpy": "2.3.5",
+      "scipy": "1.17.0",
+      "matplotlib": "3.10.8",
+      "shapely": "2.2.0",
+      "gdstk": "1.0.2",
+      "PyQt5": "5.15.11",
+      "klayout": "0.30.13"
+    }
+  },
+  "unit": {
+    "baseline": {
+      "tests": 340,
+      "failures": 15,
+      "errors": 9,
+      "skipped": 3
+    },
+    "integrated": {
+      "tests": 355,
+      "passed": 331,
+      "failures": 15,
+      "errors": 6,
+      "skipped": 3
+    },
+    "new_failure_ids": [],
+    "resolved_failure_ids": [
+      "test_search_targets_cache_and_final_clearance (test_reconstruction.ReconstructionTests.test_search_targets_cache_and_final_clearance) (example='示例F_逐芯片幅度与迭代窗口')",
+      "test_search_targets_cache_and_final_clearance (test_reconstruction.ReconstructionTests.test_search_targets_cache_and_final_clearance) (example='示例N_三线路窄通道宽度')",
+      "test_source_partition_reuses_own_pose_and_bypasses_changed_base (test_v29.V29Tests.test_source_partition_reuses_own_pose_and_bypasses_changed_base)"
+    ],
+    "remaining_failure_ids": [
+      "test_a_drag_past_the_copper_end_stops_at_the_last_crossing (test_reconstruction.ReconstructionTests.test_a_drag_past_the_copper_end_stops_at_the_last_crossing)",
+      "test_a_dragged_cut_plane_pins_the_cut (test_reconstruction.ReconstructionTests.test_a_dragged_cut_plane_pins_the_cut)",
+      "test_a_dragged_plane_inside_the_landing_is_pushed_back_to_its_edge (test_reconstruction.ReconstructionTests.test_a_dragged_plane_inside_the_landing_is_pushed_back_to_its_edge)",
+      "test_a_narrow_seam_is_still_covered (test_reconstruction.ReconstructionTests.test_a_narrow_seam_is_still_covered)",
+      "test_a_pinned_cut_can_be_dragged_again (test_reconstruction.ReconstructionTests.test_a_pinned_cut_can_be_dragged_again)",
+      "test_a_plane_beyond_the_copper_end_is_flagged_as_clamped (test_reconstruction.ReconstructionTests.test_a_plane_beyond_the_copper_end_is_flagged_as_clamped)",
+      "test_a_plate_shared_by_two_chips_is_split_at_the_frame (test_reconstruction.ReconstructionTests.test_a_plate_shared_by_two_chips_is_split_at_the_frame)",
+      "test_a_safe_piece_is_not_marked (test_reconstruction.ReconstructionTests.test_a_safe_piece_is_not_marked)",
+      "test_a_shared_plate_that_moves_onto_the_middle_needs_no_cover (test_reconstruction.ReconstructionTests.test_a_shared_plate_that_moves_onto_the_middle_needs_no_cover)",
+      "test_an_unavoidable_short_is_marked (test_reconstruction.ReconstructionTests.test_an_unavoidable_short_is_marked)",
+      "test_close_landings_share_one_cut_beyond_the_farthest_one (test_reconstruction.ReconstructionTests.test_close_landings_share_one_cut_beyond_the_farthest_one)",
+      "test_cover_polygon_is_built_from_the_four_cut_face_corners (test_reconstruction.ReconstructionTests.test_cover_polygon_is_built_from_the_four_cut_face_corners)",
+      "test_cut_is_straight_across_a_stepped_trace (test_reconstruction.ReconstructionTests.test_cut_is_straight_across_a_stepped_trace)",
+      "test_cut_meets_a_45_degree_route_at_a_right_angle (test_reconstruction.ReconstructionTests.test_cut_meets_a_45_degree_route_at_a_right_angle)",
+      "test_explicit_distance_replaces_the_auto_landing_diameters (test_reconstruction.ReconstructionTests.test_explicit_distance_replaces_the_auto_landing_diameters)",
+      "test_movable_part_keeps_its_shape_and_the_seam_gap_is_the_shift (test_reconstruction.ReconstructionTests.test_movable_part_keeps_its_shape_and_the_seam_gap_is_the_shift)",
+      "test_reconstruction_moves_real_copper_independently_of_channel_capacity (test_reconstruction.ReconstructionTests.test_reconstruction_moves_real_copper_independently_of_channel_capacity)",
+      "test_scope_and_parameters_state_that_the_split_is_a_guess (test_reconstruction.ReconstructionTests.test_scope_and_parameters_state_that_the_split_is_a_guess)",
+      "test_spacing_follows_the_reconstructed_neighbour (test_reconstruction.ReconstructionTests.test_spacing_follows_the_reconstructed_neighbour)",
+      "test_view_settings_key_drives_the_reconstruction (test_reconstruction.ReconstructionTests.test_view_settings_key_drives_the_reconstruction)",
+      "test_whole_feature_follows_the_die_when_the_cut_falls_past_it (test_reconstruction.ReconstructionTests.test_whole_feature_follows_the_die_when_the_cut_falls_past_it)"
+    ],
+    "note": "Baseline error count includes two failing subtests of one method. No old assertions removed."
+  },
+  "new_unit_tests": {
+    "passed": 15,
+    "failed": 0
+  },
+  "aggregate_verify_source": {
+    "status": "FAIL",
+    "stage": "unit suite",
+    "tests": 355,
+    "failures": 15,
+    "errors": 6,
+    "skipped": 3,
+    "later_stages": "Not run by aggregate tool; independently tested below."
+  },
+  "gui_summary": {
+    "total": 20,
+    "passed": 18,
+    "inherited_failures": [
+      "gui_v21",
+      "gui_recon_drag"
+    ],
+    "new_failures": [],
+    "latest_text_change_retest": {
+      "name": "gui_branch_integration",
+      "status": "PASS",
+      "seconds": 4.127759089999927
+    }
+  },
+  "cli_summary": {
+    "examples": 17,
+    "passed": 17,
+    "all_extreme_counts_verified": true
+  },
+  "runs": [
+    {
+      "name": "gui_smoke",
+      "kind": "gui",
+      "exit_code": 0,
+      "seconds": 24.744,
+      "status": "PASS"
+    },
+    {
+      "name": "gui_v14",
+      "kind": "gui",
+      "exit_code": 0,
+      "seconds": 9.591,
+      "status": "PASS"
+    },
+    {
+      "name": "gui_v20",
+      "kind": "gui",
+      "exit_code": 0,
+      "seconds": 33.172,
+      "status": "PASS"
+    },
+    {
+      "name": "gui_scheduler_v20",
+      "kind": "gui",
+      "exit_code": 0,
+      "seconds": 3.825,
+      "status": "PASS"
+    },
+    {
+      "name": "gui_v21",
+      "kind": "gui",
+      "exit_code": 1,
+      "seconds": 49.317,
+      "status": "FAIL",
+      "reason": "Inherited expected (pieces,bridges,orphans)=(1,0,1), actual (1,0,0)."
+    },
+    {
+      "name": "gui_repair",
+      "kind": "gui",
+      "exit_code": 0,
+      "seconds": 5.38,
+      "status": "PASS"
+    },
+    {
+      "name": "gui_v24",
+      "kind": "gui",
+      "exit_code": 0,
+      "seconds": 52.309,
+      "status": "PASS"
+    },
+    {
+      "name": "gui_v25",
+      "kind": "gui",
+      "exit_code": 0,
+      "seconds": 62.118,
+      "status": "PASS"
+    },
+    {
+      "name": "gui_v26",
+      "kind": "gui",
+      "exit_code": 0,
+      "seconds": 56.809,
+      "status": "PASS"
+    },
+    {
+      "name": "gui_v27",
+      "kind": "gui",
+      "exit_code": 0,
+      "seconds": 7.455,
+      "status": "PASS"
+    },
+    {
+      "name": "gui_v28",
+      "kind": "gui",
+      "exit_code": 0,
+      "seconds": 6.58,
+      "status": "PASS"
+    },
+    {
+      "name": "gui_v29",
+      "kind": "gui",
+      "exit_code": 0,
+      "seconds": 7.707,
+      "status": "PASS"
+    },
+    {
+      "name": "gui_v30",
+      "kind": "gui",
+      "exit_code": 0,
+      "seconds": 4.427,
+      "status": "PASS"
+    },
+    {
+      "name": "gui_v32",
+      "kind": "gui",
+      "exit_code": 0,
+      "seconds": 3.33,
+      "status": "PASS"
+    },
+    {
+      "name": "gui_v33",
+      "kind": "gui",
+      "exit_code": 0,
+      "seconds": 9.957,
+      "status": "PASS"
+    },
+    {
+      "name": "gui_v34",
+      "kind": "gui",
+      "exit_code": 0,
+      "seconds": 9.564,
+      "status": "PASS"
+    },
+    {
+      "name": "gui_v35",
+      "kind": "gui",
+      "exit_code": 0,
+      "seconds": 12.347,
+      "status": "PASS"
+    },
+    {
+      "name": "gui_v36",
+      "kind": "gui",
+      "exit_code": 0,
+      "seconds": 7.694,
+      "status": "PASS"
+    },
+    {
+      "name": "gui_recon_drag",
+      "kind": "gui",
+      "exit_code": 1,
+      "seconds": 3.874,
+      "status": "FAIL",
+      "reason": "Inherited fixture assumes cut geometry, current main whole-follow returns cut=None."
+    },
+    {
+      "name": "gui_branch_integration",
+      "kind": "gui",
+      "exit_code": 0,
+      "seconds": 3.975,
+      "status": "PASS"
+    },
+    {
+      "name": "cli_example_1",
+      "project": "示例A_小芯片大孔盘.dshift.json",
+      "kind": "cli",
+      "exit_code": 0,
+      "seconds": 1.167,
+      "status": "PASS",
+      "extreme_checked": true,
+      "package_states": 27,
+      "discrete_states": 27
+    },
+    {
+      "name": "cli_example_2",
+      "project": "示例B_大芯片局部重构.dshift.json",
+      "kind": "cli",
+      "exit_code": 0,
+      "seconds": 1.117,
+      "status": "PASS",
+      "extreme_checked": true,
+      "package_states": 27,
+      "discrete_states": 27
+    },
+    {
+      "name": "cli_example_3",
+      "project": "示例C_多芯片晶圆接口.dshift.json",
+      "kind": "cli",
+      "exit_code": 0,
+      "seconds": 1.874,
+      "status": "PASS",
+      "extreme_checked": true,
+      "package_states": 729,
+      "discrete_states": 729
+    },
+    {
+      "name": "cli_example_4",
+      "project": "示例D_芯片外扇出.dshift.json",
+      "kind": "cli",
+      "exit_code": 0,
+      "seconds": 1.019,
+      "status": "PASS",
+      "extreme_checked": true,
+      "package_states": 729,
+      "discrete_states": 729
+    },
+    {
+      "name": "cli_example_5",
+      "project": "示例E_连续型变与约束.dshift.json",
+      "kind": "cli",
+      "exit_code": 0,
+      "seconds": 1.067,
+      "status": "PASS",
+      "extreme_checked": true,
+      "package_states": 19683,
+      "discrete_states": 19683
+    },
+    {
+      "name": "cli_example_6",
+      "project": "示例F_逐芯片幅度与迭代窗口.dshift.json",
+      "kind": "cli",
+      "exit_code": 0,
+      "seconds": 1.017,
+      "status": "PASS",
+      "extreme_checked": true,
+      "package_states": 81,
+      "discrete_states": 81
+    },
+    {
+      "name": "cli_example_7",
+      "project": "示例G_小偏移与三段追溯.dshift.json",
+      "kind": "cli",
+      "exit_code": 0,
+      "seconds": 0.967,
+      "status": "PASS",
+      "extreme_checked": true,
+      "package_states": 729,
+      "discrete_states": 729
+    },
+    {
+      "name": "cli_example_8",
+      "project": "示例H_不可修复时恢复原图.dshift.json",
+      "kind": "cli",
+      "exit_code": 0,
+      "seconds": 1.067,
+      "status": "PASS",
+      "extreme_checked": true,
+      "package_states": 729,
+      "discrete_states": 729
+    },
+    {
+      "name": "cli_example_9",
+      "project": "示例I_旋转中心与全范围概率.dshift.json",
+      "kind": "cli",
+      "exit_code": 0,
+      "seconds": 1.067,
+      "status": "PASS",
+      "extreme_checked": true,
+      "package_states": 729,
+      "discrete_states": 729
+    },
+    {
+      "name": "cli_example_10",
+      "project": "示例J_短宽孔盘与DRC容差.dshift.json",
+      "kind": "cli",
+      "exit_code": 0,
+      "seconds": 0.918,
+      "status": "PASS",
+      "extreme_checked": true,
+      "package_states": 27,
+      "discrete_states": 27
+    },
+    {
+      "name": "cli_example_11",
+      "project": "示例K_中段连接与平滑孔盘.dshift.json",
+      "kind": "cli",
+      "exit_code": 0,
+      "seconds": 0.971,
+      "status": "PASS",
+      "extreme_checked": true,
+      "package_states": 27,
+      "discrete_states": 27
+    },
+    {
+      "name": "cli_example_12",
+      "project": "示例L_同网部分适配与既有接触.dshift.json",
+      "kind": "cli",
+      "exit_code": 0,
+      "seconds": 1.118,
+      "status": "PASS",
+      "extreme_checked": true,
+      "package_states": 81,
+      "discrete_states": 81
+    },
+    {
+      "name": "cli_example_13",
+      "project": "示例M_不同芯片底层与Pad随动.dshift.json",
+      "kind": "cli",
+      "exit_code": 0,
+      "seconds": 1.017,
+      "status": "PASS",
+      "extreme_checked": true,
+      "package_states": 729,
+      "discrete_states": 729
+    },
+    {
+      "name": "cli_example_14",
+      "project": "示例N_三线路窄通道宽度.dshift.json",
+      "kind": "cli",
+      "exit_code": 0,
+      "seconds": 1.17,
+      "status": "PASS",
+      "extreme_checked": true,
+      "package_states": 729,
+      "discrete_states": 729
+    },
+    {
+      "name": "cli_example_15",
+      "project": "示例O_运动网络三线路通道.dshift.json",
+      "kind": "cli",
+      "exit_code": 0,
+      "seconds": 1.117,
+      "status": "PASS",
+      "extreme_checked": true,
+      "package_states": 729,
+      "discrete_states": 729
+    },
+    {
+      "name": "cli_example_16",
+      "project": "示例P_单点PATH与相邻孔盘.dshift.json",
+      "kind": "cli",
+      "exit_code": 0,
+      "seconds": 1.425,
+      "status": "PASS",
+      "extreme_checked": true,
+      "package_states": 27,
+      "discrete_states": 27
+    },
+    {
+      "name": "cli_example_17",
+      "project": "示例R_禁布区贴边与联合良率.dshift.json",
+      "kind": "cli",
+      "exit_code": 0,
+      "seconds": 1.018,
+      "status": "PASS",
+      "extreme_checked": true,
+      "package_states": 3,
+      "discrete_states": 3
+    },
+    {
+      "name": "startup_default",
+      "kind": "startup",
+      "exit_code": 0,
+      "seconds": 10.616,
+      "status": "PASS"
+    },
+    {
+      "name": "gpu_info",
+      "kind": "diagnostic",
+      "exit_code": 0,
+      "seconds": 0.767,
+      "status": "PASS"
+    },
+    {
+      "name": "startup_desktop",
+      "kind": "desktop",
+      "exit_code": 1,
+      "seconds": 0.265,
+      "status": "BLOCKED_ENVIRONMENT",
+      "reason": "KLayout desktop executable unavailable; Python module available."
+    }
+  ],
+  "source_package": {
+    "files": 108,
+    "sha256": "fe06369c5a7c3b5632d4f359677bcb8dff59fd184738cb3561c3387f907c4b38",
+    "crc": "PASS",
+    "line_endings_independent": true,
+    "source_only": true,
+    "chinese_space_directory_smoke": "PASS",
+    "gpu_diagnostic_entry": "PASS",
+    "published_release": false
+  },
+  "not_validated": [
+    "Windows native build/runtime",
+    "Real CUDA hardware",
+    "External user GDS/GD55",
+    "KLayout desktop executable"
+  ],
+  "known_limitations": [
+    "Legacy reconstruction tests need reconciliation with current main double-cut model.",
+    "reconstruction_second_turn_deg is read but unused by automatic second-cut search.",
+    "Existing K-02 physical-frame/custom-pivot issue remains open."
+  ]
+}
