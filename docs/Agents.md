@@ -243,3 +243,5 @@ V23 的 Linux 复算覆盖 GD55 三颗芯片、267 个保留对象、每姿态 6
 - GD55：输入±35 μm/±1°、15/15/15 μm，验证8种叠加工况使用相同名义端点。有效几何127–132/145个区域；其余源铜保留并说明原因，不能把该数字当作DRC通过率或生产良率。未缓存帧约1–1.7s，局部拖动约12ms，完整时序和硬件以机器记录为准，不冒称端到端FPS或GPU提速。
 - 动静区DXF实图回读1495个开放LWPOLYLINE，无HATCH；完整物理边界核对、原文件保护和孔洞测试通过。输出信息说明退回源图B层的区域数量。
 - [PR #21](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/pull/21)合并须以最终准确头的Windows clean/with-cupy双绿为门禁，早先两头成功不替代最终头。源码资产、校验值和回下载结果见[V38 Release](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/releases/tag/V38)；不上传图片、私有图纸或EXE。合并后仅保留main，旧临时工作树未提交内容保持原样。
+
+- 最终源码干净聚合复验仍为295项核心/18组GUI/两后端/17工程通过；新增连续两次拖动在前一任务未完成时不丢端点，操作者状态与可变工作引擎解耦。原图区域共同量化后的分割通过斜线接缝测试，实图DXF回读无HATCH。
