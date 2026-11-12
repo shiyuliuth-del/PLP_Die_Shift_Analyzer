@@ -1,22 +1,7 @@
-# Automatic GitHub source archives contain the runnable source and its build recipe.
-# Full developer history, documentation and test input remain available in the Git checkout.
-.github export-ignore
-.gitattributes export-ignore
-.gitignore export-ignore
-AGENTS.md export-ignore
-Agent.md export-ignore
-CONTRIBUTING.md export-ignore
-README.md export-ignore
-DIE_SHIFT评估报告.md export-ignore
-die_shift_model.py export-ignore
-run.sh export-ignore
-Jobs export-ignore
-docs export-ignore
-examples export-ignore
+# Keep online report figures in Git, but exclude them from source archives.
 figures export-ignore
-results export-ignore
-tests export-ignore
-tools export-ignore
+DIE_SHIFT评估报告.md export-ignore
+docs/*操作与验证说明.md export-ignore
 *.[pP][nN][gG] export-ignore
 *.[jJ][pP][gG] export-ignore
 *.[jJ][pP][eE][gG] export-ignore
@@ -27,3 +12,4 @@ tools export-ignore
 *.[tT][iI][fF][fF] export-ignore
 *.[sS][vV][gG] export-ignore
 *.[iI][cC][oO] export-ignore
+*.[pP][dD][fF] export-ignore

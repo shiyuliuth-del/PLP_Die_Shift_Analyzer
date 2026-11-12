@@ -1,0 +1,11 @@
+Traceback (most recent call last):
+  File "D:\Dieshift\Main\main.py", line 18, in <module>
+    from die_shift_studio.gui import launch
+  File "D:\Dieshift\Main\die_shift_studio\gui.py", line 32, in <module>
+    from .settings import ViewSettings
+  File "D:\Dieshift\Main\die_shift_studio\settings.py", line 6, in <module>
+    from .reconstruction import (FRAME_MARGIN_UM, SECOND_CUT_VIA_STOP_UM,
+  File "D:\Dieshift\Main\die_shift_studio\reconstruction.py", line 476
+    if (moving is not None and not moving.is_empty
+       ^
+SyntaxError: '(' was never closed
