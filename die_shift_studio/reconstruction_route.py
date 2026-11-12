@@ -221,6 +221,7 @@ class RoutePlan:
                 part=self.partition(0.,float(b))
                 if part is not None:candidates.append((float(b),0.,float(b),part));break
         if not candidates:return None
+        self.candidate_intervals=tuple((q[1],q[2]) for q in sorted(candidates,reverse=True,key=lambda q:q[0]))
         # Sufficient bound on smoothstep shear; an insufficient length remains
         # explicitly warned, never passed off as a guaranteed safe region.
         safe=[q for q in candidates if q[0]>2.5*max_travel]
@@ -240,23 +241,45 @@ class RoutePlan:
         return self.partition(a,b),True
 
 
-def warp(part,plan,center,state):
+def taper_mesh(part,plan,start,end):
+    """Refine where the displacement weight changes, never a rigid landing.
+
+    A very short transition used to subdivide the entire pad at span/48 and
+    create tens of thousands of collinear points. Use the 48 transition samples
+    on each intersecting source edge, leaving rigid regions and seams intact.
+    """
+    faces=[g.buffer(plan.tolerance*.05) for g in (part['near'],part['far']) if g.geom_type=='LineString']
+    def ring(r):
+        xy=np.asarray(r.coords);s=project(plan.route,xy);out=[]
+        for p,q,u,v in zip(xy[:-1],xy[1:],s[:-1],s[1:]):
+            out.append(p)
+            if abs(v-u)<plan.tolerance*.01:continue
+            segment=shapely.LineString([p,q])
+            if any(face.covers(segment) for face in faces):continue
+            ts=(np.linspace(start,end,49)-u)/(v-u)
+            ts=np.sort(ts[(ts>1e-10)&(ts<1-1e-10)])
+            out.extend(p+ts[:,None]*(q-p))
+        out.append(xy[-1]);return out
+    return shapely.union_all([shapely.Polygon(ring(p.exterior),[ring(h) for h in p.interiors]) for p in parts(part['A'])])
+
+
+def warp(part,plan,center,state,style="c2"):
     """Move original material; C is rigid and A tapers continuously into B."""
     from .preview import rigid_transform
     if not np.any(state):return dict(A=part['A'],B=part['B'],C=part['C']),None
-    memo_key=(part['a'],part['b'],np.asarray(center,float).tobytes(),np.asarray(state,float).tobytes())
+    memo_key=(style,part['a'],part['b'],np.asarray(center,float).tobytes(),np.asarray(state,float).tobytes())
     if memo_key in plan.pose_memo:
         saved=plan.pose_memo[memo_key];plan.pose_memo.move_to_end(memo_key)
         return dict(saved[0]),saved[1]
     a,b=part['a'],part['b'];start=a if a>0 else plan.land_end
     span=b-start
     if span<=plan.tolerance:return None,'动区过短，保留原始图形'
-    field_key=('field',round(a,8),round(b,8))
+    field_key=('field',style,round(a,8),round(b,8))
     def move(points):
         saved=plan.cache.get(field_key)
         if saved is None:
             s=project(plan.route,points);t=np.clip((s-start)/span,0,1)
-            w=1-(10*t**3-15*t**4+6*t**5)
+            w=1-(3*t**2-2*t**3) if style=="c1" else 1-(10*t**3-15*t**4+6*t**5)
             pt=shapely.points(points)
             if a>0:w=np.where(shapely.distance(pt,part['near'])<plan.tolerance*.1,1.,w)
             w=np.where(shapely.distance(pt,part['far'])<plan.tolerance*.1,0.,w)
@@ -267,13 +290,17 @@ def warp(part,plan,center,state):
     key=('mesh',round(a,8),round(b,8))
     mesh=plan.cache.get(key)
     if mesh is None:
-        mesh=shapely.segmentize(part['A'],max(plan.tolerance*8,min(5.,span/48)))
+        mesh=taper_mesh(part,plan,start,b)
         plan.cache[key]=mesh
-    active=shapely.transform(mesh,move)
+    if style in ("linear","arc"):
+        from .connection_curves import endpoint_active
+        try:active=endpoint_active(part,plan,center,state,style)
+        except (ValueError,shapely.errors.GEOSException) as exc:return None,str(exc)+"；保留原始图形"
+    else:active=shapely.transform(mesh,move)
     rigid_key=('rigid_mesh',round(a,8),round(b,8))
     rigid=plan.cache.get(rigid_key)
     if rigid is None:
-        rigid=shapely.segmentize(part['C'],max(plan.tolerance*8,min(5.,span/48)));plan.cache[rigid_key]=rigid
+        rigid=part['C'];plan.cache[rigid_key]=rigid
     translated=shapely.transform(rigid,lambda xy:rigid_transform(xy,center,state))
     # Floating-point seam slivers are repaired only within one source DBU.
     if not active.is_valid:

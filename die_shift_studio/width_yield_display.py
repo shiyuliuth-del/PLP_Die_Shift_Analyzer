@@ -12,7 +12,7 @@ class YieldLabel(W.QLabel):
     """Keep both numbers on the toolbar row without changing the plot height."""
     def __init__(self,parent):
         super().__init__(parent)
-        self.parts=None;self.pixel_size=12
+        self.parts=None;self.pixel_size=12;self.width_active=False;self.width_text="";self.extra_text="";self.width_tip="";self.extra_tip=""
         self.setAlignment(ALIGN_CENTER);self.setContentsMargins(4,0,4,0)
         self.setStyleSheet('font-size:12px');self.ensurePolished()
         self.setMinimumWidth(0)
@@ -23,19 +23,33 @@ class YieldLabel(W.QLabel):
     def set_values(self,prefix,labels,suffix):
         self.parts=(prefix,labels,suffix);self.reflow()
 
+    def set_width_active(self,enabled):
+        self.width_active=enabled;self.reflow()
+
+    def set_extra(self,text,tip=''):
+        self.extra_text=text;self.extra_tip=tip;self.reflow()
+
+    def setText(self,text):
+        self.parts=None;self.width_text=text;self.reflow()
+
+    def setToolTip(self,text):
+        self.width_tip=text;super().setToolTip('\n\n'.join(t for t in (self.width_tip,self.extra_tip) if t))
+
     def resizeEvent(self,event):
         super().resizeEvent(event);self.reflow()
 
     def reflow(self):
-        if self.parts is None:return
-        prefix,labels,suffix=self.parts
+        prefix,labels,suffix=self.parts or (self.width_text,[],"")
         width=max(1,self.width()-self.contentsMargins().right()-self.contentsMargins().left())
         font=QtGui.QFont(self.font());font.setPixelSize(12)
         metrics=QtGui.QFontMetrics(font)
-        whole=prefix+'  ·  '.join(labels)+suffix
+        base=prefix+'  ·  '.join(labels)+suffix
+        whole='  ·  '.join(t for t in (base if self.width_active else '',self.extra_text) if t)
+        self.setVisible(self.width_active or bool(self.extra_text))
+        super().setToolTip('\n\n'.join(t for t in (self.width_tip if self.width_active else '',self.extra_tip) if t))
         text=whole
         size=12
-        while size>8 and max(metrics.horizontalAdvance(line) for line in text.splitlines())>width:
+        while size>8 and max((metrics.horizontalAdvance(line) for line in text.splitlines()),default=0)>width:
             size-=1;font.setPixelSize(size);metrics=QtGui.QFontMetrics(font)
         if size!=self.pixel_size:self.pixel_size=size;self.setStyleSheet(f'font-size:{size}px')
         if metrics.horizontalAdvance(text)>width:
@@ -43,7 +57,7 @@ class YieldLabel(W.QLabel):
         super().setText(text)
 
     def clear(self):
-        self.parts=None;super().clear()
+        self.parts=None;self.width_text="";self.reflow()
 
 
 class WidthYieldDisplay:
@@ -66,8 +80,9 @@ class WidthYieldDisplay:
     def refresh(self):
         w=self.w
         if w.loading or w._closing:return
+        if hasattr(w,'reconstruction_yield'):w.reconstruction_yield.refresh()
         enabled=w.width_toggle.isChecked()
-        self.label.setVisible(enabled)
+        self.label.set_width_active(enabled)
         if not enabled or not w.data:
             self.reset()
             if enabled:self.label.setText('宽度良率 · 等待图纸')

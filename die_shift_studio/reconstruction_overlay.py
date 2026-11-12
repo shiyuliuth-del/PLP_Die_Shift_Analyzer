@@ -40,7 +40,8 @@ class ReconstructionOverlay:
     def __init__(self,window):
         self.w=window;self.artists={};self.cuts=None;self.stamp=self.table_stamp=None
         self.selected=self.selected_kind=None;self.hover=None;self.hover_key=None
-        self.end_artists=[];self.region_artists=[];self.arrow_artists=[]
+        self.end_artists=[];self.region_artists=[];self.arrow_artists=[];self.path_cache={}
+        self.pulse_timer=QtCore.QTimer(window);self.pulse_timer.setInterval(33);self.pulse_timer.timeout.connect(self.pulse)
     def active(self):return self.w.reconstruction_toggle.isChecked()
     @staticmethod
     def _key(q):return q['layer'],int(q['index']),normalize_via_refs(q.get('via_refs',q['vias']))
@@ -52,6 +53,7 @@ class ReconstructionOverlay:
         if self.cuts is None or self.cuts.axes is not w.ax:
             self.artists={}
             self.warning=PatchCollection([],facecolor='none',edgecolor=WARNING_COLOR,linestyles='--',linewidths=1.1,zorder=9.4);w.ax.add_collection(self.warning)
+            self.constraints=PatchCollection([],facecolor='#dd5790',edgecolor='#bc386d',alpha=.35,linewidths=.7,zorder=10.5);w.ax.add_collection(self.constraints)
             self.cuts=LineCollection([],colors=CUT_COLOR,linewidths=2.2,zorder=11.5);w.ax.add_collection(self.cuts)
             self.second_cuts=LineCollection([],colors=SECOND_CUT_COLOR,linewidths=2.2,zorder=11.6);w.ax.add_collection(self.second_cuts)
             self.points=Line2D([],[],ls='none',marker='o',markersize=10,color=CUT_COLOR,markeredgecolor='white',markeredgewidth=.8,zorder=12);w.ax.add_line(self.points)
@@ -60,21 +62,35 @@ class ReconstructionOverlay:
         vis=tuple(k for k,v in w.visible_boxes.items() if v.isChecked())
         order=tuple(w.ordered_layers());stamp=(id(data),vis,w.view_bounds,order)
         if stamp==self.stamp:return
-        self.stamp=stamp;paths={};first=[];second=[];dots=[];warnings=[];seen=set()
+        self.stamp=stamp;paths={};first=[];second=[];dots=[];warnings=[];seen=set();fixed_groups={};old_cache=self.path_cache;self.path_cache={}
+        def patch(g):
+            previous=old_cache.get(id(g))
+            item=previous if previous is not None and previous[0] is g else (g,w.geometry_patch(g))
+            self.path_cache[id(g)]=item
+            return item[1]
+        if not self.active():self.clear_hover()
+        final_geometries={(layer,i):v['geometry'] for layer,values in (data or {}).get('replacements',{}).items() for v in values for i in v['indices']}
+        warned=set()
         for q in self.pieces():
             if not _in_view(q['route_plan'].source.bounds if q.get('route_plan') else q['fixed'].bounds,w.view_bounds) and not any(not g.is_empty and _in_view(g.bounds,w.view_bounds) for g in q['regions'].values()):continue
             for k,g in q['regions'].items():
                 if g.is_empty:continue
                 ident=(q['layer'],q['index'],k)
-                if k=='B' and ident in seen:continue
-                seen.add(ident);paths.setdefault((q['layer'],k),[]).append(w.geometry_patch(g))
-            if q.get('warning'):
-                g=shapely.union_all(list(q['regions'].values()))
-                if not g.is_empty:warnings.append(w.geometry_patch(g))
+                if k=='B':
+                    fixed_groups.setdefault((q['layer'],q['index']),{})[id(g)]=g;continue
+                seen.add(ident);paths.setdefault((q['layer'],k),[]).append(patch(g))
+            ref=(q['layer'],q['index'])
+            if q.get('warning') and ref not in warned:
+                warned.add(ref);g=final_geometries.get(ref)
+                if g is None:g=shapely.union_all(list(q['regions'].values()))
+                if not g.is_empty:warnings.append(patch(g))
             near=q.get('moved_cut')
             if near is not None and near.geom_type=='Point':dots.append(near.coords[0])
             else:first.extend(_lines(near))
             second.extend(_lines(q.get('extra_cut')))
+        for (layer,index),values in fixed_groups.items():
+            geos=list(values.values());g=geos[0] if len(geos)==1 else shapely.union_all(geos)
+            paths.setdefault((layer,'B'),[]).append(patch(g))
         for key in paths:
             if key not in self.artists:
                 k=key[1];artist=PatchCollection([],facecolor=COLORS[k],edgecolor=COLORS[k],alpha=.66,linewidths=.5)
@@ -82,6 +98,9 @@ class ReconstructionOverlay:
         for (layer,k),artist in self.artists.items():
             shapes=paths.get((layer,k),[]);artist.set_paths(shapes);artist.set_visible(bool(shapes))
             artist.set_zorder(2+(order.index(layer) if layer in order else 0)/max(1,len(order))+.001*('BCA'.index(k)+1))
+        bad=[patch(q['geometry']) for q in (data or {}).get('violations',())
+             if any(w.visible_boxes.get(k) is not None and w.visible_boxes[k].isChecked() for k in q['layers']) and _in_view(q['geometry'].bounds,w.view_bounds)]
+        self.constraints.set_paths(bad);self.constraints.set_visible(bool(bad))
         self.warning.set_paths(warnings);self.warning.set_visible(bool(warnings))
         self.cuts.set_segments(first);self.cuts.set_visible(bool(first))
         self.second_cuts.set_segments(second);self.second_cuts.set_visible(bool(second))
@@ -101,12 +120,23 @@ class ReconstructionOverlay:
     def highlight(self,picked):
         if self.hover is None or self.hover.axes is not self.w.ax:
             self.hover=Line2D([],[],color=CUT_COLOR,lw=4,alpha=.7,zorder=13);self.w.ax.add_line(self.hover)
-        if picked is None or picked[2]=='bridge':self.hover.set_visible(False);return False
+        if picked is None or picked[2]=='bridge':
+            visible=self.hover.get_visible();self.hover.set_visible(False);self.pulse_timer.stop();self.hover_key=None
+            if visible and hasattr(self.w,'scene_renderer'):self.w.render_scene()
+            return False
         q,xy,kind=picked;self.hover.set_data(xy.T);self.hover.set_visible(True)
         self.hover.set_color(SECOND_CUT_COLOR if kind=='extra' else CUT_COLOR)
         self.hover.set_marker('o' if np.linalg.norm(xy[-1]-xy[0])<1e-8 else '');self.hover.set_markersize(11)
-        if getattr(self.w,'cut_drag',None) is None or self.w.cut_drag.state is None:self.w.canvas.draw_idle()
+        self.hover_key=(self._key(q),kind)
+        if not self.pulse_timer.isActive():self.pulse_timer.start()
         return True
+    def pulse(self):
+        if self.hover is None or not self.hover.get_visible() or not self.active() or self.w._closing:
+            self.pulse_timer.stop();return
+        wave=.5+.5*math.sin(time.monotonic()*7)
+        self.hover.set_alpha(.55+.4*wave);self.hover.set_linewidth(3.+2.*wave)
+        self.hover.set_markersize(12.+4.*wave)
+        self.w.scene_renderer.draw_feedback(self.hover,(id(self.data()),self.stamp),self.w.legend)
     def clear_hover(self):self.highlight(None)
     def fill_table(self,data):
         if getattr(self.w,'cut_drag',None) and self.w.cut_drag.state is not None:return
@@ -117,6 +147,7 @@ class ReconstructionOverlay:
         for i,q in enumerate(rows):
             status=q.get('warning') or '已按共用动区重构'
             if q['conflict']:status+='；异网间距不足'
+            if q.get('rule_violations'):status+='；'+('、'.join(q['rule_violations']))
             values=[f"{q['layer']} #{q['index']+1}",f"DIE{q['die']+1}",q['net'],f"{q['movable_area_um2']:.2f}",f"{q['shift_um']:.2f}",
                     '—' if q['gap_um'] is None else f"{q['gap_um']:.2f}",f"{q['bridge_area_um2']:.2f}",f"{q['bridge_span_um']:.2f}",f"{q['bridge_length_um']:.2f}",
                     '—' if q['clearance_um'] is None else f"{q['clearance_um']:.2f}",status]
@@ -160,6 +191,7 @@ class CutDrag:
     def move(self,event):
         if self.state is None:
             if self.w.reconstruction_toggle.isChecked() and event.inaxes is self.w.ax and event.xdata is not None:self.w.reconstruction_overlay.highlight(self.w.reconstruction_overlay.pick(event.xdata,event.ydata,self._tolerance()))
+            else:self.w.reconstruction_overlay.clear_hover()
             return
         if event.xdata is None or event.ydata is None:return
         if not self.state['moved'] and np.linalg.norm(np.array([event.x,event.y])-self.state['start'])<2:return
@@ -167,9 +199,6 @@ class CutDrag:
     def _tick(self):
         state=self.state
         if state is None:return
-        hover=self.w.reconstruction_overlay.hover
-        state['phase']+=.35
-        if hover is not None:hover.set_alpha(.55+.4*(.5+.5*math.sin(state['phase'])));hover.set_linewidth(3.5+1.5*math.sin(state['phase'])**2)
         if self.latest is not None:
             cursor=self.latest;self.latest=None;piece=state['piece'];owner=piece['die'];frame=state['frame']
             if state['kind']!='extra':
@@ -186,18 +215,26 @@ class CutDrag:
                     line=part['far'] if which else transform(part['near'],frame['rotation_centers'][owner],frame['states'][owner])
                     self.w.reconstruction_overlay.highlight((piece,_lines(line)[0],state['kind']))
                     if self.w.view_settings.reconstruction_live:self._live(part)
-        self.w.render_scene()
+                    self.w.render_scene()
     def _live(self,part):
         from .reconstruction_route import warp
         state=self.state;old=state['frame'];piece=state['piece'];plan=piece['route_plan']
-        regions,error=warp(part,plan,old['rotation_centers'][piece['die']],old['states'][piece['die']])
+        regions,error=warp(part,plan,old['rotation_centers'][piece['die']],old['states'][piece['die']],self.w.view_settings.reconstruction_style)
         if error:
             self.w.statusBar().showMessage(error);regions=piece['regions']
         moved_cut=transform(part['near'],old['rotation_centers'][piece['die']],old['states'][piece['die']])
         replacement=dict(piece,regions=regions,nominal_regions={k:part[k] for k in 'ABC'},moved=regions['C'],movable=part['C'],fixed=regions['B'],bridge=regions['A'],
-                         cut=part['near'],moved_cut=moved_cut,extra_cut=part['far'],span=part['A'],interval=(part['a'],part['b']))
-        data=old['reconstruction'];items=[replacement if q is piece else q for q in data['pieces']]
-        self.w.current_frame=dict(old,reconstruction=dict(data,pieces=items))
+                         cut=part['near'],moved_cut=moved_cut,extra_cut=part['far'],span=part['A'],interval=(part['a'],part['b']),valid=not bool(error),warning=error or '',whole_landing=part['a']==0,rule_violations=())
+        data=old['reconstruction'];items=[replacement if q is piece else dict(q,regions=dict(q['regions'])) for q in data['pieces']]
+        replacements={k:[dict(v) for v in values] for k,values in data['replacements'].items()}
+        feature=[q for q in items if (q['layer'],q['index'])==(piece['layer'],piece['index'])]
+        from .reconstruction import compose_feature
+        copper,_=compose_feature(plan.source,feature,plan.tolerance,bool(np.any(old['states'])))
+        for q in replacements.get(piece['layer'],()):
+            if piece['index'] in q['indices']:q['geometry']=copper
+        self.w.current_frame=dict(old,reconstruction=dict(data,pieces=items,replacements=replacements,violations=[],constraints_complete=False))
+        self.w.constraint_feedback.request(self.w.current_frame,state['updated'])
+        self.w.reconstruction_yield.refresh(state['updated'])
         self.w.reconstruction_overlay.stamp=None;self.w.reconstruction_overlay.draw()
     def release(self,event):
         if self.state is None:return
@@ -212,6 +249,7 @@ class CutDrag:
     def cancel(self):
         if self.state is None:return False
         original=self.state['frame'];self.state=None;self.latest=None;self.timer.stop()
+        self.w.constraint_feedback.cancel();self.w.reconstruction_yield.refresh()
         self.w.current_frame=original;self.w.reconstruction_overlay.clear_hover()
         self.w.reconstruction_overlay.stamp=None;self.w.reconstruction_overlay.draw();self.w.render_scene()
         return True

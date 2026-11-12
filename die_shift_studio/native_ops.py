@@ -27,6 +27,8 @@ def encode(r):
 
 def execute(kdb,request):
     op=request['op']
+    any_only=op.endswith('_any')
+    if any_only:op=op[:-4]
     if op=='info':
         check=kdb.Region(kdb.Box(0,0,100,10)).width_check(20)
         if check.is_empty():raise RuntimeError('KLayout native DRC self-check failed')
@@ -41,8 +43,10 @@ def execute(kdb,request):
             for pair in pairs.each():
                 x,y=pair.first,pair.second
                 if x.p1==y.p1 or x.p1==y.p2 or x.p2==y.p1 or x.p2==y.p2:continue
+                if any_only:return dict(polygons=[],area=1)
                 kept.insert(pair)
             pairs=kept
+        if any_only:return dict(polygons=[],area=0 if pairs.is_empty() else 1)
         a=pairs.polygons(1)
     elif op=='round':
         r=kdb.Region()

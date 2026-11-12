@@ -11,9 +11,22 @@ class SceneRenderer:
     def __init__(self,canvas,ax):
         self.canvas=canvas;self.ax=ax;self.key=None;self.background=None;self.capturing=False;self.legend_region=None;self.static_cache=OrderedDict();self.pending_key=None
         self.static_budget=64*1024**2;self.selection_background=None;self.selection_images=OrderedDict();self.unselected_key=None
+        self.feedback_background=None
         canvas.mpl_connect('draw_event',self.external_draw)
     def external_draw(self,event):
-        if not self.capturing:self.key=None;self.background=None;self.selection_background=None;self.selection_images.clear();self.unselected_key=None
+        if not self.capturing:self.key=None;self.background=None;self.selection_background=None;self.selection_images.clear();self.unselected_key=None;self.feedback_background=None
+
+    def draw_feedback(self,artist,key,legend=None):
+        """Pulse a handle without rerasterising copper or probability images."""
+        stamp=(key,self.selection_key(legend))
+        if self.feedback_background is None or self.feedback_background[0]!=stamp:
+            visible=artist.get_visible();artist.set_visible(False)
+            self.draw(self.key or self.pending_key or ('feedback',stamp),legend)
+            self.feedback_background=(stamp,self.canvas.copy_from_bbox(self.ax.bbox))
+            artist.set_visible(visible)
+        self.canvas.restore_region(self.feedback_background[1])
+        if artist.get_visible():self.ax.draw_artist(artist)
+        self.canvas.blit(self.ax.bbox)
 
     def selection_key(self,legend):
         return (tuple(self.ax.get_xlim()),tuple(self.ax.get_ylim()),tuple(self.ax.bbox.bounds),self.canvas.figure.dpi,
@@ -21,6 +34,7 @@ class SceneRenderer:
 
     def draw_selection(self,artists,legend,signature):
         """A stable scene needs only the selected outlines and their callouts repainted."""
+        self.feedback_background=None
         key=self.selection_key(legend)
         if self.selection_background is None or self.selection_background[0]!=key:
             visible=[a for a in artists if a is not None and a.get_visible()]
@@ -60,8 +74,11 @@ class SceneRenderer:
         self.canvas.blit(self.ax.bbox)
 
     def draw(self,key,legend=None):
+        self.feedback_background=None
         self.selection_background=None;self.selection_images.clear();self.unselected_key=None
-        artists=[a for a in list(self.ax.collections)+list(self.ax.patches)+list(self.ax.images)+list(self.ax.texts) if a.get_visible()]
+        # Line2D handles MUST be excluded while capturing the static background.
+        # Otherwise the old handle is baked into it and remains after dragging.
+        artists=[a for a in list(self.ax.collections)+list(self.ax.patches)+list(self.ax.images)+list(self.ax.texts)+list(self.ax.lines) if a.get_visible()]
         # During camera motion, the view changes every frame. A single normal
         # draw is cheaper than building background and static-run caches that
         # immediately expire. Build them only on the second stable-view draw.

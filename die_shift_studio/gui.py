@@ -225,6 +225,8 @@ class MainWindow(W.QMainWindow):
         self.reconstruction_overlay=ReconstructionOverlay(self)
         self.cut_drag=CutDrag(self)
         self.region_select=RegionSelect(self)
+        from .reconstruction_status import ReconstructionYieldDisplay,ConstraintFeedback
+        self.reconstruction_yield=ReconstructionYieldDisplay(self);self.constraint_feedback=ConstraintFeedback(self)
         self.canvas.mpl_connect('key_press_event',lambda e:self.exit_region_mode() if str(e.key).lower()=='m' else None)
         self.job_watcher=QtCore.QFileSystemWatcher([str(self.jobs_dir)],self);self.job_watcher.directoryChanged.connect(self.refresh_jobs)
         self.cache_status_timer=QtCore.QTimer(self);self.cache_status_timer.setInterval(500);self.cache_status_timer.timeout.connect(self.refresh_cache_status);self.cache_status_timer.start()
@@ -566,6 +568,10 @@ class MainWindow(W.QMainWindow):
         spin(drc_group,'repair_patch_width_um','补块直径 / μm（0=与过孔等宽）',0,10000,3)
         self.setting_fields['repair_patch_width_um'].setToolTip('“修复补块”所画直线补块的直径。0 表示每块补块取所连过孔的最小外形尺寸（最小外接矩形的短边），即与孔等宽；填正数则所有补块统一使用该直径。')
         recon=group('重构预演')
+        choices['reconstruction_style']=[('直线','linear'),('一阶','c1'),('二阶','c2'),('圆弧','arc')]
+        choice(recon,'reconstruction_style','连接样式')
+        spin(recon,'reconstruction_grid_nodes','良率积分每轴节点',3,9)
+        self.setting_fields['reconstruction_grid_nodes'].setToolTip('完整有限网格，按区间概率质量积分；增大节点可检查连续空间误差。不是等概率极端计数。')
         live=W.QCheckBox('实时反馈动区变化');self.setting_fields['reconstruction_live']=live;recon.addRow(live);live.toggled.connect(self.settings_changed)
         spin(recon,'reconstruction_corner_guard_um','拐角吸附预留 / μm',0,1000,2)
         recon.addRow(label('动区沿原图追溯路径定义，所有姿态共用。蓝色近端与玫红远端分别拖动；蓝点表示整个运动孔盘纳入动区。'))
@@ -632,7 +638,7 @@ class MainWindow(W.QMainWindow):
         if self.loading:return
         values={k:(w.currentData() if isinstance(w,W.QComboBox) else w.isChecked() if isinstance(w,W.QCheckBox) else w.value()) for k,w in self.setting_fields.items()}
         updated=ViewSettings.from_dict(dict(asdict(self.view_settings),**values))
-        width_inputs=('width_yield_method','width_yield_exponent','width_yield_seed','width_grid_nodes')
+        width_inputs=('reconstruction_grid_nodes','width_yield_method','width_yield_exponent','width_yield_seed','width_grid_nodes')
         if all(getattr(updated,k)==getattr(self.view_settings,k) for k in values if k not in width_inputs):
             self.view_settings=updated;self.enable_settings();self.width_yield.refresh();return
         ranges=('show_annulus_range','show_spacing_range')
@@ -820,7 +826,7 @@ class MainWindow(W.QMainWindow):
         self.cleanup_retired_sessions();self.refresh_cache_status();self.width_yield.refresh()
     def clear_cached_results(self,all_projects=False):
         if self.cache_clear_worker is not None:return
-        self.stop_animation();self.width_yield.reset();self._prepared_motion=None;self._prepared_package=None
+        self.stop_animation();self.width_yield.reset();self.reconstruction_yield.reset();self.constraint_feedback.cancel();self._prepared_motion=None;self._prepared_package=None
         self.preview_ticket+=1;self.preview_pending=None;self.motion_pending=None;self.motion_generation+=1
         self._width_grid_summary=None;self._problem_tag=None;self._coupled_key=None;self._coupled_data=None
         for worker in [self.worker,self.motion_worker,self.filter_job,*self.preview_workers]:
@@ -848,6 +854,8 @@ class MainWindow(W.QMainWindow):
         if getattr(self,'_clear_native_when_idle',False):
             from . import native_backend
             native_backend.close();self._clear_native_when_idle=False
+            from .reconstruction_rules import intrinsic
+            intrinsic.cache_clear();self.reconstruction_yield.plan_pool.clear();self.constraint_feedback.context=None
         for group_ in self.parked_groups:
             if group_ is self.cache_group:continue
             group_.park_frames()
@@ -1277,6 +1285,7 @@ class MainWindow(W.QMainWindow):
     def invalidate_reconstruction_edit(self):
         """Reject old coupled/extreme evidence after a reconstruction edit."""
         self.dirty=True;self.report_dirty=True
+        if hasattr(self,"reconstruction_yield"):self.reconstruction_yield.refresh()
         self._coupled_key=None;self._coupled_data=None;self._coupled_error=False
         self._problem_tag=None
         if self.filter_job:self.filter_job.cancelled.set()
@@ -1357,6 +1366,7 @@ class MainWindow(W.QMainWindow):
 
     def reconstruction_changed(self,*_):
         if self.loading:return
+        self.reconstruction_yield.refresh();self.constraint_feedback.cancel()
         if not self.reconstruction_toggle.isChecked():self.exit_region_mode();self.cut_drag.cancel()
         self.filter_changed(pending_ok=True)
         if self.reconstruction_toggle.isChecked():
@@ -2617,9 +2627,9 @@ class MainWindow(W.QMainWindow):
             self.load_gds(gds,project.get('top_cell'),project,project_path=path)
         except Exception as exc:self.refresh_jobs();self.error(exc)
     def closeEvent(self,event):
-        self.stop_animation();self.width_yield.reset()
+        self.stop_animation();self.width_yield.reset();self.reconstruction_yield.reset();self.constraint_feedback.cancel()
         if hasattr(self,'mouse_die'):self.mouse_die.pending=False;self.mouse_die.full_pending=False;self.mouse_die.timer.stop();self.mouse_die.idle.stop()
-        running=[w for w in [self.worker,self.motion_worker,self.hardware_worker,self.cache_clear_worker,self.filter_job,self.width_yield.worker,*self.preview_workers] if w is not None and w.isRunning()]
+        running=[w for w in [self.worker,self.motion_worker,self.hardware_worker,self.cache_clear_worker,self.filter_job,self.width_yield.worker,self.reconstruction_yield.worker,self.constraint_feedback.worker,*self.preview_workers] if w is not None and w.isRunning()]
         # The physical thread may have returned before Qt delivers its queued
         # finished handlers. Keep their QObject parent alive through delivery.
         if running or self._tasks:
