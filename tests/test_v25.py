@@ -153,7 +153,7 @@ class V25Tests(unittest.TestCase):
         self.assertEqual(old['expanded_settings'],[]);self.assertEqual(old['settings']['width_label_font_pt'],8.)
         saved=normalize_project(dict(old,expanded_settings=['缓存管理'],settings={'width_label_font_pt':14}))
         self.assertEqual(saved,normalize_project(saved))
-        self.assertEqual(saved['expanded_settings'],['缓存管理'])
+        self.assertEqual(saved['expanded_settings'],['硬件与计算资源'])
         cfg=ViewSettings.from_dict(saved['settings'])
         self.assertEqual(cfg.width_key(),ViewSettings().width_key())
         self.assertEqual(cfg.numeric_key(),ViewSettings().numeric_key())

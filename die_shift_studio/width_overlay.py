@@ -272,7 +272,7 @@ class WidthOverlay:
         modes=w.view_settings.width_display
         nominal=w.width_toggle.isChecked() and (w.current_frame or {}).get('nominal_global')
         selected=tuple(w.selection.selected)
-        stamp = (flags,selected,id(w.width_yield.bank),w.view_settings.width_show_probability,w.view_settings.width_yield_decimals,tuple(w.ax.get_xlim()),tuple(w.ax.get_ylim()),id(w._coupled_data),visible,tuple(modes.items()),w.view_settings.width_label_font_pt,w.view_settings.width_label_decimals,tuple(w.ax.bbox.bounds),w.figure.dpi,w.view_bounds,self.selected,id(w.current_frame),w.reconstruction_toggle.isChecked(),w.deformation_toggle.isChecked())
+        stamp = (flags,selected,id(w.width_yield.bank),w.view_settings.width_show_probability,w.view_settings.width_yield_decimals,tuple(w.ax.get_xlim()),tuple(w.ax.get_ylim()),id(w._coupled_data),visible,tuple(modes.items()),w.view_settings.width_label_font_pt,w.view_settings.width_label_decimals,tuple(w.ax.bbox.bounds),w.figure.dpi,w.view_bounds,self.selected,id(w.current_frame),w.reconstruction_toggle.isChecked(),False)
         if self.stamp == stamp and (getattr(w,'_in_animation',False) or self.table_stamp==flags):
             return
         self.stamp = stamp
@@ -345,7 +345,7 @@ class WidthOverlay:
         # Use the displayed replacement geometry when a source wire was deformed.
         changed = {}
         frame = w.current_frame or {}
-        for toggle,feature in ((w.deformation_toggle,'deformation'),(w.reconstruction_toggle,'reconstruction')):
+        for toggle,feature in ((w.reconstruction_toggle,'reconstruction'),):
             if toggle.isChecked():
                 for k,items in frame.get(feature,{}).get('replacements',{}).items():
                     for q in items:
@@ -369,7 +369,7 @@ class WidthOverlay:
         self.outlines.set_visible(bool(paths) and modes['描边']!='hide')
         # Fill only the material belonging to this risk row, clipped to the
         # actual rectangle. The original copper outside it keeps the dark edge.
-        fill_stamp=(id(data),id(frame),w.deformation_toggle.isChecked(),w.reconstruction_toggle.isChecked())
+        fill_stamp=(id(data),id(frame),False,w.reconstruction_toggle.isChecked())
         if getattr(self,'fill_stamp',None)!=fill_stamp:
             self.fill_stamp=fill_stamp;self.clips={}
         fill_paths={s:[] for s in self.inset};fill_low={s:[] for s in self.inset};fill_prob={s:[] for s in self.inset}

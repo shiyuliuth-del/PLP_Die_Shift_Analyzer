@@ -53,7 +53,7 @@ class GlobalDRC:
     def cached(self,geometry,width,space,angle):
         key=(geometry.wkb,width,space,angle)
         if key in self.cache:self.hits+=1;self.cache.move_to_end(key);return self.cache[key]
-        from .deformation import angle_regions
+        from .geometry_rules import angle_regions
         self.misses+=1;dbu=self.model.data.dbu_um
         out=[('线宽不足',rule_region(geometry,width,dbu)),('线距不足',rule_region(geometry,space,dbu,'space'))]
         if angle:out.append(('最小内角不足',angle_regions(geometry,angle,dbu)))
@@ -65,7 +65,7 @@ class GlobalDRC:
         from .drc_rules import effective_rules
         m=self.model;p=self.p;dbu=m.data.dbu_um;replacements=replacements or {};groups={};items=[]
         width,space=effective_rules(p,settings)
-        rule_key=(width,space,settings.deformation_min_angle_deg if settings else 0)
+        rule_key=(width,space,settings.drc_min_angle_deg if settings else 0)
         if not replacements and getattr(self,'fixed_key',None)==rule_key:
             self.hits+=1;return self.fixed_items
         # Check the reconstructed fixed RDL, including unchanged source copper.
@@ -83,7 +83,7 @@ class GlobalDRC:
                 for q in replacements.get(key,[]):nets.setdefault(q['net'],[]).append((key,q['geometry']))
             for net,rows in nets.items():
                 copper=shapely.union_all([v[1] for v in rows]);layers=tuple(sorted({v[0] for v in rows}));key=layers[0]
-                angle=settings.deformation_min_angle_deg if settings else 0
+                angle=settings.drc_min_angle_deg if settings else 0
                 for kind,g in self.cached(copper,width,space,angle):
                     items.append(dict(layer=key,layers=layers,geometry=g,kind=kind,net=net))
                 world.append((key,copper,net,layers))
@@ -102,24 +102,34 @@ class GlobalDRC:
     def frame(self,states,replacements=None,settings=None,progress=lambda *_:None,owners=None):
         m=self.model;p=self.p;dbu=m.data.dbu_um
         items=list(self.fixed_regions(replacements,settings,progress)) if owners is None else []
-        # Keep the same target unions for all undeformed poses. Replacement
-        # geometry is resolved afresh, preserving the original net identities.
-        if replacements or not hasattr(self,'landing_targets'):
-            targets=[]
-            for r in m.records:
-                pads=[next((q['geometry'] for q in (replacements or {}).get(k,[]) if i in q['indices']),m.cache.layers[k]['geometry'][i])
-                      for k,i in m.connections.fixed_interfaces(r['key'],r['index'])]
-                targets.append(shapely.union_all(pads) if pads else None)
-            if not replacements:self.landing_targets=targets
-        else:targets=self.landing_targets
-        indices=[j for j,r in enumerate(m.records) if owners is None or r['owner'] in owners]
-        if indices:
-            vias=np.array([m.moved(m.records[j]['poly'],m.records[j]['owner'],states) for j in indices],object)
-            missing=shapely.difference(shapely.buffer(vias,p.annulus_um/math.cos(math.pi/128),quad_segs=32),[targets[j] for j in indices])
-            for i in np.flatnonzero(shapely.area(missing)>dbu*dbu):
-                r=m.records[indices[i]]
-                items.append(dict(layer=r['target_layers'][0],layers=tuple(r['target_layers']),geometry=missing[i],
-                                  kind='孔盘包围不足',owner=r['owner']))
+        # Each nominal via→RDL interface uses the receiving RDL's enclosure.
+        # Visibility does not enter this catalogue. Via chains terminating in
+        # fixed copper retain Connections.fixed_interfaces() fallback semantics.
+        catalogue={}
+        for link in getattr(getattr(m,'connections',None),'links',()):
+            a=(link['upper'],link['upper_index']);b=(link['lower'],link['lower_index'])
+            for via,rdl in ((a,b),(b,a)):
+                vr=m.roles.get(via[0]);rr=m.roles.get(rdl[0])
+                if vr in ('运动过孔','固定过孔') and rr in ('运动RDL','固定RDL'):
+                    catalogue.setdefault((via,rdl[0].split('/')[0],rr),set()).add(rdl)
+        for r in m.records:
+            for ref in m.connections.fixed_interfaces(r['key'],r['index']):
+                catalogue.setdefault(((r['key'],r['index']),ref[0].split('/')[0],'固定RDL'),set()).add(tuple(ref))
+        for (ref,plane,role),receivers in catalogue.items():
+            node=m.nodes[m.ids[ref]]
+            if owners is not None and node['owner'] not in owners:continue
+            via=m.moved(node['poly'],node['owner'],states)
+            target=[]
+            for key,index in receivers:
+                original=m.nodes[m.ids[key,index]]
+                replacement=next((q['geometry'] for q in (replacements or {}).get(key,()) if index in q['indices']),None)
+                target.append(replacement if replacement is not None else m.moved(original['poly'],original['owner'],states))
+            enclosure=p.moving_annulus_um if role=='运动RDL' else p.annulus_um
+            missing=via.buffer(enclosure/math.cos(math.pi/128),quad_segs=32).difference(shapely.union_all(target))
+            if missing.area>dbu*dbu:
+                layers=tuple(sorted({k for k,i in receivers}))
+                items.append(dict(layer=layers[0],layers=layers,geometry=missing,kind='孔盘包围不足',owner=node['owner'],
+                                  source_layer=ref[0],source_index=ref[1],rdl_role=role,required_um=enclosure))
         from .edge_clearance import edge_violations
         items.extend(edge_violations(m,states,p,settings,replacements,owners))
         progress(100,f'全局 DRC 完成 · {len(items)} 组标记')

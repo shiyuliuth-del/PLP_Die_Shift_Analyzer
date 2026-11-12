@@ -42,7 +42,7 @@ def main():
             assert w.setting_fields['width_yield_method'].currentData()=='grid'
             assert w.setting_fields['acceleration'].findData('cuda')>=0
             assert hasattr(w,'width_yield') and hasattr(w,'problem_filter')
-            assert hasattr(w,'second_left') and hasattr(w,'second_right')
+            assert hasattr(w,'cut_left') and hasattr(w,'cut_right')
             w.load_project(ROOT/'Jobs/示例F_逐芯片幅度与迭代窗口.dshift.json');settle()
             w.tabs.setCurrentIndex(next(i for i in range(w.tabs.count()) if w.tabs.tabText(i)=='结果图形'));app.processEvents();w.canvas.draw()
             w.ax.set_xlim(0,100);w.ax.set_ylim(0,100);w.canvas.draw()
@@ -70,7 +70,7 @@ def main():
                 assert w.view_settings.reconstruction_cuts==(plane,)
                 before=preview.call_count
                 w.dirty=False;w._coupled_key=('old',);w._coupled_data={'old':True}
-                w.setting_fields['reconstruction_frame_margin_um'].setValue(w.view_settings.reconstruction_frame_margin_um+1)
+                w.setting_fields['reconstruction_corner_guard_um'].setValue(w.view_settings.reconstruction_corner_guard_um+1)
                 assert preview.call_count>before
                 assert w.dirty and w._coupled_key is None and w._coupled_data is None
                 assert w.view_settings.reconstruction_regions==saved_regions
@@ -90,12 +90,8 @@ def main():
                 with patch.object(w,'_selected_reconstruction_piece',return_value={}), \
                      patch('die_shift_studio.reconstruction_overlay.nudge_cut',return_value=changed):
                     w.dirty=False;w.nudge_selected_cut(5);assert w.dirty
-                rotated=replace(changed,reconstruction_second_cuts=((plane[0],plane[1],plane[2],0.,1.,12.,14.),))
-                with patch.object(w,'_selected_reconstruction_piece',return_value={}), \
-                     patch('die_shift_studio.reconstruction_overlay._rotate_second',return_value=rotated):
-                    w.dirty=False;w.rotate_selected_second(5);assert w.dirty
                 previous=w.current_frame
-                w.current_frame={'reconstruction':{'pieces':[{'layer':plane[0],'index':plane[1],'vias':plane[2]}]}}
+                w.current_frame={'reconstruction':{'pieces':[{'layer':plane[0],'index':plane[1],'die':0,'vias':plane[2]}]}}
                 w.reconstruction_table.blockSignals(True)
                 w.reconstruction_table.setRowCount(1);w.reconstruction_table.setCurrentCell(0,0)
                 w.reconstruction_table.blockSignals(False)

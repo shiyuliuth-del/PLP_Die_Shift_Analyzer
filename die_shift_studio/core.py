@@ -29,7 +29,7 @@ PARAMETER_DESCRIPTIONS = {
     'panel_layers':'固定RDL可用层数 / 层', 'wafer_layers':'运动RDL可用层数 / 层',
     'line_width_um':'固定线宽 / μm', 'line_space_um':'固定线距 / μm',
     'wafer_line_width_um':'运动线宽 / μm', 'wafer_line_space_um':'运动线距 / μm',
-    'via_diameter_um':'连接孔直径 / μm', 'annulus_um':'最小包围量 / μm',
+    'via_diameter_um':'连接孔直径 / μm', 'annulus_um':'固定RDL包围量 / μm', 'moving_annulus_um':'运动RDL包围量 / μm',
     'residual_budget_um':'套刻和形变确定性预留 / μm', 'transition_length_um':'动态过渡长度 / μm',
     'max_route_angle_deg':'通道允许斜角 / °', 'routing_edge_keepout_um':'边端禁布长度 / μm',
     'min_die_gap_um':'要求芯片间净距 / μm', 'min_package_clearance_um':'要求芯片到封装边净距 / μm',
@@ -54,7 +54,8 @@ class Parameters:
     wafer_line_width_um: float = 15.0
     wafer_line_space_um: float = 15.0
     via_diameter_um: float = 20.0
-    annulus_um: float = 15.0
+    annulus_um: float = 15.0  # fixed RDL, retains the schema-5 field
+    moving_annulus_um: float = 15.0
     residual_budget_um: float = 5.0
     transition_length_um: float = 200.0
     max_route_angle_deg: float = 30.0
@@ -92,6 +93,7 @@ class Parameters:
     @classmethod
     def from_dict(cls, data, require_rdl=True):
         data=dict(data)
+        data.setdefault("moving_annulus_um",data.get("annulus_um",15.0))
         for key in ('input_nsigma','target_nsigma'):
             if data.get(key) in ('Infinity','∞','无穷大'):data[key]=math.inf
         data={k:v for k,v in data.items() if k not in {f'{prefix}_s{i}' for prefix in ('cost','yield') for i in (1,2,3)}}
@@ -150,7 +152,7 @@ class Parameters:
         for key in positive:
             if getattr(self,key) <= 0:
                 raise ValueError(f"{key} 必须大于0")
-        for key in ("annulus_um", "residual_budget_um", "routing_edge_keepout_um", "min_die_gap_um",
+        for key in ("moving_annulus_um", "annulus_um", "residual_budget_um", "routing_edge_keepout_um", "min_die_gap_um",
                     "min_package_clearance_um", "single_bound_x_um", "single_bound_y_um",
                     "multi_bound_x_um", "multi_bound_y_um", "bound_angle_deg"):
             if getattr(self,key) < 0:

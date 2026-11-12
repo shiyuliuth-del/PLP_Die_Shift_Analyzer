@@ -44,7 +44,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert any('方案1' in w.text() and w.text().count('\n')==2 for w in window.findChildren(W.QLabel))
     assert [window.tabs.tabText(i) for i in range(window.tabs.count())]==['结果图形','结果分析','报告']
     assert [window.preview_tabs.tabText(i) for i in range(2)]==['极端情况','信息']
-    assert window.preview_tabs.tabText(2).startswith('型变校验')
+    assert all('型变校验' not in window.preview_tabs.tabText(i) for i in range(window.preview_tabs.count()))
     assert not hasattr(window,'preview_status') and window.layer_table.verticalHeader().isHidden()
     assert window.gds_label.text().endswith('示例C_多芯片晶圆接口.gds')
     # Drag starts in the count cell, not a row-number header. Preview reorders before release.
@@ -122,6 +122,7 @@ with tempfile.TemporaryDirectory() as tmp:
     np.testing.assert_allclose([np.mean(window.ax.get_xlim()),np.mean(window.ax.get_ylim())],expected)
     window.ax.set_xlim(0,100);QTest.mouseClick(window.issue_table.viewport(),Qt.LeftButton,pos=target);wait_idle()
     assert abs(np.mean(window.ax.get_xlim())-expected[0])<1e-7
+    window.show_issues.setChecked(True);app.processEvents();window.canvas.draw()
     window.canvas.draw();x,y=window.ax.transData.transform(expected);rgba=np.asarray(window.canvas.buffer_rgba());h,w=rgba.shape[:2]
     crop=rgba[max(0,h-int(y)-15):min(h,h-int(y)+16),max(0,int(x)-15):min(w,int(x)+16),:3]
     assert np.count_nonzero((crop[:,:,0]>150)&(crop[:,:,1]<130)&(crop[:,:,2]<140))>3

@@ -29,9 +29,9 @@ class FootprintOverlay:
     def draw(self):
         w=self.window
         if self.artist is None or self.artist not in w.ax.collections:
-            self.artist=PatchCollection([],facecolor='#7e89b726',edgecolor='#73639faa',linewidths=.8,zorder=6.8)
+            self.artist=PatchCollection([],facecolor='none',edgecolor='#677a9a80',linewidths=.65,linestyles=(0,(3,2)),zorder=6.8)
             w.ax.add_collection(self.artist);self.stamp=None
-        data=w.footprint_data if w.footprint_toggle.isChecked() else None
+        data=w.footprint_data if w.footprint_toggle.isChecked() and w.target_sigma.currentText()!='∞' else None
         visible=frozenset(k for k,v in w.visible_boxes.items() if v.isChecked())
         stamp=(id(data),visible,w.view_bounds)
         if stamp==self.stamp:return

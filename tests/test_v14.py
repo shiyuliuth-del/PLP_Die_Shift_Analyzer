@@ -19,7 +19,6 @@ from die_shift_studio.probability_overlay import probability_maps,coverage_envel
 from die_shift_studio.contact_probability import contact_probability
 from die_shift_studio.space_map import space_maps
 from die_shift_studio.viewport import ViewportIndex
-from die_shift_studio.deformation import DeformationPreview
 
 class V14Tests(unittest.TestCase):
     def test_pivots_centers_corners_custom_and_legacy(self):
@@ -53,19 +52,6 @@ class V14Tests(unittest.TestCase):
         np.testing.assert_allclose([v['rotation_origin_um'] for v in result['dies']],origins)
         self.assertEqual(result['dies'][0]['input_bounds'],[35,25,1]);e.close()
 
-    def test_pivot_changes_probability_space_and_adaptation_consistently(self):
-        d,r,c,cache,m,p=traced_fixture();p=replace(p,rotation_center='custom',rotation_x_um=800,multi_bound_x_um=0,multi_bound_y_um=0,bound_angle_deg=3)
-        m.configure_parameters(p);maps=probability_maps(cache,m.bound,r,p,masks=m.interface_masks,settings=ViewSettings(probability_method='quadrature',quadrature_order=9))
-        for q in maps['maps']:
-            owner=q['owner'];np.testing.assert_allclose(q['rotation_center'],rotation_center(c,owner,p))
-            self.assertLess(abs(q['integrated_area_um2']/q['via_area_um2']-1),.01)
-            self.assertLess(q['edge_probability'],1e-10)
-        sm=space_maps(m,p);self.assertTrue(all(np.isfinite(q['spacing']).all() for q in sm['maps']))
-        origin=rotation_center(c,0,p)
-        self.assertEqual(uncertainty_bound([origin],origin,p,2)[0],0)
-        d,q,c,cache,p,m=fixture();p=replace(p,rotation_center='bottom_left');z=np.array([[0,0,.002],[0,1,.001]])
-        dp=DeformationPreview(m,p,{},ViewSettings());np.testing.assert_allclose(m.bound.centers,rotation_centers(c,p));frame=dp.frame(z,m.current(z,p))
-        self.assertEqual(len(frame['interfaces']),len(m.records));self.assertTrue(all(v['verified'] for values in frame['replacements'].values() for v in values));dp.cache.close()
 
     def test_zero_keeps_distribution_scale_and_uses_all_hard_support(self):
         p=Parameters(target_nsigma=3,rho_xy=.4);zero=replace(p,target_nsigma=0);zero.validate()

@@ -56,7 +56,7 @@ w.ax.set_xlim(np.mean(x)+(np.array(x)-np.mean(x))/2);w.ax.set_ylim(np.mean(y)+(n
 w.setting_fields['contact_marker_absolute'].setChecked(True);wait();a=w.marker_size('contact')
 x=w.ax.get_xlim();y=w.ax.get_ylim();w.ax.set_xlim(np.mean(x)+(np.array(x)-np.mean(x))/2);w.ax.set_ylim(np.mean(y)+(np.array(y)-np.mean(y))/2);w.plot_layout(preserve=True);wait()
 np.testing.assert_allclose(w.marker_size('contact'),4*a,rtol=.03)
-for prefix in ('contact','unadapted'):
+for prefix in ('contact',):
     color=w.setting_fields[prefix+'_marker_color'];color.setValue('#7954a6');color.valueChanged.emit();wait()
     assert getattr(w.view_settings,prefix+'_marker_color')=='#7954a6'
 # All-support overlay + separately styled and layer-bound target envelopes.

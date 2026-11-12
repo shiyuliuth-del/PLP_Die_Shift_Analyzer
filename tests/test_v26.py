@@ -22,28 +22,17 @@ def fixture():
     copper={'9/0':[box(-250,-120,250,120)],'8/0':[box(-190,-65,-5,65),box(10,-65,190,65)],
             '5/0':[box(-52,-18,-24,18),box(24,-17,52,17),box(-6,-50,5,45)],
             '4/0':[box(-40,-5,-32,5),box(32,-5,40,5)],
-            '3/0':[box(-90,-4,-32,4),box(32,-4,90,4)],'10/0':[box(-122,-5,-116,5)],
+            '3/0':[box(-90,-9,-28,9),box(28,-9,90,9)],'10/0':[box(-122,-5,-116,5)],
             '90/0':[box(-245,-118,245,118)]}  # older Jobs omit unused layers from their role map
     data=GDSData('local.gds','v26fixture','TOP',['TOP'],.001,{k:[np.array(g.exterior.coords) for g in gs] for k,gs in copper.items()},roles)
     case=build_case(data,roles,layer_order=['3/0','4/0','5/0'])
-    p=Parameters(multi_bound_x_um=35,multi_bound_y_um=5,bound_angle_deg=1,annulus_um=3,line_width_um=5,line_space_um=5,
+    p=Parameters(multi_bound_x_um=35,multi_bound_y_um=5,bound_angle_deg=1,annulus_um=3,moving_annulus_um=3,line_width_um=5,line_space_um=5,
                  min_die_gap_um=8,min_package_clearance_um=3)
     e=PreviewEngine(GeometryCache(data),case,roles,{},p,None,case['connections'])
     return e,case,p
 
 
 class V26Tests(unittest.TestCase):
-    def test_zero_rotation_does_not_certify_an_unbounded_local_transition(self):
-        from die_shift_studio.deformation import Field
-        settings=replace(ViewSettings(),deformation_continuity='C1',deformation_method='bezier')
-        def bound(span):
-            field=Field([{'center':(5.,0.),'owner':0}],np.zeros((1,2)),
-                        np.array([[3.,0.,0.]]),[5.],span,settings)
-            return field.jacobian_bound()
-        with np.errstate(invalid='raise',divide='raise'):
-            self.assertAlmostEqual(bound(10.),.45)
-            for span in (np.inf,np.nan,0.):
-                self.assertEqual(bound(span),np.inf)
 
     def test_ternary_dedup_frozen_bias_and_big_integer_last_page(self):
         c={'dies':[None,None,None]};p=Parameters(per_die_enabled=True,die_bounds=[[0,0,0],[5,0,0],[4,9,1]],mean_x_um=5,mean_y_um=3)

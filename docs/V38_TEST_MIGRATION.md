@@ -1,0 +1,87 @@
+# V38 测试合同迁移
+
+用户明确完全删除“预演分析”，并以原图路径上的共用双端动区替代旧单刀/芯片边框双刀算法。以下测试对应已删除合同，未计为本轮通过；原断言完整保留于 main 起点 a82099e 和 V37 历史。非型变的概率、归属、缓存、DRC、工程及显示回归仍执行。新合同由 test_v38.py 与 gui_v38.py 验证；新几何失败不会靠放宽断言隐藏。
+
+替换验证：完整原铜分割、A/B/C内部不交、真实过孔与固定端、27姿态一致、独立拖动与跨角、反向限位、孔盘全纳入/恢复、精度修补边界、DXF真实边界与开放接点、旧工程字段、零位缓存和实际鼠标事件。
+
+退役项：
+
+- `test_reconstruction.py::test_no_motion_builds_no_pieces`
+- `test_reconstruction.py::test_cut_meets_a_45_degree_route_at_a_right_angle`
+- `test_reconstruction.py::test_cut_is_straight_across_a_stepped_trace`
+- `test_reconstruction.py::test_movable_part_keeps_its_shape_and_the_seam_gap_is_the_shift`
+- `test_reconstruction.py::test_cover_polygon_is_built_from_the_four_cut_face_corners`
+- `test_reconstruction.py::test_a_narrow_seam_is_still_covered`
+- `test_reconstruction.py::test_a_flush_seam_is_counted_apart_from_the_covered_ones`
+- `test_reconstruction.py::test_whole_feature_follows_the_die_when_the_cut_falls_past_it`
+- `test_reconstruction.py::test_explicit_distance_replaces_the_auto_landing_diameters`
+- `test_reconstruction.py::test_close_landings_share_one_cut_beyond_the_farthest_one`
+- `test_reconstruction.py::test_rotated_die_keeps_the_movable_part_on_its_via`
+- `test_reconstruction.py::test_view_settings_key_drives_the_reconstruction`
+- `test_reconstruction.py::test_reconstruction_moves_real_copper_independently_of_channel_capacity`
+- `test_reconstruction.py::test_a_plate_shared_by_two_chips_is_split_at_the_frame`
+- `test_reconstruction.py::test_a_shared_plate_that_moves_onto_the_middle_needs_no_cover`
+- `test_reconstruction.py::test_scope_and_parameters_state_that_the_split_is_a_guess`
+- `test_reconstruction.py::test_the_fixed_part_of_the_trace_completes_the_warm_trace`
+- `test_reconstruction.py::test_a_safe_piece_is_not_marked`
+- `test_reconstruction.py::test_a_dragged_cut_plane_pins_the_cut`
+- `test_reconstruction.py::test_a_dragged_plane_inside_the_landing_is_pushed_back_to_its_edge`
+- `test_reconstruction.py::test_a_drag_past_the_copper_end_stops_at_the_last_crossing`
+- `test_reconstruction.py::test_a_plane_beyond_the_copper_end_is_flagged_as_clamped`
+- `test_reconstruction.py::test_a_pinned_cut_can_be_dragged_again`
+- `test_reconstruction.py::test_search_targets_cache_and_final_clearance`
+- `test_reconstruction_integration.py::test_frame_cut_pair_cache_and_quick_parity`
+- `test_reconstruction_integration.py::test_first_and_second_edits_stay_independent`
+- `test_reconstruction_integration.py::test_reset_second_clears_correct_field_and_preserves_first`
+- `test_reconstruction_integration.py::test_fixed_via_stop_clearance_bounds_second_cut`
+- `test_reconstruction_integration.py::test_invalid_second_width_follows_without_bridge`
+- `test_reconstruction_integration.py::test_qualified_refs_never_guess_ambiguous_legacy_layer`
+- `test_reconstruction_integration.py::test_regions_stay_priority_landing_and_ambiguous_ownership`
+- `test_reconstruction_integration.py::test_region_override_reaches_final_copper`
+- `test_reconstruction_integration.py::test_final_clearance_is_exact_even_far_beyond_conflict_radius`
+- `test_reconstruction_integration.py::test_inside_frame_whole_follow_has_no_invented_cut`
+- `test_v10.py::test_weight_endpoint_derivatives`
+- `test_v10.py::test_deforms_original_copper_and_keeps_anchors_width_spacing`
+- `test_v10.py::test_current_failures_are_retained_without_statistical_freeze`
+- `test_v10.py::test_each_animation_pose_revalidated_and_cache_reused`
+- `test_v10.py::test_warp_preserves_holes_and_circular_option_changes_translation_path`
+- `test_v11.py::test_iterative_final_layout_releases_then_adapts_initially_blocked_via`
+- `test_v11.py::test_minimum_angle_checked_and_actual_bad_corners_located`
+- `test_v11.py::test_native_rule_violation_regions_and_frame_state_match`
+- `test_v11.py::test_global_summary_never_calls_finite_extremes_a_probability_certificate`
+- `test_v11.py::test_spawn_native_width_worker`
+- `test_v12.py::test_small_motion_inside_original_pad_still_adapts_for_enclosure_range`
+- `test_v12.py::test_three_part_tracks_actual_folded_copper_and_keeps_fixed_anchor`
+- `test_v12.py::test_straight_cut_join_endpoint_derivatives_and_branches`
+- `test_v12.py::test_unverified_best_shape_is_restored_and_all_final_markers_use_source`
+- `test_v13.py::test_failed_deformation_init_can_retry_with_probability_enabled`
+- `test_v13.py::test_all_states_and_configuration_roundtrip_remain_cached`
+- `test_v13.py::test_failed_routes_preserve_source_and_every_interface_has_outcome`
+- `test_v13.py::test_final_plane_drc_is_independent_acceptance_gate`
+- `test_v14.py::test_pivot_changes_probability_space_and_adaptation_consistently`
+- `test_v15.py::test_exact_cancellation_tightens_local_injectivity_bound`
+- `test_v15.py::test_branched_whole_sections_are_continuous_and_keep_fixed_ends`
+- `test_v15.py::test_serial_thread_spawn_have_identical_verified_output_and_cached_repeat`
+- `test_v15.py::test_tangent_branch_zero_area_clip_does_not_crash_band_warp`
+- `test_v16.py::test_unknown_drc_or_failure_cannot_be_green`
+- `test_v17.py::test_support_bound_does_not_sum_remote_pads`
+- `test_v17.py::test_slab_transverse_shear_is_certified_but_fold_is_rejected`
+- `test_v17.py::test_sparse_refinement_preserves_far_contours_and_matches_dense`
+- `test_v17.py::test_portable_short_pad_case_deforms_and_keeps_fixed_anchor`
+- `test_v17.py::test_cancelled_parallel_search_never_restarts_in_serial`
+- `test_v18.py::test_middle_terminal_keeps_both_fixed_ends_and_uniform_sections`
+- `test_v18.py::test_axial_certificate_rejects_fold`
+- `test_v18.py::test_overlapping_landing_disks_have_convex_unpinched_valid_outline`
+- `test_v18.py::test_portable_middle_case_accepted_and_revalidation_is_cached`
+- `test_v19.py::test_microhole_repair_is_bounded_by_both_dimensions`
+- `test_v19.py::test_local_convex_tip_is_smoothed_without_moving_remote_anchor`
+- `test_v19.py::test_partial_same_net_adapts_safe_terminal_without_enlarging_old_contact`
+- `test_v20.py::test_no_motion_is_not_a_material_following_certificate`
+- `test_v20.py::test_unavailable_mesh_backend_leaves_other_candidate_families_available`
+- `test_v20.py::test_source_mesh_preserves_hole_and_reuses_clipped_regions`
+- `test_v20.py::test_final_copper_and_source_landing_both_move`
+- `test_v20.py::test_repeated_failed_search_is_cached_but_changed_neighbour_retries`
+- `test_v20.py::test_independent_engines_share_completed_frames_but_not_working_arrays`
+- `test_v21.py::test_actual_preview_deformation_is_accepted_without_new_markers`
+- `test_v26.py::test_zero_rotation_does_not_certify_an_unbounded_local_transition`
+- `test_v34.py::test_tangent_is_consistent_in_geometry_and_deformation_checks`

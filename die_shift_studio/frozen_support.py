@@ -48,7 +48,7 @@ def smoke(output):
     try:
         if not fixtures.is_dir():
             from .native_backend import backend
-            from .deformation import width_ok
+            from .geometry_rules import width_ok
             from shapely.geometry import box
             window.canvas.draw();app.processEvents()
             assert not window.windowIcon().isNull() and width_ok(box(0,0,50,50),10,.001)
@@ -82,7 +82,7 @@ def smoke(output):
             deterministic=probability_maps(model.cache,model.bound,model.roles,p,masks=model.interface_masks,settings=ViewSettings(probability_method='quadrature'))
             assert len(deterministic['maps'])==2 and deterministic['samples']==0
             assert model.current([[65,0,0],[0,0,0]],p)['intrusions']
-            from .deformation import width_ok
+            from .geometry_rules import width_ok
             from shapely.geometry import box
             from .native_backend import backend
             assert width_ok(box(-25,-25,25,25),20,.001) and not width_ok(box(-5,-25,5,25),20,.001)
@@ -90,12 +90,13 @@ def smoke(output):
             trace_project=json.loads(trace_path.with_suffix('.json').read_text(encoding='utf-8'))
             td=read_gds(trace_path);tc=build_case(td,trace_project['roles'],layer_order=trace_project['layer_order']);tp=Parameters.from_dict(trace_project['parameters'])
             te=PreviewEngine(GeometryCache(td),tc,trace_project['roles'],{},tp,{},tc['connections'])
-            te.configure_deformation(True,ViewSettings());te.configure_drc(True,ViewSettings())
+            te.configure_reconstruction(True,ViewSettings())
             pose=np.array([[1.,1,0],[0,35,0]]);tf=te.frame(pose)
-            assert tf['deformation']['accepted_count']==2 and not tf['drc']
-            te.configure_deformation(False,ViewSettings());te.frame(pose);te.configure_deformation(True,ViewSettings())
-            assert te.frame(pose)['deformation']['accepted_count']==2
-            record.update(deformation_routes=2,configuration_retry=True)
+            assert tf['reconstruction']['complete'] and tf['reconstruction']['pieces']
+            assert all(q['geometry'].is_valid for rows in tf['reconstruction']['replacements'].values() for q in rows)
+            te.configure_reconstruction(False,ViewSettings());te.frame(pose);te.configure_reconstruction(True,ViewSettings())
+            assert te.frame(pose)['reconstruction']['complete']
+            record.update(reconstruction_routes=len(tf['reconstruction']['pieces']),configuration_retry=True)
             te.close()
             record.update(native_drc=backend().info,status='PASS',version=result['version'],jobs=str(window.jobs_dir),formulas=len(resources),regions=len(frame['contact']['regions']),space_maps=len(window.space_artists),probability_maps=len(masses),sample_standard_deviations=window.probability_data['sample_standard_deviations'],min_occupied_probability_cells=min(int(np.count_nonzero(a)) for a in masses))
     except Exception:record['error']=traceback.format_exc()

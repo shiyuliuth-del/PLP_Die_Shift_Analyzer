@@ -114,14 +114,14 @@ for attempt in range(2):
     if attempt:assert w._prepared_motion['cached']
 # With adaptive copper enabled, intermediate frames stay binary and the
 # endpoint restores the nominal global probability decision.
-w.width_toggle.setChecked(True);w.deformation_toggle.setChecked(True);wait()
+w.width_toggle.setChecked(True);w.reconstruction_toggle.setChecked(True);wait()
 strategy=w.setting_fields['animation_strategy'];strategy.setCurrentIndex(strategy.findData('stream'));wait()
 w.manual_states=np.array([[3.,0,0]]);w.request_preview();wait();seen.clear()
 w.manual_states=None;w.active_preview=None;w.request_preview();wait()
 assert seen and any(np.any(z) for z in seen)
 assert w.current_frame['nominal_global'] and not np.any(w.current_frame['states'])
-assert w.current_frame.get('global_deformation') is not None
-w.deformation_toggle.setChecked(False);strategy.setCurrentIndex(strategy.findData('prepared'));wait()
+assert w.current_frame.get('reconstruction') is not None
+w.reconstruction_toggle.setChecked(False);strategy.setCurrentIndex(strategy.findData('prepared'));wait()
 w.show_motion_frame=original_frame;w.width_toggle.setChecked(True);wait()
 # The true P throat is 52.6 um. At 19 um spacing a single 15 um line
 # needs 53 um; exercise highlighting at this genuine deficit.

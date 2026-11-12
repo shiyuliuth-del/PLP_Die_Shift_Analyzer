@@ -3,14 +3,16 @@ from pathlib import Path
 from .qt_compat import QtWidgets as W,run_dialog,ACCEPTED
 
 
-def export_dxf(window):
+def export_dxf(window,regions=False):
     if window.data is None:
         window.error('请先打开GDS');return
     if window.worker is not None:
         window.error('图纸操作尚未完成，请完成后再输出');return
+    if regions and (window.case is None or window.engine is None):
+        window.error('请先设置封装、芯片及金属层用途，并完成一次重构预演');return
     root=Path(window.dxf_directory) if getattr(window,'dxf_directory','') else Path(window.data.path).parent
     if not root.is_dir():root=Path(window.data.path).parent
-    dialog=W.QFileDialog(window,'DXF输出',str(root/(Path(window.data.path).stem+'.dxf')),'DXF (*.dxf)')
+    dialog=W.QFileDialog(window,'动静区输出' if regions else 'DXF输出',str(root/(Path(window.data.path).stem+('_ABC' if regions else '')+'.dxf')),'DXF (*.dxf)')
     dialog.setAcceptMode(getattr(W.QFileDialog,'AcceptMode',W.QFileDialog).AcceptSave)
     dialog.setDefaultSuffix('dxf')
     # Deliberately no stylesheet, custom options or DontUseNativeDialog.
@@ -24,18 +26,33 @@ def export_dxf(window):
     options=window.dxf_settings
     selected=frozenset(data.layers) if options.layer_scope=='all' else frozenset(k for k,v in window.visible_boxes.items() if v.isChecked()) if options.layer_scope=='visible' else frozenset(k for k,v in window.roles().items() if v!='不参与')
     if not selected:window.error('所选导出范围没有图层');return
-    flags=dict(deformation=window.deformation_toggle.isChecked(),reconstruction=window.reconstruction_toggle.isChecked(),
+    flags=dict(reconstruction=window.reconstruction_toggle.isChecked(),
                repairs=window.repair_data if window.repair_toggle.isChecked() else None)
     if frame is not None and getattr(window,'preview_pending',None):
         window.error('当前预演仍在更新，请显示完成后再输出');return
+    roles=window.roles();process=window.params();view=window.view_settings;model=window.engine.contact if regions else None
     def work(progress):
         from .fast_preview import GeometryCache
         from .dxf_export import snapshot,write
         progress(0,'冻结当前GDS几何')
-        current=snapshot(data,cache or GeometryCache(data),frame,progress=lambda n,t:progress(round(n*.2),t),**flags)
+        current_frame=frame
+        if regions:
+            from .reconstruction import Reconstructor
+            import numpy as np
+            rebuild=Reconstructor(model,process,view)
+            try:
+                states=frame['states'] if frame is not None else np.zeros((len(model.case['dies']),3))
+                split=rebuild.frame(states,progress=progress)
+                current_frame=dict(frame or {},states=states,reconstruction=split)
+            finally:rebuild.close()
+            flags['reconstruction']=True
+        current=snapshot(data,cache or GeometryCache(data),current_frame,progress=lambda n,t:progress(round(n*.2),t),**flags)
         from dataclasses import replace
         current=replace(current,layers={k:v for k,v in current.layers.items() if k in selected})
-        result=write(current,destination,lambda n,t:progress(20+round(n*.8),t),settings=options)
+        if regions:
+            from .region_export import write_regions
+            result=write_regions(current,split,roles,destination,lambda n,t:progress(20+round(n*.8),t),settings=options)
+        else:result=write(current,destination,lambda n,t:progress(20+round(n*.8),t),settings=options)
         result['states']=current.states.tolist() if current.states is not None else None
         return result
     def complete(result):

@@ -6,7 +6,7 @@ from .core import Parameters
 # as a newly opened drawing, independent of the previously open project.
 EXTREME_PAGE_SIZE=256
 
-OVERLAY_DEFAULTS = dict(drc=False, probability=False, space=False, deformation=False,
+OVERLAY_DEFAULTS = dict(drc=False, space=False,
                         width=False, width_sufficient=False, repair=False, reconstruction=False, footprint=False)
 
 
@@ -28,6 +28,7 @@ def project_overlays(project):
         if not isinstance(value,bool):
             raise ValueError(f'工程图形选项 {key} 必须为布尔值')
         options[key] = value
+    options['footprint']=bool(saved.get('footprint',False) or saved.get('probability',False))
     return options
 
 
@@ -42,7 +43,8 @@ def normalize_project(project):
     pars=p.get('parameters',{})
     if 'bga_assignment' in pars:
         pars['fixed_via_assignment']=pars.pop('bga_assignment')
-    Parameters.from_dict(pars,require_rdl=False)
+    from dataclasses import asdict
+    p['parameters']=asdict(Parameters.from_dict(pars,require_rdl=False))
     p.setdefault('stage_hints',{k:r for k,r in p['roles'].items() if r in ('运动过孔','晶圆段输出接口')} if p.get('schema_version',1)<3 else {})
     from .settings import ViewSettings
     from dataclasses import asdict
@@ -58,7 +60,11 @@ def normalize_project(project):
     sections=p.setdefault('expanded_settings',[])
     if not isinstance(sections,list) or any(not isinstance(title,str) for title in sections):
         raise ValueError('工程设置栏目列表必须由标题字符串组成')
-    p['expanded_settings']=list(dict.fromkeys('无接触良率计算' if title in ('全输入无接触模型良率','全输入良率计算') else '宽度分析' if title in ('宽度分析 · 良率计算','宽度分析 · 元素显示') else title for title in sections))
+    titles={'全输入无接触模型良率':'无接触良率','全输入良率计算':'无接触良率','无接触良率计算':'无接触良率',
+            '宽度分析 · 良率计算':'宽度分析','宽度分析 · 元素显示':'宽度分析','DXF输出参数':'DXF',
+            '缓存管理':'硬件与计算资源','过孔实体覆盖概率':'极端足迹','视图与预演运动':'动画',
+            '连续无异常接触范围':'安全范围','固定RDL重构预演':'重构预演','DRC检查':'DRC'}
+    p['expanded_settings']=list(dict.fromkeys(titles.get(title,title) for title in sections if not title.startswith('预演分析')))
     from .dxf_settings import DxfSettings
     p['dxf_options']=asdict(DxfSettings.from_dict(p.get('dxf_options')))
     if not isinstance(p.setdefault('dxf_directory',''),str):raise ValueError('DXF输出目录必须为文本')

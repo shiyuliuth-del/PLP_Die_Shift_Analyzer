@@ -4,7 +4,7 @@ from .qt_compat import QtWidgets as W,Qt
 from .dxf_settings import DxfSettings
 
 def build(window,layout):
-    header=W.QToolButton();header.setText('DXF输出参数');header.setCheckable(True)
+    header=W.QToolButton();header.setText('DXF');header.setCheckable(True)
     header.setToolButtonStyle(getattr(Qt,'ToolButtonStyle',Qt).ToolButtonTextBesideIcon)
     body=W.QWidget();form=W.QFormLayout(body);body.hide()
     def expand(opened):
@@ -12,9 +12,10 @@ def build(window,layout):
         header.setArrowType(getattr(Qt,'ArrowType',Qt).DownArrow if opened else getattr(Qt,'ArrowType',Qt).RightArrow)
     header.toggled.connect(expand);expand(False)
     layout.addWidget(header);layout.addWidget(body)
-    window.setting_sections['DXF输出参数']=header
+    window.setting_sections['DXF']=header
     info=W.QLabel('Flatten Top Cell：已启用，包含全部实例、阵列与层级变换。')
     info.setWordWrap(True);form.addRow(info)
+    hint=W.QLabel('动静区输出：A动区、B静区、C平移区，仅输出相接的开放轮廓，不使用HATCH。图层范围、Merge、孔洞拆层和比例仍有效。');hint.setWordWrap(True);form.addRow(hint)
     fields={};window.dxf_fields=fields
     for key,title,items in (
         ('layer_scope','导出图层',[('全部已导入图层','all'),('当前显示图层','visible'),('参与分析图层','participating')]),

@@ -150,20 +150,11 @@ class PreviewEngine:
         from .session_cache import EphemeralCache
         self.intermediate=EphemeralCache()
     def configure_deformation(self,enabled,settings):
+        """Compatibility for old callers; the retired preview never runs."""
         self.bound.acceleration=self.contact.bound.acceleration=settings.acceleration
-        key=(bool(enabled and self.result is not None),*settings.deformation_key())
-        if getattr(self,'deformation_key',None)==key:return
-        if self.deformer is not None:self.deformer.release_workers()
-        # Commit state only after successful initialization: retry remains possible.
-        from .deformation import DeformationPreview
-        deformer=self.deformers.get(key)
-        if key[0] and deformer is None:
-            deformer=DeformationPreview(self.contact,self.p,self.result,settings,cache_group=self.cache_group)
-            self.deformers[key]=deformer
-            deformer.cache.pose_source=(getattr(self,'signature',None),'型变',key)
-        self.deformer=deformer;self.deformation_key=key
+        self.deformer=None;self.deformation_key=(False,'retired-v38')
     def configure_drc(self,enabled,settings):
-        key=(bool(enabled),settings.deformation_min_angle_deg,settings.drc_tolerance_um)
+        key=(bool(enabled),settings.drc_min_angle_deg,settings.drc_tolerance_um)
         if enabled and not hasattr(self,'global_drc'):
             from .drc import GlobalDRC
             self.global_drc=GlobalDRC(self.contact,self.p)
@@ -195,7 +186,8 @@ class PreviewEngine:
         if enabled:
             from .reconstruction import Reconstructor
             if not hasattr(self,'reconstructors'):self.reconstructors={}
-            if key not in self.reconstructors:self.reconstructors[key]=Reconstructor(self.contact,self.p,settings,self.cache_group)
+            if not hasattr(self,'reconstruction_plan_pool'):self.reconstruction_plan_pool={}
+            if key not in self.reconstructors:self.reconstructors[key]=Reconstructor(self.contact,self.p,settings,self.cache_group,self.reconstruction_plan_pool)
             self.reconstructor=self.reconstructors[key]
             self.reconstructor.cache.pose_source=(getattr(self,'signature',None),'重构',key)
         self.reconstruction_config=key
@@ -235,7 +227,7 @@ class PreviewEngine:
         progress(0,'生成当前几何状态')
         layers=self.bound.calibrate(states) if self.bound.calibration is None else self.bound.transform(states)
         current=self.contact.current(states,self.p)
-        deformation=self.deformer.frame(states,current,progress,quick=quick) if self.deformer is not None else None
+        deformation=None
         if deformation and deformation['replacements']:current=self.contact.current(states,self.p,deformation['replacements'])
         mechanical=check_frame(self.bound,self.roles,self.p,self.result,states,layers,1,self.connections,False)
         checks={s:dict(mechanical,failures=list(mechanical['failures'])) for s in (1,2,3)}
@@ -250,7 +242,7 @@ class PreviewEngine:
             # so the plot and the piece table share its accepted display geometry.
             frame['reconstruction']=self.reconstructor.frame(states,deformation,progress,quick=quick)
         if getattr(self,'drc_enabled',False):
-            frame['drc']=deformation['violations'] if deformation is not None else self.global_drc.frame(states,settings=self.drc_settings,progress=progress)
+            frame['drc']=self.global_drc.frame(states,frame.get('reconstruction',{}).get('replacements'),settings=self.drc_settings,progress=progress)
         if deformation is not None or getattr(self,'drc_enabled',False):
             from .drc_rules import effective_rules
             cfg=self.deformer.settings if self.deformer is not None else self.drc_settings
@@ -289,58 +281,4 @@ class PreviewEngine:
         return frame
 
     def global_frame(self,nominal,settings,progress=lambda *_:None):
-        """Iterate every representative pose, with honest post-adaptation bounds.
-
-        A finite pose catalogue cannot certify the probability of an adaptive
-        route. Original passing probability upper bounds remain valid because
-        adaptation may never introduce a previously absent contact. A previously
-        failing lower bound cannot be reused after changing the geometry.
-        """
-        if self.deformer is None:return nominal
-        global_key=('global',self.cache_key(),settings.numeric_key())
-        cached=self.frames.get(global_key)
-        if cached is not None:return cached
-        from .representatives import RepresentativeExtremes
-        catalogue=RepresentativeExtremes.from_result(self.bound.case,self.p,self.result)
-        poses=[('名义位置',nominal['states'])]+[(q['name'],q['states']) for q in catalogue]
-        summaries=[];remaining={};released=set()
-        for i,(name,states) in enumerate(poses):
-            progress(round(95*i/len(poses)),f'全局重点型变预演 {i+1}/{len(poses)}')
-            f=nominal if i==0 else self.frame(states,lambda n,t:progress(round(95*(i+n/100)/len(poses)),t))
-            d=f['deformation'];summaries.append(dict(name=name,states=states.tolist(),
-                accepted=d['accepted_count'],best_effort=d.get('best_effort_count',0),initial=d['initial_blocked_count'],remaining=d['blocked_count'],released=d['released_count'],iterations=d['iterations']))
-            for q in f['contact']['issues']:
-                identity=(q['source_layer'],q['source_index'],q['scheme'])
-                if identity not in remaining or q['ratio']>remaining[identity]['ratio']:remaining[identity]=dict(q)
-        keys=('single_bound_x_um','single_bound_y_um','multi_bound_x_um','multi_bound_y_um','bound_angle_deg','target_nsigma','reference_nsigma','mean_x_um','mean_y_um','mean_angle_deg','rho_xy','per_die_enabled','die_bounds','rotation_center','rotation_x_um','rotation_y_um','die_pivots','annulus_um','line_space_um')
-        result=self.result or {};saved=result.get('parameters',{})
-        current=(all(saved.get(k)==getattr(self.p,k) for k in keys) and result.get('roles')==self.roles and result.get('connections',{}).get('layer_order')==self.connections.order)
-        baseline=result.get('contact_analysis',{}) if current else self.contact.screen(self.p,settings,progress)
-        probabilities={(q['source_layer'],q['source_index']):q for q in baseline.get('probabilities',[])}
-        issues=[]
-        originals={(q['source_layer'],q['source_index'],q['scheme']):q for q in baseline.get('issues',[])}
-        for v in baseline.get('unresolved',[]):
-            record=self.contact.by_feature.get((v['source_layer'],v['source_index']))
-            if record is None or not record['foreign']:continue
-            node=self.contact.nodes[record['foreign'][0]]
-            for scheme in (1,2,3):
-                row=self.contact.issue(record,node,record['center'],record['poly'].distance(node['poly']),self.p.annulus_um+self.p.line_space_um,self.p.line_space_um,scheme,'原概率待细化')
-                row.update(probability_upper=v['upper'],threshold=v['threshold']);originals[record['key'],record['index'],scheme]=row
-        # Best-effort candidates may introduce contacts that did not exist in
-        # the source. Include those interfaces; the old probability bound is
-        # not a certificate for a changed, unverified route.
-        for identity,q in remaining.items():
-            if identity not in originals:originals[identity]=dict(q,probability_upper=1.,threshold=self.p.failure_threshold)
-        has_best=any(q.get('best_effort',0) for q in summaries)
-        for identity,original in originals.items():
-            q=dict(remaining.get(identity,original));v=probabilities.get(identity[:2],{})
-            q.update(adaptive_unresolved=True,kind='型变后仍有代表状态接触' if identity in remaining else '代表状态已释放；概率待细化',
-                     probability_lower=0.,probability_upper=1. if has_best else v.get('upper',original.get('probability_upper',1.)),threshold=original.get('threshold',0.))
-            q['detail']='所有代表状态均迭代到无新增充足窗口；型变后连续接触概率尚无证书，不能把有限预演无接触当作全局通过。'
-            issues.append(q)
-            if identity not in remaining:released.add(identity[:2])
-        out=dict(nominal);out['contact']=dict(nominal['contact'],issues=issues)
-        out['global_deformation']=dict(discrete_package_states=catalogue.full.total+1,focused_shifted_states=catalogue.total,drc_tolerance_um=settings.drc_tolerance_um,statistics_match_saved_evaluation=current,target_sigma=self.p.target_nsigma,annulus_um=self.p.annulus_um,line_width_um=self.p.line_width_um,line_space_um=self.p.line_space_um,die_bounds=[[(self.p.for_die(i).single_bound_x_um if len(self.bound.centers)==1 else self.p.for_die(i).multi_bound_x_um),(self.p.for_die(i).single_bound_y_um if len(self.bound.centers)==1 else self.p.for_die(i).multi_bound_y_um),self.p.for_die(i).bound_angle_deg] for i in range(len(self.bound.centers))],states=summaries,best_effort_states=sum(bool(q.get('best_effort')) for q in summaries),representative_released=len(released),continuous_probability='待细化；带DRC候选不复用原概率上界；有限代表状态不构成连续概率证书',scope='代表状态最终布局，不是连续概率穷举')
-        self.frames.pin(global_key);self.frames[global_key]=out
-        progress(100,'全局代表状态型变完成；已标明连续概率未决项')
-        return out
+        return nominal  # legacy call, no retired adaptation or representative sweep

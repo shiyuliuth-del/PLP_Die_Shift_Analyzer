@@ -92,17 +92,4 @@ class V21Tests(unittest.TestCase):
    nominal=layers['3/0'][0];moved=np.asarray(f['layers']['3/0']['polygons'][0])
    np.testing.assert_allclose(moved-nominal,np.tile(states[owner,:2],(len(nominal),1)),atol=1e-9)
   finally:e.close()
- def test_actual_preview_deformation_is_accepted_without_new_markers(self):
-  from die_shift_studio.extreme_validation import frame_status
-  d,q,c,p,e=example('示例N_三线路窄通道宽度');e.result={};e.configure_width(True,ViewSettings());e.configure_deformation(True,ViewSettings())
-  try:
-   baseline=e.frame(np.zeros((2,3)))['deformation']['violations']
-   f=e.frame(np.array([[-35.,0,0],[0,0,0]]))
-   self.assertEqual(f['deformation']['accepted_count'],1)
-   # Existing conservative buffer discretization warnings are not new DRC.
-   before=shapely.union_all([v['geometry'] for v in baseline]);after=shapely.union_all([v['geometry'] for v in f['deformation']['violations']])
-   self.assertLess(after.difference(before).area,1e-8)
-   quick=e.frame(np.array([[-17.5,0,0],[0,0,0]]),quick=True)
-   self.assertTrue(quick['width_analysis']['complete']);self.assertTrue(all(r['required']==0 for r in quick['width_analysis']['rows']));self.assertIsNot(frame_status(quick)['safe'],True)
-  finally:e.close()
 if __name__=='__main__':unittest.main()
