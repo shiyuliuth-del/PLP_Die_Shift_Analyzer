@@ -15,7 +15,13 @@ import shapely
 from shapely.ops import split
 from scipy.spatial import Voronoi,cKDTree,QhullError
 
+from .resources import cancel_check
+
 EMPTY=shapely.Polygon()
+
+
+def part_key(part):
+    return (part['a'],part['b'],*part.get('angles',(0.,0.)))
 
 
 def parts(g):
@@ -196,19 +202,20 @@ class RoutePlan:
                 else:s=lo if which==0 else hi
         return s
 
-    def section(self,s):
+    def section(self,s,angle=0.):
         point=np.asarray(self.route.interpolate(s).coords[0]);normal=self.tangent(s);u=np.array([-normal[1],normal[0]])
+        co,si=np.cos(angle),np.sin(angle);u=np.array([co*u[0]-si*u[1],si*u[0]+co*u[1]])
         size=np.hypot(self.source.bounds[2]-self.source.bounds[0],self.source.bounds[3]-self.source.bounds[1])+1
         chord=shapely.intersection(self.source,shapely.LineString([point-u*size,point+u*size]))
         lines=[q for q in shapely.get_parts(chord) if q.geom_type=='LineString' and q.length>self.tolerance]
         if not lines:return None
         return min(lines,key=lambda g:float(g.distance(shapely.Point(point))))
 
-    def prefix(self,s):
+    def prefix(self,s,angle=0.):
         """Connected source portion on the moving-terminal side of a local cut."""
-        key=round(float(s),8)
+        key=('prefix',round(float(s),8),round(float(angle),10))
         if key in self.cache:return self.cache[key]
-        face=self.section(s)
+        face=self.section(s,angle)
         if face is None:return None
         xy=np.asarray(face.coords);v=xy[-1]-xy[0];v/=max(np.linalg.norm(v),1e-12)
         blade=shapely.LineString([xy[0]-v*self.tolerance*16,xy[-1]+v*self.tolerance*16])
@@ -223,18 +230,18 @@ class RoutePlan:
         self.cache[key]=result
         return result
 
-    def partition(self,a,b):
+    def partition(self,a,b,angles=(0.,0.)):
         """Return disjoint A/B/C and their real shared boundaries, or no partition."""
         if abs(b-self.length)<=self.tolerance*.01:
             moving_plus=self.source;far=shapely.Point(self.route.coords[-1]);b_shape=EMPTY
         else:
-            outer=self.prefix(b)
+            outer=self.prefix(b,angles[1])
             if outer is None:return None
             moving_plus,far,b_shape=outer
         if a==0.:
             c=EMPTY;near=shapely.Point(self.route.coords[0]);a_shape=moving_plus
         else:
-            near=self.section(a)
+            near=self.section(a,angles[0])
             if near is None:return None
             xy=np.asarray(near.coords);v=xy[-1]-xy[0];v/=max(np.linalg.norm(v),1e-12)
             blade=shapely.LineString([xy[0]-v*self.tolerance*16,xy[-1]+v*self.tolerance*16])
@@ -247,7 +254,7 @@ class RoutePlan:
         if a_shape.is_empty:return None
         union=shapely.union_all([a_shape,b_shape,c])
         if union.symmetric_difference(self.source).area>max(self.tolerance**2,self.source.area*1e-8):return None
-        return {'A':a_shape,'B':b_shape,'C':c,'near':near,'far':far,'a':a,'b':b}
+        return {'A':a_shape,'B':b_shape,'C':c,'near':near,'far':far,'a':a,'b':b,'angles':tuple(map(float,angles))}
 
     def pad_handle(self,side):
         """UI-only branchward point; electrical endpoint and export stay exact."""
@@ -353,9 +360,10 @@ def taper_mesh(part,plan,start,end):
 
 def _warp_variant(part,plan,center,state,style="c2",variant=0):
     """Move original material; C is rigid and A tapers continuously into B."""
+    cancel_check()
     from .preview import rigid_transform
     if not np.any(state) and variant==0 and style in ('c1','c2'):return dict(A=part['A'],B=part['B'],C=part['C']),None
-    memo_key=(style,variant,part['a'],part['b'],np.asarray(center,float).tobytes(),np.asarray(state,float).tobytes())
+    memo_key=(style,variant,part_key(part),np.asarray(center,float).tobytes(),np.asarray(state,float).tobytes())
     if memo_key in plan.pose_memo:
         saved=plan.pose_memo[memo_key];plan.pose_memo.move_to_end(memo_key)
         return dict(saved[0]),saved[1]
@@ -363,18 +371,35 @@ def _warp_variant(part,plan,center,state,style="c2",variant=0):
     end=plan.fixed_start if part['far'].geom_type=='Point' else b
     span=end-start
     if span<=plan.tolerance:return None,'动区过短'
-    field_key=('field',style,round(a,8),round(b,8))
+    field_key=('field',style,part_key(part))
     def move(points):
         saved=plan.cache.get(field_key)
         if saved is None:
             s=project(plan.route,points);t=np.clip((s-start)/span,0,1)
+            if any(abs(v)>1e-10 for v in part.get('angles',(0.,0.))):
+                faces=[]
+                for face,pos in ((part['near'],start),(part['far'],end)):
+                    pivot=np.asarray(face.centroid.coords[0] if face.geom_type=='LineString' else plan.route.interpolate(pos).coords[0]);axis=plan.tangent(pos).copy()
+                    if face.geom_type=='LineString':
+                        edge=np.asarray(face.coords[-1])-np.asarray(face.coords[0]);axis=np.array([-edge[1],edge[0]]);axis/=max(np.linalg.norm(axis),1e-20)
+                        if axis@plan.tangent(pos)<0:axis=-axis
+                    faces.append((pivot,axis))
+                left=(points-faces[0][0])@faces[0][1];right=(faces[1][0]-points)@faces[1][1]
+                denominator=left+right
+                if np.any(denominator<=plan.tolerance):raise ValueError('斜向边界在动区内交错')
+                t=np.clip(left/denominator,0,1)
             w=1-(3*t**2-2*t**3) if style=="c1" else 1-(10*t**3-15*t**4+6*t**5)
             pt=shapely.points(points)
             if a>0:w=np.where(shapely.distance(pt,part['near'])<plan.tolerance*.1,1.,w)
             w=np.where(shapely.distance(pt,part['far'])<plan.tolerance*.1,0.,w)
             saved=points.copy(),w[:,None];plan.cache[field_key]=saved
         xy,weight=saved
-        return xy+weight*(rigid_transform(xy,center,state)-xy)
+        placed=rigid_transform(xy,center,state);out=xy+weight*(placed-xy)
+        # Preserve the two seam coordinates bit-for-bit, including translations
+        # near a half-DBU rounding boundary; avoid add/subtract cancellation.
+        moved=(weight[:,0]==1);fixed=(weight[:,0]==0)
+        out[moved]=placed[moved];out[fixed]=xy[fixed]
+        return out
     try:
         if variant:
             from .turn_connection import turn_active
@@ -383,11 +408,11 @@ def _warp_variant(part,plan,center,state,style="c2",variant=0):
             from .connection_curves import endpoint_active
             active=endpoint_active(part,plan,center,state,style)
         else:
-            key=('mesh',round(a,8),round(b,8));mesh=plan.cache.get(key)
+            key=('mesh',part_key(part));mesh=plan.cache.get(key)
             if mesh is None:mesh=taper_mesh(part,plan,start,end);plan.cache[key]=mesh
             active=shapely.transform(mesh,move)
     except (ValueError,shapely.errors.GEOSException) as exc:return None,str(exc)
-    rigid_key=('rigid_mesh',round(a,8),round(b,8))
+    rigid_key=('rigid_mesh',part_key(part))
     rigid=plan.cache.get(rigid_key)
     if rigid is None:
         rigid=part['C'];plan.cache[rigid_key]=rigid
@@ -437,7 +462,7 @@ def _warp_variant(part,plan,center,state,style="c2",variant=0):
     size=int(sum(shapely.get_num_coordinates(g) for g in result.values()))*24+512
     if size<=plan.memo_budget:
         plan.pose_memo[memo_key]=(dict(result),None,size);plan.memo_bytes+=size
-        while plan.memo_bytes>plan.memo_budget or len(plan.pose_memo)>32:
+        while plan.memo_bytes>plan.memo_budget or len(plan.pose_memo)>128:
             _,old=plan.pose_memo.popitem(last=False);plan.memo_bytes-=old[2]
     return result,None
 
@@ -445,7 +470,7 @@ def _warp_variant(part,plan,center,state,style="c2",variant=0):
 def warp(part,plan,center,state,style="c2",variant=None):
     """Use the selected style; curved styles may make a verified return bend."""
     if variant is not None:return _warp_variant(part,plan,center,state,style,variant)
-    key=('resolved-v39',style,part['a'],part['b'],np.asarray(center,float).tobytes(),np.asarray(state,float).tobytes())
+    key=('resolved-v40',style,part_key(part),np.asarray(center,float).tobytes(),np.asarray(state,float).tobytes())
     if key in plan.pose_memo:
         result,error,_=plan.pose_memo[key];plan.pose_memo.move_to_end(key)
         return None if result is None else dict(result),error
@@ -453,12 +478,12 @@ def warp(part,plan,center,state,style="c2",variant=None):
     if error and style!='linear':
         from .turn_connection import VARIANTS
         for v in range(1,len(VARIANTS)+1):
-            alternate,reason=_warp_variant(part,plan,center,state,style,v)
+            cancel_check();alternate,reason=_warp_variant(part,plan,center,state,style,v)
             if reason is None:result,error=alternate,None;break
     size=(sum(int(shapely.get_num_coordinates(g))*24 for g in result.values()) if result is not None else 0)+512
     if size<=plan.memo_budget:
         plan.pose_memo[key]=(None if result is None else dict(result),error,size);plan.memo_bytes+=size
-        while plan.memo_bytes>plan.memo_budget or len(plan.pose_memo)>32:
+        while plan.memo_bytes>plan.memo_budget or len(plan.pose_memo)>128:
             _,old=plan.pose_memo.popitem(last=False);plan.memo_bytes-=old[2]
     return result,error
 

@@ -31,20 +31,29 @@ def export_dxf(window,regions=False):
     if frame is not None and getattr(window,'preview_pending',None):
         window.error('当前预演仍在更新，请显示完成后再输出');return
     roles=window.roles();process=window.params();view=window.view_settings;model=window.engine.contact if regions else None
+    export_plans={}
+    if regions and getattr(window.engine,'reconstructor',None) is not None:
+        from .reconstruction_status import clone_plan_pool
+        export_plans=clone_plan_pool(window.engine.reconstructor.plan_pool)
     def work(progress):
         from .fast_preview import GeometryCache
         from .dxf_export import snapshot,write
         progress(0,'冻结当前GDS几何')
         current_frame=frame
         if regions:
-            from .reconstruction import Reconstructor
-            import numpy as np
-            rebuild=Reconstructor(model,process,view)
-            try:
-                states=frame['states'] if frame is not None else np.zeros((len(model.case['dies']),3))
-                split=rebuild.frame(states,progress=progress)
-                current_frame=dict(frame or {},states=states,reconstruction=split)
-            finally:rebuild.close()
+            split=(frame or {}).get('reconstruction')
+            reusable=bool(flags['reconstruction'] and split and split.get('complete') and split.get('constraints_complete') and split.get('configuration')==view.reconstruction_key())
+            if reusable:
+                progress(4,'复用当前已完成的重构图形')
+            else:
+                from .reconstruction import Reconstructor
+                import numpy as np
+                rebuild=Reconstructor(model,process,view,plan_pool=export_plans)
+                try:
+                    states=frame['states'] if frame is not None else np.zeros((len(model.case['dies']),3))
+                    split=rebuild.frame(states,progress=progress)
+                    current_frame=dict(frame or {},states=states,reconstruction=split)
+                finally:rebuild.close()
             flags['reconstruction']=True
         current=snapshot(data,cache or GeometryCache(data),current_frame,progress=lambda n,t:progress(round(n*.2),t),**flags)
         from dataclasses import replace
@@ -59,7 +68,7 @@ def export_dxf(window,regions=False):
         message=f"DXF已输出：{result['path']} · {result['polygons']}个图形，{result['layers']}层；Flatten已完成，Merge {'开启' if result['merge_layers'] else '关闭'}（{result['input_polygons']}→{result['merged_polygons']}）；比例{result['scale']:g}，单位μm。"
         if result.get('regions'):
             message+=' A/B/C仅含真实轮廓，无HATCH。'
-            if result.get('unresolved_regions'):message+=f" {result['unresolved_regions']}个重构区域未通过几何检查，保留原图并归入B层；请查看重构预演警告。"
+            if result.get('unresolved_regions'):message+=f" {result['unresolved_regions']}个重构区域未完成有效连接；输出当前实际实体，红色提示区不导出。"
         if result['ignored']:message+=f"已跳过导入时未能识别的{result['ignored']}个图形。"
         window.log_bus.emit(message);window.statusBar().showMessage(message)
     window.start_worker(work,complete)

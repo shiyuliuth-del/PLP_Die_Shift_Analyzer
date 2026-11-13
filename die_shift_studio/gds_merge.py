@@ -110,8 +110,9 @@ def restore_project_geometry(data,project):
         for name in ('reconstruction_cuts','reconstruction_extra_cuts','reconstruction_second_cuts','reconstruction_dropped_cuts'):
             cfg[name]=[(l,ref(l,i),vias(v),*tail) for l,i,v,*tail in cfg.get(name,())]
         cfg['reconstruction_intervals']=[(l,ref(l,i),owner,vias(v),identity,a,b) for l,i,owner,v,identity,a,b in cfg.get('reconstruction_intervals',())]
-        ignored=p.get('ignored_width_lines')
-        if ignored:ignored['refs']=sorted({(l,ref(l,i)) for l,i in ignored['refs']})
+        for name in ('ignored_width_lines','ignored_reconstruction'):
+            ignored=p.get(name)
+            if ignored:ignored['refs']=sorted({(l,ref(l,i)) for l,i in ignored['refs']})
         p['legacy_node_edits']=old;p['node_edits']=[];p['geometry_indexing']='merged-v39'
         if cfg['reconstruction_intervals'] and data.merge_notes:
             data.import_warnings=list(data.import_warnings)+['工程图形已按完整轮廓合并：旧分区引用已映射；不匹配的旧路径保留记录并重新选区。']

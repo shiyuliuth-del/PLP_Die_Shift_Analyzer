@@ -6,13 +6,13 @@ from .session_cache import logical_fingerprint
 
 class ReconstructionYieldDisplay:
     def __init__(self,w):
-        self.w=w;self.worker=None;self.pending=None;self.key=None;self.bank=None;self.plan_pool={}
+        self.w=w;self.worker=None;self.pending=None;self.key=None;self.bank=None;self.evidence=None;self.plan_pool={}
         from .session_cache import EphemeralCache
         from .resources import resource_profile
         self.factor_pool=EphemeralCache(budget=min(128*1024**2,int(resource_profile()['available_memory_mb']*1024**2*.06)),max_entries=512)
         self.timer=QtCore.QTimer(w);self.timer.setSingleShot(True);self.timer.setInterval(220);self.timer.timeout.connect(self.start)
     def reset(self):
-        self.key=None;self.bank=None;self.pending=None;self.timer.stop()
+        self.key=None;self.bank=None;self.evidence=None;self.pending=None;self.timer.stop()
         if self.worker:self.worker.cancelled.set()
         self.w.width_yield.label.set_extra('')
         if self.w.result is not None:self.w.result.pop('reconstruction_yield',None)
@@ -23,7 +23,7 @@ class ReconstructionYieldDisplay:
         try:p=replace(w.params(),target_nsigma=0)
         except ValueError:self.reset();return
         cfg=settings or w.view_settings
-        token=('reconstruction-yield-v39-branch2',logical_fingerprint((w.data.geometry_id,w.data.top_name,w.roles(),w.ordered_layers(),asdict(p),cfg.reconstruction_key(),cfg.reconstruction_grid_nodes)))
+        token=('reconstruction-analysis-v40',logical_fingerprint((w.data.geometry_id,w.data.top_name,w.roles(),w.ordered_layers(),asdict(p),cfg.reconstruction_key(),cfg.reconstruction_grid_nodes)))
         key=(id(w.cache_group),token)
         if key==self.key:self.render();return
         self.reset();self.key=key
@@ -32,15 +32,19 @@ class ReconstructionYieldDisplay:
         self.timer.start()
     def start(self):
         if self.worker or self.pending is None or self.w._closing:return
+        w=self.w
+        # Foreground preview owns route construction; background analyses reuse
+        # its completed plan instead of building the same style a second time.
+        if w.preview_workers or w.preview_pending or (getattr(w,'cut_drag',None) and w.cut_drag.state is not None):
+            self.timer.start(120);return
         from .scheduling import admission,job_budget
         admitted=admission(len(self.w._tasks),256)
         if not admitted['start']:self.timer.start(250);return
         key,data,p,cfg,roles,order,cache,group=self.pending;self.pending=None
         completed=getattr(getattr(self.w,'engine',None),'reconstructor',None)
         if completed is not None and completed._plans is not None and not self.w.preview_workers:
-            import copy
-            self.plan_pool.update(copy.deepcopy(completed.plan_pool))
-        while len(self.plan_pool)>3:self.plan_pool.pop(next(iter(self.plan_pool)))
+            self.plan_pool.update(clone_plan_pool(completed.plan_pool))
+        while len(self.plan_pool)>16:self.plan_pool.pop(next(iter(self.plan_pool)))
         from .gui import Worker
         def work(progress):
             def calculate():
@@ -53,12 +57,27 @@ class ReconstructionYieldDisplay:
                 geom=cache or GeometryCache(data);con=Connections(data,roles,order,geom.geometries)
                 case=build_case(data,roles,connections=con);model=ContactModel(data,case,roles,con,geom,parameters=p)
                 engine=Reconstructor(model,p,cfg,plan_pool=self.plan_pool)
-                try:return measure_reconstruction_yield(engine,p,cfg,progress,self.factor_pool,worker.publish)
+                try:
+                    from .statistics import ExtremeCatalog
+                    from .reconstruction_events import scan
+                    from .reconstruction_probability import attach
+                    evidence_key=('reconstruction-extreme-events-v40',logical_fingerprint((data.geometry_id,data.top_name,roles,order,asdict(p),cfg.reconstruction_key())))
+                    evidence=group.values.get_or_compute(evidence_key,lambda:attach(scan(engine,ExtremeCatalog(case,p),lambda n,t:progress(round(n*.8),t)),engine))
+                    worker.publish({'evidence':evidence})
+                    bank=measure_reconstruction_yield(engine,p,cfg,lambda n,t:progress(80+round(n*.2),t),self.factor_pool,
+                        lambda value:worker.publish({'yield':value,'evidence':evidence}))
+                    return {'yield':bank,'evidence':evidence}
                 finally:engine.close()
             with job_budget(admitted['threads'],admitted['processes']):return group.values.get_or_compute(key[1],calculate)
         worker=Worker(work,self.w);self.worker=worker;self.w.watch_worker(worker,'重构良率')
-        def accept(bank):
-            if bank is not None and self.key==key and not self.w._closing:self.bank=bank;self.render()
+        def accept(value):
+            if value is None or self.key!=key or self.w._closing or worker.cancelled.is_set():return
+            if isinstance(value,tuple):kind,bank=value;value={kind:bank}
+            if 'evidence' in value and self.evidence is not value['evidence']:
+                self.evidence=value['evidence'];self.w._problem_tag=None
+                self.w.filter_changed(pending_ok=True)
+                self.w.reconstruction_overlay.stamp=None;self.w.plot_layout(preserve=True)
+            if 'yield' in value:self.bank=value['yield'];self.render()
         def failed(text):
             if self.key==key and not worker.cancelled.is_set():self.w.width_yield.label.set_extra('重构良率 · 无法计算',text.split('Traceback')[0])
         def finish():
@@ -115,3 +134,22 @@ class ConstraintFeedback:
             self.worker=None;worker.deleteLater()
             if self.pending and not self.w._closing:self.timer.start()
         worker.done.connect(accept);worker.finished.connect(finish);worker.start()
+
+
+def clone_plan_pool(pool):
+    """Immutable geometries may be shared; mutable memo dictionaries may not."""
+    from collections import OrderedDict
+    clones={};out={}
+    for key,entries in pool.items():
+        copied=[]
+        for entry in entries:
+            q=dict(entry);plan=entry.get('plan')
+            if plan is not None:
+                if id(plan) not in clones:
+                    clone=object.__new__(type(plan));clone.__dict__=dict(plan.__dict__)
+                    clone.cache=dict(plan.cache);clone.pose_memo=OrderedDict(plan.pose_memo)
+                    clones[id(plan)]=clone
+                q['plan']=clones[id(plan)]
+            copied.append(q)
+        out[key]=copied
+    return out

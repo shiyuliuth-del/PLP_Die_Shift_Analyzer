@@ -9,6 +9,7 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 from .reconstruction import normalize_via_refs,cut_identity_matches,transform
 from .qt_compat import QtCore,QtWidgets as W
+from .reconstruction_events import zone_key,active_region,color_for,PALETTE,RANK
 
 REGION_COLORS={'move':'#2f7bd6','stay':'#c2571f'}
 REGION_LABELS={'move':'动区','stay':'静区'}
@@ -40,7 +41,7 @@ class ReconstructionOverlay:
     def __init__(self,window):
         self.w=window;self.artists={};self.cuts=None;self.stamp=self.table_stamp=None
         self.selected=self.selected_kind=None;self.hover=None;self.hover_key=None
-        self.end_artists=[];self.region_artists=[];self.arrow_artists=[];self.path_cache={};self.handles={};self.union_cache={}
+        self.end_artists=[];self.region_artists=[];self.arrow_artists=[];self.path_cache={};self.handles={};self.union_cache={};self.labels=[];self.text_sizes={};self.zone_views={}
         self.pulse_timer=QtCore.QTimer(window);self.pulse_timer.setInterval(33);self.pulse_timer.timeout.connect(self.pulse)
     def active(self):return self.w.reconstruction_toggle.isChecked()
     @staticmethod
@@ -85,71 +86,118 @@ class ReconstructionOverlay:
                 placed.append(point)
                 result[rows[j][0]]=shapely.Point(self.w.ax.transData.inverted().transform(point))
         return result
+    def risk_bank(self):return getattr(getattr(self.w,'reconstruction_yield',None),'evidence',None)
     def draw(self):
         w=self.w
         if self.cuts is None or self.cuts.axes is not w.ax:
             self.artists={}
-            self.warning=PatchCollection([],facecolor='none',edgecolor=WARNING_COLOR,linestyles='--',linewidths=1.1,zorder=9.4);w.ax.add_collection(self.warning)
-            self.problems=PatchCollection([],facecolor='#df4b50',edgecolor='#b92d39',alpha=.38,linewidths=.9,zorder=9.7);w.ax.add_collection(self.problems)
-            self.constraints=PatchCollection([],facecolor='#dd5790',edgecolor='#bc386d',alpha=.35,linewidths=.7,zorder=10.5);w.ax.add_collection(self.constraints)
+            self.warning=PatchCollection([],facecolor='none',edgecolor=WARNING_COLOR,linestyles='--',linewidths=.8,zorder=9.4);w.ax.add_collection(self.warning)
+            self.problems=PatchCollection([],facecolor='none',edgecolor='#b92d39',alpha=.7,linewidths=.9,zorder=9.7);w.ax.add_collection(self.problems)
+            self.constraints=PatchCollection([],facecolor='#dd5790',edgecolor='#bc386d',alpha=.45,linewidths=.7,zorder=10.5);w.ax.add_collection(self.constraints)
+            self.problem_points=Line2D([],[],ls='none',marker='o',fillstyle='none',markersize=4,color='#bb354d',alpha=.8,zorder=10.7);w.ax.add_line(self.problem_points)
             self.cuts=LineCollection([],colors=CUT_COLOR,linewidths=2.2,zorder=11.5);w.ax.add_collection(self.cuts)
             self.second_cuts=LineCollection([],colors=SECOND_CUT_COLOR,linewidths=2.2,zorder=11.6);w.ax.add_collection(self.second_cuts)
             self.points=Line2D([],[],ls='none',marker='o',markersize=10,color=CUT_COLOR,markeredgecolor='white',markeredgewidth=.8,zorder=12);w.ax.add_line(self.points)
             self.second_points=Line2D([],[],ls='none',marker='o',markersize=10,color=SECOND_CUT_COLOR,markeredgecolor='white',markeredgewidth=.8,zorder=12);w.ax.add_line(self.second_points)
             self.stamp=None
-        data=self.data() if self.active() else None
-        vis=tuple(k for k,v in w.visible_boxes.items() if v.isChecked())
-        order=tuple(w.ordered_layers());stamp=(id(data),vis,w.view_bounds,order)
-        if stamp==self.stamp:return
-        self.stamp=stamp;paths={};first=[];second=[];dots=[];far_dots=[];warnings=[];seen=set();region_groups={};old_unions=self.union_cache;self.union_cache={};old_cache=self.path_cache;self.path_cache={}
+        data=self.data() if self.active() else None;bank=self.risk_bank() if self.active() else None
+        vis=tuple(k for k,v in w.visible_boxes.items() if v.isChecked());order=tuple(w.ordered_layers())
+        nominal=bool((w.current_frame or {}).get('nominal_global'));level_text=w.target_sigma.currentText() if hasattr(w,'target_sigma') else '6'
+        level=math.inf if level_text=='∞' else float(level_text)
+        stamp=(id(data),id(bank),vis,w.view_bounds,order,nominal,level)
+        if stamp==self.stamp:self.draw_labels();return
+        self.stamp=stamp;paths={};colors={};first=[];second=[];dots=[];far_dots=[];warnings=[];region_groups={};red=[];markers={}
+        old_unions=self.union_cache;self.union_cache={};old_cache=self.path_cache;self.path_cache={};self.zone_views={}
         def patch(g):
-            previous=old_cache.get(id(g))
-            item=previous if previous is not None and previous[0] is g else (g,w.geometry_patch(g))
-            self.path_cache[id(g)]=item
-            return item[1]
+            previous=old_cache.get(id(g));item=previous if previous is not None and previous[0] is g else (g,w.geometry_patch(g))
+            self.path_cache[id(g)]=item;return item[1]
         if not self.active():self.clear_hover()
-        final_geometries={(layer,i):v['geometry'] for layer,values in (data or {}).get('replacements',{}).items() for v in values for i in v['indices']}
-        warned=set()
         current=self.pieces();self.handles=self.handle_geometries(current)
+        # A manual pose outside the probability support remains a binary fact.
+        inside=True
+        if current and not nominal and 'states' in (w.current_frame or {}):
+            from .statistics import mean_and_bounds
+            p=w.params();states=w.current_frame['states']
+            inside=all(np.all(abs(state-mean_and_bounds(p.for_die(i),len(states))[0])<=mean_and_bounds(p.for_die(i),len(states))[1]+1e-12) for i,state in enumerate(states))
         for q in current:
-            if not _in_view(q['route_plan'].source.bounds if q.get('route_plan') else q['fixed'].bounds,w.view_bounds) and not any(not g.is_empty and _in_view(g.bounds,w.view_bounds) for g in q['regions'].values()):continue
+            status=color_for(q,bank,nominal,level,inside);gactive=active_region(q)
+            self.zone_views[zone_key(q)]=(q,status,gactive)
             for k,g in q['regions'].items():
-                if g.is_empty:continue
-                ident=(q['layer'],q['index'],k)
-                region_groups.setdefault((q['layer'],q['index'],k),{})[id(g)]=g
-            ref=(q['layer'],q['index'])
-            if q.get('warning') and ref not in warned:
-                warned.add(ref);g=final_geometries.get(ref)
-                if g is None:g=shapely.union_all(list(q['regions'].values()))
-                if not g.is_empty:warnings.append(patch(g))
-            near=self.handles.get((self._key(q),'moved'),q.get('moved_cut'))
-            if near is not None and near.geom_type=='Point':dots.append(near.coords[0])
-            else:first.extend(_lines(near))
-            far=self.handles.get((self._key(q),'extra'),q.get('extra_cut'))
-            if far is not None and far.geom_type=='Point':far_dots.append(far.coords[0])
-            else:second.extend(_lines(far))
-        for (layer,index,kind),values in region_groups.items():
-            geos=tuple(values.values());cache_key=(layer,index,kind,tuple(values))
-            previous=old_unions.get(cache_key)
+                if k=='A':g=gactive
+                if g.is_empty or not _in_view(g.bounds,w.view_bounds):continue
+                region_groups.setdefault((q['layer'],q['index'],k,status if k=='A' else ''),{})[id(g)]=g
+            if status=='red' and not gactive.is_empty and _in_view(gactive.bounds,w.view_bounds):red.append(patch(gactive))
+            if status=='pending' and not gactive.is_empty and _in_view(gactive.bounds,w.view_bounds):warnings.append(patch(gactive))
+            row=(bank or {}).get('zones',{}).get(zone_key(q))
+            geos=[row['markers']] if nominal and row else [v['geometry'] for v in q.get('rule_witnesses',())]
+            for g in geos:
+                if not g.is_empty and _in_view(g.bounds,w.view_bounds):markers[g.wkb]=g
+            for kind,target,dot_list,line_list in (('moved','moved_cut',dots,first),('extra','extra_cut',far_dots,second)):
+                face=self.handles.get((self._key(q),kind),q.get(target))
+                if face is not None and face.geom_type=='Point':dot_list.append(face.coords[0])
+                else:line_list.extend(_lines(face))
+        for (layer,index,kind,status),values in sorted(region_groups.items(),key=lambda item:RANK.get(item[0][3],-1)):
+            geos=tuple(values.values());cache_key=(layer,index,kind,status,tuple(values));previous=old_unions.get(cache_key)
             g=previous[1] if previous is not None and all(a is b for a,b in zip(previous[0],geos)) else (geos[0] if len(geos)==1 else shapely.union_all(geos))
-            self.union_cache[cache_key]=(geos,g);paths.setdefault((layer,kind),[]).append(patch(g))
+            self.union_cache[cache_key]=(geos,g);paths.setdefault((layer,kind),[]).append(patch(g));colors.setdefault((layer,kind),[]).append(PALETTE[status] if kind=='A' else COLORS[kind])
         for key in paths:
             if key not in self.artists:
-                k=key[1];artist=PatchCollection([],facecolor=COLORS[k],edgecolor=COLORS[k],alpha=.66,linewidths=.5)
-                w.ax.add_collection(artist);self.artists[key]=artist
+                artist=PatchCollection([],alpha=.66,linewidths=.5);w.ax.add_collection(artist);self.artists[key]=artist
         for (layer,k),artist in self.artists.items():
-            shapes=paths.get((layer,k),[]);artist.set_paths(shapes);artist.set_visible(bool(shapes))
+            shapes=paths.get((layer,k),[]);artist.set_paths(shapes);artist.set_visible(bool(shapes));artist.set_facecolors(colors.get((layer,k),[]));artist.set_edgecolors(colors.get((layer,k),[]))
             artist.set_zorder(2+(order.index(layer) if layer in order else 0)/max(1,len(order))+.001*('BCA'.index(k)+1))
-        bad=[patch(q['geometry']) for q in (data or {}).get('violations',())
-             if any(w.visible_boxes.get(k) is not None and w.visible_boxes[k].isChecked() for k in q['layers']) and _in_view(q['geometry'].bounds,w.view_bounds)]
-        self.constraints.set_paths(bad);self.constraints.set_visible(bool(bad))
-        problem_paths=[patch(q['problem_region']) for q in current if q.get('problem_region') is not None and not q['problem_region'].is_empty and _in_view(q['problem_region'].bounds,w.view_bounds)]
-        self.problems.set_paths(problem_paths);self.problems.set_visible(bool(problem_paths))
-        self.warning.set_paths(warnings);self.warning.set_visible(bool(warnings))
-        self.cuts.set_segments(first);self.cuts.set_visible(bool(first))
-        self.second_cuts.set_segments(second);self.second_cuts.set_visible(bool(second))
+        self.constraints.set_paths([patch(g) for g in markers.values()]);self.constraints.set_visible(bool(markers))
+        points=[g.representative_point().coords[0] for g in markers.values()]
+        self.problem_points.set_data(np.array(points).T if points else [[],[]]);self.problem_points.set_visible(bool(points))
+        self.problems.set_paths(red);self.problems.set_visible(bool(red));self.warning.set_paths(warnings);self.warning.set_visible(bool(warnings))
+        self.cuts.set_segments(first);self.cuts.set_visible(bool(first));self.second_cuts.set_segments(second);self.second_cuts.set_visible(bool(second))
         self.points.set_data(np.array(dots).T if dots else [[],[]]);self.points.set_visible(bool(dots))
         self.second_points.set_data(np.array(far_dots).T if far_dots else [[],[]]);self.second_points.set_visible(bool(far_dots))
+        self.draw_labels()
+
+    def draw_labels(self):
+        w=self.w;selected=set(getattr(getattr(w,'selection',None),'selected',()));items=[];boxes=[];outside=[];anchors=[]
+        bank=self.risk_bank();nominal=bool((w.current_frame or {}).get('nominal_global'))
+        if self.active():
+            from .width_witness import pose_text
+            labels={'red':'当前存在违规','yellow':'当前通过，其他极端存在问题','green':'全部离散极端通过','gray':'失效概率上界满足良率要求','pending':'当前通过，全极端核验中'}
+            for key,(q,status,g) in self.zone_views.items():
+                if (q['layer'],q['index']) not in selected or status=='green':continue
+                if g.is_empty:g=q['source']
+                row=(bank or {}).get('zones',{}).get(key,{})
+                kinds=q.get('problem_reasons',()) if not nominal else row.get('kinds',q.get('problem_reasons',()))
+                if not kinds and status=='yellow':kinds=row.get('kinds',())
+                text=f"{q['layer']} #{q['index']+1} · DIE{q['die']+1} · {labels[status]}"
+                text+='\n'+('、'.join(kinds) if kinds else q.get('warning') or '核验尚未完成')
+                rules=(self.data() or {}).get('rules',{})
+                if rules:text+=f"\n要求线宽≥{rules['width_um']:g} μm，线距≥{rules['space_um']:g} μm"
+                angles=q.get('boundary_angles',(0.,0.));text+=f"\n边界角度 {math.degrees(angles[0]):.1f}° / {math.degrees(angles[1]):.1f}°"
+                probability=row.get('probability');places=w.view_settings.width_yield_decimals
+                if probability:
+                    if probability.get('certified'):text+=f"\n失效概率 ≤ {probability['upper']*100:.{places}g}%（保守界限）"
+                    else:text+=f"\n极端代表网格估计≈{probability.get('estimate',0)*100:.{places}g}% · 连续概率待定"
+                witness=row.get('witness')
+                if witness and (nominal or not q.get('problem_reasons')):text+='\n代表工况：'+pose_text(bank['grid_key'],witness['index'])
+                else:
+                    state=w.current_frame['states'][q['die']];text+=f"\nDX {state[0]:.2f} μm, DY {state[1]:.2f} μm, θ {math.degrees(state[2]):.2f}°"
+                rect,anchor,out=w.width_overlay.label_anchor(g)
+                if out:text+='\n动区在当前视野外'
+                items.append((status,text));boxes.append(rect if out else shapely.box(*g.bounds));anchors.append(anchor);outside.append(out)
+        from .width_labels import LabelLayout
+        from .canvas_callouts import put
+        from matplotlib.colors import to_rgb
+        count=0
+        if items:
+            size=w.view_settings.width_label_font_pt;layout=LabelLayout(w.ax,boxes,size,self.text_sizes)
+            if w.legend is not None and w.legend.get_visible():
+                b=w.legend.get_window_extent(w.canvas.get_renderer());layout.labels.append((np.array([b.x0,b.y0])/layout.scale,np.array([b.x1,b.y1])/layout.scale))
+            for i,(status,text) in enumerate(items):
+                near=layout.place_selected(i,text);position=(*near,size) if near else layout.place_pinned(i,text)
+                if position is None:continue
+                if outside[i]:position=w.width_overlay.retarget(position,anchors[i])
+                _,tip,offset,font=position;color=PALETTE[status]
+                put(w,self.labels,count,text,tip,offset,font,color,np.asarray(to_rgb(color))*.64,color);count+=1
+        for a in self.labels[count:]:a.set_visible(False)
     def pick(self,x,y,tolerance):
         best=None;pieces=self.pieces();self.handles=self.handle_geometries(pieces)
         for q in pieces:
@@ -223,10 +271,7 @@ class CutDrag:
         picked=w.reconstruction_overlay.pick(event.xdata,event.ydata,self._tolerance())
         if picked is None:return
         piece,xy,kind=picked;overlay=w.reconstruction_overlay;overlay.selected=overlay._key(piece);overlay.selected_kind=kind
-        if kind=='problem' and event.button==1:
-            if getattr(w,'selection',None):w.selection.press=None;w.selection.apply_hits([(piece['layer'],piece['index'])],'replace')
-            self.problem_menu(piece,event);return
-        if kind=='bridge':return
+        if kind in ('bridge','problem'):return
         if event.button!=1:return
         w.stop_animation();w.cancel_previews()
         if event.dblclick:self.clear(overlay._key(piece),piece,kind);return
@@ -238,28 +283,6 @@ class CutDrag:
                         handle_offset=(xy.mean(axis=0)-np.asarray(piece['extra_cut' if kind=='extra' else 'moved_cut'].coords[0]) if piece['extra_cut' if kind=='extra' else 'moved_cut'].geom_type=='Point' else np.zeros(2)))
         self.latest=None;self.timer.start();overlay.highlight(picked)
         w.statusBar().showMessage('拖动共用动区边界；另一端保持不动，松开后更新所有工况。')
-    def problem_menu(self,piece,event):
-        from .connection_curves import STYLES
-        menu=W.QMenu(self.w.canvas)
-        menu.addAction(f"重构问题 · {piece['layer']} #{piece['index']+1} · 分支{piece.get('branch',1)}").setEnabled(False)
-        menu.addAction('连接样式：'+STYLES[self.w.view_settings.reconstruction_style]).setEnabled(False)
-        state=self.w.current_frame['states'][piece['die']]
-        menu.addAction(f"DIE{piece['die']+1} · DX {state[0]:.3f} μm · DY {state[1]:.3f} μm · O {math.degrees(state[2]):.3f}°").setEnabled(False)
-        menu.addSeparator()
-        for reason in piece.get('problem_reasons',()):menu.addAction(reason).setEnabled(False)
-        mass=piece.get('priority_failure_mass')
-        if mass is not None:menu.addAction(f'局部候选失败质量约 {mass*100:.4g}%（名义邻网参考）').setEnabled(False)
-        if piece.get('connection_failed'):menu.addAction('连接段未生成；红色提示区不作为铜或DXF输出。').setEnabled(False)
-        else:menu.addAction('保留当前候选供调整，红色不代表已满足工艺规则。').setEnabled(False)
-        frame=self.w.current_frame
-        def locate():
-            if self.w.current_frame is frame:
-                row=next((i for i,q in enumerate(frame['reconstruction']['pieces']) if q is piece),None)
-                if row is not None:self.w.reconstruction_overlay.locate(row)
-        menu.addAction('在重构表中定位',locate)
-        ratio=self.w.canvas.devicePixelRatioF();pos=QtCore.QPoint(round(event.x/ratio),round(self.w.canvas.height()-event.y/ratio))
-        self.w._reconstruction_problem_menu=menu;menu.aboutToHide.connect(menu.deleteLater);menu.popup(self.w.canvas.mapToGlobal(pos))
-
     def move(self,event):
         if self.state is None:
             if self.w.reconstruction_toggle.isChecked() and event.inaxes is self.w.ax and event.xdata is not None:self.w.reconstruction_overlay.highlight(self.w.reconstruction_overlay.pick(event.xdata,event.ydata,self._tolerance()))
@@ -294,22 +317,25 @@ class CutDrag:
     def _live(self,part):
         from .reconstruction_route import warp,failed_connection,missing_area
         state=self.state;old=state['frame'];piece=state['piece'];plan=piece['route_plan']
-        regions,error=warp(part,plan,old['rotation_centers'][piece['die']],old['states'][piece['die']],self.w.view_settings.reconstruction_style)
+        from .reconstruction_angles import solve
+        if self.w.view_settings.reconstruction_boundary_mode=='perpendicular':regions,error=warp(part,plan,old['rotation_centers'][piece['die']],old['states'][piece['die']],self.w.view_settings.reconstruction_style)
+        else:part,regions,error,_=solve(self.w.engine.reconstructor,plan,part,old['rotation_centers'][piece['die']],old['states'][piece['die']],quick=True)
         if error:
             self.w.statusBar().showMessage(error+'；已取消连接段');regions=failed_connection(part,plan,old['rotation_centers'][piece['die']],old['states'][piece['die']])
         moved_cut=transform(part['near'],old['rotation_centers'][piece['die']],old['states'][piece['die']])
         replacement=dict(piece,regions=regions,nominal_regions={k:part[k] for k in 'ABC'},moved=regions['C'],movable=part['C'],fixed=regions['B'],bridge=regions['A'],
                          fallback_regions=failed_connection(part,plan,old['rotation_centers'][piece['die']],old['states'][piece['die']]),connection_failed=bool(error),
                          missing_region=missing_area(part,plan,old['rotation_centers'][piece['die']],old['states'][piece['die']]),
-                         cut=part['near'],moved_cut=moved_cut,extra_cut=part['far'],span=part['A'],interval=(part['a'],part['b']),valid=not bool(error),warning=error or '',whole_landing=part['a']==0,whole_fixed_landing=part['far'].geom_type=='Point',rule_violations=())
+                         cut=part['near'],moved_cut=moved_cut,extra_cut=part['far'],span=part['A'],interval=(part['a'],part['b']),boundary_angles=part.get('angles',(0.,0.)),valid=not bool(error),warning=error or '',whole_landing=part['a']==0,whole_fixed_landing=part['far'].geom_type=='Point',rule_violations=())
         data=old['reconstruction'];items=[replacement if q is piece else dict(q,regions=dict(q['regions'])) for q in data['pieces']]
         replacements={k:[dict(v) for v in values] for k,values in data['replacements'].items()}
         feature=[q for q in items if (q['layer'],q['index'])==(piece['layer'],piece['index'])]
         from .reconstruction import compose_feature
-        copper,_=compose_feature(piece.get('source',plan.source),feature,plan.tolerance,bool(np.any(old['states'])) or self.w.view_settings.reconstruction_style in ('linear','arc'))
+        from .reconstruction import feature_moves
+        copper,_=compose_feature(piece.get('source',plan.source),feature,plan.tolerance,feature_moves(feature,old['states'],self.w.view_settings.reconstruction_style))
         for q in replacements.get(piece['layer'],()):
             if piece['index'] in q['indices']:q['geometry']=copper
-        self.w.current_frame=dict(old,reconstruction=dict(data,pieces=items,replacements=replacements,violations=[],constraints_complete=False))
+        self.w.current_frame=dict(old,reconstruction=dict(data,configuration=state['updated'].reconstruction_key(),pieces=items,replacements=replacements,violations=[],constraints_complete=False))
         from .reconstruction import decorate_problems
         decorate_problems(self.w.current_frame['reconstruction'])
         self.w.constraint_feedback.request(self.w.current_frame,state['updated'])

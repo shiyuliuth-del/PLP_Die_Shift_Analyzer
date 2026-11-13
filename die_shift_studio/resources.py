@@ -4,9 +4,21 @@ import threading
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor,ProcessPoolExecutor,as_completed
 import multiprocessing
+from contextlib import contextmanager
 
 _local=threading.local()
 _slots=threading.Condition();_active_threads=0
+
+@contextmanager
+def cancellation_scope(event):
+    previous=getattr(_local,'cancel',None);_local.cancel=event
+    try:yield
+    finally:_local.cancel=previous
+
+def cancel_check():
+    event=getattr(_local,'cancel',None)
+    if event is not None and event.is_set():raise InterruptedError('用户取消')
+
 
 def resource_profile():
     cpu=os.cpu_count() or 1
@@ -42,24 +54,29 @@ def geometry_budget(profile,packed_bytes):
 
 
 def parallel_map(fn,items,profile=None,progress=None,process=False):
+    cancel_check();event=getattr(_local,'cancel',None)
     items=list(items);profile=profile or resource_profile();workers=min(profile['process_workers' if process else 'workers'],len(items))
     if getattr(_local,'nested',False):workers=1
     if workers<2:
         result=[]
         for item in items:
-            result.append(fn(item))
+            cancel_check();result.append(fn(item))
             if progress:progress(len(result),len(items))
         return result
-    capacity=profile.get('worker_capacity',profile['workers'])
+    capacity=profile.get('worker_capacity',profile['workers']);abort=threading.Event()
+    combined=_Cancellation(event,abort)
     def wrapped(item):
         # A small first job must not permanently cap a later large machine.
         # Nested native work stays serial within its parent's slot.
         global _active_threads
         with _slots:
-            _slots.wait_for(lambda:_active_threads<capacity)
+            while _active_threads>=capacity:
+                if combined.is_set():raise InterruptedError('用户取消')
+                _slots.wait(.05)
             _active_threads+=1
         _local.nested=True
-        try:return fn(item)
+        try:
+            with cancellation_scope(combined):cancel_check();return fn(item)
         finally:
             _local.nested=False
             with _slots:
@@ -75,7 +92,52 @@ def parallel_map(fn,items,profile=None,progress=None,process=False):
             result[futures[future]]=future.result()
             if progress:progress(done,len(items))
     except BaseException:
+        abort.set()
         for f in futures:f.cancel()
         raise
     finally:executor.shutdown(wait=True,cancel_futures=True)
     return result
+
+
+class _Cancellation:
+    def __init__(self,*events):self.events=events
+    def is_set(self):return any(e is not None and e.is_set() for e in self.events)
+
+
+def parallel_iter(fn,items,profile=None):
+    """Bounded ordered output: at most twice the worker count is in flight."""
+    from collections import deque
+    profile=profile or resource_profile();items=iter(items)
+    workers=1 if getattr(_local,'nested',False) else max(1,profile['workers'])
+    if workers==1:
+        for item in items:cancel_check();yield fn(item)
+        return
+    abort=threading.Event();combined=_Cancellation(getattr(_local,'cancel',None),abort)
+    capacity=profile.get('worker_capacity',workers)
+    def wrapped(item):
+        global _active_threads
+        with _slots:
+            while _active_threads>=capacity:
+                if combined.is_set():raise InterruptedError('用户取消')
+                _slots.wait(.05)
+            _active_threads+=1
+        _local.nested=True
+        try:
+            with cancellation_scope(combined):cancel_check();return fn(item)
+        finally:
+            _local.nested=False
+            with _slots:_active_threads-=1;_slots.notify_all()
+    executor=ThreadPoolExecutor(max_workers=workers,thread_name_prefix='die-shift-stream');pending=deque()
+    try:
+        for _ in range(workers*2):
+            try:pending.append(executor.submit(wrapped,next(items)))
+            except StopIteration:break
+        while pending:
+            cancel_check();future=pending.popleft();value=future.result()
+            try:pending.append(executor.submit(wrapped,next(items)))
+            except StopIteration:pass
+            yield value
+    finally:
+        abort.set()
+        for f in pending:f.cancel()
+        executor.shutdown(wait=True,cancel_futures=True)

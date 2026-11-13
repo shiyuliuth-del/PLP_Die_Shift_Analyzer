@@ -87,6 +87,8 @@ class ViewSettings:
     reconstruction_enabled:bool=False
     reconstruction_live:bool=True
     reconstruction_style:str="c2"
+    reconstruction_boundary_mode:str="perpendicular"
+    reconstruction_ignored:tuple=()
     reconstruction_grid_nodes:int=3
     reconstruction_intervals:tuple=()  # layer,index,owner,via refs,route fingerprint,s0,s1
     reconstruction_corner_guard_um:float=3.0
@@ -161,6 +163,9 @@ class ViewSettings:
                     intervals.append((str(layer),int(index),int(owner),refs,str(fingerprint),a,b))
             except (TypeError,ValueError):continue
         values['reconstruction_intervals']=tuple(intervals)
+        refs=values.get('reconstruction_ignored',())
+        if not isinstance(refs,(list,tuple)) or any(not isinstance(r,(list,tuple)) or len(r)!=2 or not isinstance(r[0],str) or type(r[1]) is not int or r[1]<0 for r in refs):raise ValueError('忽略重构图形编号无效')
+        values['reconstruction_ignored']=tuple(sorted(set(tuple(r) for r in refs)))
         if 'reconstruction_cuts' in values:
             values['reconstruction_cuts']=cls._normalize_cuts(values['reconstruction_cuts'])
         for key in ('reconstruction_extra_cuts','reconstruction_second_cuts'):
@@ -173,7 +178,7 @@ class ViewSettings:
             if new not in values and old in values:values[new]=values[old]
         if 'width_yield_method' not in values and values.get('yield_method')=='partition':values['width_yield_method']='grid'
         known={f.name for f in fields(cls)};q=cls(**{k:v for k,v in (values or {}).items() if k in known})
-        choices={'reconstruction_style':('linear','c1','c2','arc'),'width_yield_method':('importance','grid'),'yield_method':('monte_carlo','partition'),'acceleration':('auto','cpu','cuda'),'probability_method':('sobol','monte_carlo','quadrature'),
+        choices={'reconstruction_boundary_mode':('perpendicular','wide','balanced'),'reconstruction_style':('linear','c1','c2','arc'),'width_yield_method':('importance','grid'),'yield_method':('monte_carlo','partition'),'acceleration':('auto','cpu','cuda'),'probability_method':('sobol','monte_carlo','quadrature'),
                  'space_cmap':('pastel','YlGnBu','BuPu','viridis','cividis'),
                  'space_interpolation':('nearest','bilinear','bicubic'),
                  'probability_interpolation':('nearest','bilinear','bicubic'),
@@ -218,7 +223,7 @@ class ViewSettings:
 
     def reconstruction_key(self):
         """Everything the reconstruction result depends on besides the pose."""
-        return (True,'nominal-route-partition-v39',self.reconstruction_style,self.drc_tolerance_um,
+        return (True,'nominal-route-partition-v40',self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_ignored,self.drc_tolerance_um,
                 self.reconstruction_corner_guard_um,tuple(self.reconstruction_intervals),
                 tuple(self.reconstruction_regions),tuple(self.reconstruction_cuts),
                 tuple(self.reconstruction_extra_cuts),tuple(self.reconstruction_second_cuts),

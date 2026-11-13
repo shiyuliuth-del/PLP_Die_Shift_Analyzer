@@ -1,9 +1,9 @@
 """Reproduce a GDS project; print the recommendation or write numeric JSON."""
 import argparse,json,sys
 from pathlib import Path
-from dataclasses import asdict
+from dataclasses import asdict,replace
 from .core import Parameters,read_gds,evaluate,clean_json
-from .project import normalize_project
+from .project import normalize_project,restored_width_ignores
 from .settings import ViewSettings
 from .recognition import automatic_parameters
 from .stack import stack_order,resolve_stages
@@ -24,7 +24,9 @@ roles=project.get('roles',data.auto_roles)
 order=stack_order(data,roles,project.get('layer_order'))
 roles=resolve_stages(data,roles,order,project.get('stage_hints'))
 params=Parameters.from_dict({**asdict(Parameters.from_dict(project['parameters'])),**automatic_parameters(data,roles)[0]})
-result=evaluate(data,roles,params,layer_order=order,motions=project.get('motions'),settings=ViewSettings.from_dict(project.get('settings')),validate_extremes=True)
+cfg=replace(ViewSettings.from_dict(project.get('settings')),
+            reconstruction_ignored=tuple(sorted(restored_width_ignores(project,data,'ignored_reconstruction'))))
+result=evaluate(data,roles,params,layer_order=order,motions=project.get('motions'),settings=cfg,validate_extremes=True)
 if args.json:Path(args.json).write_text(json.dumps(clean_json(result),ensure_ascii=False,indent=2),encoding='utf-8')
 if not result['extreme_factors']['checked']:
     sys.exit('离散极端校验未完成：'+result['extreme_factors']['reason'])

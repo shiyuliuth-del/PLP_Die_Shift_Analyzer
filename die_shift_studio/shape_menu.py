@@ -44,6 +44,17 @@ def show_shape_menu(window,event,point):
                 window.change_width_ignores(items,value)
         if add:menu.addAction('忽略选中的问题线路',lambda:change(add,True))
         if remove:menu.addAction('取消忽略选中的问题线路',lambda:change(remove,False))
+    if window.reconstruction_toggle.isChecked():
+        selected={r for r in refs if window.roles().get(r[0])=='固定RDL'}
+        ignored=set(window.view_settings.reconstruction_ignored)
+        add=selected-ignored;remove=selected&ignored
+        data=window.data;group=window.cache_group
+        def change_reconstruction(items,value):
+            if window.data is data and window.cache_group is group and window.reconstruction_toggle.isChecked():
+                window.change_reconstruction_ignores(items,value)
+        if add or remove:menu.addSeparator()
+        if add:menu.addAction('忽略选中图形的重构',lambda:change_reconstruction(add,True))
+        if remove:menu.addAction('取消忽略选中图形的重构',lambda:change_reconstruction(remove,False))
     ratio=window.canvas.devicePixelRatioF()
     pos=QtCore.QPoint(round(event.x/ratio),round(window.canvas.height()-event.y/ratio))
     menu.aboutToHide.connect(menu.deleteLater)

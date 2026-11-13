@@ -81,7 +81,8 @@ class Worker(QtCore.QThread):
         return value
     def run(self):
         try:
-            result=self.fn(self.update)
+            from .resources import cancellation_scope
+            with cancellation_scope(self.cancelled):result=self.fn(self.update)
             if not self.cancelled.is_set():self.done.emit(result)
         except InterruptedError:pass
         except ValueError as exc:self.failed.emit(str(exc)+'\n'+traceback.format_exc())
@@ -339,7 +340,7 @@ class MainWindow(W.QMainWindow):
         self.page_edit=W.QLineEdit('1');self.page_edit.setMaximumWidth(54);self.page_edit.setToolTip('输入页码并按回车')
         for widget in (self.grid_mode,self.page_prev,self.page_edit,self.page_next,self.page_summary):nav.addWidget(widget)
         self.problem_filter=W.QCheckBox('过滤无问题情况');self.problem_filter.setChecked(True)
-        self.problem_filter.setToolTip('仅列实际接触的姿态；宽度分析开启时仅列宽度不足（红色）的姿态。空白首行始终保留。')
+        self.problem_filter.setToolTip('重构开启时按重构后的线宽、线距与连接等规则筛选；否则按宽度红色风险或接触筛选。空白首行始终保留。')
         nav.addWidget(self.problem_filter);nav.addStretch();ep.addLayout(nav)
         self.problem_filter.toggled.connect(lambda *_:self.filter_changed())
         self.grid_mode.currentIndexChanged.connect(lambda *_:self.show_extreme_page(0))
@@ -570,6 +571,8 @@ class MainWindow(W.QMainWindow):
         recon=group('重构预演')
         choices['reconstruction_style']=[('直线','linear'),('一阶','c1'),('二阶','c2'),('圆弧','arc')]
         choice(recon,'reconstruction_style','连接样式')
+        choices['reconstruction_boundary_mode']=[('垂直','perpendicular'),('重构区优先','wide'),('两侧平均','balanced')]
+        choice(recon,'reconstruction_boundary_mode','边界角度')
         spin(recon,'reconstruction_grid_nodes','良率积分每轴节点',3,9)
         self.setting_fields['reconstruction_grid_nodes'].setToolTip('完整有限网格，按区间概率质量积分；增大节点可检查连续空间误差。不是等概率极端计数。')
         live=W.QCheckBox('实时反馈动区变化');self.setting_fields['reconstruction_live']=live;recon.addRow(live);live.toggled.connect(self.settings_changed)
@@ -638,7 +641,7 @@ class MainWindow(W.QMainWindow):
         if self.loading:return
         values={k:(w.currentData() if isinstance(w,W.QComboBox) else w.isChecked() if isinstance(w,W.QCheckBox) else w.value()) for k,w in self.setting_fields.items()}
         updated=ViewSettings.from_dict(dict(asdict(self.view_settings),**values))
-        width_inputs=('reconstruction_grid_nodes','width_yield_method','width_yield_exponent','width_yield_seed','width_grid_nodes')
+        width_inputs=('width_yield_method','width_yield_exponent','width_yield_seed','width_grid_nodes')
         if all(getattr(updated,k)==getattr(self.view_settings,k) for k in values if k not in width_inputs):
             self.view_settings=updated;self.enable_settings();self.width_yield.refresh();return
         ranges=('show_annulus_range','show_spacing_range')
@@ -667,6 +670,7 @@ class MainWindow(W.QMainWindow):
         repair_shape=(updated.repair_landing_pad!=old_settings.repair_landing_pad or updated.repair_patch_width_um!=old_settings.repair_patch_width_um)
         reconstruction_shape=updated.reconstruction_key()!=old_settings.reconstruction_key()
         if reconstruction_shape:self.invalidate_reconstruction_edit()
+        if updated.reconstruction_grid_nodes!=old_settings.reconstruction_grid_nodes:self.reconstruction_yield.refresh()
         if numeric or updated.drc_tolerance_um!=old_settings.drc_tolerance_um:self.width_yield.refresh()
         if numeric:
             self.dirty=self.result is not None
@@ -755,6 +759,7 @@ class MainWindow(W.QMainWindow):
         self.per_die_values[i][j]=value
         if not self.loading:self.invalidate()
     def task_progress(self,worker,n,text):
+        if getattr(worker,'_task_tracked',True) is False:return
         self._tasks[id(worker)]=(n,text);self.progress.show();self.progress.setRange(0,100);self.progress.setValue(n);self.progress.setFormat(f'{n}% · '+text[:36]);self.statusBar().showMessage(text)
         self.log_bus.emit(text)
     def watch_worker(self,worker,name,quiet=False):
@@ -765,11 +770,11 @@ class MainWindow(W.QMainWindow):
             worker.progress.connect(lambda n,t:self.statusBar().showMessage(t))
             worker.failed.connect(lambda text:self.log_bus.emit(name+'：'+text,'ERROR'))
             return
-        start=time.perf_counter();self.task_progress(worker,0,name+'：开始')
+        start=time.perf_counter();worker._task_tracked=True;self.task_progress(worker,0,name+'：开始')
         worker.progress.connect(lambda n,t:self.task_progress(worker,n,t))
         worker.failed.connect(lambda text:self.log_bus.emit(name+'：'+text,'ERROR'))
         def finish():
-            self._tasks.pop(id(worker),None);self.log_bus.emit(f'{name}：'+('已取消' if worker.cancelled.is_set() else '线程退出')+f'，耗时 {time.perf_counter()-start:.3f} s')
+            worker._task_tracked=False;self._tasks.pop(id(worker),None);self.log_bus.emit(f'{name}：'+('已取消' if worker.cancelled.is_set() else '线程退出')+f'，耗时 {time.perf_counter()-start:.3f} s')
             if self._closing and not self._tasks:QtCore.QTimer.singleShot(0,self.close)
             if not self._tasks:self.progress.hide();self.cleanup_retired_sessions()
             else:
@@ -991,7 +996,7 @@ class MainWindow(W.QMainWindow):
             self.problem_filter.blockSignals(True);self.problem_filter.setChecked(view.get('filter_problems',True));self.problem_filter.blockSignals(False)
             self._initial_extreme_page=view['page']-1
             for title,header in self.setting_sections.items():header.setChecked(title in project.get('expanded_settings',[]))
-            self.view_settings=ViewSettings.from_dict(project.get('settings'));self.load_view_settings();self.layer_styles=project.get('layer_styles',{})
+            self.view_settings=replace(ViewSettings.from_dict(project.get('settings')),reconstruction_ignored=tuple(sorted(restored_width_ignores(project,data,'ignored_reconstruction'))));self.load_view_settings();self.layer_styles=project.get('layer_styles',{})
             for name,value in project_overlays(project).items():
                 toggle=getattr(self,name+'_toggle')
                 toggle.blockSignals(True)
@@ -1290,7 +1295,9 @@ class MainWindow(W.QMainWindow):
 
     def invalidate_reconstruction_edit(self):
         """Reject old coupled/extreme evidence after a reconstruction edit."""
-        self.dirty=True;self.report_dirty=True
+        self.report_dirty=True
+        self.cancel_previews()
+        if self.motion_worker:self.motion_worker.cancelled.set()
         if hasattr(self,"reconstruction_yield"):self.reconstruction_yield.refresh()
         self._coupled_key=None;self._coupled_data=None;self._coupled_error=False
         self._problem_tag=None
@@ -1638,7 +1645,7 @@ class MainWindow(W.QMainWindow):
         return origin
     def refresh_legend(self):
         stamp=(tuple((k,self.visible_boxes[k].isChecked(),str(self.style_for(k))) for k in self.ordered_layers()),
-               self.view_settings.show_annulus_range,self.view_settings.show_spacing_range,self.show_issues.isChecked(),self.current_frame is not None,(self.current_frame or {}).get('width_summary') is not None,self.target_sigma.currentText(),False,self.probability_toggle.isChecked(),id(self.probability_data),self.view_settings.probability_cmap,self.view_settings.probability_alpha,self.view_settings.probability_gamma,self.view_settings.probability_show_ranges,self.view_settings.probability_ranges,self.view_settings.probability_target_color,self.view_settings.contact_marker_color,self.view_settings.unadapted_marker_color,self.width_toggle.isChecked(),self.width_sufficient_toggle.isChecked(),self.ignored_width_lines,self.repair_toggle.isChecked(),self.reconstruction_toggle.isChecked(),bool(self.current_frame and self.current_frame.get('motion_issues')))
+               self.view_settings.show_annulus_range,self.view_settings.show_spacing_range,self.show_issues.isChecked(),self.current_frame is not None,(self.current_frame or {}).get('width_summary') is not None,self.target_sigma.currentText(),False,self.probability_toggle.isChecked(),id(self.probability_data),self.view_settings.probability_cmap,self.view_settings.probability_alpha,self.view_settings.probability_gamma,self.view_settings.probability_show_ranges,self.view_settings.probability_ranges,self.view_settings.probability_target_color,self.view_settings.contact_marker_color,self.view_settings.unadapted_marker_color,self.width_toggle.isChecked(),self.width_sufficient_toggle.isChecked(),self.ignored_width_lines,self.repair_toggle.isChecked(),self.reconstruction_toggle.isChecked(),id(self.reconstruction_yield.evidence),bool(self.current_frame and self.current_frame.get('motion_issues')))
         if stamp==self._legend_stamp:return
         self._legend_stamp=stamp
         if self.legend is not None:self.legend.remove()
@@ -1667,8 +1674,10 @@ class MainWindow(W.QMainWindow):
                         handles.append(Patch(facecolor='none',edgecolor=tint(color,modes['截面']),label=title))
         if self.reconstruction_toggle.isChecked():
             from .reconstruction_overlay import COLORS,CUT_COLOR,SECOND_CUT_COLOR,WARNING_COLOR
-            handles += [Patch(facecolor=COLORS[k],alpha=.66,label=k+' '+title) for k,title in [('A','动区'),('B','静区'),('C','平移区')]]
-            handles += [Line2D([],[],color=CUT_COLOR,lw=2,label='运动侧边界 / 整孔盘蓝点'),Line2D([],[],color=SECOND_CUT_COLOR,lw=2,label='固定侧边界 / 整孔盘黄点'),Patch(facecolor='#df4b50',edgecolor='#b92d39',alpha=.38,label='重构问题（单击查看）')]
+            from .reconstruction_events import PALETTE
+            handles += [Patch(facecolor=PALETTE[k],alpha=.66,label=title) for k,title in [('red','动区违规'),('yellow','当前通过 / 其他极端风险'),('green','全部离散极端通过'),('gray','低概率满足要求')]]
+            handles += [Patch(facecolor=COLORS[k],alpha=.66,label=k+' '+title) for k,title in [('B','静区'),('C','平移区')]]
+            handles += [Line2D([],[],color=CUT_COLOR,lw=2,label='运动侧边界 / 整孔盘蓝点'),Line2D([],[],color=SECOND_CUT_COLOR,lw=2,label='固定侧边界 / 整孔盘黄点'),Patch(facecolor='#dd5790',edgecolor='#bc386d',alpha=.45,label='具体违规位置 · 选中查看')]
         if self.current_frame and self.current_frame.get('motion_issues'):handles.append(Line2D([],[],color='#bf862c',ls='--',label='运动归属未定：保持名义位置'))
         if getattr(self.data,'ignored_geometry',[]):handles.append(Line2D([],[],color='#d72b91',ls='--',lw=.7,label='忽略的无效图形'))
         if self.current_frame is not None:
@@ -1920,7 +1929,9 @@ class MainWindow(W.QMainWindow):
         global_ready=show_frame or not (deform and self.result and math.isfinite(p.target_nsigma)) or bool(cached and cached.get('global_deformation'))
         matches=[e for e in self.session_engines.values() if getattr(e,'signature',None)==signature]
         actual=next((e for e in matches if not getattr(e,'busy',False) and e.cache_key()==expected),next(iter(matches),None))
-        if cached is not None and actual is not None and ready and global_ready and self.repair_lookup(signature,state,deform):
+        if cached is not None and actual is not None and not getattr(actual,'busy',False) and ready and global_ready and self.repair_lookup(signature,state,deform):
+            actual.configure_deformation(deform,settings);actual.configure_drc(drc,settings)
+            actual.configure_width(self.width_toggle.isChecked(),settings);actual.configure_reconstruction(self.reconstruction_toggle.isChecked(),settings)
             self.engine=actual
             animate=settings.animation_enabled and not direct and not np.array_equal(origin,state)
             prepared=animate and (np.any(state) or animate_back)
@@ -1947,7 +1958,7 @@ class MainWindow(W.QMainWindow):
     def launch_preview(self):
         if self._closing or self.motion_worker is not None or self.preview_pending is None:return
         request=self.preview_pending
-        request_key=(self.preview_identity(self.data,request[5],request[11],request[4],request[6],request[7]),request[1].deformation_key(),request[1].numeric_key(),request[3].tobytes(),request[12:19],request[19].tobytes(),request[20:],request[1].animation_enabled,request[1].animation_return_zero,request[1].animation_strategy,request[1].animation_speed,request[1].animation_fps,request[1].animation_duration_ms)
+        request_key=(self.preview_identity(self.data,request[5],request[11],request[4],request[6],request[7]),request[1].deformation_key(),request[1].numeric_key(),request[1].reconstruction_key(),request[1].width_key(),request[1].drc_tolerance_um,request[3].tobytes(),request[12:19],request[19].tobytes(),request[20:],request[1].animation_enabled,request[1].animation_return_zero,request[1].animation_strategy,request[1].animation_speed,request[1].animation_fps,request[1].animation_duration_ms)
         for running in self.preview_workers:
             if getattr(running,'request_key',None)==request_key and not running.cancelled.is_set() and not getattr(running,'delivered',False) and not running.isFinished():
                 # The identical in-flight result can answer the latest display ticket.
@@ -2248,6 +2259,17 @@ class MainWindow(W.QMainWindow):
 
     def schedule_coupled_filter(self):
         if self.loading or self._closing:return
+        if self.reconstruction_toggle.isChecked():
+            if self.filter_job:self.filter_job.cancelled.set()
+            self.reconstruction_yield.refresh()
+            evidence=self.reconstruction_yield.evidence;base=self._width_grid_summary
+            if self.width_toggle.isChecked() and evidence and base:
+                extra=evidence['routing_summary']
+                self._coupled_data=dict(complete=True,grid_key=evidence['grid_key'],
+                    lines={**base['channel_lines'],**extra['lines']},witnesses={**base['channel_witnesses'],**extra['witnesses']},
+                    red_factors=[*base['channel_factors'],*extra['red_factors']])
+            else:self._coupled_data=None
+            return
         wanted=self.coupled_view() and self.extremes is not None and not self.dirty
         if not wanted:
             if self.filter_job:self.filter_job.cancelled.set()
@@ -2308,7 +2330,7 @@ class MainWindow(W.QMainWindow):
             self.active_preview=current
             self.extreme_table.blockSignals(True);self.extreme_table.setCurrentCell(row,0);self.extreme_table.blockSignals(False)
         elif current is not None:
-            if pending_ok and ((self.coupled_view() and self._coupled_data is None) or (self.width_toggle.isChecked() and self._width_grid_summary is None)):
+            if pending_ok and ((self.reconstruction_toggle.isChecked() and self.reconstruction_yield.evidence is None) or (self.coupled_view() and self._coupled_data is None) or (self.width_toggle.isChecked() and self._width_grid_summary is None)):
                 self.active_preview=current;self.leave_extreme_selection()
             else:self.select_preview(0,0)
 
@@ -2321,16 +2343,18 @@ class MainWindow(W.QMainWindow):
             from .extreme_filter import ProblemIndex,FilteredCatalog,contact_factors
             width=self.width_toggle.isChecked()
             summary=getattr(self,'_width_grid_summary',None) if width else None
+            reconstruction=self.reconstruction_toggle.isChecked()
             changed=self.coupled_view()
             facts=self._coupled_data if changed else summary if width else (self.result or {}).get('extreme_factors')
+            if reconstruction:facts=self.reconstruction_yield.evidence
             if self.dirty or (summary and summary.get('grid_key')!=tuple(v.tobytes() for v in self.extremes.locals)):facts=None
-            if facts is not None and (facts.get('complete') if width or changed else facts.get('checked')):
-                tag=(id(self.extremes),id(facts),width)
+            if facts is not None and (facts.get('complete') if width or changed or reconstruction else facts.get('checked')):
+                tag=(id(self.extremes),id(facts),width,reconstruction)
                 if getattr(self,'_problem_tag',None)!=tag:
                     if changed and 'indices' in facts:
                         from .extreme_filter import ExplicitIndex
                         self._problem_index=ExplicitIndex(self.extremes,facts['indices'])
-                    else:self._problem_index=ProblemIndex(self.extremes,facts['red_factors'] if width else contact_factors(facts))
+                    else:self._problem_index=ProblemIndex(self.extremes,facts['red_factors'] if width or reconstruction else contact_factors(facts))
                     self._problem_tag=tag
                 catalogue=FilteredCatalog(source,self._problem_index)
             else:
@@ -2368,7 +2392,7 @@ class MainWindow(W.QMainWindow):
         rows=[(0,None),*[(i,item) for i,(_,item) in enumerate(self.page_items,1)]]
         current_key=(frame['states'].tobytes() if frame is not None and not frame.get('nominal_global') else None)
         current=frame_status(frame) if current_key is not None else {}
-        version=(self._cache_color_context,self._cache_color_epoch,id(self.result),self.dirty,current_key,tuple(current.items()))
+        version=(id(self.reconstruction_yield.evidence),self._cache_color_context,self._cache_color_epoch,id(self.result),self.dirty,current_key,tuple(current.items()))
         if getattr(self,'_paint_pass',None)==version:return
         self._paint_pass=version
         for row,item in rows:
@@ -2379,6 +2403,17 @@ class MainWindow(W.QMainWindow):
             if item and key==current_key:
                 if current.get('checked') or current.get('safe') is False:status=current
                 elif current.get('width_pending') or False or self.dirty:status=current
+            if item and self.reconstruction_toggle.isChecked():
+                evidence=self.reconstruction_yield.evidence
+                if evidence and evidence.get('complete'):
+                    from .extreme_filter import ProblemIndex
+                    if getattr(self,'_reconstruction_row_bank',None) is not evidence:
+                        self._reconstruction_row_bank=evidence;self._reconstruction_row_index=ProblemIndex(self.extremes,evidence['red_factors'])
+                    status=dict(checked=True,safe=not self._reconstruction_row_index.matches(item['choices']),reason='按实际重构规则检查')
+                else:status=dict(checked=False,safe=None,reason='重构极端核验中')
+                if item and key==current_key and frame and frame.get('reconstruction',{}).get('constraints_complete'):
+                    from .reconstruction_events import current_failures
+                    status=dict(checked=True,safe=not current_failures(frame['reconstruction']),reason='按当前重构几何检查')
             count=self._cached_pose_counts.get(key,0);safe=status.get('safe') is True
             check=('通过已检查规则' if safe else '存在已检查的问题' if status.get('safe') is False else '未作完整校验') if item else '名义位置 / 全局判定'
             if not item:
@@ -2554,6 +2589,7 @@ class MainWindow(W.QMainWindow):
                     roles=self.roles(),parameters=asdict(self.params()),settings=asdict(self.view_settings),node_edits=list(self.data.node_edits),
                     geometry_indexing=getattr(self.data,'geometry_indexing','legacy'),legacy_node_edits=list(getattr(self.data,'legacy_node_edits',[])),
                     dxf_directory=self.dxf_directory,dxf_options=asdict(self.dxf_settings),
+                    ignored_reconstruction=dict(sha256=self.data.sha256,top_cell=self.data.top_name,refs=[list(r) for r in self.view_settings.reconstruction_ignored]),
                     ignored_width_lines=dict(sha256=self.data.sha256,top_cell=self.data.top_name,refs=[list(r) for r in sorted(self.ignored_width_lines)]),
                     extreme_view=dict(filter_problems=self.problem_filter.isChecked(),mode='focus' if self.grid_mode.currentIndex() else 'all',page_size=EXTREME_PAGE_SIZE,page=(self.preview_page if self.extremes is not None else self._initial_extreme_page)+1),
                     expanded_settings=[title for title,header in self.setting_sections.items() if header.isChecked()],
@@ -2563,6 +2599,15 @@ class MainWindow(W.QMainWindow):
     def show_shape_menu(self,event,point):
         from .shape_menu import show_shape_menu
         show_shape_menu(self,event,point)
+
+    def change_reconstruction_ignores(self,refs,ignore):
+        old=set(self.view_settings.reconstruction_ignored)
+        refs={(k,int(i)) for k,i in refs if self.roles().get(k)=='固定RDL'}
+        updated=old|refs if ignore else old-refs
+        if updated==old:return
+        self.view_settings=replace(self.view_settings,reconstruction_ignored=tuple(sorted(updated)))
+        self.invalidate_reconstruction_edit();self.request_preview()
+        self.statusBar().showMessage(f'已忽略重构 {len(updated)} 个图形；保持源图，运动过孔仍按所属DIE运动。')
 
     def change_width_ignores(self,refs,ignore):
         self.ignored_width_lines=(self.ignored_width_lines.union(refs) if ignore else self.ignored_width_lines.difference(refs))

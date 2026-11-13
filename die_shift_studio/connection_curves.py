@@ -75,7 +75,7 @@ def connection_data(part,plan,center,state):
             start=plan.land_end+plan.tolerance*offset if part['a']==0 else part['a']
             end=plan.fixed_start-plan.tolerance*offset if part['far'].geom_type=='Point' else part['b']
             if start>=end:break
-            active_part=plan.partition(start,end)
+            active_part=plan.partition(start,end,part.get('angles',(0.,0.)))
             if active_part is not None:break
         if active_part is None:raise ValueError('整孔盘外没有可连接的截面')
         if part['a']==0:landing=shapely.transform(active_part['C'],lambda p:rigid_transform(p,center,state))
