@@ -69,6 +69,36 @@ class Connections:
                         found.append(dict(upper=uk,upper_index=int(ui[j]),lower=lk,lower_index=index))
             return found
         for links in parallel_map(between,list(zip(self.groups,self.groups[1:]))):self.links.extend(links)
+        # Moving/fixed via drawings can occupy consecutive functional rows at
+        # disjoint XY positions. An empty local via row must not disconnect a
+        # fixed landing from the nearest actual RDL plane on the other side.
+        self.inferred_interfaces=[]
+        known={(q['upper'],q['upper_index'],q['lower'],q['lower_index']) for q in self.links}
+        via_roles={'运动过孔','固定过孔'};rdl_roles={'运动RDL','固定RDL'}
+        eps=max(1e-12,data.dbu_um**2*.01)
+        def overlaps(key,geometry):
+            tree=self._layer_tree(key)
+            if tree is None:return []
+            return [int(i) for i in tree.query(geometry,predicate='intersects')
+                    if geometry.intersection(self.geometry[key][int(i)]).area>eps]
+        for rank,group in enumerate(self.groups):
+            for key in group:
+                if self.roles[key]!='固定过孔':continue
+                for index,geometry in enumerate(self.geometry[key]):
+                    for direction in (-1,1):
+                        at=rank+direction
+                        while 0<=at<len(self.groups):
+                            other_group=self.groups[at];rdls=[k for k in other_group if self.roles[k] in rdl_roles]
+                            if rdls:
+                                for other in rdls:
+                                    for j in overlaps(other,geometry):
+                                        ref=(other,j,key,index) if direction<0 else (key,index,other,j)
+                                        if ref not in known:
+                                            row=dict(upper=ref[0],upper_index=ref[1],lower=ref[2],lower_index=ref[3])
+                                            self.links.append(row);self.inferred_interfaces.append(row);known.add(ref)
+                                break  # a real RDL plane is never jumped
+                            if any(self.roles[k] not in via_roles or overlaps(k,geometry) for k in other_group):break
+                            at+=direction
         for link in self.links:
             self.outgoing[link['upper']].setdefault(link['upper_index'],[]).append(link)
             self.incoming[link['lower']].setdefault(link['lower_index'],[]).append(link)
@@ -209,7 +239,7 @@ class Connections:
         return self.ownership
     def filter_case(self,case):return case
     def summary(self):
-        return dict(layer_order=self.order,contact_count=len(self.links),
+        return dict(layer_order=self.order,contact_count=len(self.links),inferred_fixed_interfaces=list(self.inferred_interfaces),
                     connected_by_layer={k:int(self.eligible(k).sum()) for k in self.order if self.roles.get(k)=='运动过孔'},
                     ownership_notes=self.ownership_notes,positional_ownership=self.positional_ownership,
                     positional_ownership_count=len(self.positional_ownership),

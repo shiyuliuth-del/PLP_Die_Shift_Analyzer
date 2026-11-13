@@ -21,6 +21,8 @@ on:
       - 'tests/gui_v39.py'
       - 'tests/gui_v40.py'
       - 'tests/test_v40.py'
+      - 'tests/gui_v41.py'
+      - 'tests/test_v41.py'
       - 'tests/test_v38.py'
       - 'tests/test_v39*.py'
       - 'tests/test_branch_integration.py'
@@ -127,6 +129,13 @@ jobs:
           "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_v36.py -v
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" tests/gui_v36.py
+      - name: Verify editable V41 zones, cancel and exact ABC
+        shell: cmd
+        run: |
+          set PYTHONPATH=.;tests
+          "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_v41.py -v
+          if errorlevel 1 exit /b 1
+          "%DIE_SHIFT_PYTHON%" tests/gui_v41.py
       - name: Verify integrated cut editing and source entry compatibility
         shell: cmd
         run: |

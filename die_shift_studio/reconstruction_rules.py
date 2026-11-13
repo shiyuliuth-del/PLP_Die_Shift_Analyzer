@@ -6,6 +6,7 @@ merged with another net before checking shorts. Visibility is not an input.
 from collections import defaultdict
 from functools import lru_cache
 import math
+import threading
 import numpy as np
 import shapely
 from .drc import rule_region,separation_region
@@ -48,9 +49,16 @@ class FixedRules:
         self.board=model.case.get('board');self.inside=self.board.buffer(-self.space) if self.board is not None else None
         from .width_keepout import forbidden
         self.keepout=forbidden(model)
-        self.contexts={};self.hard_memo={}
+        self.contexts={};self.hard_memo={};self._nominal_rows=None;self._nominal_lock=threading.Lock()
         from .session_cache import logical_fingerprint
         self.identity=logical_fingerprint((model.data.geometry_id,model.roles,model.connections.order,self.width,self.space,p.annulus_um))
+
+    def nominal_check(self):
+        if self._nominal_rows is None:
+            with self._nominal_lock:
+                if self._nominal_rows is None:
+                    self._nominal_rows=tuple(dict(v,phase='original') for v in self.check({},np.zeros((len(self.model.bound.centers),3))))
+        return self._nominal_rows
 
     def geometries(self,replacements):
         changed={}
@@ -113,7 +121,7 @@ class FixedRules:
         """
         from .reconstruction_route import warp,part_key
         from .turn_connection import VARIANTS
-        token=('rule-choice-v39',self.identity,style,part_key(part),np.asarray(center).tobytes(),np.asarray(pose).tobytes())
+        token=('rule-choice-v41',self.identity,style,part_key(part),np.asarray(center).tobytes(),np.asarray(pose).tobytes())
         if token in plan.pose_memo:
             value,_,_=plan.pose_memo[token];plan.pose_memo.move_to_end(token)
             geos,error,score=value;return None if geos is None else dict(geos),error,score
@@ -150,7 +158,7 @@ class FixedRules:
             self.hard_memo[hard_key]=permanent
         permanent=self.hard_memo[hard_key]
         if score[0] and style!='linear' and np.any(pose) and not permanent:
-            for v in range(1,len(VARIANTS)+1):
+            for v in (-1,*range(1,len(VARIANTS)+1)):
                 cancel_check();alternate,reason=warp(part,plan,center,pose,style,v)
                 if reason:continue
                 candidate_score=quality(alternate)
@@ -193,6 +201,10 @@ class FixedRules:
             cancel_check()
             if weights[i]<=0:continue
             regions,error,score=self.best_regions(plan,part,self.model.bound.centers[plan.owner],grid.locals[plan.owner][i],style)
+            if self.hard_memo.get((plan.key,plan.identity,part_key(part)),False):
+                # A strict violation in rigid copper, far from every seam,
+                # cannot be cured by any transition shape or sampled pose.
+                return 1.,len(grid.locals[plan.owner])
             bad=bool(error) or score[0]>0
             if bad:failure+=float(weights[i]);count+=1
             if failure>limit+1e-15:break

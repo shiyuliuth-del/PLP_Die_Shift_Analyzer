@@ -128,7 +128,7 @@ class V38Tests(unittest.TestCase):
         poly=box(0,0,100,100).difference(box(20,20,40,40));snap=Snapshot({'5/0':(poly.wkb,)},'T',None,0)
         cfg=DxfSettings(scale=2,separate_holes=True,polygon_mode='hatch',show_fill=True)
         shapes,_,_=contours(snap,{'pieces':[]},{'5/0':'固定RDL'},cfg)
-        self.assertEqual({k for k,_ in shapes},{'L5_D0B','L5_D0B_holes'})
+        self.assertEqual({k for k,_ in shapes},{'L5_D0C'})  # V41: public C=static; holes stay in the same ABC layer
         self.assertLess(shapely.union_all([LineString(xy) for _,xy in shapes]).symmetric_difference(shapely.transform(poly,lambda a:a*2).boundary).length,1e-8)
         with tempfile.TemporaryDirectory() as tmp:
             out=Path(tmp)/'kept.dxf';out.write_bytes(b'previous')

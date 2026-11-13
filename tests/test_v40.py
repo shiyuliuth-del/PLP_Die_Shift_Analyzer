@@ -54,7 +54,7 @@ class Reconstruction40Tests(unittest.TestCase):
             self.assertEqual(color_for(q,None,False,6),'pending')
         finally:e.close()
 
-    def test_risk_fill_is_only_active_region_even_when_b_has_an_original_fault(self):
+    def test_rigid_side_fault_does_not_colour_active_region_v41(self):
         e,_,_=fixture()
         try:
             r=e.reconstructor;f=r.frame(np.zeros((1,3)));q=f['pieces'][0]
@@ -62,12 +62,12 @@ class Reconstruction40Tests(unittest.TestCase):
             from copy import deepcopy
             f=dict(f,pieces=[dict(q)],violations=[dict(kind='线宽不足',geometry=q['regions']['B'].representative_point().buffer(1),layers=('5/0',),net=('5',q['net']))])
             decorate_problems(f);q=f['pieces'][0]
-            self.assertTrue(q['problem_region'].equals(q['regions']['A']))
-            self.assertLess(q['problem_region'].intersection(q['regions']['B']).area,1e-8)
-            self.assertTrue(q['problem_reasons'])
+            self.assertTrue(q['problem_region'].is_empty)
+            self.assertFalse(q['problem_reasons'])
+            self.assertTrue(f['violations'], 'side violations remain in global DRC')
         finally:e.close()
 
-    def test_rule_support_reuses_pose_but_invalidates_moved_copper_and_via(self):
+    def test_rule_support_reuses_pose_and_ignores_remote_rigid_vias(self):
         from die_shift_studio.reconstruction_events import support
         q=dict(regions=dict(A=box(0,0,5,5),B=box(5,0,10,5),C=box(-5,0,0,5)),moving_terminals=box(-3,1,-1,3))
         original=support(q,.001);self.assertIs(original,support(q,.001))
@@ -75,7 +75,7 @@ class Reconstruction40Tests(unittest.TestCase):
         self.assertFalse(original.equals(support(changed,.001)))
         old_via=support(q,.001,True)
         moved=dict(q,moving_terminals=box(30,1,32,3))
-        self.assertFalse(old_via.equals(support(moved,.001,True)))
+        self.assertTrue(old_via.equals(support(moved,.001,True)))  # V41: a remote rigid via cannot colour A
         self.assertIs(original,support(q,.001))
 
     def test_two_die_pair_dependencies_cover_mixed_non_diagonal_cases(self):
@@ -131,7 +131,7 @@ class Reconstruction40Tests(unittest.TestCase):
                 '3/0':[Point(x,y).buffer(20) for x,y in points],'4/0':[Point(x,y).buffer(7) for x,y in points],
                 '5/0':[LineString([(-600,0),(0,.1234567),(600,0)]).buffer(20)],'6/0':[]}
         p=Parameters(multi_bound_x_um=5,multi_bound_y_um=0,bound_angle_deg=0,annulus_um=5,moving_annulus_um=5)
-        e,_,_=make_engine(shapes,p)
+        e,_,_=make_engine(shapes,p,ViewSettings(reconstruction_forced=(('5/0',0),)))
         try:
             r=e.reconstructor;zero=np.zeros((3,3));first=r.frame(zero)
             owners={q['die'] for q in first['pieces']};self.assertEqual(len(owners),2)

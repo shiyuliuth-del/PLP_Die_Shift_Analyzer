@@ -1,0 +1,607 @@
+{
+  "status": "PASS",
+  "code_sha256": "eedbbe9d9483f7aa0b959c1c85e6848454bc7c517c5d843b62922aee53b75398",
+  "hardware": {
+    "cpu": 8,
+    "total_memory_mb": 15708,
+    "available_memory_mb": 5289,
+    "workers": 4,
+    "worker_capacity": 4,
+    "process_workers": 2,
+    "policy": "预留至少2个逻辑CPU（大机器约10%）与65%可用内存；原生几何/FFT使用线程；大型独立原图DRC与RDL候选搜索使用spawn进程；小任务串行"
+  },
+  "cases": [
+    {
+      "project": "nu17123.dshift",
+      "source_sha256": "6bdd1614389450db9f57e80cbed109e42b3e374e8ad775da86f3da0a0e6df418",
+      "parameters": {
+        "panel_layers": 1,
+        "wafer_layers": 0,
+        "line_width_um": 15.0,
+        "line_space_um": 15.0,
+        "wafer_line_width_um": 15.0,
+        "wafer_line_space_um": 15.0,
+        "via_diameter_um": 30.145805744756366,
+        "annulus_um": 15.0,
+        "moving_annulus_um": 15.0,
+        "residual_budget_um": 5.0,
+        "transition_length_um": 200.0,
+        "max_route_angle_deg": 30.0,
+        "routing_edge_keepout_um": 40.0,
+        "min_die_gap_um": 20.0,
+        "min_package_clearance_um": 20.0,
+        "single_bound_x_um": 25.0,
+        "single_bound_y_um": 25.0,
+        "multi_bound_x_um": 15.0,
+        "multi_bound_y_um": 15.0,
+        "bound_angle_deg": 1.0,
+        "per_die_enabled": false,
+        "die_bounds": [],
+        "rotation_center": "center",
+        "rotation_x_um": 0.0,
+        "rotation_y_um": 0.0,
+        "die_pivots": [
+          [
+            "center",
+            0.0,
+            0.0
+          ],
+          [
+            "center",
+            0.0,
+            0.0
+          ]
+        ],
+        "input_nsigma": 6.0,
+        "target_nsigma": 6.0,
+        "reference_nsigma": 6.0,
+        "mean_x_um": 0.0,
+        "mean_y_um": 0.0,
+        "mean_angle_deg": 0.0,
+        "rho_xy": 0.0,
+        "interdie": "unknown",
+        "fixed_via_assignment": "all"
+      },
+      "dies": 2,
+      "interfaces": 235,
+      "covered_interfaces": 235,
+      "inferred_fixed_interfaces": 82,
+      "auto_ignored": 1,
+      "nominal_zones": 65,
+      "nominal_valid_zones": 65,
+      "cold_seconds": 253.5640241630026,
+      "scan_seconds": 131.2367173510138,
+      "states": 729,
+      "geometry_checks": 6940,
+      "local_checks": 6940,
+      "pair_checks": 1223,
+      "colours": {
+        "red": 23,
+        "yellow": 0,
+        "green": 42,
+        "gray": 0
+      },
+      "parity": [
+        {
+          "index": -1,
+          "seconds": 3.0067982152104378e-05,
+          "rule_groups": 0,
+          "problem_zones": 0,
+          "disconnected": 0
+        },
+        {
+          "index": 0,
+          "seconds": 0.6904133619973436,
+          "rule_groups": 0,
+          "problem_zones": 5,
+          "disconnected": 5
+        },
+        {
+          "index": 727,
+          "seconds": 0.7456818469800055,
+          "rule_groups": 6,
+          "problem_zones": 6,
+          "disconnected": 1
+        },
+        {
+          "index": 483,
+          "seconds": 0.7781144650070928,
+          "rule_groups": 2,
+          "problem_zones": 6,
+          "disconnected": 3
+        },
+        {
+          "index": 694,
+          "seconds": 0.8046711130300537,
+          "rule_groups": 6,
+          "problem_zones": 8,
+          "disconnected": 2
+        },
+        {
+          "index": 603,
+          "seconds": 0.681458218023181,
+          "rule_groups": 6,
+          "problem_zones": 9,
+          "disconnected": 2
+        },
+        {
+          "index": 559,
+          "seconds": 0.714709635998588,
+          "rule_groups": 5,
+          "problem_zones": 6,
+          "disconnected": 2
+        },
+        {
+          "index": 515,
+          "seconds": 0.7019835090031847,
+          "rule_groups": 6,
+          "problem_zones": 7,
+          "disconnected": 1
+        },
+        {
+          "index": 91,
+          "seconds": 0.8021981950150803,
+          "rule_groups": 4,
+          "problem_zones": 6,
+          "disconnected": 2
+        },
+        {
+          "index": 185,
+          "seconds": 0.7469028380000964,
+          "rule_groups": 0,
+          "problem_zones": 3,
+          "disconnected": 3
+        },
+        {
+          "index": 602,
+          "seconds": 0.6617310320143588,
+          "rule_groups": 4,
+          "problem_zones": 6,
+          "disconnected": 1
+        },
+        {
+          "index": 243,
+          "seconds": 0.8190497219911776,
+          "rule_groups": 2,
+          "problem_zones": 3,
+          "disconnected": 1
+        }
+      ],
+      "exports": [
+        {
+          "pose": "zero",
+          "contours": [
+            {
+              "layer": "1/0",
+              "hausdorff_um": 0.0,
+              "length_error_um": 0.0
+            },
+            {
+              "layer": "2/0",
+              "hausdorff_um": 0.0,
+              "length_error_um": 2.9103830456733704e-11
+            },
+            {
+              "layer": "4/0",
+              "hausdorff_um": 0.0,
+              "length_error_um": 1.8189894035458565e-12
+            }
+          ],
+          "polygons": 240,
+          "layers": 5,
+          "sha256": "a827f9036b3ee433ae495ade46300a65bc54e34493049952ea6172f127f91c54",
+          "ignored": 0,
+          "input_polygons": 53,
+          "merged_polygons": 53,
+          "flattened": true,
+          "merge_layers": true,
+          "scale": 1.0,
+          "regions": true,
+          "topology": {
+            "L1_D0": {
+              "segments": 4,
+              "nodes": 4,
+              "closed": true,
+              "overlap": false
+            },
+            "L2_D0": {
+              "segments": 11896,
+              "nodes": 11896,
+              "closed": true,
+              "overlap": false
+            },
+            "L4_D0": {
+              "segments": 8,
+              "nodes": 8,
+              "closed": true,
+              "overlap": false
+            }
+          },
+          "unresolved_regions": 0,
+          "seconds": 1.167148960987106
+        },
+        {
+          "pose": "mixed",
+          "contours": [
+            {
+              "layer": "1/0",
+              "hausdorff_um": 0.0,
+              "length_error_um": 0.0
+            },
+            {
+              "layer": "2/0",
+              "hausdorff_um": 0.0,
+              "length_error_um": 1.1641532182693481e-10
+            },
+            {
+              "layer": "4/0",
+              "hausdorff_um": 0.0,
+              "length_error_um": 1.8189894035458565e-12
+            }
+          ],
+          "polygons": 257,
+          "layers": 5,
+          "sha256": "5eea2c6dde42d6a64cf9bc35e81e74ba9242c542bbfd7880b47b608674a34e5d",
+          "ignored": 0,
+          "input_polygons": 53,
+          "merged_polygons": 53,
+          "flattened": true,
+          "merge_layers": true,
+          "scale": 1.0,
+          "regions": true,
+          "topology": {
+            "L1_D0": {
+              "segments": 4,
+              "nodes": 4,
+              "closed": true,
+              "overlap": false
+            },
+            "L2_D0": {
+              "segments": 19317,
+              "nodes": 19317,
+              "closed": true,
+              "overlap": false
+            },
+            "L4_D0": {
+              "segments": 8,
+              "nodes": 8,
+              "closed": true,
+              "overlap": false
+            }
+          },
+          "unresolved_regions": 1,
+          "seconds": 2.010098708968144
+        }
+      ],
+      "styles": [
+        {
+          "style": "linear",
+          "seconds": 1.9394364330219105,
+          "pieces": 65,
+          "disconnected": 5,
+          "rule_groups": 21
+        },
+        {
+          "style": "c1",
+          "seconds": 2.8480539790471084,
+          "pieces": 65,
+          "disconnected": 1,
+          "rule_groups": 2
+        },
+        {
+          "style": "c2",
+          "seconds": 0.0012758140219375491,
+          "pieces": 65,
+          "disconnected": 1,
+          "rule_groups": 2
+        },
+        {
+          "style": "arc",
+          "seconds": 6.353233180998359,
+          "pieces": 65,
+          "disconnected": 5,
+          "rule_groups": 23
+        }
+      ]
+    },
+    {
+      "project": "gd55-1105.dshift",
+      "source_sha256": "a4bccbb65058dc4023bc53d5a6916c4185b81f6d1710e365c8b21c9c6feb1b29",
+      "parameters": {
+        "panel_layers": 1,
+        "wafer_layers": 1,
+        "line_width_um": 15.0,
+        "line_space_um": 15.0,
+        "wafer_line_width_um": 15.0,
+        "wafer_line_space_um": 15.0,
+        "via_diameter_um": 40.00100998725171,
+        "annulus_um": 15.0,
+        "moving_annulus_um": 15.0,
+        "residual_budget_um": 5.0,
+        "transition_length_um": 200.0,
+        "max_route_angle_deg": 30.0,
+        "routing_edge_keepout_um": 40.0,
+        "min_die_gap_um": 20.0,
+        "min_package_clearance_um": 20.0,
+        "single_bound_x_um": 25.0,
+        "single_bound_y_um": 25.0,
+        "multi_bound_x_um": 15.0,
+        "multi_bound_y_um": 15.0,
+        "bound_angle_deg": 1.0,
+        "per_die_enabled": false,
+        "die_bounds": [],
+        "rotation_center": "center",
+        "rotation_x_um": 0.0,
+        "rotation_y_um": 0.0,
+        "die_pivots": [
+          [
+            "center",
+            0.0,
+            0.0
+          ],
+          [
+            "center",
+            0.0,
+            0.0
+          ],
+          [
+            "center",
+            0.0,
+            0.0
+          ]
+        ],
+        "input_nsigma": 6.0,
+        "target_nsigma": 6.0,
+        "reference_nsigma": 6.0,
+        "mean_x_um": 0.0,
+        "mean_y_um": 0.0,
+        "mean_angle_deg": 0.0,
+        "rho_xy": 0.0,
+        "interdie": "unknown",
+        "fixed_via_assignment": "all"
+      },
+      "dies": 3,
+      "interfaces": 155,
+      "covered_interfaces": 155,
+      "inferred_fixed_interfaces": 0,
+      "auto_ignored": 88,
+      "nominal_zones": 64,
+      "nominal_valid_zones": 64,
+      "cold_seconds": 120.22199180501048,
+      "scan_seconds": 21.01618353597587,
+      "states": 19683,
+      "geometry_checks": 1789,
+      "local_checks": 1789,
+      "pair_checks": 230,
+      "colours": {
+        "red": 16,
+        "yellow": 0,
+        "green": 48,
+        "gray": 0
+      },
+      "parity": [
+        {
+          "index": -1,
+          "seconds": 0.002069775015115738,
+          "rule_groups": 0,
+          "problem_zones": 0,
+          "disconnected": 0
+        },
+        {
+          "index": 0,
+          "seconds": 0.7562064250232652,
+          "rule_groups": 6,
+          "problem_zones": 1,
+          "disconnected": 0
+        },
+        {
+          "index": 19681,
+          "seconds": 0.75577918702038,
+          "rule_groups": 15,
+          "problem_zones": 2,
+          "disconnected": 1
+        },
+        {
+          "index": 13071,
+          "seconds": 0.9213402189780027,
+          "rule_groups": 14,
+          "problem_zones": 2,
+          "disconnected": 1
+        },
+        {
+          "index": 18779,
+          "seconds": 0.7956539010046981,
+          "rule_groups": 6,
+          "problem_zones": 1,
+          "disconnected": 0
+        },
+        {
+          "index": 16312,
+          "seconds": 0.8008837169618346,
+          "rule_groups": 7,
+          "problem_zones": 4,
+          "disconnected": 1
+        },
+        {
+          "index": 15114,
+          "seconds": 0.8168620999786071,
+          "rule_groups": 10,
+          "problem_zones": 3,
+          "disconnected": 1
+        },
+        {
+          "index": 13935,
+          "seconds": 0.7218978609889746,
+          "rule_groups": 7,
+          "problem_zones": 0,
+          "disconnected": 0
+        },
+        {
+          "index": 2479,
+          "seconds": 0.6945462240255438,
+          "rule_groups": 9,
+          "problem_zones": 5,
+          "disconnected": 1
+        },
+        {
+          "index": 5002,
+          "seconds": 0.8173893720377237,
+          "rule_groups": 10,
+          "problem_zones": 4,
+          "disconnected": 0
+        },
+        {
+          "index": 16276,
+          "seconds": 0.7665757240029052,
+          "rule_groups": 14,
+          "problem_zones": 7,
+          "disconnected": 2
+        },
+        {
+          "index": 6571,
+          "seconds": 0.6506108369794674,
+          "rule_groups": 3,
+          "problem_zones": 0,
+          "disconnected": 0
+        }
+      ],
+      "exports": [
+        {
+          "pose": "zero",
+          "contours": [
+            {
+              "layer": "5/0",
+              "hausdorff_um": 1.1368683772161603e-13,
+              "length_error_um": 7.8580342233181e-10
+            },
+            {
+              "layer": "127/0",
+              "hausdorff_um": 0.0,
+              "length_error_um": 0.0
+            },
+            {
+              "layer": "128/0",
+              "hausdorff_um": 0.0,
+              "length_error_um": 0.0
+            }
+          ],
+          "polygons": 434,
+          "layers": 5,
+          "sha256": "32c947968decc8462f716e0f82da3eb6ac06681b940bfbf5d3d92eb7b368252a",
+          "ignored": 0,
+          "input_polygons": 155,
+          "merged_polygons": 155,
+          "flattened": true,
+          "merge_layers": true,
+          "scale": 1.0,
+          "regions": true,
+          "topology": {
+            "L127_D0": {
+              "segments": 4,
+              "nodes": 4,
+              "closed": true,
+              "overlap": false
+            },
+            "L128_D0": {
+              "segments": 12,
+              "nodes": 12,
+              "closed": true,
+              "overlap": false
+            },
+            "L5_D0": {
+              "segments": 8162,
+              "nodes": 8162,
+              "closed": true,
+              "overlap": false
+            }
+          },
+          "unresolved_regions": 0,
+          "seconds": 1.1072803139686584
+        },
+        {
+          "pose": "mixed",
+          "contours": [
+            {
+              "layer": "5/0",
+              "hausdorff_um": 5.684341886080802e-14,
+              "length_error_um": 7.8580342233181e-10
+            },
+            {
+              "layer": "127/0",
+              "hausdorff_um": 0.0,
+              "length_error_um": 0.0
+            },
+            {
+              "layer": "128/0",
+              "hausdorff_um": 0.0,
+              "length_error_um": 0.0
+            }
+          ],
+          "polygons": 441,
+          "layers": 5,
+          "sha256": "e4798484bfcc6c3f361471b3fea165e991b42a367fd9ff8d4dc858661fc0d40e",
+          "ignored": 0,
+          "input_polygons": 155,
+          "merged_polygons": 155,
+          "flattened": true,
+          "merge_layers": true,
+          "scale": 1.0,
+          "regions": true,
+          "topology": {
+            "L127_D0": {
+              "segments": 4,
+              "nodes": 4,
+              "closed": true,
+              "overlap": false
+            },
+            "L128_D0": {
+              "segments": 12,
+              "nodes": 12,
+              "closed": true,
+              "overlap": false
+            },
+            "L5_D0": {
+              "segments": 10705,
+              "nodes": 10705,
+              "closed": true,
+              "overlap": false
+            }
+          },
+          "unresolved_regions": 0,
+          "seconds": 1.4061358359758742
+        }
+      ],
+      "styles": [
+        {
+          "style": "linear",
+          "seconds": 2.212952336994931,
+          "pieces": 64,
+          "disconnected": 1,
+          "rule_groups": 8
+        },
+        {
+          "style": "c1",
+          "seconds": 28.26627030898817,
+          "pieces": 64,
+          "disconnected": 0,
+          "rule_groups": 3
+        },
+        {
+          "style": "c2",
+          "seconds": 0.0029230720247142017,
+          "pieces": 64,
+          "disconnected": 0,
+          "rule_groups": 3
+        },
+        {
+          "style": "arc",
+          "seconds": 24.630760700034443,
+          "pieces": 64,
+          "disconnected": 1,
+          "rule_groups": 11
+        }
+      ]
+    }
+  ],
+  "scope": "Linux CPU; complete discrete factors, selected full-frame native parity and actual DXF readback. Geometric validity is distinct from DRC, continuous probability or production acceptance."
+}

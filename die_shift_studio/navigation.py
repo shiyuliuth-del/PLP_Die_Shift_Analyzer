@@ -31,6 +31,7 @@ class Navigation:
         toolbar=getattr(self.canvas,'toolbar',None)
         if toolbar:toolbar.push_current()
     def scroll(self,e):
+        if getattr(self.canvas,'reconstruction_drag_active',False) or getattr(e,'reconstruction_cut_handled',False):return
         if getattr(self.canvas,'die_move_active',False) and not control_held(e):return
         if self.drag or self.zoom is not None or e.inaxes is not self.ax or e.xdata is None or e.ydata is None:return
         step=float(e.step)

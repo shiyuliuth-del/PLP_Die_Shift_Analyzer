@@ -61,7 +61,7 @@ def solve(r,plan,base,center,pose,quick=False):
     if mode=='perpendicular':
         regions,error,quality=r.rules.best_regions(plan,base,center,pose,style)
         return base,regions,error,quality
-    key=('angle-v40',mode,style,quick,part_key(base),np.asarray(center).tobytes(),np.asarray(pose).tobytes())
+    key=('angle-v41',mode,style,quick,base.get('manual_angles'),part_key(base),np.asarray(center).tobytes(),np.asarray(pose).tobytes())
     hit=plan.cache.get(key)
     if hit is not None:
         part,regions,error,quality=hit
@@ -77,6 +77,8 @@ def solve(r,plan,base,center,pose,quick=False):
         for values in (angles[:1] if quick else angles):
             cancel_check()
             values=np.clip(np.asarray(values,float),-math.pi/3,math.pi/3)
+            for side,locked in enumerate(base.get('manual_angles',(False,False))):
+                if locked:values[side]=base['angles'][side]
             if base['near'].geom_type=='Point':values=np.array([0.,values[1]])
             if base['far'].geom_type=='Point':values=np.array([values[0],0.])
             part=plan.partition(base['a'],base['b'],values)

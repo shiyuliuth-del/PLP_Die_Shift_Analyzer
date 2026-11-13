@@ -11,8 +11,8 @@ from die_shift_studio import __version__
 def check_source():
     """Stage a clean test checkout. Test helpers and projects do not enter the release."""
     gui=['gui_smoke','gui_v14','gui_scheduler_v20','gui_repair',
-         'gui_v24','gui_v25','gui_v26','gui_v27','gui_v28','gui_v29','gui_v30','gui_v32','gui_v33','gui_v34','gui_v35','gui_v36','gui_v38','gui_v39','gui_v40','gui_branch_integration']
-    env=dict(os.environ,QT_QPA_PLATFORM='offscreen',OPENBLAS_NUM_THREADS='1',PYTHONUTF8='1')
+         'gui_v24','gui_v25','gui_v26','gui_v27','gui_v28','gui_v29','gui_v30','gui_v32','gui_v33','gui_v34','gui_v35','gui_v36','gui_v38','gui_v39','gui_v40','gui_v41','gui_branch_integration']
+    env=dict(os.environ,QT_QPA_PLATFORM='offscreen',OPENBLAS_NUM_THREADS='1',PYTHONUTF8='1',PYTHONFAULTHANDLER='1')
     subprocess.run([sys.executable,'tools/check_contribution.py'],cwd=ROOT,env=env,check=True)
     records=[]
     with tempfile.TemporaryDirectory(prefix='die-shift-source-qa-') as name:
@@ -36,7 +36,7 @@ def check_source():
                                   stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=600)
             print(result.stdout,flush=True)
             if result.returncode or 'Traceback (most recent call last)' in result.stdout or '未处理异常' in result.stdout:
-                raise RuntimeError('Source regression failed: '+str(args))
+                raise RuntimeError(f'Source regression failed (exit {result.returncode}): {args}')
             record=dict(args=args,env=extra,status='PASS',summary=result.stdout.strip().splitlines()[-3:])
             if '--project' in args:
                 data=json.loads((stage/args[-1]).read_text(encoding='utf8'))

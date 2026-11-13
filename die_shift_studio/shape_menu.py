@@ -17,6 +17,11 @@ def issue_refs(window):
 def show_shape_menu(window,event,point):
     if window.data is None:return
     selection=window.selection
+    picked=None
+    if window.reconstruction_toggle.isChecked():
+        picked=window.reconstruction_overlay.pick(*point,window.cut_drag._tolerance())
+        if picked and picked[2] in ('moved','extra'):
+            selection.apply_hits([(picked[0]['layer'],picked[0]['index'])],'replace')
     if not selection.selected:
         tolerance=3*abs(window.ax.get_xlim()[1]-window.ax.get_xlim()[0])/max(1,window.ax.bbox.width)
         hits=selection.hits(Point(point).buffer(tolerance),point=True)
@@ -45,8 +50,24 @@ def show_shape_menu(window,event,point):
         if add:menu.addAction('忽略选中的问题线路',lambda:change(add,True))
         if remove:menu.addAction('取消忽略选中的问题线路',lambda:change(remove,False))
     if window.reconstruction_toggle.isChecked():
+        from .reconstruction_edits import change_zone
+        source_data=window.data;source_group=window.cache_group
+        def edit_zone(action,**kwargs):
+            if window.data is source_data and window.cache_group is source_group and window.reconstruction_toggle.isChecked():change_zone(window,action,**kwargs)
         selected={r for r in refs if window.roles().get(r[0])=='固定RDL'}
-        ignored=set(window.view_settings.reconstruction_ignored)
+        if picked:
+            piece,_,kind=picked
+            if kind in ('moved','extra'):
+                menu.addAction('撤销旋转',lambda:edit_zone('rotate_reset',piece=piece,side=1 if kind=='extra' else 0))
+            menu.addAction('删除动区',lambda:edit_zone('delete',piece=piece))
+        at_cursor=[ref for ref in selection.hits(Point(point).buffer(window.cut_drag._tolerance()),point=True) if window.roles().get(ref[0])=='固定RDL']
+        if picked or at_cursor:
+            ref=(picked[0]['layer'],picked[0]['index']) if picked else at_cursor[0]
+            action=menu.addAction('增加动区',lambda:edit_zone('add',ref=ref,point=point))
+            solver=getattr(getattr(window,'engine',None),'reconstructor',None)
+            if solver is None or ref not in solver.vias_by_target:
+                action.setEnabled(False);action.setToolTip('此固定RDL没有可追溯的运动过孔连接')
+        ignored=set(window.view_settings.reconstruction_ignored)|set((window.current_frame or {}).get('reconstruction',{}).get('auto_ignored',{}))
         add=selected-ignored;remove=selected&ignored
         data=window.data;group=window.cache_group
         def change_reconstruction(items,value):

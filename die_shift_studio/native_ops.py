@@ -7,8 +7,8 @@ from collections import OrderedDict
 import json
 
 _REGIONS=OrderedDict()
-def region(kdb,polygons):
-    key=json.dumps(polygons,separators=(',',':'))
+def region(kdb,polygons,identity=None):
+    key=identity or json.dumps(polygons,separators=(',',':'))
     if key in _REGIONS:
         _REGIONS.move_to_end(key);return _REGIONS[key].dup()
     r=kdb.Region()
@@ -34,10 +34,10 @@ def execute(kdb,request):
         if check.is_empty():raise RuntimeError('KLayout native DRC self-check failed')
         return dict(version=str(getattr(kdb,'__version__','desktop')),self_check=True)
     if op=='clear':_REGIONS.clear();return {}
-    a=region(kdb,request['a'])
+    a=region(kdb,request['a'],request.get('akey'))
     if op in ('width','space','notch','separation'):
         options=dict(whole_edges=False,ignore_angle=5.+1e-8,metrics=kdb.Region.Projection,shielded=False)
-        if op=='separation':pairs=a.separation_check(region(kdb,request['b']),request['distance'],**options)
+        if op=='separation':pairs=a.separation_check(region(kdb,request['b'],request.get('bkey')),request['distance'],**options)
         else:
             pairs=getattr(a,op+'_check')(request['distance'],**options);kept=kdb.EdgePairs()
             for pair in pairs.each():

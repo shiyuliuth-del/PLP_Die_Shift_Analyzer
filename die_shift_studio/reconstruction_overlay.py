@@ -58,7 +58,7 @@ class ReconstructionOverlay:
                 if g is None:continue
                 if plan is not None and g.geom_type=='Point':
                     local=plan.pad_handle(side)
-                    if side==0:local=transform(local,frame['rotation_centers'][q['die']],frame['states'][q['die']])
+                    local=transform(local,frame['rotation_centers'][q['die']],frame['states'][q['die']]*q.get('endpoint_weights',(1.,0.))[side])
                     result[key]=local
                     anchor=tuple(np.round(np.asarray(plan.route.coords[0 if side==0 else -1]),7))
                     groups.setdefault((q['layer'],kind,q['die'] if side==0 else -1,anchor),[]).append((key,g,local))
@@ -165,7 +165,7 @@ class ReconstructionOverlay:
         bank=self.risk_bank();nominal=bool((w.current_frame or {}).get('nominal_global'))
         if self.active():
             from .width_witness import pose_text
-            labels={'red':'当前存在违规','yellow':'当前通过，其他极端存在问题','green':'全部离散极端通过','gray':'失效概率上界满足良率要求','pending':'当前通过，全极端核验中'}
+            labels={'red':'当前存在违规（动区型变前／后）','yellow':'当前通过，其他极端存在问题','green':'全部离散极端通过','gray':'失效概率上界满足良率要求','pending':'当前通过，全极端核验中'}
             for key,(q,status,g) in self.zone_views.items():
                 if (q['layer'],q['index']) not in selected or status=='green':continue
                 if g.is_empty:g=q['source']
@@ -237,6 +237,11 @@ class ReconstructionOverlay:
         self.hover.set_markersize(12.+4.*wave)
         self.w.scene_renderer.draw_feedback(self.hover,(id(self.data()),self.stamp),self.w.legend)
     def clear_hover(self):self.highlight(None)
+    def hide(self):
+        self.clear_hover();self.stamp=None;self.handles={};self.zone_views={}
+        for artist in [*self.artists.values(),*self.labels,*self.end_artists,*self.region_artists,*self.arrow_artists,*[getattr(self,n,None) for n in ('warning','problems','constraints','problem_points','cuts','second_cuts','points','second_points')]]:
+            if artist is not None:artist.set_visible(False)
+        self.w.scene_renderer.external_draw(None)
     def fill_table(self,data):
         if getattr(self.w,'cut_drag',None) and self.w.cut_drag.state is not None:return
         stamp=(id(data),self.active())
@@ -266,7 +271,7 @@ class CutDrag:
     def __init__(self,window):
         self.w=window;self.state=None;self.line=None;self.latest=None
         self.timer=QtCore.QTimer(window);self.timer.setInterval(33);self.timer.timeout.connect(self._tick)
-        for event,fn in [('button_press_event',self.press),('motion_notify_event',self.move),('button_release_event',self.release),('figure_leave_event',self.leave)]:window.canvas.mpl_connect(event,fn)
+        for event,fn in [('button_press_event',self.press),('motion_notify_event',self.move),('button_release_event',self.release),('figure_leave_event',self.leave),('scroll_event',self.scroll)]:window.canvas.mpl_connect(event,fn)
     def _tolerance(self):
         t=self.w.ax.transData.inverted();return float(np.linalg.norm(t.transform((12,0))-t.transform((0,0))))
     def press(self,event):
@@ -278,6 +283,7 @@ class CutDrag:
         piece,xy,kind=picked;overlay=w.reconstruction_overlay;overlay.selected=overlay._key(piece);overlay.selected_kind=kind
         if kind in ('bridge','problem'):return
         if event.button!=1:return
+        event.reconstruction_cut_handled=True
         w.stop_animation();w.cancel_previews()
         if event.dblclick:self.clear(overlay._key(piece),piece,kind);return
         if getattr(w,'selection',None):
@@ -286,6 +292,7 @@ class CutDrag:
         self.state=dict(piece=piece,kind=kind,start=np.array([event.x,event.y]),moved=False,settings=w.view_settings,
                         frame=w.current_frame,phase=0.,updated=w.view_settings,part=None,
                         handle_offset=(xy.mean(axis=0)-np.asarray(piece['extra_cut' if kind=='extra' else 'moved_cut'].coords[0]) if piece['extra_cut' if kind=='extra' else 'moved_cut'].geom_type=='Point' else np.zeros(2)))
+        w.canvas.reconstruction_drag_active=True
         self.latest=None;self.timer.start();overlay.highlight(picked)
         w.statusBar().showMessage('拖动共用动区边界；另一端保持不动，松开后更新所有工况。')
     def move(self,event):
@@ -295,33 +302,61 @@ class CutDrag:
             return
         if event.xdata is None or event.ydata is None:return
         if not self.state['moved'] and np.linalg.norm(np.array([event.x,event.y])-self.state['start'])<2:return
-        self.state['moved']=True;self.latest=np.array([event.xdata,event.ydata])
+        self.state['moved']=True;self.state['rotated_only']=False;self.latest=np.array([event.xdata,event.ydata])
     def _tick(self):
         state=self.state
         if state is None:return
         if self.latest is not None:
             cursor=self.latest-self.state['handle_offset'];self.latest=None;piece=state['piece'];owner=piece['die'];frame=state['frame']
-            if state['kind']!='extra':
-                from .selection import inverse_geometry
-                cursor=np.asarray(inverse_geometry(shapely.Point(cursor),frame['rotation_centers'][owner],frame['states'][owner]).coords[0])
+            from .selection import inverse_geometry
+            weight=piece.get('endpoint_weights',(1.,0.))[1 if state['kind']=='extra' else 0]
+            cursor=np.asarray(inverse_geometry(shapely.Point(cursor),frame['rotation_centers'][owner],frame['states'][owner]*weight).coords[0])
             plan=piece.get('route_plan')
             if plan is not None:
                 which=1 if state['kind']=='extra' else 0
                 part,clamped=plan.edit_pose(*piece['interval'],which,float(plan.route.project(shapely.Point(cursor))),frame['rotation_centers'][owner],frame['states'][owner],self.w.view_settings.reconstruction_style)
                 if part is not None:
+                    from .reconstruction_edits import apply_angles
+                    part=apply_angles(state['updated'],plan,part)
+                if part is not None:
                     rows=[r for r in self.w.view_settings.reconstruction_intervals if (r[0],r[1],r[2],normalize_via_refs(r[3]),r[4])!=(*plan.key,plan.identity)]
                     rows.append((*plan.key,plan.identity,part['a'],part['b']))
-                    state['updated']=replace(self.w.view_settings,reconstruction_intervals=tuple(rows));state['part']=part
-                    line=part['far'] if which else transform(part['near'],frame['rotation_centers'][owner],frame['states'][owner])
+                    state['updated']=replace(state['updated'],reconstruction_intervals=tuple(rows));state['part']=part
+                    weights=piece.get('endpoint_weights',(1.,0.))
+                    near=transform(part['near'],frame['rotation_centers'][owner],frame['states'][owner]*weights[0])
+                    far=transform(part['far'],frame['rotation_centers'][owner],frame['states'][owner]*weights[1])
+                    line=far if which else near
                     if self.w.view_settings.reconstruction_live:self._live(part)
-                    view_piece=dict(piece,moved_cut=transform(part['near'],frame['rotation_centers'][owner],frame['states'][owner]),extra_cut=part['far'])
+                    view_piece=dict(piece,moved_cut=near,extra_cut=far)
                     handles=self.w.reconstruction_overlay.handles if self.w.view_settings.reconstruction_live else self.w.reconstruction_overlay.handle_geometries([view_piece])
                     handle=handles.get((self.w.reconstruction_overlay._key(piece),state['kind']),line)
                     self.w.reconstruction_overlay.highlight((piece,_lines(handle)[0],state['kind']))
                     self.w.render_scene()
+    def scroll(self,event):
+        if self.state is None:return
+        event.reconstruction_cut_handled=True
+        state=self.state;piece=state['piece'];side=1 if state['kind']=='extra' else 0
+        from .reconstruction_edits import rotate,apply_angles
+        plan=piece['route_plan'];part=state['part'] or plan.partition(*piece['interval'],piece.get('boundary_angles',(0.,0.)))
+        if part is None:return
+        current=dict(piece,interval=(part['a'],part['b']),boundary_angles=part.get('angles',(0.,0.)))
+        updated=rotate(state['updated'],current,side,-math.radians(2)*event.step)
+        angled=apply_angles(updated,plan,part)
+        if angled is None:
+            self.w.statusBar().showMessage('该角度无法分离原始连接端，已保留上一个有效角度');return
+        state.update(updated=updated,part=angled,moved=True,rotated_only=True)
+        if self.w.view_settings.reconstruction_live:self._live(angled)
+        self.w.reconstruction_overlay.stamp=None;self.w.reconstruction_overlay.draw();self.w.render_scene()
+        self.w.statusBar().showMessage(f"边界旋转 {math.degrees(angled['angles'][side]):.1f}°；右键可撤销旋转")
+
     def _live(self,part):
         from .reconstruction_route import warp,failed_connection,missing_area
         state=self.state;old=state['frame'];piece=state['piece'];plan=piece['route_plan']
+        if piece.get('endpoint_weights',(1.,0.))!=(1.,0.):
+            from .reconstruction_zones import live_serial
+            self.w.current_frame=live_serial(self.w,state['updated'],old,(piece['layer'],piece['index']))
+            self.w.constraint_feedback.request(self.w.current_frame,state['updated']);self.w.reconstruction_yield.refresh(state['updated'])
+            self.w.reconstruction_overlay.stamp=None;self.w.reconstruction_overlay.draw();return
         from .reconstruction_angles import solve
         if self.w.view_settings.reconstruction_boundary_mode=='perpendicular':regions,error=warp(part,plan,old['rotation_centers'][piece['die']],old['states'][piece['die']],self.w.view_settings.reconstruction_style)
         else:part,regions,error,_=solve(self.w.engine.reconstructor,plan,part,old['rotation_centers'][piece['die']],old['states'][piece['die']],quick=True)
@@ -348,9 +383,10 @@ class CutDrag:
         self.w.reconstruction_overlay.stamp=None;self.w.reconstruction_overlay.draw()
     def release(self,event):
         if self.state is None:return
-        if event.xdata is not None and event.ydata is not None and self.state['moved']:self.latest=np.array([event.xdata,event.ydata])
+        if event.xdata is not None and event.ydata is not None and self.state['moved'] and not self.state.get('rotated_only'):self.latest=np.array([event.xdata,event.ydata])
         self._tick();state=self.state
         if state.get('part') is not None:self._live(state['part'])
+        self.w.canvas.reconstruction_drag_active=False
         self.state=None;self.latest=None;self.timer.stop()
         self.w.reconstruction_overlay.clear_hover()
         if not state['moved']:return
@@ -358,6 +394,7 @@ class CutDrag:
         self.w.invalidate_reconstruction_edit();self.w.request_preview(quiet=True)
     def cancel(self):
         if self.state is None:return False
+        self.w.canvas.reconstruction_drag_active=False
         original=self.state['frame'];self.state=None;self.latest=None;self.timer.stop()
         self.w.constraint_feedback.cancel();self.w.reconstruction_yield.refresh()
         self.w.current_frame=original;self.w.reconstruction_overlay.clear_hover()

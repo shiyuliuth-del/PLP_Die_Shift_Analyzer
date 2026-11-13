@@ -1,5 +1,5 @@
 """Native KLayout API, or a persistent installed-desktop batch process. Offline."""
-import atexit,importlib,json,logging,math,os,secrets,shutil,socket,struct,subprocess,sys,tempfile,threading
+import atexit,importlib,json,logging,math,os,secrets,shutil,socket,struct,subprocess,sys,tempfile,threading,hashlib
 from pathlib import Path
 from functools import lru_cache
 import numpy as np
@@ -127,7 +127,7 @@ def close():
     global _backend
     with _lock:
         if _backend is not None:_backend.close();_backend=None
-    compute.cache_clear();any_violation.cache_clear();native_ops._REGIONS.clear()
+    compute.cache_clear();any_violation.cache_clear();encoded.cache_clear();native_ops._REGIONS.clear()
 atexit.register(close)
 
 def _encode(geometry,dbu):
@@ -149,12 +149,22 @@ def _encode(geometry,dbu):
         out.append(rings)
     return out
 
+@lru_cache(maxsize=32)
+def encoded(wkb,dbu):
+    # Adjacent width/spacing/enclosure checks reuse one immutable DBU conversion.
+    return tuple(tuple(tuple(tuple(point) for point in ring) for ring in poly) for poly in _encode(shapely.from_wkb(wkb),dbu))
+
+
+def packed(wkb,dbu):
+    value=encoded(wkb,dbu) if len(wkb)<=256000 else _encode(shapely.from_wkb(wkb),dbu)
+    return value,float(dbu).hex()+':'+hashlib.sha256(wkb).hexdigest()
+
 @lru_cache(maxsize=192)
 def compute(op,wkb,dbu,distance=0.,other=None):
-    request=dict(op=op,a=_encode(shapely.from_wkb(wkb),dbu))
+    a,akey=packed(wkb,dbu);request=dict(op=op,a=a,akey=akey)
     if op.removesuffix('_any') in ('width','space','notch','separation'):request['distance']=max(1,math.ceil(distance/dbu-1e-9))
     if op=='round':request['radius']=round(distance/dbu)
-    if other is not None:request['b']=_encode(shapely.from_wkb(other),dbu)
+    if other is not None:request['b'],request['bkey']=packed(other,dbu)
     result=backend().execute(request);polygons=[]
     for rings in result['polygons']:
         p=Polygon(np.asarray(rings[0])*dbu,[np.asarray(r)*dbu for r in rings[1:]])

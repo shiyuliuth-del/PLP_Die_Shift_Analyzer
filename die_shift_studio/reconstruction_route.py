@@ -20,6 +20,15 @@ from .resources import cancel_check
 EMPTY=shapely.Polygon()
 
 
+def clean_overlay(g,tolerance):
+    """Remove only sub-DBU floating overlay spurs, never edit imported source."""
+    if g.is_empty:return g
+    epsilon=max(tolerance*1e-6,np.spacing(max(1.,max(abs(x) for x in g.bounds)))*32)
+    simple=g.simplify(epsilon,preserve_topology=False)
+    if not simple.is_empty and simple.is_valid and abs(simple.area-g.area)<=max(tolerance*tolerance*.01,epsilon*g.length):return simple
+    return g
+
+
 def part_key(part):
     return (part['a'],part['b'],*part.get('angles',(0.,0.)))
 
@@ -55,12 +64,18 @@ def trace(poly,start,end,width):
     """Shortest interior medial path, with exact source terminal endpoints."""
     start,end=np.asarray(start,float),np.asarray(end,float)
     if np.linalg.norm(end-start)<1e-8:return None
+    direct=shapely.LineString([start,end])
+    if poly.covers(direct):return direct
     nodes,base=medial_graph(poly.wkb,round(float(width),6))
     if not len(nodes):
         direct=shapely.LineString([start,end])
-        return direct if poly.covers(direct) else None
+        if poly.covers(direct):return direct
+        from .reconstruction_visibility import trace as fallback
+        return fallback(poly,start,end,width)
     active=np.array([i for i,row in enumerate(base) if row],int)
-    if not len(active):return None
+    if not len(active):
+        from .reconstruction_visibility import trace as fallback
+        return fallback(poly,start,end,width)
     tree=cKDTree(nodes[active]);graph=[list(row) for row in base];graph.extend([[],[]])
     allxy=np.vstack([nodes,start,end]);src,dst=len(nodes),len(nodes)+1
     for pos,point in ((src,start),(dst,end)):
@@ -76,7 +91,9 @@ def trace(poly,start,end,width):
         for j,w in graph[i]:
             value=d+w
             if value<dist.get(j,math.inf):dist[j]=value;previous[j]=i;heapq.heappush(queue,(value,j))
-    if dst not in previous:return None
+    if dst not in previous:
+        from .reconstruction_visibility import trace as fallback
+        return fallback(poly,start,end,width)
     order=[dst]
     while order[-1]!=src:order.append(previous[order[-1]])
     line=shapely.LineString(allxy[order[::-1]])
@@ -88,6 +105,13 @@ def trace(poly,start,end,width):
 
 def project(route,points):
     return shapely.line_locate_point(route,shapely.points(np.asarray(points,float)))
+
+
+def terminal_marks(route,geometry):
+    """Arclengths where the actual trace crosses a terminal, not remote vertices."""
+    crossing=route.intersection(geometry)
+    points=shapely.get_coordinates(crossing)
+    return project(route,points) if len(points) else np.empty(0)
 
 
 def branch_sources(source,land,anchors,start,width,tolerance,guard):
@@ -104,8 +128,10 @@ def branch_sources(source,land,anchors,start,width,tolerance,guard):
         if route is None:return None
         others=tuple([g for g in anchors if g is not anchor]+[land])
         probe=RoutePlan('',0,0,(),source,route,anchor,others,tolerance,guard)
-        lo=float(np.max(project(route,shapely.get_coordinates(land))))+max(tolerance*16,guard)
-        hi=float(np.min(project(route,shapely.get_coordinates(anchor))))-max(tolerance*16,guard)
+        first=terminal_marks(route,land);last=terminal_marks(route,anchor)
+        if not len(first) or not len(last):return None
+        lo=float(np.max(first))+max(tolerance*16,.01)
+        hi=float(np.min(last))-max(tolerance*16,.01)
         if hi<=lo:return None
         lower=lo;found=None
         for mark in np.linspace(lo,hi,32):
@@ -126,13 +152,13 @@ def branch_sources(source,land,anchors,start,width,tolerance,guard):
         for i,a in enumerate(distal):
             for j in range(i+1,len(distal)):
                 if a.intersection(distal[j]).area>epsilon:bad.update((i,j))
-        trunk=source.difference(shapely.union_all(distal))
+        trunk=clean_overlay(source.difference(shapely.union_all(distal)),tolerance)
         if trunk.is_empty or land.difference(trunk).area>epsilon:return None
-        result=[(shapely.union_all([trunk,g]),trunk,anchor) for g,anchor in zip(distal,anchors)]
+        result=[(clean_overlay(source.difference(shapely.union_all([other for j,other in enumerate(distal) if j!=i])),tolerance),trunk,anchor) for i,anchor in enumerate(anchors)]
         if trunk.geom_type!='Polygon' or any(g.geom_type!='Polygon' or not g.is_valid for g,_,_ in result):bad.update(range(len(distal)))
         if not bad:
             if shapely.union_all([g for g,_,_ in result]).symmetric_difference(source).area>epsilon:return None
-            return result
+            return [(clean_overlay(g,tolerance),clean_overlay(trunk,tolerance),anchor) for g,trunk,anchor in result]
         for i in sorted(bad):
             mark=min(limits[i],positions[i]+max(width,guard*2))
             if mark<=positions[i]+tolerance:return None
@@ -167,8 +193,10 @@ class RoutePlan:
         self.marks=np.r_[0,np.cumsum(self.lengths)]
         self.length=float(self.route.length)
         self.identity=hashlib.sha256(self.route.wkb).hexdigest()[:20]
-        self.land_end=float(np.max(project(self.route,shapely.get_coordinates(self.land))))
-        self.fixed_start=min((float(np.min(project(self.route,shapely.get_coordinates(g)))) for g in self.anchors),default=self.length)
+        moving_marks=terminal_marks(self.route,self.land)
+        self.land_end=float(moving_marks.max()) if len(moving_marks) else 0.
+        fixed_marks=[terminal_marks(self.route,g) for g in self.anchors]
+        self.fixed_start=min((float(v.min()) for v in fixed_marks if len(v)),default=self.length)
         self.fixed_start=max(0.,min(self.fixed_start,self.length))
         self.corners=[]
         for i in range(1,len(self.xy)-1):
@@ -191,6 +219,7 @@ class RoutePlan:
         eps=max(self.tolerance*8,1e-4)
         lo=0. if which==0 else max(other+eps,self.land_end+eps)
         hi=min(other-eps,self.fixed_start-eps) if which==0 else self.length
+        limits=getattr(self,'zone_limits',(0.,self.length));lo=max(lo,limits[0]);hi=min(hi,limits[1])
         if hi<lo:return lo
         s=float(np.clip(s,lo,hi))
         if which==0 and s<=self.land_end+eps:return 0.
@@ -254,6 +283,7 @@ class RoutePlan:
         if a_shape.is_empty:return None
         union=shapely.union_all([a_shape,b_shape,c])
         if union.symmetric_difference(self.source).area>max(self.tolerance**2,self.source.area*1e-8):return None
+        a_shape,b_shape,c=(clean_overlay(g,self.tolerance) for g in (a_shape,b_shape,c))
         return {'A':a_shape,'B':b_shape,'C':c,'near':near,'far':far,'a':a,'b':b,'angles':tuple(map(float,angles))}
 
     def pad_handle(self,side):
@@ -358,7 +388,7 @@ def taper_mesh(part,plan,start,end):
     return shapely.union_all([shapely.Polygon(ring(p.exterior),[ring(h) for h in p.interiors]) for p in parts(part['A'])])
 
 
-def _warp_variant(part,plan,center,state,style="c2",variant=0):
+def _warp_geometry(part,plan,center,state,style="c2",variant=0):
     """Move original material; C is rigid and A tapers continuously into B."""
     cancel_check()
     from .preview import rigid_transform
@@ -401,7 +431,10 @@ def _warp_variant(part,plan,center,state,style="c2",variant=0):
         out[moved]=placed[moved];out[fixed]=xy[fixed]
         return out
     try:
-        if variant:
+        if variant<0:
+            from .parallel_curves import offset_active
+            active=offset_active(part,plan,center,state,style,(-variant+1)/2)
+        elif variant:
             from .turn_connection import turn_active
             active=turn_active(part,plan,center,state,style,variant)
         elif style in ('linear','arc'):
@@ -416,7 +449,7 @@ def _warp_variant(part,plan,center,state,style="c2",variant=0):
     rigid=plan.cache.get(rigid_key)
     if rigid is None:
         rigid=part['C'];plan.cache[rigid_key]=rigid
-    translated=shapely.transform(rigid,lambda xy:rigid_transform(xy,center,state))
+    translated=clean_overlay(shapely.transform(rigid,lambda xy:rigid_transform(xy,center,state)),plan.tolerance)
     # Floating-point seam slivers are repaired only within one source DBU.
     if not active.is_valid:
         repaired=shapely.make_valid(active)
@@ -457,7 +490,7 @@ def _warp_variant(part,plan,center,state,style="c2",variant=0):
     if len(parts(full))!=len(parts(plan.source)) or not full.is_valid or sum(len(q.interiors) for q in parts(full))!=expected_holes:
         return None,'重构连接不能闭合'
     fixed=shapely.intersection(full,shapely.set_precision(raw['B'],plan.tolerance))
-    rigid=shapely.intersection(full,shapely.set_precision(raw['C'],plan.tolerance)).difference(fixed)
+    rigid=shapely.union_all(parts(shapely.intersection(full,shapely.set_precision(raw['C'],plan.tolerance)))).difference(fixed)
     result={'A':full.difference(shapely.union_all([fixed,rigid])),'B':fixed,'C':rigid}
     size=int(sum(shapely.get_num_coordinates(g) for g in result.values()))*24+512
     if size<=plan.memo_budget:
@@ -467,17 +500,23 @@ def _warp_variant(part,plan,center,state,style="c2",variant=0):
     return result,None
 
 
+def _warp_variant(part,plan,center,state,style="c2",variant=0):
+    try:return _warp_geometry(part,plan,center,state,style,variant)
+    except (ValueError,shapely.errors.GEOSException) as exc:
+        return None,'连接几何无法通过布尔校验：'+str(exc)
+
+
 def warp(part,plan,center,state,style="c2",variant=None):
     """Use the selected style; curved styles may make a verified return bend."""
     if variant is not None:return _warp_variant(part,plan,center,state,style,variant)
-    key=('resolved-v40',style,part_key(part),np.asarray(center,float).tobytes(),np.asarray(state,float).tobytes())
+    key=('resolved-v41',style,part_key(part),np.asarray(center,float).tobytes(),np.asarray(state,float).tobytes())
     if key in plan.pose_memo:
         result,error,_=plan.pose_memo[key];plan.pose_memo.move_to_end(key)
         return None if result is None else dict(result),error
     result,error=_warp_variant(part,plan,center,state,style,0)
     if error and style!='linear':
         from .turn_connection import VARIANTS
-        for v in range(1,len(VARIANTS)+1):
+        for v in (-1,*range(1,len(VARIANTS)+1)):
             cancel_check();alternate,reason=_warp_variant(part,plan,center,state,style,v)
             if reason is None:result,error=alternate,None;break
     size=(sum(int(shapely.get_num_coordinates(g))*24 for g in result.values()) if result is not None else 0)+512
@@ -491,7 +530,7 @@ def warp(part,plan,center,state,style="c2",variant=None):
 def failed_connection(part,plan,center,state):
     """Omit the failed connecting strip, retain real rigid terminal copper."""
     from .preview import rigid_transform
-    moved=lambda g:shapely.transform(g,lambda xy:rigid_transform(xy,center,state))
+    moved=lambda g:clean_overlay(shapely.transform(clean_overlay(g,plan.tolerance),lambda xy:rigid_transform(xy,center,state)),plan.tolerance)
     pads=[]
     if part['near'].geom_type=='Point':pads.append(moved(plan.land))
     if part['far'].geom_type=='Point':pads.extend(plan.anchors)

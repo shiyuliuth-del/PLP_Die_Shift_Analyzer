@@ -10,7 +10,7 @@ import threading
 import math
 import numpy as np
 import shapely
-from .resources import parallel_map,cancel_check,resource_profile
+from .resources import parallel_map,cancel_check,resource_profile,native_phase_profile
 from .extreme_filter import PoseClause,ProblemIndex
 from .reconstruction_route import EMPTY
 
@@ -29,37 +29,35 @@ def active_region(q):
     return q.get('missing_region',EMPTY) if q.get('connection_failed') else q.get('nominal_regions',{}).get('A',EMPTY)
 
 
-def support(q,tol,via=False):
-    parts=[q['regions']['A'],q['regions']['B'],q['regions']['C']]
-    if via:parts.append(q.get('moving_terminals',EMPTY))
-    if q.get('connection_failed'):parts.append(q.get('missing_region',EMPTY))
-    cuts=[]
-    for name in ('moved_cut','extra_cut'):
-        if q.get(name) is not None:cuts.append(q[name])
-    key='_rule_support_via' if via else '_rule_support';shapes=tuple(parts+cuts);cached=q.get(key)
-    if cached is not None and cached[0]==tol and len(cached[1])==len(shapes) and all(a is b for a,b in zip(cached[1],shapes)):return cached[2]
-    result=shapely.union_all([*parts,*[g.buffer(tol*4) for g in cuts]]).buffer(tol*4)
-    # A pose participates in many neighbouring combinations. Retain the actual
-    # geometry references so id reuse or a live edit cannot leave stale support.
-    q[key]=(tol,shapes,result)
+def support(q,tol,via=False,original=False):
+    """Only the transition material determines its colour, never the rigid sides."""
+    region=q.get('nominal_regions',{}).get('A',EMPTY) if original else active_region(q)
+    key='_zone_original_support' if original else '_zone_current_support'
+    cached=q.get(key)
+    if cached is not None and cached[0]==tol and cached[1] is region:return cached[2]
+    # Native edge-pair markers already carry their DBU raster margin. Do not
+    # expand A into the neighbouring rigid regions for colour attribution.
+    result=region
+    q[key]=(tol,region,result)
     return result
 
 
 def associate(pieces,violations,tol):
-    """Attribute rules to the reconstructed feature; paint only its A region."""
+    """Attribute pre/post rule witnesses only where they intersect the A region."""
     found={zone_key(q):[] for q in pieces}
     for q in pieces:
-        shape=support(q,tol);via_shape=None
+        shape=support(q,tol);original=None
         for row in violations:
             own=(q['layer'].split('/')[0],q.get('net'));net=row.get('net')
             affected=(net,) if net and isinstance(net[0],str) else net
             if affected is not None and own not in affected:continue
             subject=shape
-            if row['kind']=='孔盘包围不足':
-                if via_shape is None:via_shape=support(q,tol,via=True)
-                subject=via_shape
+            if row.get('phase')=='original':
+                if original is None:original=support(q,tol,original=True)
+                subject=original
             g=row['geometry'];layers=row.get('layers',(q['layer'],))
-            if q['layer'] in layers and not subject.is_empty and subject.intersects(g):found[zone_key(q)].append(row)
+            if q['layer'] in layers and not subject.is_empty and subject.intersects(g):
+                found[zone_key(q)].append(dict(row,geometry=g.intersection(subject),kind=('原始动区：' if row.get('phase')=='original' else '')+row['kind']))
         if q.get('connection_failed',False):
             found[zone_key(q)].append(dict(kind=q.get('warning') or '连接未完成',geometry=active_region(q),connection=True,layers=(q['layer'],)))
     return found
@@ -149,6 +147,7 @@ def compatible_candidates(a,b,space):
 
 def scan(r,grid,progress=lambda *_:None):
     entries=r._plans_for_all_poses(lambda n,t:progress(round(n*.12),t))
+    original_rows=r.rules.nominal_check()
     by_ref=defaultdict(list)
     for e in entries:by_ref[e['layer'],e['index']].append(e)
     progress(12,'复用共用路径，建立逐图形极端几何')
@@ -168,7 +167,7 @@ def scan(r,grid,progress=lambda *_:None):
         bounds=np.array([v['geometry'].bounds for v in values.values()])
         envelope=shapely.box(*bounds[:,:2].min(axis=0),*bounds[:,2:].max(axis=0))
         return ref,dict(owners=owners,values=values,envelope=envelope)
-    bundles=dict(parallel_map(build,refs,progress=lambda n,total:progress(12+round(28*n/max(1,total)),f'重构逐图形几何 {n}/{total}')))
+    bundles=dict(parallel_map(build,refs,profile=native_phase_profile(),progress=lambda n,total:progress(12+round(28*n/max(1,total)),f'重构逐图形几何 {n}/{total}')))
     from .width_keepout import routing_violations
     from .width_witness import edge_witness
     from .width_analysis import BLOCKED
@@ -229,7 +228,7 @@ def scan(r,grid,progress=lambda *_:None):
             ps=tuple(q for v in items for q in v['pieces'])
             raw=r.rules.local(net,g,states,[])
             rows=[dict(kind=k,geometry=p,layers=tuple({ref[0] for ref in component}),net=net) for k,p in raw]
-            record(ps,associate(ps,rows,r.tol),axes,digits,bool(raw))
+            record(ps,associate(ps,[*rows,*original_rows],r.tol),axes,digits,bool(raw))
             table[digits]=(g,ps);calls+=1
         # Enclosure needs the copper owners plus ONE via owner, never every
         # independently moving via on the net in one Cartesian product.

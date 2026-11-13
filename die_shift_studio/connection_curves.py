@@ -53,8 +53,9 @@ def _face_ends(plan,face,s):
 
 def _side_tangent(source,point,direction,tol):
     """Real source boundary tangent, oriented toward the route's far end."""
-    xy=shapely.get_coordinates(source.boundary)
-    a,b=xy[:-1],xy[1:];v=b-a;length=np.linalg.norm(v,axis=1)
+    rings=[shapely.get_coordinates(line) for line in shapely.get_parts(source.boundary)]
+    a=np.concatenate([xy[:-1] for xy in rings if len(xy)>1]);b=np.concatenate([xy[1:] for xy in rings if len(xy)>1])
+    v=b-a;length=np.linalg.norm(v,axis=1)
     good=length>tol*.01;a,b,v,length=a[good],b[good],v[good],length[good]
     t=np.clip(np.sum((point-a)*v,axis=1)/(length*length),0,1)
     distance=np.linalg.norm(a+t[:,None]*v-point,axis=1)

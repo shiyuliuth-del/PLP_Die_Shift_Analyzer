@@ -46,6 +46,16 @@ def resource_profile():
     return constrain(profile)
 
 
+def native_phase_profile():
+    """The KLayout backend owns a serial database; two frontends overlap prep.
+
+    More concurrent candidate searches contend for the same lock and evict
+    one another's region cache. Pure GEOS/array jobs retain the full CPU policy.
+    """
+    profile=resource_profile()
+    return dict(profile,workers=min(2,profile['workers']))
+
+
 def geometry_budget(profile,packed_bytes):
     """Limit simultaneous GEOS copies (decoded coordinates, rings and trees)."""
     available=profile['available_memory_mb']*1024**2
