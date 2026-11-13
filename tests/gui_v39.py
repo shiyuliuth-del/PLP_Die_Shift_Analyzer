@@ -105,7 +105,7 @@ try:
  assert current['interval']==q3['interval']
  w.setting_fields['show_contact_markers'].setChecked(True);app.processEvents();assert w.show_issues.isChecked()
  w.show_issues.setChecked(False);app.processEvents();assert not w.view_settings.show_contact_markers
- # A concrete failed straight join is red and offers the width-style popup.
+ # V40 explicitly replaces the old QMenu by the same on-canvas selected callout as width.
  combo=w.setting_fields['reconstruction_style'];combo.setCurrentIndex(combo.findData('linear'));wait()
  w.manual_states=np.array([[8000.,8000.,0.],[0,0,0]]);w.request_preview();wait()
  bad=next(p for p in w.current_frame['reconstruction']['pieces'] if p.get('problem_reasons'))
@@ -116,10 +116,10 @@ try:
  candidates=shapely.get_coordinates(bad['problem_region'].boundary)
  pick=next((xy for xy in [center,*candidates[::max(1,len(candidates)//20)]] if (hit:=w.reconstruction_overlay.pick(*xy,w.cut_drag._tolerance())) and hit[2]=='problem'),None)
  assert pick is not None
- event('button_press_event',pick);app.processEvents()
- assert getattr(w,'_reconstruction_problem_menu',None) and w._reconstruction_problem_menu.isVisible()
- assert any('重构问题' in action.text() for action in w._reconstruction_problem_menu.actions())
- w._reconstruction_problem_menu.close();app.processEvents()
+ event('button_press_event',pick);event('button_release_event',pick);app.processEvents()
+ assert any(a.get_visible() and '当前存在违规' in a.get_text() for a in w.reconstruction_overlay.labels)
+ assert not any(isinstance(a,W.QMenu) and a.isVisible() for a in app.topLevelWidgets())
+ w.escape_action();app.processEvents()
  w.fit_plot();w.plot_layout(preserve=True);w.canvas.draw()
  if os.environ.get('DSA_QA_SCREENSHOT'):w.grab().save(os.environ['DSA_QA_SCREENSHOT'])
  print('GUI_V39_PASS: four styles, saved options, animated point hover/drag, constraints, whole-input yield')

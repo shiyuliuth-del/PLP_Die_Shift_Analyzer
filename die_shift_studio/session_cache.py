@@ -255,7 +255,8 @@ class SessionCache(MutableMapping):
                     value=fn();self[key]=value;return value
                 finally:
                     with self.lock:self.inflight.pop(key,None);pending.set()
-            pending.wait()  # Releases the GIL; never holds the shared disk lock.
+            from .resources import cancel_check
+            while not pending.wait(.05):cancel_check()  # No GUI/disk lock is held.
 
     def __del__(self):
         if hasattr(self,'directory') and not getattr(self,'closed',True):self.close()

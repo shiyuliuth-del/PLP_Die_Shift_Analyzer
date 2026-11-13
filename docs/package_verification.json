@@ -1,11 +1,11 @@
 {
-  "version": "V39",
+  "version": "V40",
   "status": "PASS",
-  "tested_at_utc": "2026-11-12T11:39:48.308954+00:00",
+  "tested_at_utc": "2026-11-13T03:45:30.183471+00:00",
   "scope": "Clean source checkout, local platform. Windows executable verification is recorded separately.",
   "platform": "linux",
-  "verified_runtime_sha256": "b6359e502717c0ddb26efcc843fb27b40b627eb802f01f333b8fd051d1caa3d8",
-  "gui_suites": 19,
+  "verified_runtime_sha256": "d00af62dba4570c37d0faa01b46582c65104fb842f6af402173baae4e97755e0",
+  "gui_suites": 20,
   "runs": [
     {
       "args": [
@@ -21,7 +21,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "Ran 318 tests in 26.273s",
+        "Ran 335 tests in 78.482s",
         "",
         "OK (skipped=2)"
       ]
@@ -237,9 +237,21 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
+        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
+        "GUI_V39_PASS: four styles, saved options, animated point hover/drag, constraints, whole-input yield"
+      ]
+    },
+    {
+      "args": [
+        "tests/gui_v40.py"
+      ],
+      "env": {},
+      "status": "PASS",
+      "summary": [
         "This plugin does not support raise()",
         "This plugin does not support grabbing the keyboard",
-        "GUI_V39_PASS: four styles, saved options, animated point hover/drag, constraints, whole-input yield"
+        "GUI_V40_PASS: rule colours/filter, shared canvas callouts, ignored source Jobs, cancelled rapid styles, boundary modes and no-reroute streaming export"
       ]
     },
     {

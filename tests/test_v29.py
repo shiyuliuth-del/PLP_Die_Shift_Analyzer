@@ -92,11 +92,13 @@ class V29Tests(unittest.TestCase):
             with patch.object(e.contact,'current',side_effect=AssertionError('unused contact computation')):
                 result=scan(e,g,cfg,True,None,lambda *_:None)
             self.assertTrue(result['edge_certified']);idx=ProblemIndex(g,result['red_factors'])
+            from die_shift_studio.reconstruction_events import current_failures,scene_failure
             for i in range(-1,g.total):
                 ds=[0]*g.count if i<0 else g.choices(i)
                 z=np.array([v[k] for v,k in zip(g.locals,ds)])
-                w=e.frame(z)['width_analysis']
-                self.assertEqual(idx.matches(ds),bool(w['counts'][BLOCKED] or w['edge_violations']))
+                frame=e.frame(z);w=frame['width_analysis']
+                self.assertEqual(idx.matches(ds),scene_failure(frame['reconstruction']))
+                self.assertFalse(w['edge_violations'])
         finally:e.close()
 
     def test_source_partition_reuses_own_pose_and_bypasses_changed_base(self):
@@ -132,7 +134,10 @@ class V29Tests(unittest.TestCase):
         base=dict(channel_lines={},channel_witnesses={},channel_factors=[],grid_key=tuple(v.tobytes() for v in g.locals),has_edge_risk=False)
         engine=SimpleNamespace(p=p,reconstructor=recon,deformer=None,contact=model,width_summary=lambda _:base,
             width_analyzer=SimpleNamespace(probability=None),final_copper=PreviewEngine.final_copper)
-        result=scan(engine,g,cfg,True,None,lambda *_:None)
+        # This narrow V29 unit checks the legacy straight-copper boundary
+        # helper. V40's public scan is checked against real native frames above.
+        from die_shift_studio.coupled_filter import scan_reconstruction
+        result=scan_reconstruction(engine,g,cfg,base,lambda *_:None)
         self.assertEqual(result['scanned'],3);idx=ProblemIndex(g,result['red_factors'])
         expected=[i for i in range(g.total) if g[i]['states'][0,0]==35.]
         self.assertEqual([idx.at(i) for i in range(idx.total)],expected)

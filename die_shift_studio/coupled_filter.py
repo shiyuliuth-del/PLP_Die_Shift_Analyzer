@@ -82,9 +82,15 @@ def scan_reconstruction(engine,grid,settings,base,progress):
 
 def scan(engine,grid,settings,width,focused,progress):
     base=engine.width_summary(progress) if width else None
-    if base and engine.deformer is None and getattr(engine,'reconstructor',None) is not None and not base['has_edge_risk']:
-        checked=scan_reconstruction(engine,grid,settings,base,progress)
-        if checked is not None:return checked
+    if engine.deformer is None and getattr(engine,'reconstructor',None) is not None:
+        # Return bends need their ACTUAL extrema, not the old convex bridge
+        # enclosure. Keep this programmatic entry aligned with the GUI path.
+        from .reconstruction_events import scan as reconstruction_scan
+        evidence=reconstruction_scan(engine.reconstructor,grid,progress)
+        routing=evidence['routing_summary']
+        return dict(evidence,lines={**(base['channel_lines'] if base else {}),**routing['lines']},
+                    witnesses={**(base['channel_witnesses'] if base else {}),**routing['witnesses']},
+                    edge_certified=not routing['red_factors'],scanned=evidence['geometry_checks'])
     channels=ProblemIndex(grid,base['channel_factors']) if base else None
     lines=dict(base['channel_lines']) if base else {}
     witnesses=dict(base['channel_witnesses']) if base else {}

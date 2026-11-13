@@ -69,33 +69,34 @@ def main():
                 w.setting_fields['width_yield_decimals'].setValue(4)
                 assert w.view_settings.reconstruction_cuts==(plane,)
                 before=preview.call_count
-                w.dirty=False;w._coupled_key=('old',);w._coupled_data={'old':True}
+                w.dirty=False;w.report_dirty=False;w._coupled_key=('old',);w._coupled_data={'old':True}
                 w.setting_fields['reconstruction_corner_guard_um'].setValue(w.view_settings.reconstruction_corner_guard_um+1)
                 assert preview.call_count>before
-                assert w.dirty and w._coupled_key is None and w._coupled_data is None
+                assert not w.dirty and w.report_dirty and w._coupled_key is None and w._coupled_data is None
                 assert w.view_settings.reconstruction_regions==saved_regions
                 project=Path(tmp)/'integration.dshift.json';w.write_project(project)
                 raw=json.loads(project.read_text())
                 assert 'dxf_options' in raw and raw['settings']['width_yield_method']=='grid'
                 clear=next(b for b in w.findChildren(W.QPushButton) if b.text()=='清除全部手动切口')
-                w.dirty=False;clear.click();assert w.dirty
+                w.dirty=False;w.report_dirty=False;clear.click();assert not w.dirty and w.report_dirty
                 for key in ('reconstruction_cuts','reconstruction_second_cuts','reconstruction_extra_cuts','reconstruction_dropped_cuts'):
                     assert not getattr(w.view_settings,key),key
-                w.dirty=False;w.clear_regions.click();assert w.dirty
+                w.dirty=False;w.report_dirty=False;w.clear_regions.click();assert not w.dirty and w.report_dirty
                 assert not w.view_settings.reconstruction_regions
                 assert w.region_select.mode is None
-                # Helper geometry is tested separately; verify these GUI edit routes
+                # V40 keeps the original assessment usable; only reconstructed evidence
+                # and the report are invalidated. Verify these GUI edit routes
                 # invalidate the same stale evidence even without mouse dragging.
                 changed=replace(w.view_settings,reconstruction_second_cuts=(plane,))
                 with patch.object(w,'_selected_reconstruction_piece',return_value={}), \
                      patch('die_shift_studio.reconstruction_overlay.nudge_cut',return_value=changed):
-                    w.dirty=False;w.nudge_selected_cut(5);assert w.dirty
+                    w.dirty=False;w.report_dirty=False;w.nudge_selected_cut(5);assert not w.dirty and w.report_dirty
                 previous=w.current_frame
                 w.current_frame={'reconstruction':{'pieces':[{'layer':plane[0],'index':plane[1],'die':0,'vias':plane[2]}]}}
                 w.reconstruction_table.blockSignals(True)
                 w.reconstruction_table.setRowCount(1);w.reconstruction_table.setCurrentCell(0,0)
                 w.reconstruction_table.blockSignals(False)
-                w.dirty=False;w.delete_selected_cut();assert w.dirty
+                w.dirty=False;w.report_dirty=False;w.delete_selected_cut();assert not w.dirty and w.report_dirty
                 assert not w.view_settings.reconstruction_second_cuts
                 w.current_frame=previous
                 status_frame={'states':np.zeros((len(w.case['dies']),3)),

@@ -10,8 +10,8 @@ OVERLAY_DEFAULTS = dict(drc=False, space=False,
                         width=False, width_sufficient=False, repair=False, reconstruction=False, footprint=False)
 
 
-def restored_width_ignores(project,data):
-    saved=project.get('ignored_width_lines') or {}
+def restored_width_ignores(project,data,name='ignored_width_lines'):
+    saved=project.get(name) or {}
     if (saved.get('sha256'),saved.get('top_cell'))!=(data.sha256,data.top_name):
         return frozenset()
     return frozenset((key,i) for key,i in saved['refs'] if key in data.layers and 0<=i<len(data.layers[key]))
@@ -54,12 +54,13 @@ def normalize_project(project):
     edits=p.setdefault('node_edits',[])
     if not isinstance(edits,list) or any(not isinstance(q,dict) or not {'layer','index','original','nodes'}<=q.keys() for q in edits):
         raise ValueError('工程节点编辑必须为含图层、图形编号、源指纹与坐标的列表')
-    saved=p.get('ignored_width_lines')
-    if saved is not None:
-        if (not isinstance(saved,dict) or not all(isinstance(saved.get(k),str) for k in ('sha256','top_cell'))
-            or not isinstance(saved.get('refs'),list) or any(not isinstance(r,(list,tuple)) or len(r)!=2
-            or not isinstance(r[0],str) or type(r[1]) is not int or r[1]<0 for r in saved['refs'])):
-            raise ValueError('忽略线路须绑定源 GDS、顶层 Cell 及有效的图层和图形编号')
+    for ignore_name in ('ignored_width_lines','ignored_reconstruction'):
+        saved=p.get(ignore_name)
+        if saved is not None:
+            if (not isinstance(saved,dict) or not all(isinstance(saved.get(k),str) for k in ('sha256','top_cell'))
+                or not isinstance(saved.get('refs'),list) or any(not isinstance(r,(list,tuple)) or len(r)!=2
+                or not isinstance(r[0],str) or type(r[1]) is not int or r[1]<0 for r in saved['refs'])):
+                raise ValueError('忽略线路须绑定源 GDS、顶层 Cell 及有效的图层和图形编号')
     sections=p.setdefault('expanded_settings',[])
     if not isinstance(sections,list) or any(not isinstance(title,str) for title in sections):
         raise ValueError('工程设置栏目列表必须由标题字符串组成')

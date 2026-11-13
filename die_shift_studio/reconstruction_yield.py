@@ -69,7 +69,7 @@ def measure_reconstruction_yield(reconstructor,p,cfg,progress,local_cache=None,p
     local_total=sum(math.prod(len(choices[o]) for o in owners[k]) for k in keys)
     always_failed=None
     for key in keys:
-        deps=owners[key];rows={}
+        deps=owners[key];rows={};render_cache={}
         targets=book.nets[key]
         from .session_cache import logical_fingerprint
         definitions=[]
@@ -78,7 +78,7 @@ def measure_reconstruction_yield(reconstructor,p,cfg,progress,local_cache=None,p
             part,_=r.interval(entry)
             definitions.append((entry['owner'],entry['source'].wkb_hex,entry['orphan'],
                                 None if part is None else tuple(part[k].wkb_hex for k in 'ABC')))
-        factor_key=logical_fingerprint((r.rules.identity,'branch2',tuple(targets),book.original[key].wkb_hex,definitions,cfg.reconstruction_style,
+        factor_key=logical_fingerprint((r.rules.identity,'branch2',tuple(targets),book.original[key].wkb_hex,definitions,cfg.reconstruction_style,cfg.reconstruction_boundary_mode,cfg.reconstruction_ignored,
                     tuple((o,grid.locals[o].tobytes().hex(),book.model.bound.centers[o].tobytes().hex()) for o in deps),book.width,book.space,book.dbu,
                     None if book.board is None else book.board.wkb_hex,book.keepout.wkb_hex))
         hit=local_cache.get(factor_key) if local_cache is not None else None
@@ -89,7 +89,7 @@ def measure_reconstruction_yield(reconstructor,p,cfg,progress,local_cache=None,p
         for digits in (() if hit is not None else product(*(choices[o] for o in deps))):
             states=np.zeros((grid.count,3))
             for owner,digit in zip(deps,digits):states[owner]=grid.locals[owner][digit]
-            frame=r.frame(states,targets=targets,diagnostics=False)
+            frame=r.frame(states,targets=targets,diagnostics=False,render_cache=render_cache)
             # Only assemble the requested net; other nets need no union here.
             changed={}
             for layer,values in frame['replacements'].items():

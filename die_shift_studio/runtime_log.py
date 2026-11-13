@@ -2,6 +2,7 @@
 import sys
 import logging
 import traceback
+import warnings
 from datetime import datetime
 from pathlib import Path
 from threading import Lock
@@ -43,6 +44,14 @@ class RuntimeCapture:
         self.out=Stream(self.stdout,bus,'OUTPUT');self.err=Stream(self.stderr,bus,'ERROR')
         sys.stdout=self.out;sys.stderr=self.err
         self.handler=Handler(bus);logging.getLogger().addHandler(self.handler)
+        self.warning_hook=warnings.showwarning
+        def warning(message,category,filename,lineno,file=None,line=None):
+            if file is not None:
+                return self.warning_hook(message,category,filename,lineno,file,line)
+            text=warnings.formatwarning(message,category,filename,lineno,line)
+            bus.emit(text,'WARNING')
+            if self.stderr is not None:self.stderr.write(text);self.stderr.flush()
+        self.new_warning_hook=warning;warnings.showwarning=warning
         def hook(kind,value,tb):
             text='未处理异常：'+''.join(traceback.format_exception(kind,value,tb));bus.emit(text,'ERROR')
             if self.stderr is not None:self.stderr.write(text+'\n');self.stderr.flush()
@@ -52,4 +61,5 @@ class RuntimeCapture:
         if sys.stdout is self.out:sys.stdout=self.stdout
         if sys.stderr is self.err:sys.stderr=self.stderr
         if sys.excepthook is self.new_hook:sys.excepthook=self.hook
+        if warnings.showwarning is self.new_warning_hook:warnings.showwarning=self.warning_hook
         logging.getLogger().removeHandler(self.handler)

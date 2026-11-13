@@ -4,6 +4,7 @@ import shapely
 from .session_cache import SessionCache, EphemeralCache
 from .preview import rigid_transform
 from .drc_rules import effective_rules
+from .resources import cancel_check
 
 AUTO_LANDING_DIAMETERS=2.5
 SCOPE='名义路径上的共用A/B/C分区；明确分区的连接失败时保留两侧实体并断开标红；无法确定分区时保留源图，不代表产线签认或完整DRC。'
@@ -50,6 +51,9 @@ def compose_feature(source,ps,tolerance,moving):
     else:
         for q in ps:q['fixed']=fixed;q['regions']['B']=fixed;q['fixed_area_um2']=fixed.area
         geometry=shapely.union_all([fixed,*[q['regions'][k] for q in ps for k in 'AC']])
+    # With no material motion and a source-preserving style, partition overlay
+    # round-off must neither create holes nor invent a failed connector.
+    if not moving:return source,occupied
     from .reconstruction_route import parts
     mismatch=(len(parts(geometry))!=len(parts(source)) or sum(len(q.interiors) for q in parts(geometry))!=sum(len(q.interiors) for q in parts(source)))
     if not geometry.is_valid or (mismatch and not any(q.get('connection_failed') for q in ps)):
@@ -64,21 +68,20 @@ def compose_feature(source,ps,tolerance,moving):
     return geometry,occupied
 
 
+def feature_moves(pieces,states,style):
+    """Quantisation may depend only on owners that actually alter this source."""
+    return style in ('linear','arc') or any(np.any(states[q['die']]) and
+        any(not q['nominal_regions'][k].is_empty for k in 'AC') for q in pieces)
+
+
 def decorate_problems(data):
-    """Selectable red warning areas are annotations, never replacement copper."""
-    for q in data.get('pieces',()):
-        own=(q['layer'].split('/')[0],q['net'])
-        support=shapely.union_all([q['regions']['A'],q['regions']['C'],q['nominal_regions']['B'],q.get('moving_terminals',shapely.Polygon())])
-        kinds={v['kind'] for v in data.get('violations',())
-               if (v['net']==own or own in v['net']) and v['geometry'].intersects(support)}
-        q['rule_violations']=tuple(sorted(kinds))
-        reasons=list(q['rule_violations'])
-        if not q['valid']:reasons.insert(0,q.get('warning') or '当前未生成有效连接')
-        q['problem_reasons']=tuple(dict.fromkeys(reasons))
-        if reasons:
-            q['problem_region']=q['missing_region'] if q.get('connection_failed') else q['regions']['A']
-            if q['problem_region'].is_empty:q['problem_region']=q.get('missing_region',q['source'])
-        else:q['problem_region']=shapely.Polygon()
+    from .reconstruction_events import associate,active_region,zone_key
+    pieces=data.get('pieces',());found=associate(pieces,data.get('violations',()),data.get('dbu_um',.001))
+    for q in pieces:
+        rows=found[zone_key(q)];q['rule_witnesses']=tuple(rows)
+        q['rule_violations']=tuple(sorted({v['kind'] for v in rows if not v.get('connection')}))
+        q['problem_reasons']=tuple(dict.fromkeys(v['kind'] for v in rows))
+        q['problem_region']=active_region(q) if rows else shapely.Polygon()
 
 
 class Reconstructor:
@@ -196,6 +199,7 @@ class Reconstructor:
         from .resources import resource_profile
         memo_budget=max(128*1024,min(2*1024**2,int(resource_profile()['available_memory_mb']*1024**2*.08/max(1,len(groups)))))
         def build(task):
+            cancel_check()
             layer,index,owner,mine,all_vias=task
             source=self.model.cache.layers[layer]['geometry'][index]
             refs=normalize_via_refs((v['key'],v['index']) for v in mine)
@@ -242,6 +246,7 @@ class Reconstructor:
                     part=plan.partition(a,b)
                     invalid=0
                     for pose in catalogue.locals[owner]:
+                        cancel_check()
                         _,error=warp(part,plan,self.model.bound.centers[owner],pose,self.settings.reconstruction_style)
                         invalid+=bool(error)
                     mass,_=self.rules.candidate_mass(plan,part,priority_grid,self.settings.reconstruction_style,best_mass)
@@ -270,7 +275,7 @@ class Reconstructor:
         if key not in self.plan_pool:
             from .resources import parallel_map
             self.plan_pool[key]=[entry for rows in parallel_map(build,groups,progress=lambda n,total:progress(round(65*n/max(1,total)),f'建立全姿态共用动区 {n}/{total}')) for entry in rows]
-        self._plans=self.plan_pool[key]
+        self._plans=[e for e in self.plan_pool[key] if (e['layer'],e['index']) not in self.settings.reconstruction_ignored]
         return self._plans
 
     def interval(self,entry):
@@ -340,10 +345,10 @@ class Reconstructor:
         updated=replace(self.settings,reconstruction_intervals=tuple(rows))
         return updated,dict(part,clamped=clamped)
 
-    def frame(self,states,deformation=None,progress=lambda *_:None,quick=False,*,targets=None,diagnostics=True):
+    def frame(self,states,deformation=None,progress=lambda *_:None,quick=False,*,targets=None,diagnostics=True,render_cache=None):
         from .reconstruction_route import warp,EMPTY,failed_connection,missing_area
         states=np.asarray(states,float)
-        key=(states.tobytes(),'shared-route-v39-branch2',bool(diagnostics),None if targets is None else tuple(sorted(targets)))
+        key=(states.tobytes(),'shared-route-v40',bool(diagnostics),None if targets is None else tuple(sorted(targets)))
         hit=self.cache.get(key) if diagnostics else None
         if hit is not None:return hit
         entries=self._plans_for_all_poses(progress);pieces=[];features={}
@@ -354,10 +359,16 @@ class Reconstructor:
         # admission policy rather than serially processing every route.
         def render(entry):
             if selected is not None and (entry['layer'],entry['index']) not in selected:return None
-            part,manual=self.interval(entry)
+            token=(id(entry),states[entry['owner']].tobytes())
+            if render_cache is not None and token in render_cache:
+                part,manual,regions,error,warning=render_cache[token]
+                return part,manual,None if regions is None else dict(regions),error,warning
+            cancel_check();part,manual=self.interval(entry)
             if part is None:return part,manual,None,None,entry['warning']
-            regions,error,quality=self.rules.best_regions(entry['plan'],part,self.model.bound.centers[entry['owner']],states[entry['owner']],self.settings.reconstruction_style)
-            warning=self._manual_warning(entry,part) if manual else entry['warning']
+            from .reconstruction_angles import solve
+            part,regions,error,quality=solve(self,entry['plan'],part,self.model.bound.centers[entry['owner']],states[entry['owner']])
+            warning=self._manual_warning(entry,part) if manual and diagnostics and self.settings.reconstruction_boundary_mode=='perpendicular' else entry['warning']
+            if render_cache is not None:render_cache[token]=(part,manual,None if regions is None else dict(regions),error,warning)
             return part,manual,regions,error,warning
         from .resources import parallel_map
         rendered=parallel_map(render,entries) if len(entries)>16 else list(map(render,entries))
@@ -384,8 +395,8 @@ class Reconstructor:
             piece=dict(die=owner,layer=layer,index=index,net=entry['net'],via_refs=entry['refs'],vias=[v[1] for v in entry['refs']],
                        fallback_regions=fallback if part.get('near') is not None else None,connection_failed=bool(error),
                        missing_region=missing_area(part,plan,self.model.bound.centers[owner],states[owner]) if plan is not None and part.get('near') is not None else source,
-                       moving_terminals=shapely.union_all([self.model.moved(v['poly'],owner,states) for v in entry['mine']]) if diagnostics else EMPTY,
-                       source=source,branch=entry.get('branch',1),branch_count=entry.get('branch_count',1),route_plan=plan,interval=(a,b),route_identity=None if plan is None else plan.identity,
+                       moving_terminals=shapely.union_all([self.model.moved(v['poly'],owner,states) for v in entry['mine']]),
+                       source=source,branch=entry.get('branch',1),branch_count=entry.get('branch_count',1),route_plan=plan,interval=(a,b),boundary_angles=part.get('angles',(0.,0.)),route_identity=None if plan is None else plan.identity,
                        nominal_regions={k:part[k] for k in 'ABC'},regions=regions,
                        movable=part['C'],moved=regions['C'],fixed=regions['B'],immovable=regions['B'],bridge=regions['A'],
                        cut=near,moved_cut=moved_cut,extra_cut=far,span=part['A'],frame_seam=False,
@@ -400,7 +411,7 @@ class Reconstructor:
         out={};conflicts=0
         for (layer,index),feature in features.items():
             ps=feature['pieces'];source=feature['source']
-            geometry,occupied=compose_feature(source,ps,self.tol,bool(np.any(states)) or self.settings.reconstruction_style in ('linear','arc'))
+            geometry,occupied=compose_feature(source,ps,self.tol,feature_moves(ps,states,self.settings.reconstruction_style))
             out.setdefault(layer,[]).append(dict(indices=(index,),geometry=geometry,net=feature['net'],movable=occupied,moved=shapely.union_all([q['moved'] for q in ps])))
         # Measure against final neighbouring copper, not source poses.
         for layer in (out if diagnostics else ()):
@@ -430,8 +441,8 @@ class Reconstructor:
             measures=dict(parallel_map(measure,sorted({(q['index'],q['net']) for q in layer_pieces})))
             for q in layer_pieces:
                 if measures[q['index']] is not None:q.update(measures[q['index']]);conflicts+=int(q['conflict'])
-        result=dict(complete=True,pieces=pieces,replacements=out,scope='共同端点按全输入概率参考选择；保持所选样式比较有限候选。未形成有效连接时取消连接段并保留两端；实际工况规则另检。不代表全局最优布线或产线签认。',
-                    parameters=dict(length_um=0.,width_um=0.,overlap_um=self.p.annulus_um,landing_diameters=AUTO_LANDING_DIAMETERS,shared_nominal=True,connection_style=self.settings.reconstruction_style),
+        result=dict(complete=True,rules=dict(width_um=self.rules.width,space_um=self.rules.space,annulus_um=self.p.annulus_um),configuration=self.settings.reconstruction_key(),dbu_um=self.tol,pieces=pieces,replacements=out,scope='共同端点按全输入概率参考选择；保持所选样式比较有限候选。未形成有效连接时取消连接段并保留两端；实际工况规则另检。不代表全局最优布线或产线签认。',
+                    parameters=dict(length_um=0.,width_um=0.,overlap_um=self.p.annulus_um,landing_diameters=AUTO_LANDING_DIAMETERS,shared_nominal=True,connection_style=self.settings.reconstruction_style,boundary_mode=self.settings.reconstruction_boundary_mode),
                     summary=dict(pieces=len(pieces),bridges=sum(not q['bridge'].is_empty for q in pieces),orphans=sum(q['orphan'] for q in pieces),conflicts=conflicts,
                                  warnings=sum(bool(q['warning']) for q in pieces),groups_used=len(features),manual_cuts=sum(q['manual'] for q in pieces),
                                  rule_space_um=self.rule_space,movable_area_um2=sum(q['movable_area_um2'] for q in pieces),

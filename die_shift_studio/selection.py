@@ -79,6 +79,12 @@ class GeometrySelection:
                 hit=poly.covers(shape.centroid) if point and filled else shape.intersects(poly.boundary) if point else shape.covers(poly) if contained else shape.intersects(poly)
                 ref=(key,item['indices'][0])
                 if hit and (not only_marked or ref in marked):found.append(ref)
+        if point and w.reconstruction_toggle.isChecked():
+            from .reconstruction_events import active_region
+            for q in w.reconstruction_overlay.pieces():
+                if active_region(q).covers(shape.centroid):
+                    ref=(q['layer'],q['index'])
+                    if ref not in found:found.append(ref)
         return sorted(found,key=lambda ref:(w.layer_artists[ref[0]].get_zorder(),order[ref[0]],ref[1]),reverse=True)
 
     def apply_hits(self,hits,mode):
@@ -169,5 +175,7 @@ class GeometrySelection:
             artists=[self.artist,self.deformed_artist]
             if w.width_toggle.isChecked():
                 w.width_overlay.draw();artists.extend(w.width_overlay.labels)
-            signature=(tuple(self.selected),w.width_overlay.stamp if w.width_toggle.isChecked() else None)
+            if w.reconstruction_toggle.isChecked():
+                w.reconstruction_overlay.draw_labels();artists.extend(w.reconstruction_overlay.labels)
+            signature=(tuple(self.selected),w.width_overlay.stamp if w.width_toggle.isChecked() else None,w.reconstruction_overlay.stamp if w.reconstruction_toggle.isChecked() else None)
             w.scene_renderer.draw_selection(artists,w.legend,signature)

@@ -11,6 +11,7 @@ import shapely
 from .drc import rule_region,separation_region
 from .drc_rules import effective_rules
 from .reconstruction import transform
+from .resources import cancel_check
 
 
 @lru_cache(maxsize=512)
@@ -74,7 +75,9 @@ class FixedRules:
 
     def pair(self,a,b):
         if a.distance(b)>=self.space:return shapely.Polygon()
-        return separation_region(a,b,self.space,self.dbu)
+        markers=separation_region(a,b,self.space,self.dbu)
+        if a.intersects(b):markers=shapely.union_all([markers,a.intersection(b).buffer(self.dbu)])
+        return markers
 
     def pair_fails(self,a,b):
         if a.distance(b)>=self.space:return False
@@ -108,13 +111,13 @@ class FixedRules:
         The reference neighbours are nominal and fixed, so this decision depends
         only on the owning DIE. Final posed neighbours are checked separately.
         """
-        from .reconstruction_route import warp
+        from .reconstruction_route import warp,part_key
         from .turn_connection import VARIANTS
-        token=('rule-choice-v39',self.identity,style,part['a'],part['b'],np.asarray(center).tobytes(),np.asarray(pose).tobytes())
+        token=('rule-choice-v39',self.identity,style,part_key(part),np.asarray(center).tobytes(),np.asarray(pose).tobytes())
         if token in plan.pose_memo:
             value,_,_=plan.pose_memo[token];plan.pose_memo.move_to_end(token)
             geos,error,score=value;return None if geos is None else dict(geos),error,score
-        regions,error=warp(part,plan,center,pose,style)
+        cancel_check();regions,error=warp(part,plan,center,pose,style)
         if error:return None,error,(float('inf'),float('inf'))
         key,rest,vias,others,tree=self.context(plan);states=np.zeros((len(self.model.bound.centers),3));states[plan.owner]=pose
         def quality(candidate):
@@ -136,7 +139,7 @@ class FixedRules:
                     amount+=(self.space-gap)/self.space+(copper.intersection(other).area/max(self.width*self.space,1e-12) if gap==0 else 0)
             return (len(kinds),amount)
         score=quality(regions);best=regions;best_score=score
-        hard_key=(plan.identity,part['a'],part['b'])
+        hard_key=(plan.key,plan.identity,part_key(part))
         if hard_key not in self.hard_memo:
             seam=shapely.union_all([part['near'],part['far']]);permanent=False
             for g in (part['B'],part['C']):
@@ -148,7 +151,7 @@ class FixedRules:
         permanent=self.hard_memo[hard_key]
         if score[0] and style!='linear' and np.any(pose) and not permanent:
             for v in range(1,len(VARIANTS)+1):
-                alternate,reason=warp(part,plan,center,pose,style,v)
+                cancel_check();alternate,reason=warp(part,plan,center,pose,style,v)
                 if reason:continue
                 candidate_score=quality(alternate)
                 if candidate_score<best_score:best,best_score=alternate,candidate_score
@@ -156,7 +159,7 @@ class FixedRules:
         size=sum(int(shapely.get_num_coordinates(g))*24 for g in best.values())+512
         if size<=plan.memo_budget:
             plan.pose_memo[token]=((dict(best),None,best_score),None,size);plan.memo_bytes+=size
-            while plan.memo_bytes>plan.memo_budget or len(plan.pose_memo)>32:
+            while plan.memo_bytes>plan.memo_budget or len(plan.pose_memo)>128:
                 _,old=plan.pose_memo.popitem(last=False);plan.memo_bytes-=old[2]
         return dict(best),None,best_score
 
@@ -184,9 +187,10 @@ class FixedRules:
         This is a bounded candidate heuristic, NOT the joint final yield. The
         final integrator checks actual independently reconstructed neighbours.
         """
-        from .reconstruction_route import warp
+        from .reconstruction_route import warp,part_key
         failure=0.;count=0;weights=grid.weights[plan.owner]
         for i in np.argsort(-weights):
+            cancel_check()
             if weights[i]<=0:continue
             regions,error,score=self.best_regions(plan,part,self.model.bound.centers[plan.owner],grid.locals[plan.owner][i],style)
             bad=bool(error) or score[0]>0

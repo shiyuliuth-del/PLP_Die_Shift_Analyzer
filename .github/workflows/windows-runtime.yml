@@ -19,6 +19,8 @@ on:
       - 'tests/test_reconstruction.py'
       - 'tests/gui_v38.py'
       - 'tests/gui_v39.py'
+      - 'tests/gui_v40.py'
+      - 'tests/test_v40.py'
       - 'tests/test_v38.py'
       - 'tests/test_v39*.py'
       - 'tests/test_branch_integration.py'
@@ -138,6 +140,10 @@ jobs:
           "%DIE_SHIFT_PYTHON%" tests/gui_v38.py
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p "test_v39*.py" -v
+          if errorlevel 1 exit /b %errorlevel%
+          "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_v40.py -v
+          if errorlevel 1 exit /b %errorlevel%
+          "%DIE_SHIFT_PYTHON%" tests/gui_v40.py
           if errorlevel 1 exit /b %errorlevel%
           "%DIE_SHIFT_PYTHON%" tests/gui_v39.py
       - name: Exercise the one-click BUILD.bat from the extracted source

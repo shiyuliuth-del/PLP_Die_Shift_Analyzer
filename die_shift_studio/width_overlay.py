@@ -127,15 +127,10 @@ class WidthOverlay:
         self.summary_stamp=None
 
     def set_label(self,n,text,tip,offset,fontsize,status,mode,low=False,summary=False):
-        if n==len(self.labels):
-            self.labels.append(self.w.ax.annotate('',xy=(0,0),textcoords='offset points',xytext=(0,0),
-                ha='center',va='center',multialignment='left',bbox=dict(boxstyle='square,pad=0.15',facecolor='white'),
-                arrowprops=dict(arrowstyle='->',lw=.9,shrinkB=0),annotation_clip=False))
-        a=self.labels[n];a.xy=tip;a.set_position(offset);a.set_text(text);a.set_fontsize(fontsize)
+        from .canvas_callouts import put
         color=COLORS[status];dark=np.asarray(to_rgb(color))*.64
-        a.set_color(low_ink(tint(dark,mode),low));a.arrow_patch.set_color(low_ink(tint(color,mode),low))
-        a.get_bbox_patch().set_edgecolor(color);a.get_bbox_patch().set_alpha(.33 if low else .94)
-        a.set_zorder(15 if summary else 12.6);a.set_visible(True)
+        put(self.w,self.labels,n,text,tip,offset,fontsize,color,low_ink(tint(dark,mode),low),
+            low_ink(tint(color,mode),low),.33 if low else .94,15 if summary else 12.6)
 
     def line_probability(self,ref):
         return lookup(self.w.width_yield.bank,'lines',ref)
