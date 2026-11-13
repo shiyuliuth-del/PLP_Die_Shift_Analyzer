@@ -13,6 +13,7 @@ def verify_written_contours(path):
     import math
     import re
     import shapely
+    import numpy as np
     from .resources import cancel_check
     layers=defaultdict(list);record=None;section=None;pending=False
     def finish(row):
@@ -53,8 +54,12 @@ def verify_written_contours(path):
             unique.add(edge);degree[a]+=1;degree[b]+=1
             line=shapely.LineString((a,b));segments.append(line);length+=line.length
         if any(n%2 for n in degree.values()):raise ValueError(f'{name} ABC交界点未严格闭合，未覆盖已有文件')
-        merged=shapely.union_all(segments)
-        if length-merged.length>max(1e-9,length*1e-12):raise ValueError(f'{name} 存在重叠轮廓线段')
+        geometries=np.asarray(segments,object);tree=shapely.STRtree(geometries)
+        for start in range(0,len(geometries),512):
+            cancel_check();i,j=tree.query(geometries[start:start+512],predicate='intersects');i=i+start
+            keep=j>i;i,j=i[keep],j[keep]
+            if len(i) and np.any(shapely.length(shapely.intersection(geometries[i],geometries[j]))>0):
+                raise ValueError(f'{name} 存在正长度重叠轮廓线段')
         summary[name]=dict(segments=len(edges),nodes=len(degree),closed=True,overlap=False)
     if not summary:raise ValueError('未读回有效动静区轮廓')
     return summary

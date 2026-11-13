@@ -30,7 +30,8 @@ def rotate(settings,piece,side,delta=None):
     rows=[r for r in settings.reconstruction_angles if (r[:5],r[5])!=(identity,side)]
     if delta is not None:
         s=piece['interval'][side];v=plan.tangent(s)
-        angle=math.atan2(v[1],v[0])+math.pi/2+piece.get('boundary_angles',(0.,0.))[side]+delta
+        previous=next((row[6] for row in settings.reconstruction_angles if (row[:5],row[5])==(identity,side)),None)
+        angle=(previous if previous is not None else math.atan2(v[1],v[0])+math.pi/2+piece.get('boundary_angles',(0.,0.))[side])+delta
         rows.append((*identity,side,angle))
     forced=set(settings.reconstruction_forced);forced.add((plan.layer,plan.index))
     return replace(settings,reconstruction_angles=tuple(rows),reconstruction_forced=tuple(sorted(forced)))

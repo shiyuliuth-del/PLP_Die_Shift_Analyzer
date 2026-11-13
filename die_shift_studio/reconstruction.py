@@ -43,7 +43,7 @@ def compose_feature(source,ps,tolerance,moving):
         if any(owner!=q['die'] and other.intersection(support).area>max(tolerance**2,source.area*1e-8) for owner,other in by_owner.items()):ambiguous=True
         by_owner[q['die']]=by_owner.get(q['die'],EMPTY).union(support)
         occupied=occupied.union(support)
-    fixed=ps[0]['regions']['B'] if len(ps)==1 else (shapely.set_precision(source.difference(occupied),tolerance) if moving else source.difference(occupied))
+    fixed=ps[0]['regions']['B'] if len(ps)==1 and ps[0].get('source_scope_complete',True) else (shapely.set_precision(source.difference(occupied),tolerance) if moving else source.difference(occupied))
     if ambiguous:
         reason='多个DIE动区归属重叠；无法确定分区，保留源图'
         for q in ps:q.update(valid=False,warning=reason,regions=dict(A=EMPTY,B=source,C=EMPTY),bridge=EMPTY,moved=EMPTY,fixed=source)
@@ -212,7 +212,10 @@ class Reconstructor:
         def build(task):
             cancel_check()
             layer,index,owner,mine,all_vias=task
-            source=self.model.cache.layers[layer]['geometry'][index]
+            original_source=self.model.cache.layers[layer]['geometry'][index]
+            from .reconstruction_ownership import divide
+            allocation=divide(original_source.wkb,tuple((v['owner'],v['poly'].wkb) for v in all_vias),self._rule_width,self.tol)
+            source,seam=allocation.get(owner,(original_source,shapely.Polygon()))
             refs=normalize_via_refs((v['key'],v['index']) for v in mine)
             net=int(self.model.nodes[self.model.ids[layer,index]]['net'])
             from .landing_geometry import embedded_pad
@@ -221,10 +224,11 @@ class Reconstructor:
             fixed=[landing(v) for v in self.stays
                    if v['net']==net and source.intersects(v['poly'])]
             fixed.extend(landing(v) for v in all_vias if v['owner']!=owner)
+            if not seam.is_empty:fixed.append(seam)
             fixed=[g for g in fixed if not g.is_empty]
             from .reconstruction_clusters import anchor_clusters,inward_routes
             fixed=anchor_clusters(source,fixed,land,self._rule_width,self.tol)
-            base=dict(layer=layer,index=index,owner=owner,refs=refs,source=source,land=land,net=net,mine=mine,anchors=fixed)
+            base=dict(layer=layer,index=index,owner=owner,refs=refs,source=original_source,land=land,net=net,mine=mine,anchors=fixed)
             def build_source(source,land,fixed,moving=None):
                 moving=mine if moving is None else moving
                 local_base=dict(base,land=land,anchors=fixed,mine=moving,refs=normalize_via_refs((v['key'],v['index']) for v in moving))
@@ -247,7 +251,8 @@ class Reconstructor:
                     plan=RoutePlan(layer,index,owner,local_base['refs'],source,line,land,tuple(fixed),self.tol,self.settings.reconstruction_corner_guard_um,memo_budget=memo_budget)
                     # Opposite moving terminals share a nominal middle seam. Neither
                     # owner's transition may consume the other owner's half-route.
-                    if not any(v['net']==net and source.intersects(v['poly']) for v in self.stays):
+                    opposite_owner=any(v['owner']!=owner and stop.intersects(v['poly']) for v in all_vias)
+                    if not allocation and (opposite_owner or not any(v['net']==net and source.intersects(v['poly']) for v in self.stays)):
                         plan.fixed_start=(plan.land_end+plan.fixed_start)*.5
                     mu,bounds=mean_and_bounds(self.p.for_die(owner),len(self.model.bound.centers))
                     radius=float(np.linalg.norm(shapely.get_coordinates(source)-self.model.bound.centers[owner],axis=1).max())
@@ -303,6 +308,7 @@ class Reconstructor:
                 ids={id(v) for v in cluster}
                 local_land=shapely.union_all([required(v) for v in cluster])
                 protected=[required(v) for v in self.stays if v['net']==net and source.intersects(v['poly'])]
+                if not seam.is_empty:protected.append(seam)
                 protected.extend(required(v) for v in all_vias if v['owner']!=owner)
                 overlap=[g for g in protected if g.intersection(local_land).area>self.tol*self.tol]
                 protected=[g for g in protected if g.intersection(local_land).area<=self.tol*self.tol]
@@ -322,7 +328,7 @@ class Reconstructor:
         # Route construction is pose-independent and reused after every handle edit.
         from .session_cache import logical_fingerprint
         key=logical_fingerprint((self.model.data.geometry_id,self.model.roles,self.model.connections.order,
-                                'v41-interfaces',self.settings.reconstruction_forced,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
+                                'v41-shared-terminals-2',self.settings.reconstruction_forced,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
         if key not in self.plan_pool:
             from .resources import parallel_map,native_phase_profile
             self.plan_pool[key]=[entry for rows in parallel_map(build,groups,profile=native_phase_profile(),progress=lambda n,total:progress(round(65*n/max(1,total)),f'建立全姿态共用动区 {n}/{total}')) for entry in rows]
@@ -458,7 +464,7 @@ class Reconstructor:
                        fallback_regions=fallback if part.get('near') is not None else None,connection_failed=bool(error),
                        missing_region=missing_area(part,plan,self.model.bound.centers[owner],states[owner]) if plan is not None and part.get('near') is not None else source,
                        moving_terminals=shapely.union_all([self.model.moved(v['poly'],owner,states) for v in entry['mine']]),
-                       source=source,endpoint_weights=(entry.get('serial_left',1.),entry.get('serial_right',0.)),branch=entry.get('branch',1),branch_count=entry.get('branch_count',1),route_plan=plan,interval=(a,b),boundary_angles=part.get('angles',(0.,0.)),route_identity=None if plan is None else plan.identity,
+                       source=source,source_scope_complete=bool(plan is None or plan.source is source),endpoint_weights=(entry.get('serial_left',1.),entry.get('serial_right',0.)),branch=entry.get('branch',1),branch_count=entry.get('branch_count',1),route_plan=plan,interval=(a,b),boundary_angles=part.get('angles',(0.,0.)),route_identity=None if plan is None else plan.identity,
                        nominal_regions={k:part[k] for k in 'ABC'},regions=regions,
                        movable=part['C'],moved=regions['C'],fixed=regions['B'],immovable=regions['B'],bridge=regions['A'],
                        cut=near,moved_cut=moved_cut,extra_cut=far,span=part['A'],frame_seam=False,

@@ -20,6 +20,32 @@ from die_shift_studio.dxf_export import Snapshot
 
 
 class V41Tests(unittest.TestCase):
+    def test_independent_die_supports_on_a_midspan_connection_do_not_overlap(self):
+        from test_v40 import make_engine
+        from die_shift_studio.core import Parameters
+        source=LineString([(-500,300),(0,0),(0,-600)]).buffer(15)
+        for point in ((-500,300),(0,0),(0,-600)):source=source.union(Point(point).buffer(30))
+        shapes={'127/0':[box(-800,-800,300,600)],'128/0':[box(-550,250,-450,350),box(-50,-50,50,50)],
+                '3/0':[Point(-500,300).buffer(20),Point(0,0).buffer(20)],
+                '4/0':[Point(-500,300).buffer(10),Point(0,0).buffer(10)],'5/0':[source],'6/0':[Point(0,-600).buffer(10)]}
+        e,_,_=make_engine(shapes,Parameters(multi_bound_x_um=15,multi_bound_y_um=15,annulus_um=5))
+        try:
+            for z in (np.zeros((2,3)),np.array([[-15,-15,-.01],[15,15,.01]])):
+                frame=e.frame(z)['reconstruction'];pieces=frame['pieces']
+                self.assertTrue(all(q['valid'] and not q['regions']['A'].is_empty for q in pieces),[(q['warning'],q['interval']) for q in pieces])
+                by_owner=[shapely.union_all([q['nominal_regions'][k] for q in pieces if q['die']==owner for k in 'AC']) for owner in (0,1)]
+                self.assertLess(by_owner[0].intersection(by_owner[1]).area,1e-8)
+                self.assertEqual(frame['replacements']['5/0'][0]['geometry'].geom_type,'Polygon')
+        finally:e.close()
+
+    def test_route_terminal_bounds_use_intersections_not_remote_vertex_projection(self):
+        from die_shift_studio.reconstruction_route import RoutePlan
+        route=LineString([(0,0),(100,0),(100,100)]);source=box(-20,-20,120,120)
+        land=box(-10,-10,10,10).union(box(70,70,80,80))
+        anchors=(box(90,90,110,110),box(-10,50,10,60))
+        plan=RoutePlan('5/0',0,0,(),source,route,land,anchors,.001,3.)
+        self.assertAlmostEqual(plan.land_end,10.);self.assertAlmostEqual(plan.fixed_start,190.)
+
     def test_zone_colour_uses_only_pre_and_post_active_material(self):
         from die_shift_studio.reconstruction_events import associate,zone_key,color_for
         q=dict(layer='5/0',index=0,die=0,net=1,route_identity='zone',valid=True,

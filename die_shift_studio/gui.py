@@ -868,7 +868,9 @@ class MainWindow(W.QMainWindow):
             from .reconstruction_rules import intrinsic
             intrinsic.cache_clear()
             from .reconstruction_enclosure import reachable_enclosure
-            reachable_enclosure.cache_clear();self.reconstruction_yield.plan_pool.clear();self.reconstruction_yield.factor_pool.clear();self.constraint_feedback.context=None
+            reachable_enclosure.cache_clear()
+            from .reconstruction_ownership import divide
+            divide.cache_clear();self.reconstruction_yield.plan_pool.clear();self.reconstruction_yield.factor_pool.clear();self.constraint_feedback.context=None
         for group_ in self.parked_groups:
             if group_ is self.cache_group:continue
             group_.park_frames()

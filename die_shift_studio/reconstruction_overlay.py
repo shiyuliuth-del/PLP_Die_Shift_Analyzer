@@ -165,7 +165,7 @@ class ReconstructionOverlay:
         bank=self.risk_bank();nominal=bool((w.current_frame or {}).get('nominal_global'))
         if self.active():
             from .width_witness import pose_text
-            labels={'red':'动区型变前／后存在违规','yellow':'当前通过，其他极端存在问题','green':'全部离散极端通过','gray':'失效概率上界满足良率要求','pending':'当前通过，全极端核验中'}
+            labels={'red':'当前存在违规（动区型变前／后）','yellow':'当前通过，其他极端存在问题','green':'全部离散极端通过','gray':'失效概率上界满足良率要求','pending':'当前通过，全极端核验中'}
             for key,(q,status,g) in self.zone_views.items():
                 if (q['layer'],q['index']) not in selected or status=='green':continue
                 if g.is_empty:g=q['source']
