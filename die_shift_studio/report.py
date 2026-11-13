@@ -213,6 +213,8 @@ def report_document(r,motions=None,progress=lambda *_:None):
              '一阶/二阶默认使用三次/五次位移权重，交错时比较匹配端部切向的三次/五次贝塞尔回头候选；直线连接对应交点且贴紧限位，圆弧使用分段相切双圆弧。蓝黄两端均可保留整孔盘。合法但违规的候选标红；无法连接时移除连接段、保留两端，红色提示不作为铜或DXF输出。',
              'P为原图边界点，s为沿名义追溯路径的弧长，s₀、s₁为共同端点；垂直截面t用上式弧长比，斜截面按前述有向距离比，均截断到[0,1]；T为该DIE刚体变换。w₁端部一阶导数为0，w₂端部一阶/二阶导数为0。整孔盘模式保留原孔盘实体，在孔盘外接线，不能把蓝点当成零宽导体。')
         def state(q):
+            if q.get('connection_failed'):return '连接失败；已断开并标记'
+            if not q.get('valid',True):return '无可信分区；保留原图并警示'
             if q['orphan']:text='整块随动（无不动铜可接）'
             elif q['gap_um'] is not None and q['gap_um']<=1e-6 and q.get('bridge_area_um2') is not None:text='贴合（由补线覆盖）'
             elif q['gap_um'] is not None and q['gap_um']<=1e-6:text='贴合（直接相接）'
@@ -224,13 +226,14 @@ def report_document(r,motions=None,progress=lambda *_:None):
                 elif clearance<2.*space-1e-6:text+='｜间距临界'
             if q.get('manual'):text+='｜手动切口'
             return text
-        blocks.append(grid(['DIE','固定RDL层','图形','落盘数','网络','移动区面积 / μm²','位移 / μm','裂隙 / μm','补线面积 / μm²','切口缝长 / μm','间距 / μm','状态'],
+        blocks.append(grid(['DIE','固定RDL层','图形','落盘数','网络','移动区面积 / μm²','位移 / μm','裂隙 / μm','补线面积 / μm²','切口缝长 / μm','间距 / μm','边界角度 / °','规则问题','状态'],
             [[f"DIE{q['die']+1}",q['layer'],q['index']+1,len(q.get('vias',(1,))),q['net'],fmt(q['movable_area_um2']),fmt(q['shift_um']),
               '—' if q['gap_um'] is None else fmt(q['gap_um']),
               '—' if q.get('bridge_area_um2') is None else fmt(q['bridge_area_um2']),
               '—' if q['bridge_length_um'] is None else fmt(q['bridge_length_um']),
               '—' if q.get('clearance_um') is None else fmt(q['clearance_um']),
-              state(q)] for q in recon['pieces'][:100]]))
+              ' / '.join(f'{math.degrees(v):.2f}' for v in q.get('boundary_angles',(0.,0.))),
+              '；'.join(q.get('problem_reasons',())) or '—',state(q)] for q in recon['pieces'][:100]]))
         if len(recon['pieces'])>100:blocks.append(f"<p>重构移动区共{len(recon['pieces'])}块，报告列出前100块；“重构预演”表可定位当前全部块。</p>")
     reconstruction_yield=r.get('reconstruction_yield')
     if reconstruction_yield:

@@ -167,6 +167,22 @@ class Reconstruction40Tests(unittest.TestCase):
             self.assertGreater(ProblemIndex(grid,bank['red_factors']).total,0)
         finally:e.close()
 
+    def test_report_renders_actual_boundary_angles_and_rules(self):
+        from die_shift_studio.core import evaluate
+        from die_shift_studio.report import report_document
+        e,d,c=fixture()
+        try:
+            cfg=ViewSettings(reconstruction_style='linear',reconstruction_boundary_mode='wide')
+            e.configure_reconstruction(True,cfg)
+            frame=e.reconstructor.frame(np.array([[20.,65.,.01]]))
+            result=evaluate(d,e.roles,replace(e.p,target_nsigma=math.inf),layer_order=c['connections'].order)
+            result['view_settings']=asdict(cfg);result['preview_reconstruction']=frame
+            html,images=report_document(result)
+            self.assertIn('重构区优先',html);self.assertIn('规则问题',html)
+            angle=' / '.join(f'{math.degrees(v):.2f}' for v in frame['pieces'][0]['boundary_angles'])
+            self.assertIn(angle,html);self.assertTrue(images)
+        finally:e.close()
+
     def test_continuous_probability_bound_is_not_a_grid_zero_claim(self):
         shapes={'127/0':[box(-500,-400,1100,500)],'128/0':[box(-70,-70,70,70)],'3/0':[box(-20,-20,20,20)],
                 '4/0':[Point(0,0).buffer(10)],'5/0':[box(-100,-50,700,50),box(-150,164.9,100,200)],'6/0':[Point(600,0).buffer(10)]}

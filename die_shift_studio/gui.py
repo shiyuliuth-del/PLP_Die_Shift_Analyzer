@@ -1149,7 +1149,7 @@ class MainWindow(W.QMainWindow):
         self.transition.start(duration,steps,update,complete)
     def show_frame_status(self,frame):
         if frame and frame.get('reconstruction') and self.reconstruction_toggle.isChecked() and self.result is not None:
-            source=frame['reconstruction'];keep=('die','layer','index','net','vias','movable_area_um2','shift_um','gap_um','bridge_length_um','bridge_area_um2','cut_distance_um','cut_clamped','clearance_um','conflict','conflict_net','manual','orphan','warning','valid','interval')
+            source=frame['reconstruction'];keep=('die','layer','index','net','vias','movable_area_um2','shift_um','gap_um','bridge_length_um','bridge_area_um2','cut_distance_um','cut_clamped','clearance_um','conflict','conflict_net','manual','orphan','warning','valid','interval','boundary_angles','problem_reasons','connection_failed')
             self.result['preview_reconstruction']=dict(states=frame['states'].tolist(),scope=source['scope'],summary=source['summary'],parameters=source.get('parameters',{}),pieces=[{k:q[k] for k in keep if k in q} for q in source['pieces']]);self.report_dirty=True
         self.update_width_report(frame)
         if frame and frame.get('drc_rules') and self.result is not None:
