@@ -11,16 +11,24 @@ from .reconstruction_edits import key
 
 
 def expand(r,entries):
-    attached=defaultdict(list);result=[]
+    attached=defaultdict(list);seeded={};result=[]
     for row in r.settings.reconstruction_added:
         layer,index,x,y,identity,*scope=row
         candidates=[e for e in entries if (e['layer'],e['index'])==(layer,index) and e['plan'] is not None]
-        if scope:candidates=[e for e in candidates if e['plan'].identity==scope[0]]
+        if scope and scope!=['seed']:candidates=[e for e in candidates if e['plan'].identity==scope[0]]
         if candidates:
             best=min(candidates,key=lambda e:e['plan'].route.distance(shapely.Point(x,y)))
-            attached[id(best)].append((x,y,identity,scope))
+            if scope==['seed']:seeded[id(best)]=(x,y,identity)
+            else:attached[id(best)].append((x,y,identity,scope))
     for entry in entries:
-        plan=entry['plan'];extras=attached.get(id(entry),())
+        plan=entry['plan'];extras=attached.get(id(entry),());seed=seeded.get(id(entry))
+        if seed and plan is not None:
+            x,y,identity=seed;child=copy.copy(plan);child.cache={};child.pose_memo=OrderedDict();child.memo_bytes=0
+            child.identity=plan.identity+'~'+identity
+            a,b=plan.nominal_first,plan.nominal_second;position=float(plan.route.project(shapely.Point(x,y)))
+            changed,_=child.edit(a,b,0,position-child.tolerance*16) if position<a else child.edit(a,b,1,position+child.tolerance*16) if position>b else (child.partition(a,b),False)
+            if changed is not None:child.nominal_first,child.nominal_second=changed['a'],changed['b']
+            entry=dict(entry,plan=child,seeded=True);plan=child
         if plan is None or not extras:
             if plan is None or key(plan) not in r.settings.reconstruction_deleted:result.append(entry)
             continue
@@ -38,7 +46,7 @@ def expand(r,entries):
         identities=[None,*[identity for _,identity in marks]]
         for j,identity in enumerate(identities):
             child=copy.copy(plan);child.cache={};child.pose_memo=OrderedDict();child.memo_bytes=0
-            child.identity=plan.identity if identity is None else plan.identity+'~'+identity
+            child.identity=plan.identity if identity is None else plan.identity.split('~')[0]+'~'+identity
             child.nominal_first=boundaries[j]+(spacing if j else 0)
             child.nominal_second=boundaries[j+1]-(spacing if j<len(identities)-1 else 0)
             local=dict(entry,plan=child,serial_base=plan.identity)

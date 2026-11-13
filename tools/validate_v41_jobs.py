@@ -40,10 +40,10 @@ def main():
    required={(l,i,v['key'],v['index']) for (l,i),values in r.vias_by_target.items() for v in values}
    covered={(q['layer'],q['index'],k,i) for q in zero['pieces'] for k,i in q['via_refs']}
    covered|={(l,i,v['key'],v['index']) for (l,i),values in r.safe_vias.items() for v in values}
+   checkpoint=scratch/(name+'.pkl');checkpoint.write_bytes(pickle.dumps(dict(source_sha256=d.sha256,code_sha256=sha,plans=r.plan_pool,job=job),protocol=5))
    assert required<=covered,('untracked interfaces',required-covered)
    assert all(q['valid'] and not q['regions']['A'].is_empty for q in zero['pieces']),[(q['layer'],q['index'],q['warning']) for q in zero['pieces'] if not q['valid'] or q['regions']['A'].is_empty]
    print(name,'COLD',cold,'ZONES',len(zero['pieces']),'AUTO_IGNORED',len(r.auto_ignored),flush=True)
-   checkpoint=scratch/(name+'.pkl');checkpoint.write_bytes(pickle.dumps(dict(source_sha256=d.sha256,code_sha256=sha,plans=r.plan_pool,job=job),protocol=5))
    start=time.perf_counter();bank=attach(scan(r,grid,progress),r);scan_seconds=time.perf_counter()-start
    checkpoint.write_bytes(pickle.dumps(dict(source_sha256=d.sha256,code_sha256=sha,plans=r.plan_pool,job=job,evidence=bank),protocol=5))
    index=ProblemIndex(grid,bank['red_factors']);zone_indices={key:ProblemIndex(grid,row['clauses']) for key,row in bank['zones'].items()};parity=[]

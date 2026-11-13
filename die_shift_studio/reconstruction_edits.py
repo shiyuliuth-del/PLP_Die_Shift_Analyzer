@@ -37,6 +37,22 @@ def rotate(settings,piece,side,delta=None):
     return replace(settings,reconstruction_angles=tuple(rows),reconstruction_forced=tuple(sorted(forced)))
 
 
+def project_click(piece,point):
+    """Map a displayed transition back to its common nominal arclength."""
+    import shapely
+    a,b=piece['interval'];near=piece.get('moved_cut');far=piece.get('extra_cut')
+    if near is None or far is None:return float(piece['route_plan'].route.project(shapely.Point(point)))
+    guide=shapely.LineString([near.centroid.coords[0],far.centroid.coords[0]])
+    region=piece['regions']['A']
+    if not region.is_empty and not region.covers(guide):
+        from .reconstruction_route import trace
+        interior=trace(region,near.centroid.coords[0],far.centroid.coords[0],max(1.,min(near.length,far.length)/2))
+        if interior is not None:guide=interior
+    if guide.length<=piece['route_plan'].tolerance:return (a+b)/2
+    fraction=guide.project(shapely.Point(point))/guide.length
+    return a+(b-a)*fraction
+
+
 def change_zone(window,action,piece=None,ref=None,point=None,side=None):
     """Apply one source-bound edit; all poses share the resulting settings key."""
     import uuid
@@ -66,7 +82,7 @@ def change_zone(window,action,piece=None,ref=None,point=None,side=None):
             from .selection import inverse_geometry
             target=min(current,key=lambda q:q['bridge'].distance(shapely.Point(point)))
             plan=target['route_plan'];base_id=plan.identity.split('~')[0]
-            a,b=target['interval'];position=float(plan.route.project(shapely.Point(point)))
+            a,b=target['interval'];position=project_click(target,point)
             guard=max(plan.tolerance*32,min(plan.guard,(b-a)*.03))
             position=min(b-guard*4,max(a+guard*4,position))
             if b-a<=guard*8:
@@ -82,7 +98,8 @@ def change_zone(window,action,piece=None,ref=None,point=None,side=None):
             saved[(*plan.key,new_id)]=(*plan.key,new_id,position+guard,b)
             intervals=list(saved.values())
             added=(*added,(*ref,float(plan.route.interpolate(position).x),float(plan.route.interpolate(position).y),identity,base_id,outer_a,outer_b))
-        else:deleted=tuple(row for row in deleted if row[:2]!=ref)
+        else:
+            added=tuple(row for row in added if row[:2]!=ref)+((*ref,float(point[0]),float(point[1]),uuid.uuid4().hex[:12],'seed'),)
         updated=replace(cfg,reconstruction_added=added,reconstruction_deleted=deleted,reconstruction_intervals=tuple(intervals),
                         reconstruction_ignored=tuple(sorted(ignored)),reconstruction_forced=tuple(sorted(forced)))
     else:return
@@ -101,7 +118,8 @@ def normalize_edits(values):
                     x,y,identity,*scope=tail;x,y=float(x),float(y)
                     if not all(map(math.isfinite,(x,y))):continue
                     row=(layer,index,x,y,str(identity))
-                    if len(scope)==3:
+                    if scope==['seed']:row+=('seed',)
+                    elif len(scope)==3:
                         base,a,b=scope;a,b=float(a),float(b)
                         if not all(map(math.isfinite,(a,b))) or not 0<=a<b:continue
                         row+=(str(base),a,b)

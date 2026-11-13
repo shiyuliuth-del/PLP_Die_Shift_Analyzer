@@ -67,7 +67,7 @@ class Reconstruction40Tests(unittest.TestCase):
             self.assertTrue(f['violations'], 'side violations remain in global DRC')
         finally:e.close()
 
-    def test_rule_support_reuses_pose_but_invalidates_moved_copper_and_via(self):
+    def test_rule_support_reuses_pose_and_ignores_remote_rigid_vias(self):
         from die_shift_studio.reconstruction_events import support
         q=dict(regions=dict(A=box(0,0,5,5),B=box(5,0,10,5),C=box(-5,0,0,5)),moving_terminals=box(-3,1,-1,3))
         original=support(q,.001);self.assertIs(original,support(q,.001))

@@ -35,7 +35,9 @@ def support(q,tol,via=False,original=False):
     key='_zone_original_support' if original else '_zone_current_support'
     cached=q.get(key)
     if cached is not None and cached[0]==tol and cached[1] is region:return cached[2]
-    result=region.buffer(tol*2) if not region.is_empty else EMPTY
+    # Native edge-pair markers already carry their DBU raster margin. Do not
+    # expand A into the neighbouring rigid regions for colour attribution.
+    result=region
     q[key]=(tol,region,result)
     return result
 

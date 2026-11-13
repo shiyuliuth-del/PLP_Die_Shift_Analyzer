@@ -231,7 +231,7 @@ class Reconstructor:
             base=dict(layer=layer,index=index,owner=owner,refs=refs,source=original_source,land=land,net=net,mine=mine,anchors=fixed)
             def build_source(source,land,fixed,moving=None):
                 moving=mine if moving is None else moving
-                local_base=dict(base,land=land,anchors=fixed,mine=moving,refs=normalize_via_refs((v['key'],v['index']) for v in moving))
+                local_base=dict(base,routing_source=source,land=land,anchors=fixed,mine=moving,refs=normalize_via_refs((v['key'],v['index']) for v in moving))
                 if not fixed:return dict(local_base,plan=None,orphan=True,warning='无固定连接端，整块按所属DIE平移')
                 if land.is_empty:return dict(local_base,plan=None,orphan=False,warning='名义落盘无可用铜，保留原图')
                 stop=min(fixed,key=lambda g:g.distance(land));end=np.asarray(stop.representative_point().coords[0])
@@ -347,6 +347,9 @@ class Reconstructor:
                     from .reconstruction_edits import apply_angles
                     adjusted=apply_angles(self.settings,plan,part)
                     if adjusted is not None:return adjusted,True
+        if entry.get('seeded'):
+            from .reconstruction_edits import apply_angles
+            return apply_angles(self.settings,plan,plan.partition(a,b)),True
         # Migrate legacy cut planes by projecting their NOMINAL points on the route.
         for which,rows in ((0,self.settings.reconstruction_cuts),(1,self.settings.reconstruction_second_cuts or self.settings.reconstruction_extra_cuts)):
             point=next(self._matching_cut_rows(((l,i,v,(x,y)) for l,i,v,nx,ny,x,y in rows),plan.layer,plan.index,plan.refs),None)

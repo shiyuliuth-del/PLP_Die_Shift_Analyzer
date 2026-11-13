@@ -20,6 +20,26 @@ from die_shift_studio.dxf_export import Snapshot
 
 
 class V41Tests(unittest.TestCase):
+    def test_visibility_fallback_finds_an_interior_bent_route(self):
+        from unittest.mock import patch
+        from die_shift_studio.reconstruction_route import trace
+        source=LineString([(0,0),(200,0),(200,200)]).buffer(20)
+        with patch('die_shift_studio.reconstruction_route.medial_graph',return_value=(np.empty((0,2)),())):
+            route=trace(source,(0,0),(200,200),15)
+        self.assertIsNotNone(route);self.assertTrue(source.covers(route))
+        self.assertEqual(tuple(route.coords[0]),(0.,0.));self.assertEqual(tuple(route.coords[-1]),(200.,200.))
+
+    def test_new_zone_on_ignored_shape_keeps_its_clicked_source_position(self):
+        e,_,_=fixture()
+        try:
+            cfg=replace(e.reconstructor.settings,reconstruction_forced=(('5/0',0),),
+                        reconstruction_added=(('5/0',0,0.,0.,'seed-case','seed'),))
+            cfg=ViewSettings.from_dict(json.loads(json.dumps(asdict(cfg))))
+            e.configure_reconstruction(True,cfg);q=e.frame(np.zeros((1,3)))['reconstruction']['pieces'][0]
+            self.assertTrue(q['nominal_regions']['A'].covers(Point(0,0)))
+            self.assertTrue(q['route_identity'].endswith('~seed-case'))
+        finally:e.close()
+
     def test_independent_die_supports_on_a_midspan_connection_do_not_overlap(self):
         from test_v40 import make_engine
         from die_shift_studio.core import Parameters
@@ -52,7 +72,7 @@ class V41Tests(unittest.TestCase):
                regions=dict(A=box(10,10,20,20),B=box(20,10,40,20),C=box(-10,10,10,20)),
                nominal_regions=dict(A=box(10,0,20,10)),moving_terminals=box(-10,10,0,20))
         def violation(g,phase=None):return dict(kind='线距不足',geometry=g,net=('5',1),layers=('5/0',),phase=phase)
-        outside=[violation(box(25,12,28,16)),violation(box(-8,12,-4,16))]
+        outside=[violation(box(25,12,28,16)),violation(box(-8,12,-4,16)),violation(box(20.001,12,20.0015,14))]
         self.assertFalse(associate([q],outside,.001)[zone_key(q)])
         q['rule_witnesses']=associate([q],outside,.001)[zone_key(q)]
         bank=dict(zones={zone_key(q):dict(complete=True,has_failure=False)})

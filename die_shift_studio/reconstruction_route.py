@@ -69,9 +69,13 @@ def trace(poly,start,end,width):
     nodes,base=medial_graph(poly.wkb,round(float(width),6))
     if not len(nodes):
         direct=shapely.LineString([start,end])
-        return direct if poly.covers(direct) else None
+        if poly.covers(direct):return direct
+        from .reconstruction_visibility import trace as fallback
+        return fallback(poly,start,end,width)
     active=np.array([i for i,row in enumerate(base) if row],int)
-    if not len(active):return None
+    if not len(active):
+        from .reconstruction_visibility import trace as fallback
+        return fallback(poly,start,end,width)
     tree=cKDTree(nodes[active]);graph=[list(row) for row in base];graph.extend([[],[]])
     allxy=np.vstack([nodes,start,end]);src,dst=len(nodes),len(nodes)+1
     for pos,point in ((src,start),(dst,end)):
@@ -87,7 +91,9 @@ def trace(poly,start,end,width):
         for j,w in graph[i]:
             value=d+w
             if value<dist.get(j,math.inf):dist[j]=value;previous[j]=i;heapq.heappush(queue,(value,j))
-    if dst not in previous:return None
+    if dst not in previous:
+        from .reconstruction_visibility import trace as fallback
+        return fallback(poly,start,end,width)
     order=[dst]
     while order[-1]!=src:order.append(previous[order[-1]])
     line=shapely.LineString(allxy[order[::-1]])
@@ -146,9 +152,9 @@ def branch_sources(source,land,anchors,start,width,tolerance,guard):
         for i,a in enumerate(distal):
             for j in range(i+1,len(distal)):
                 if a.intersection(distal[j]).area>epsilon:bad.update((i,j))
-        trunk=source.difference(shapely.union_all(distal))
+        trunk=clean_overlay(source.difference(shapely.union_all(distal)),tolerance)
         if trunk.is_empty or land.difference(trunk).area>epsilon:return None
-        result=[(shapely.union_all([trunk,g]),trunk,anchor) for g,anchor in zip(distal,anchors)]
+        result=[(clean_overlay(source.difference(shapely.union_all([other for j,other in enumerate(distal) if j!=i])),tolerance),trunk,anchor) for i,anchor in enumerate(anchors)]
         if trunk.geom_type!='Polygon' or any(g.geom_type!='Polygon' or not g.is_valid for g,_,_ in result):bad.update(range(len(distal)))
         if not bad:
             if shapely.union_all([g for g,_,_ in result]).symmetric_difference(source).area>epsilon:return None

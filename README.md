@@ -2,9 +2,9 @@
 
 V41正在开发，基于已发布的[V40](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/releases/tag/V40)。本轮合同与进度见[工作记录](docs/V41_WORK.md)；尚未作为V41发布。
 
-V40 修复重构极端筛选、动区违规配色和连接样式切换任务滞留，增加“边界角度”和按源图形忽略重构。动区详情共用宽度分析的画布标签；后台复用路径，动静区 DXF 复用完成帧并逐层并行、流式输出。
+V41增加按原图保存的边界旋转与动区增删，修复多芯片共网和中段接入识别；动区颜色只由该区型变前后的规则决定。动静区DXF交换B/C定义，仅输出边框及固定RDL，并独立回读校验精确闭合、重复和重合。
 
-当前行为、公式与限制见 [V40 使用说明](docs/V40_使用说明.md)，实际验收见 [V40 验证记录](docs/V40_VALIDATION.md)。基线为 V39 主线 `04093da99640c5513b2bd15db57abc7b614853de`。
+行为与公式见 [V41使用说明](docs/V41_使用说明.md)，实际验收见 [V41验证记录](docs/V41_VALIDATION.md)。基线为V40 main `213065c40567aa97daa087e0af785848fa34bf40`。
 
 ## 开发入口
 
@@ -27,8 +27,8 @@ V40 修复重构极端筛选、动区违规配色和连接样式切换任务滞�
 3. 点击“方案评估”，再选择极端行、数值输入或 M 键手动偏移。首行/“复原”回零并保留表格滚动位置。每轴 0/最小/最大组成离散目录，零幅度轴锁零；默认重点组合和过滤无问题情况。
 4. “极端足迹”合并离散孔实体与覆盖概率，∞ 只画当前实体。Space Map 表示位置相关线距需求。接触标记及低概率标记默认隐藏；两种过孔虚线范围可分别设置。
 5. 宽度分析按名义线路需求检查相邻刚性孔盘/固定障碍/封装和禁布区通道。原宽可过、需收窄、最小线宽仍不足分三档；零位汇总全部离散工况。右键可忽略线路；“全修正良率”和“不修正良率”按联合宽度事件计算，有限网格不是连续空间精确穷尽。
-6. 重构预演把固定 RDL 分为 A 动区、B 固定端静区、C 运动端平移区，共用原图端点。蓝黄柄独立拖动，两端整孔盘模式可逆；连接样式为直线/一阶/二阶/圆弧，边界角度为垂直/重构区优先/两侧平均。当前/全极端风险按红黄绿灰显示，规则位置另标记；左键选中显示画布详情，右键可忽略整个源图形的重构。
-7. 普通 DXF 输出保存当前完成几何；动静区输出只将固定 RDL 分为 A/B/C 三层的真实开放轮廓。默认 Flatten 所选 Top Cell 并按层 Merge，不恢复圆弧。分区交接共用相同坐标，无人工内部截面、无 HATCH，失败保留旧文件。
+6. 重构预演把固定 RDL 分为 A 动区、B 运动端平移区、C 固定端静区，共用原图端点。蓝黄柄独立拖动，两端整孔盘模式可逆；连接样式为直线/一阶/二阶/圆弧，边界角度为垂直/重构区优先/两侧平均。当前/全极端风险按红黄绿灰显示，规则位置另标记；左键选中显示画布详情，右键可忽略源图形、增删动区；拖动时滚轮旋转边界，右键可撤销旋转。进度条旁可取消计算并保留上次结果。
+7. 普通 DXF 输出保存当前完成几何；动静区输出仅边框及固定RDL的A/B/C真实开放轮廓，B为平移、C为静区。默认 Flatten 所选 Top Cell 并按层 Merge，不恢复圆弧。分区交接共用相同坐标，无人工内部截面、无 HATCH，失败保留旧文件。
 
 图片滚轮缩放、中键平移；普通右键拖框缩放、单击图形菜单。**F** 恢复视图，**M** 选择 DIE 后右键拖移、滚轮旋转、Ctrl+滚轮缩放，**ESC** 退出/取消选择。左键点选或框选，Shift 追加、Ctrl 扣除；边框不参与选择。**Q** 查看/修改源图形节点，修改保存在工程而不回写 GDS。表格/信息框允许滚动，数值和下拉控件禁止滚轮改值。
 
@@ -41,9 +41,9 @@ V40 修复重构极端筛选、动区违规配色和连接样式切换任务滞�
 ```bash
 python3 tools/check_contribution.py
 python3 tools/package_release.py verify-source
-PYTHONPATH=tests:. python3 -m unittest test_v40
-QT_QPA_PLATFORM=offscreen python3 tests/gui_v40.py
-python3 tools/benchmark_v40.py --gds /path/to/GD55_9-21.gds --dxf /tmp/GD55_ABC.dxf
+PYTHONPATH=tests:. python3 -m unittest test_v41
+QT_QPA_PLATFORM=offscreen python3 tests/gui_v41.py
+python3 tools/validate_v41_jobs.py --project /path/to/case.dshift.json --output /tmp/audit.json --scratch /tmp/dsa-audit
 ```
 
 Linux、托管 Windows 和物理 GPU 的验证分别记录。有关概率精度、复杂铜区无可信分区和冷计算耗时等限制见 [已知问题](docs/KNOWN_ISSUES.md)。
