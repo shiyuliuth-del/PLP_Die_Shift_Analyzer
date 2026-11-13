@@ -212,4 +212,21 @@ class Reconstruction40Tests(unittest.TestCase):
                 for (ka,xy),(kb,uv) in zip(a,b):self.assertEqual(ka,kb);np.testing.assert_allclose(xy,uv,atol=1e-10,rtol=0)
         finally:e.close()
 
+    def test_optional_runtime_warning_is_not_an_error_and_hook_is_restored(self):
+        import warnings,sys,io
+        from types import SimpleNamespace
+        from die_shift_studio.runtime_log import RuntimeCapture
+        old=warnings.showwarning;records=[]
+        with patch('sys.stderr',io.StringIO()):
+            capture=RuntimeCapture(SimpleNamespace(emit=lambda text,level='INFO':records.append((str(text),level))))
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter('always');warnings.warn('optional CUDA path unavailable',UserWarning)
+                sys.stderr.write('real failure\n')
+            finally:capture.close()
+        self.assertIs(warnings.showwarning,old)
+        self.assertTrue(any('CUDA path' in text and level=='WARNING' for text,level in records))
+        self.assertFalse(any('CUDA path' in text and level=='ERROR' for text,level in records))
+        self.assertIn(('real failure\n','ERROR'),records)
+
 if __name__=='__main__':unittest.main()
