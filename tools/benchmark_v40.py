@@ -21,7 +21,11 @@ def progress(n,t):
  if time.monotonic()-last[0]>3 or n==100:print(n,t,flush=True);last[0]=time.monotonic()
 try:
  t=time.perf_counter();nominal=r.frame(np.zeros((grid.count,3)),progress=progress);cold=time.perf_counter()-t
- print('COLD',cold,flush=True);t=time.perf_counter();evidence=attach(scan(r,grid,progress),r);scan_seconds=time.perf_counter()-t
+ print('COLD',cold,flush=True)
+ if args.checkpoint:
+  import pickle
+  Path(args.checkpoint).write_bytes(pickle.dumps(dict(source_sha256=d.sha256,code_sha256=code_hash,plans=r.plan_pool),protocol=5))
+ t=time.perf_counter();evidence=attach(scan(r,grid,progress),r);scan_seconds=time.perf_counter()-t
 
  if args.checkpoint:
   import pickle

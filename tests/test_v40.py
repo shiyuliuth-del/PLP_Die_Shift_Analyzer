@@ -67,6 +67,17 @@ class Reconstruction40Tests(unittest.TestCase):
             self.assertTrue(q['problem_reasons'])
         finally:e.close()
 
+    def test_rule_support_reuses_pose_but_invalidates_moved_copper_and_via(self):
+        from die_shift_studio.reconstruction_events import support
+        q=dict(regions=dict(A=box(0,0,5,5),B=box(5,0,10,5),C=box(-5,0,0,5)),moving_terminals=box(-3,1,-1,3))
+        original=support(q,.001);self.assertIs(original,support(q,.001))
+        changed=dict(q,regions=dict(q['regions'],A=box(0,10,5,15)))
+        self.assertFalse(original.equals(support(changed,.001)))
+        old_via=support(q,.001,True)
+        moved=dict(q,moving_terminals=box(30,1,32,3))
+        self.assertFalse(old_via.equals(support(moved,.001,True)))
+        self.assertIs(original,support(q,.001))
+
     def test_two_die_pair_dependencies_cover_mixed_non_diagonal_cases(self):
         ys=(0,70)
         shapes={'127/0':[box(-200,-200,800,300)],'128/0':[box(-40,y-25,40,y+25) for y in ys],

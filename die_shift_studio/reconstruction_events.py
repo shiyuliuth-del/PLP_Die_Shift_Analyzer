@@ -10,7 +10,7 @@ import threading
 import math
 import numpy as np
 import shapely
-from .resources import parallel_map,cancel_check
+from .resources import parallel_map,cancel_check,resource_profile
 from .extreme_filter import PoseClause,ProblemIndex
 from .reconstruction_route import EMPTY
 
@@ -33,9 +33,16 @@ def support(q,tol,via=False):
     parts=[q['regions']['A'],q['regions']['B'],q['regions']['C']]
     if via:parts.append(q.get('moving_terminals',EMPTY))
     if q.get('connection_failed'):parts.append(q.get('missing_region',EMPTY))
+    cuts=[]
     for name in ('moved_cut','extra_cut'):
-        if q.get(name) is not None:parts.append(q[name].buffer(tol*4))
-    return shapely.union_all(parts).buffer(tol*4)
+        if q.get(name) is not None:cuts.append(q[name])
+    key='_rule_support_via' if via else '_rule_support';shapes=tuple(parts+cuts);cached=q.get(key)
+    if cached is not None and cached[0]==tol and len(cached[1])==len(shapes) and all(a is b for a,b in zip(cached[1],shapes)):return cached[2]
+    result=shapely.union_all([*parts,*[g.buffer(tol*4) for g in cuts]]).buffer(tol*4)
+    # A pose participates in many neighbouring combinations. Retain the actual
+    # geometry references so id reuse or a live edit cannot leave stale support.
+    q[key]=(tol,shapes,result)
+    return result
 
 
 def associate(pieces,violations,tol):
@@ -209,7 +216,10 @@ def scan(r,grid,progress=lambda *_:None):
                     record(placed,associate(placed,rows,r.tol),scope,digits)
         envelope=shapely.union_all([bundles[ref]['envelope'] for ref in component]).envelope
         return dict(net=net,owners=axes,values=table,envelope=envelope),calls
-    results=parallel_map(local_table,list(enumerate(components)),progress=lambda n,total:progress(40+round(20*n/max(1,total)),f'重构局部规则 {n}/{total}'))
+    # The native backend serialises its database access. More frontend threads
+    # thrash its region cache; two overlap geometry preparation with native work.
+    native_profile=resource_profile();native_profile=dict(native_profile,workers=min(2,native_profile['workers']))
+    results=parallel_map(local_table,list(enumerate(components)),profile=native_profile,progress=lambda n,total:progress(40+round(20*n/max(1,total)),f'重构局部规则 {n}/{total}'))
     tables=[row[0] for row in results];calls=sum(row[1] for row in results)
     for t in tables:
         items=list(t['values'].items());t['items']=items
@@ -243,7 +253,7 @@ def scan(r,grid,progress=lambda *_:None):
             ps=pa+pb;rows=[dict(kind='异网线距不足 / 接触',geometry=bad,layers=tuple({q['layer'] for q in ps}),net=(a['net'],b['net']))]
             record(ps,associate(ps,rows,r.tol),axes,digits)
         return pair_checks
-    pair_checks=sum(parallel_map(check_pair,list(enumerate(pairs)),progress=lambda n,total:progress(60+round(35*n/max(1,total)),f'重构异网组合 {n}/{total}')))
+    pair_checks=sum(parallel_map(check_pair,list(enumerate(pairs)),profile=native_profile,progress=lambda n,total:progress(60+round(35*n/max(1,total)),f'重构异网组合 {n}/{total}')))
     clauses=tuple(sorted(set().union(*records.values()) if records else set(),key=lambda c:c.allowed))
     zones={}
     for key,q in zone_defs.items():
