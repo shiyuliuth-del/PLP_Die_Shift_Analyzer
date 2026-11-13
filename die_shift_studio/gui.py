@@ -85,8 +85,10 @@ class Worker(QtCore.QThread):
             with cancellation_scope(self.cancelled):result=self.fn(self.update)
             if not self.cancelled.is_set():self.done.emit(result)
         except InterruptedError:pass
-        except ValueError as exc:self.failed.emit(str(exc)+'\n'+traceback.format_exc())
-        except Exception as exc:self.failed.emit(str(exc)+'\n'+traceback.format_exc())
+        except ValueError as exc:
+            if not self.cancelled.is_set():self.failed.emit(str(exc)+'\n'+traceback.format_exc())
+        except Exception as exc:
+            if not self.cancelled.is_set():self.failed.emit(str(exc)+'\n'+traceback.format_exc())
 
 
 def label(text):
@@ -256,6 +258,8 @@ class MainWindow(W.QMainWindow):
         header.addSpacing(14);header.addWidget(W.QLabel('GDS · 极端偏移预演 · μm'));header.addStretch()
         self.progress=W.QProgressBar();self.progress.setMinimumWidth(160);self.progress.setMaximumWidth(360);self.progress.setMaximumHeight(23);self.progress.setTextVisible(True)
         policy=self.progress.sizePolicy();policy.setRetainSizeWhenHidden(True);self.progress.setSizePolicy(policy);header.addWidget(self.progress,1);self.progress.hide()
+        from .task_control import TaskControl
+        self.task_control=TaskControl(self,header)
         self.job_combo=W.QComboBox();self.job_combo.setMinimumWidth(210);self.job_combo.setMaximumWidth(360)
         self.job_combo.setToolTip('Jobs工程；空白项表示未命名的新工程');self.job_combo.currentIndexChanged.connect(self.job_selected);header.addWidget(self.job_combo)
         self.save_button=W.QPushButton('保存工程');self.save_button.clicked.connect(self.save_project);header.addWidget(self.save_button)
@@ -330,7 +334,7 @@ class MainWindow(W.QMainWindow):
         self.filter_job=None;self._coupled_key=None;self._coupled_data=None;self._coupled_error=False
         self.width_toggle=W.QCheckBox('宽度分析');self.width_toggle.setToolTip('按实际线路穿越数量检查局部通道容量：矩形颜色显示宽度余量，轮廓高亮风险线路；不代表全局可布通证明。');corner_layout.addWidget(self.width_toggle);self.width_toggle.toggled.connect(self.width_changed)
         self.repair_toggle=W.QCheckBox('修复补块');self.repair_toggle.setToolTip('设备方修复模型：过孔偏移后脱离固定RDL时，在固定RDL层按偏移量拉直线补块，并对补块后的图形做DRC；补块是简化模型，不代表设备实际修复合格。');corner_layout.addWidget(self.repair_toggle);self.repair_toggle.toggled.connect(self.repair_changed)
-        self.reconstruction_toggle=W.QCheckBox('重构预演');self.reconstruction_toggle.setToolTip('沿原始走线划分A动区、B静区、C平移区；所有偏移状态共用端点。拖动蓝色/黄色边界可分别调整，动区轮廓可输出DXF。');corner_layout.addWidget(self.reconstruction_toggle);self.reconstruction_toggle.toggled.connect(self.reconstruction_changed)
+        self.reconstruction_toggle=W.QCheckBox('重构预演');self.reconstruction_toggle.setToolTip('沿原始走线划分A动区、B平移区、C静区；所有偏移状态共用端点。拖动蓝色/黄色边界可分别调整，动区轮廓可输出DXF。');corner_layout.addWidget(self.reconstruction_toggle);self.reconstruction_toggle.toggled.connect(self.reconstruction_changed)
         self.preview_tabs.setCornerWidget(corner)
         self.probability_toggle.toggled.connect(self.footprint_changed);self.space_toggle.toggled.connect(self.space_changed)
         extreme_page=W.QWidget();ep=W.QVBoxLayout(extreme_page);ep.setContentsMargins(0,0,0,0)
@@ -759,22 +763,24 @@ class MainWindow(W.QMainWindow):
         self.per_die_values[i][j]=value
         if not self.loading:self.invalidate()
     def task_progress(self,worker,n,text):
-        if getattr(worker,'_task_tracked',True) is False:return
+        import time
+        if time.monotonic()<getattr(worker,'_quiet_until',0.):return
+        if getattr(worker,'_task_tracked',True) is False or worker.cancelled.is_set():return
         self._tasks[id(worker)]=(n,text);self.progress.show();self.progress.setRange(0,100);self.progress.setValue(n);self.progress.setFormat(f'{n}% · '+text[:36]);self.statusBar().showMessage(text)
         self.log_bus.emit(text)
     def watch_worker(self,worker,name,quiet=False):
         import time
+        self.task_control.checkpoint();self.task_control.button.setEnabled(True)
+        start=time.perf_counter();worker._task_tracked=True
+        worker._quiet_until=time.monotonic()+.25 if quiet else 0.
+        self._tasks[id(worker)]=(0,name+'：开始')
+        self.task_progress(worker,0,name+'：开始')
         if quiet:
-            # Interactive edits (dragging a cut line) must not flash the header
-            # progress bar on every release; keep only the status hint.
-            worker.progress.connect(lambda n,t:self.statusBar().showMessage(t))
-            worker.failed.connect(lambda text:self.log_bus.emit(name+'：'+text,'ERROR'))
-            return
-        start=time.perf_counter();worker._task_tracked=True;self.task_progress(worker,0,name+'：开始')
+            QtCore.QTimer.singleShot(260,lambda:self.task_progress(worker,0,name+'：计算中') if getattr(worker,'_task_tracked',False) and not worker.cancelled.is_set() else None)
         worker.progress.connect(lambda n,t:self.task_progress(worker,n,t))
         worker.failed.connect(lambda text:self.log_bus.emit(name+'：'+text,'ERROR'))
         def finish():
-            worker._task_tracked=False;self._tasks.pop(id(worker),None);self.log_bus.emit(f'{name}：'+('已取消' if worker.cancelled.is_set() else '线程退出')+f'，耗时 {time.perf_counter()-start:.3f} s')
+            worker._task_tracked=False;self._tasks.pop(id(worker),None);self.task_control.finished();self.log_bus.emit(f'{name}：'+('已取消' if worker.cancelled.is_set() else '线程退出')+f'，耗时 {time.perf_counter()-start:.3f} s')
             if self._closing and not self._tasks:QtCore.QTimer.singleShot(0,self.close)
             if not self._tasks:self.progress.hide();self.cleanup_retired_sessions()
             else:
@@ -860,7 +866,9 @@ class MainWindow(W.QMainWindow):
             from . import native_backend
             native_backend.close();self._clear_native_when_idle=False
             from .reconstruction_rules import intrinsic
-            intrinsic.cache_clear();self.reconstruction_yield.plan_pool.clear();self.reconstruction_yield.factor_pool.clear();self.constraint_feedback.context=None
+            intrinsic.cache_clear()
+            from .reconstruction_enclosure import reachable_enclosure
+            reachable_enclosure.cache_clear();self.reconstruction_yield.plan_pool.clear();self.reconstruction_yield.factor_pool.clear();self.constraint_feedback.context=None
         for group_ in self.parked_groups:
             if group_ is self.cache_group:continue
             group_.park_frames()
@@ -925,7 +933,7 @@ class MainWindow(W.QMainWindow):
         self.progress.show();self.progress.setValue(0);self.run_button.setEnabled(False);self.controls.setEnabled(interactive);self.job_combo.setEnabled(False);self.save_button.setEnabled(False)
         worker=Worker(fn,self);self.worker=worker
         self.watch_worker(worker,'主计算')
-        worker.done.connect(success);worker.failed.connect(lambda text:(self.refresh_jobs(),self.error(text)));worker.finished.connect(lambda:self.finish_worker(worker));worker.start()
+        worker.done.connect(lambda result:success(result) if not worker.cancelled.is_set() else None);worker.failed.connect(lambda text:(self.refresh_jobs(),self.error(text)));worker.finished.connect(lambda:self.finish_worker(worker));worker.start()
     def finish_worker(self,worker):
         self.controls.setEnabled(True);self.job_combo.setEnabled(True);self.save_button.setEnabled(True);self.run_button.setEnabled(True)
         if self.worker is worker:self.worker=None
@@ -1325,12 +1333,12 @@ class MainWindow(W.QMainWindow):
     def clear_manual_cuts(self,*_):
         extras=getattr(self.view_settings,'reconstruction_extra_cuts',())
         dropped=getattr(self.view_settings,'reconstruction_dropped_cuts',())
-        if not any((self.view_settings.reconstruction_cuts,extras,dropped,self.view_settings.reconstruction_second_cuts,self.view_settings.reconstruction_intervals)):return
+        if not any((self.view_settings.reconstruction_cuts,extras,dropped,self.view_settings.reconstruction_second_cuts,self.view_settings.reconstruction_intervals,self.view_settings.reconstruction_angles,self.view_settings.reconstruction_deleted,self.view_settings.reconstruction_added)):return
         from dataclasses import replace
         # Also restores the automatic cuts that were deleted, so one button undoes
         # every hand edit of the cut lines.
         self.view_settings=replace(self.view_settings,reconstruction_cuts=(),
-                                   reconstruction_extra_cuts=(),reconstruction_second_cuts=(),reconstruction_dropped_cuts=(),reconstruction_intervals=())
+                                   reconstruction_extra_cuts=(),reconstruction_second_cuts=(),reconstruction_dropped_cuts=(),reconstruction_intervals=(),reconstruction_angles=(),reconstruction_deleted=(),reconstruction_added=(),reconstruction_forced=())
         self.invalidate_reconstruction_edit()
         self.statusBar().showMessage('已清除全部手动切口，并恢复被删除的自动切口')
         self.request_preview()
@@ -1380,7 +1388,9 @@ class MainWindow(W.QMainWindow):
     def reconstruction_changed(self,*_):
         if self.loading:return
         self.reconstruction_yield.refresh();self.constraint_feedback.cancel()
-        if not self.reconstruction_toggle.isChecked():self.exit_region_mode();self.cut_drag.cancel()
+        if not self.reconstruction_toggle.isChecked():
+            self.exit_region_mode();self.cut_drag.cancel();self.cancel_previews();self.preview_ticket+=1;self.preview_pending=None
+            self.reconstruction_overlay.hide()
         self.filter_changed(pending_ok=True)
         if self.reconstruction_toggle.isChecked():
             self.statusBar().showMessage('重构预演：建立原图共用动区，核对全部离散极端；蓝色与黄色两端可独立拖动…')
@@ -1676,7 +1686,7 @@ class MainWindow(W.QMainWindow):
             from .reconstruction_overlay import COLORS,CUT_COLOR,SECOND_CUT_COLOR,WARNING_COLOR
             from .reconstruction_events import PALETTE
             handles += [Patch(facecolor=PALETTE[k],alpha=.66,label=title) for k,title in [('red','动区违规'),('yellow','当前通过 / 其他极端风险'),('green','全部离散极端通过'),('gray','低概率满足要求')]]
-            handles += [Patch(facecolor=COLORS[k],alpha=.66,label=k+' '+title) for k,title in [('B','静区'),('C','平移区')]]
+            handles += [Patch(facecolor=COLORS[k],alpha=.66,label={'B':'C','C':'B'}[k]+' '+title) for k,title in [('B','静区'),('C','平移区')]]
             handles += [Line2D([],[],color=CUT_COLOR,lw=2,label='运动侧边界 / 整孔盘蓝点'),Line2D([],[],color=SECOND_CUT_COLOR,lw=2,label='固定侧边界 / 整孔盘黄点'),Patch(facecolor='#dd5790',edgecolor='#bc386d',alpha=.45,label='具体违规位置 · 选中查看')]
         if self.current_frame and self.current_frame.get('motion_issues'):handles.append(Line2D([],[],color='#bf862c',ls='--',label='运动归属未定：保持名义位置'))
         if getattr(self.data,'ignored_geometry',[]):handles.append(Line2D([],[],color='#d72b91',ls='--',lw=.7,label='忽略的无效图形'))
@@ -2050,7 +2060,7 @@ class MainWindow(W.QMainWindow):
         self.log_bus.emit(admitted['reason']+f" · 活跃预演 {len(self.preview_workers)} · CPU {admitted['load'].get('cpu_percent')}% · 可用内存 {admitted['load']['available_memory_mb']} MiB")
         def partial(_):
             value=worker.take_partial()
-            if value is None:return
+            if value is None or worker.cancelled.is_set():return
             if revision!=self.revision or worker.view_ticket!=self.preview_ticket or data is not self.data:return
             actual,frame,distribution,con,cache,field=value
             self.engine=actual;self.case=case;self.probability_data=distribution;self.connections=con;self.geometry_cache=cache;self.space_data=field
@@ -2058,6 +2068,7 @@ class MainWindow(W.QMainWindow):
         worker.partial.connect(partial)
         def accepted(value):
             worker.delivered=True
+            if worker.cancelled.is_set():return
             if revision!=self.revision or data is not self.data or worker.view_ticket!=self.preview_ticket:return
             self.engine,frame,self.probability_data,self.connections,self.geometry_cache,self.space_data,self._prepared_package,self._prepared_motion,self.repair_data,self.footprint_data,summary=value
             if summary is not None and self._width_grid_summary is not summary:
@@ -2231,17 +2242,19 @@ class MainWindow(W.QMainWindow):
         if self.tabs.currentWidget() is self.detail and self.result and self.report_dirty:self.update_report()
     def update_report(self):
         if getattr(self,'_report_rendering',False):return
+        self.task_control.report_cancelled=False
         self._report_rendering=True;result=self.result;self.progress.show();self.progress.setValue(0)
         width_snapshot=result.get('width_policy_yield');retry=False
         try:
             def progress(n,text):
                 self.progress.setValue(n);self.progress.setFormat(text);self.log_bus.emit(text)
-                flag=getattr(QtCore.QEventLoop,'ProcessEventsFlag',QtCore.QEventLoop).ExcludeUserInputEvents
-                W.QApplication.processEvents(flag)
+                W.QApplication.processEvents()
+                if self.task_control.report_cancelled:raise InterruptedError('用户取消报告生成')
             html,resources=report_document(result,self.evaluation_motions,progress)
             if self.result is result:
                 set_document(self.detail,html,resources)
                 self.report_dirty=result.get('width_policy_yield') is not width_snapshot;retry=self.report_dirty
+        except InterruptedError:pass
         except Exception:self.error(traceback.format_exc())
         finally:
             self._report_rendering=False
@@ -2604,8 +2617,12 @@ class MainWindow(W.QMainWindow):
         old=set(self.view_settings.reconstruction_ignored)
         refs={(k,int(i)) for k,i in refs if self.roles().get(k)=='固定RDL'}
         updated=old|refs if ignore else old-refs
-        if updated==old:return
-        self.view_settings=replace(self.view_settings,reconstruction_ignored=tuple(sorted(updated)))
+        if updated==old and ignore:return
+        extra={}
+        if not ignore:
+            extra['reconstruction_forced']=tuple(sorted(set(self.view_settings.reconstruction_forced)|refs))
+            extra['reconstruction_deleted']=tuple(r for r in self.view_settings.reconstruction_deleted if r[:2] not in refs)
+        self.view_settings=replace(self.view_settings,reconstruction_ignored=tuple(sorted(updated)),**extra)
         self.invalidate_reconstruction_edit();self.request_preview()
         self.statusBar().showMessage(f'已忽略重构 {len(updated)} 个图形；保持源图，运动过孔仍按所属DIE运动。')
 

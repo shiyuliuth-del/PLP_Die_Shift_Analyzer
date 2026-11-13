@@ -1,4 +1,6 @@
-# Die Shift Analyze V40
+# Die Shift Analyze V41
+
+V41正在开发，基于已发布的[V40](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/releases/tag/V40)。本轮合同与进度见[工作记录](docs/V41_WORK.md)；尚未作为V41发布。
 
 V40 修复重构极端筛选、动区违规配色和连接样式切换任务滞留，增加“边界角度”和按源图形忽略重构。动区详情共用宽度分析的画布标签；后台复用路径，动静区 DXF 复用完成帧并逐层并行、流式输出。
 

@@ -55,6 +55,8 @@ def trace(poly,start,end,width):
     """Shortest interior medial path, with exact source terminal endpoints."""
     start,end=np.asarray(start,float),np.asarray(end,float)
     if np.linalg.norm(end-start)<1e-8:return None
+    direct=shapely.LineString([start,end])
+    if poly.covers(direct):return direct
     nodes,base=medial_graph(poly.wkb,round(float(width),6))
     if not len(nodes):
         direct=shapely.LineString([start,end])
@@ -104,8 +106,8 @@ def branch_sources(source,land,anchors,start,width,tolerance,guard):
         if route is None:return None
         others=tuple([g for g in anchors if g is not anchor]+[land])
         probe=RoutePlan('',0,0,(),source,route,anchor,others,tolerance,guard)
-        lo=float(np.max(project(route,shapely.get_coordinates(land))))+max(tolerance*16,guard)
-        hi=float(np.min(project(route,shapely.get_coordinates(anchor))))-max(tolerance*16,guard)
+        lo=float(np.max(project(route,shapely.get_coordinates(land))))+max(tolerance*16,.01)
+        hi=float(np.min(project(route,shapely.get_coordinates(anchor))))-max(tolerance*16,.01)
         if hi<=lo:return None
         lower=lo;found=None
         for mark in np.linspace(lo,hi,32):
@@ -191,6 +193,7 @@ class RoutePlan:
         eps=max(self.tolerance*8,1e-4)
         lo=0. if which==0 else max(other+eps,self.land_end+eps)
         hi=min(other-eps,self.fixed_start-eps) if which==0 else self.length
+        limits=getattr(self,'zone_limits',(0.,self.length));lo=max(lo,limits[0]);hi=min(hi,limits[1])
         if hi<lo:return lo
         s=float(np.clip(s,lo,hi))
         if which==0 and s<=self.land_end+eps:return 0.
@@ -358,7 +361,7 @@ def taper_mesh(part,plan,start,end):
     return shapely.union_all([shapely.Polygon(ring(p.exterior),[ring(h) for h in p.interiors]) for p in parts(part['A'])])
 
 
-def _warp_variant(part,plan,center,state,style="c2",variant=0):
+def _warp_geometry(part,plan,center,state,style="c2",variant=0):
     """Move original material; C is rigid and A tapers continuously into B."""
     cancel_check()
     from .preview import rigid_transform
@@ -401,7 +404,10 @@ def _warp_variant(part,plan,center,state,style="c2",variant=0):
         out[moved]=placed[moved];out[fixed]=xy[fixed]
         return out
     try:
-        if variant:
+        if variant<0:
+            from .parallel_curves import offset_active
+            active=offset_active(part,plan,center,state,style,(-variant+1)/2)
+        elif variant:
             from .turn_connection import turn_active
             active=turn_active(part,plan,center,state,style,variant)
         elif style in ('linear','arc'):
@@ -457,7 +463,7 @@ def _warp_variant(part,plan,center,state,style="c2",variant=0):
     if len(parts(full))!=len(parts(plan.source)) or not full.is_valid or sum(len(q.interiors) for q in parts(full))!=expected_holes:
         return None,'重构连接不能闭合'
     fixed=shapely.intersection(full,shapely.set_precision(raw['B'],plan.tolerance))
-    rigid=shapely.intersection(full,shapely.set_precision(raw['C'],plan.tolerance)).difference(fixed)
+    rigid=shapely.union_all(parts(shapely.intersection(full,shapely.set_precision(raw['C'],plan.tolerance)))).difference(fixed)
     result={'A':full.difference(shapely.union_all([fixed,rigid])),'B':fixed,'C':rigid}
     size=int(sum(shapely.get_num_coordinates(g) for g in result.values()))*24+512
     if size<=plan.memo_budget:
@@ -467,10 +473,16 @@ def _warp_variant(part,plan,center,state,style="c2",variant=0):
     return result,None
 
 
+def _warp_variant(part,plan,center,state,style="c2",variant=0):
+    try:return _warp_geometry(part,plan,center,state,style,variant)
+    except (ValueError,shapely.errors.GEOSException) as exc:
+        return None,'连接几何无法通过布尔校验：'+str(exc)
+
+
 def warp(part,plan,center,state,style="c2",variant=None):
     """Use the selected style; curved styles may make a verified return bend."""
     if variant is not None:return _warp_variant(part,plan,center,state,style,variant)
-    key=('resolved-v40',style,part_key(part),np.asarray(center,float).tobytes(),np.asarray(state,float).tobytes())
+    key=('resolved-v41',style,part_key(part),np.asarray(center,float).tobytes(),np.asarray(state,float).tobytes())
     if key in plan.pose_memo:
         result,error,_=plan.pose_memo[key];plan.pose_memo.move_to_end(key)
         return None if result is None else dict(result),error

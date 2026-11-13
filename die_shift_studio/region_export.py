@@ -14,6 +14,7 @@ import numpy as np
 import shapely
 from .dxf_export import PairWriter,_handles,_verify
 from . import dxf_document as doc
+from .region_contract import EXPORT_ROLES,PUBLIC_KIND,verify_written_contours
 
 
 def line_parts(g):
@@ -112,7 +113,7 @@ def layer_contours(task):
     polygons=[p for blob in raw for p in shapely.get_parts(shapely.from_wkb(blob)) if not p.is_empty]
     if any(p.geom_type!='Polygon' or not p.is_valid for p in polygons):raise ValueError(f'图层 {key} 的输出几何无效')
     inputs=len(polygons)
-    if options.merge_layers:polygons=list(shapely.get_parts(shapely.union_all(polygons)))
+    polygons=list(shapely.get_parts(shapely.union_all(polygons)))
     merged=len(polygons);base='L'+key.replace('/','_D');shapes=[]
     masks={k:shapely.union_all([q['regions'][k] for q in rows]) for k in 'AC'}
     trees={kind:shapely.STRtree(shapely.get_parts(g)) for kind,g in masks.items()} if role=='固定RDL' else {}
@@ -122,7 +123,7 @@ def layer_contours(task):
         for hole,ring in enumerate([polygon.exterior,*polygon.interiors]):
             assigned=partition_ring(ring,local) if role=='固定RDL' else [('',np.asarray(ring.coords))]
             for kind,xy in assigned:
-                name=base+kind+('_holes' if hole and options.separate_holes else '');xy=xy*options.scale
+                name=base+PUBLIC_KIND[kind];xy=xy*options.scale
                 if len(xy)>=2 and np.isfinite(xy).all():shapes.append((name,xy))
     return key,joined_coordinates(shapes),inputs,merged
 
@@ -130,6 +131,7 @@ def layer_contours(task):
 def contour_batches(snapshot,reconstruction,roles,options,progress=lambda *_:None):
     tasks=[]
     for key,raw in sorted(snapshot.layers.items()):
+        if roles.get(key) not in EXPORT_ROLES:continue
         tasks.append((key,raw,[p for p in reconstruction.get('pieces',()) if p['layer']==key],roles.get(key),options))
     profile=resource_profile();largest=max((sum(len(v) for v in raw) for key,raw in snapshot.layers.items()),default=1)
     profile=dict(profile,workers=min(len(tasks) or 1,geometry_budget(profile,largest)))
@@ -170,10 +172,10 @@ def write_regions(snapshot,reconstruction,roles,path,progress=lambda *_:None,*,s
                         doc._write_outline(w,dict(vertices=xy,closed=False),name,entities[i],handles['block_record_model']);i+=1
                         if i%128==0:progress(65+round(25*i/count),'流式写出开放 A/B/C 轮廓')
                 w.add(0,'ENDSEC');doc._write_objects(w,handles);stream.flush();os.fsync(stream.fileno())
-            _verify(temp,count,extent);digest=hashlib.sha256(Path(temp).read_bytes()).hexdigest();os.replace(temp,path)
+            _verify(temp,count,extent);progress(92,'回读核对ABC端点、闭合与重复轮廓');topology=verify_written_contours(temp);digest=hashlib.sha256(Path(temp).read_bytes()).hexdigest();os.replace(temp,path)
         finally:
             if temp and os.path.exists(temp):os.unlink(temp)
     progress(100,'动静区DXF输出完成')
     return dict(path=str(path),polygons=count,layers=len(names),sha256=digest,ignored=snapshot.ignored_count,
-                input_polygons=inputs,merged_polygons=merged,flattened=True,merge_layers=options.merge_layers,scale=options.scale,regions=True,
+                input_polygons=inputs,merged_polygons=merged,flattened=True,merge_layers=True,scale=options.scale,regions=True,topology=topology,
                 unresolved_regions=sum(not q.get('valid',True) for q in reconstruction.get('pieces',())))

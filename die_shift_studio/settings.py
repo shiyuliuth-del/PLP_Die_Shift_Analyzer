@@ -89,6 +89,10 @@ class ViewSettings:
     reconstruction_style:str="c2"
     reconstruction_boundary_mode:str="perpendicular"
     reconstruction_ignored:tuple=()
+    reconstruction_forced:tuple=()  # explicit edits override enclosure-based auto-ignore
+    reconstruction_angles:tuple=() # layer,index,owner,refs,route,side,absolute nominal blade angle
+    reconstruction_deleted:tuple=() # stable zone keys
+    reconstruction_added:tuple=() # source layer,index,nominal x,y,stable id
     reconstruction_grid_nodes:int=3
     reconstruction_intervals:tuple=()  # layer,index,owner,via refs,route fingerprint,s0,s1
     reconstruction_corner_guard_um:float=3.0
@@ -166,6 +170,8 @@ class ViewSettings:
         refs=values.get('reconstruction_ignored',())
         if not isinstance(refs,(list,tuple)) or any(not isinstance(r,(list,tuple)) or len(r)!=2 or not isinstance(r[0],str) or type(r[1]) is not int or r[1]<0 for r in refs):raise ValueError('忽略重构图形编号无效')
         values['reconstruction_ignored']=tuple(sorted(set(tuple(r) for r in refs)))
+        from .reconstruction_edits import normalize_edits
+        values.update(normalize_edits(values))
         if 'reconstruction_cuts' in values:
             values['reconstruction_cuts']=cls._normalize_cuts(values['reconstruction_cuts'])
         for key in ('reconstruction_extra_cuts','reconstruction_second_cuts'):
@@ -223,8 +229,9 @@ class ViewSettings:
 
     def reconstruction_key(self):
         """Everything the reconstruction result depends on besides the pose."""
-        return (True,'nominal-route-partition-v40',self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_ignored,self.drc_tolerance_um,
+        return (True,'nominal-route-partition-v41',self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_ignored,self.drc_tolerance_um,
                 self.reconstruction_corner_guard_um,tuple(self.reconstruction_intervals),
+                self.reconstruction_forced,self.reconstruction_angles,self.reconstruction_deleted,self.reconstruction_added,
                 tuple(self.reconstruction_regions),tuple(self.reconstruction_cuts),
                 tuple(self.reconstruction_extra_cuts),tuple(self.reconstruction_second_cuts),
                 tuple(self.reconstruction_dropped_cuts))

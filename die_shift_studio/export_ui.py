@@ -30,7 +30,12 @@ def export_dxf(window,regions=False):
                repairs=window.repair_data if window.repair_toggle.isChecked() else None)
     if frame is not None and getattr(window,'preview_pending',None):
         window.error('当前预演仍在更新，请显示完成后再输出');return
-    roles=window.roles();process=window.params();view=window.view_settings;model=window.engine.contact if regions else None
+    roles=window.roles()
+    if regions:
+        from .region_contract import EXPORT_ROLES
+        selected=frozenset(k for k in selected if roles.get(k) in EXPORT_ROLES)
+        if not selected:window.error('所选范围没有封装边框、芯片边框或固定RDL');return
+    process=window.params();view=window.view_settings;model=window.engine.contact if regions else None
     export_plans={}
     if regions and getattr(window.engine,'reconstructor',None) is not None:
         from .reconstruction_status import clone_plan_pool
@@ -67,7 +72,7 @@ def export_dxf(window,regions=False):
     def complete(result):
         message=f"DXF已输出：{result['path']} · {result['polygons']}个图形，{result['layers']}层；Flatten已完成，Merge {'开启' if result['merge_layers'] else '关闭'}（{result['input_polygons']}→{result['merged_polygons']}）；比例{result['scale']:g}，单位μm。"
         if result.get('regions'):
-            message+=' A/B/C仅含真实轮廓，无HATCH。'
+            message+=' A动区／B平移区／C静区，仅输出边框及固定RDL；开放轮廓已回读检查闭合与重复，无HATCH。'
             if result.get('unresolved_regions'):message+=f" {result['unresolved_regions']}个重构区域未完成有效连接；输出当前实际实体，红色提示区不导出。"
         if result['ignored']:message+=f"已跳过导入时未能识别的{result['ignored']}个图形。"
         window.log_bus.emit(message);window.statusBar().showMessage(message)

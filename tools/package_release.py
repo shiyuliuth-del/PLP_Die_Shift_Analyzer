@@ -11,7 +11,7 @@ from die_shift_studio import __version__
 def check_source():
     """Stage a clean test checkout. Test helpers and projects do not enter the release."""
     gui=['gui_smoke','gui_v14','gui_scheduler_v20','gui_repair',
-         'gui_v24','gui_v25','gui_v26','gui_v27','gui_v28','gui_v29','gui_v30','gui_v32','gui_v33','gui_v34','gui_v35','gui_v36','gui_v38','gui_v39','gui_v40','gui_branch_integration']
+         'gui_v24','gui_v25','gui_v26','gui_v27','gui_v28','gui_v29','gui_v30','gui_v32','gui_v33','gui_v34','gui_v35','gui_v36','gui_v38','gui_v39','gui_v40','gui_v41','gui_branch_integration']
     env=dict(os.environ,QT_QPA_PLATFORM='offscreen',OPENBLAS_NUM_THREADS='1',PYTHONUTF8='1')
     subprocess.run([sys.executable,'tools/check_contribution.py'],cwd=ROOT,env=env,check=True)
     records=[]
