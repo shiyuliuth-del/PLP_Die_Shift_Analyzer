@@ -1,0 +1,78 @@
+{
+  "source_sha256": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+  "code_sha256": "d00af62dba4570c37d0faa01b46582c65104fb842f6af402173baae4e97755e0",
+  "index": 9228,
+  "contours": [
+    {
+      "layer": "7/0",
+      "hausdorff_um": 0.0,
+      "length_error_um": 2.9103830456733704e-11
+    },
+    {
+      "layer": "6/0",
+      "hausdorff_um": 0.0,
+      "length_error_um": 3.092281986027956e-11
+    },
+    {
+      "layer": "5/0",
+      "hausdorff_um": 5.684341886080802e-14,
+      "length_error_um": 3.4924596548080444e-10
+    },
+    {
+      "layer": "4/0",
+      "hausdorff_um": 0.0,
+      "length_error_um": 1.0913936421275139e-11
+    },
+    {
+      "layer": "3/0",
+      "hausdorff_um": 0.0,
+      "length_error_um": 2.9103830456733704e-11
+    },
+    {
+      "layer": "2/0",
+      "hausdorff_um": 0.0,
+      "length_error_um": 2.7284841053187847e-11
+    },
+    {
+      "layer": "1/0",
+      "hausdorff_um": 0.0,
+      "length_error_um": 2.6193447411060333e-10
+    },
+    {
+      "layer": "122/0",
+      "hausdorff_um": 0.0,
+      "length_error_um": 1.4551915228366852e-11
+    },
+    {
+      "layer": "127/0",
+      "hausdorff_um": 0.0,
+      "length_error_um": 0.0
+    },
+    {
+      "layer": "128/0",
+      "hausdorff_um": 0.0,
+      "length_error_um": 0.0
+    }
+  ],
+  "angle_modes": [
+    {
+      "mode": "wide",
+      "seconds": 23.4236793119926,
+      "valid_output": true,
+      "shared_positions": true,
+      "tilted_records": 76,
+      "violations": 56,
+      "scene_failure": true
+    },
+    {
+      "mode": "balanced",
+      "seconds": 17.25322018697625,
+      "valid_output": true,
+      "shared_positions": true,
+      "tilted_records": 18,
+      "violations": 55,
+      "scene_failure": true
+    }
+  ],
+  "scope": "One complete GD55 pose; valid output and rule violations are different quantities."
+}

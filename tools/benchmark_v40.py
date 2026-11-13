@@ -27,7 +27,7 @@ def progress(n,t):
  if time.monotonic()-last[0]>3 or n==100:print(n,t,flush=True);last[0]=time.monotonic()
 try:
  t=time.perf_counter();nominal=r.frame(np.zeros((grid.count,3)),progress=progress);cold=time.perf_counter()-t
- print('COLD',cold,flush=True)
+ print('INITIAL_FRAME_REUSED_PLANS' if seed_hash else 'COLD',cold,flush=True)
  if args.checkpoint:
   import pickle
   Path(args.checkpoint).write_bytes(pickle.dumps(dict(source_sha256=d.sha256,code_sha256=code_hash,plans=r.plan_pool),protocol=5))
@@ -61,7 +61,7 @@ try:
    xy=np.array(list(entity.get_points('xy')));assert not np.array_equal(xy[0],xy[-1])
    ends[tuple(xy[0])]+=1;ends[tuple(xy[-1])]+=1
   assert all(n%2==0 for n in ends.values());export['all_open']=True;export['unmatched_endpoints']=0
- result=dict(version='V40',source_sha256=d.sha256,code_sha256=code_hash,hardware=resource_profile(),cold_seconds=cold,
+ result=dict(version='V40',source_sha256=d.sha256,code_sha256=code_hash,hardware=resource_profile(),cold_seconds=None if seed_hash else cold,initial_frame_seconds=cold,
              scan_seconds=scan_seconds,plan_cache_seed_sha256=seed_hash,states=grid.total+1,filtered_states=idx.total+1,geometry_checks=evidence['geometry_checks'],local_checks=evidence['local_checks'],pair_checks=evidence['pair_checks'],
              zones=len(evidence['zones']),nominal_colors={k:sum(color_for(q,evidence,True,6)==k for q in nominal['pieces']) for k in ('red','yellow','green','gray')},
              frame_parity=actual,export=export,scope='Linux CPU; complete discrete factor analysis, selected full-frame parity. No physical GPU or production-yield acceptance.')

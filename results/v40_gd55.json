@@ -1,0 +1,115 @@
+{
+  "version": "V40",
+  "source_sha256": "a18c984b5a30a7590ddcf9881268eed95b5881711a54fe00bd1e57bd23cbdfae",
+  "code_sha256": "d00af62dba4570c37d0faa01b46582c65104fb842f6af402173baae4e97755e0",
+  "hardware": {
+    "cpu": 8,
+    "total_memory_mb": 15708,
+    "available_memory_mb": 7900,
+    "workers": 6,
+    "worker_capacity": 6,
+    "process_workers": 3,
+    "policy": "预留至少2个逻辑CPU（大机器约10%）与65%可用内存；原生几何/FFT使用线程；大型独立原图DRC与RDL候选搜索使用spawn进程；小任务串行"
+  },
+  "cold_seconds": null,
+  "scan_seconds": 722.4774306750041,
+  "plan_cache_seed_sha256": "920fcf77b2f6d441b3b6d778826ab9d6f0c63429dd45e9398eb83b4c64ce5fcf",
+  "states": 19683,
+  "filtered_states": 19683,
+  "geometry_checks": 17174,
+  "local_checks": 17174,
+  "pair_checks": 23162,
+  "zones": 143,
+  "nominal_colors": {
+    "red": 115,
+    "yellow": 0,
+    "green": 28,
+    "gray": 0
+  },
+  "frame_parity": [
+    {
+      "index": 0,
+      "seconds": 2.4260570249753073,
+      "problem_zones": 20
+    },
+    {
+      "index": 1,
+      "seconds": 2.3831957670045085,
+      "problem_zones": 32
+    },
+    {
+      "index": 19681,
+      "seconds": 1.8393109619501047,
+      "problem_zones": 64
+    },
+    {
+      "index": 11052,
+      "seconds": 1.6779744369559921,
+      "problem_zones": 53
+    },
+    {
+      "index": 14365,
+      "seconds": 1.5107913819956593,
+      "problem_zones": 52
+    },
+    {
+      "index": 419,
+      "seconds": 1.619045787025243,
+      "problem_zones": 53
+    },
+    {
+      "index": 13647,
+      "seconds": 1.6070975470356643,
+      "problem_zones": 56
+    },
+    {
+      "index": 8612,
+      "seconds": 1.5564040309982374,
+      "problem_zones": 39
+    },
+    {
+      "index": 18538,
+      "seconds": 1.8895305849728175,
+      "problem_zones": 48
+    },
+    {
+      "index": 616,
+      "seconds": 1.9254920759703964,
+      "problem_zones": 75
+    },
+    {
+      "index": 1174,
+      "seconds": 2.0138868910144083,
+      "problem_zones": 58
+    },
+    {
+      "index": 9228,
+      "seconds": 2.1376239839592017,
+      "problem_zones": 68
+    }
+  ],
+  "export": {
+    "path": "/tmp/GD55_V40_ABC.dxf",
+    "polygons": 2506,
+    "layers": 12,
+    "sha256": "b3ce815fd4a2e450aa8b14957eb376f0ea0281de595433ae6bfc263809261603",
+    "ignored": 0,
+    "input_polygons": 1034,
+    "merged_polygons": 1017,
+    "flattened": true,
+    "merge_layers": true,
+    "scale": 1.0,
+    "regions": true,
+    "unresolved_regions": 11,
+    "seconds": 3.3736325909849256,
+    "all_open": true,
+    "unmatched_endpoints": 0
+  },
+  "scope": "Linux CPU; complete discrete factor analysis, selected full-frame parity. No physical GPU or production-yield acceptance.",
+  "initial_frame_seconds": 1.7526925510028377,
+  "cold_planning_observation": {
+    "seconds": 266.92742119403556,
+    "code_sha256": "920fcf77b2f6d441b3b6d778826ab9d6f0c63429dd45e9398eb83b4c64ce5fcf",
+    "scope": "Cold planning plus first nominal frame; same unchanged planning modules, concurrent source checks. The 1.75 s initial frame in the final scan reused these plans."
+  }
+}
