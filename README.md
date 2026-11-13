@@ -1,6 +1,6 @@
 # Die Shift Analyze V41
 
-V41正在开发，基于已发布的[V40](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/releases/tag/V40)。本轮合同与进度见[工作记录](docs/V41_WORK.md)；尚未作为V41发布。
+V41基于已发布的[V40](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/releases/tag/V40)，按两版顺序交付。本轮合同与实现见[工作记录](docs/V41_WORK.md)，源码与校验文件见[Release](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/releases)。
 
 V41增加按原图保存的边界旋转与动区增删，修复多芯片共网和中段接入识别；动区颜色只由该区型变前后的规则决定。动静区DXF交换B/C定义，仅输出边框及固定RDL，并独立回读校验精确闭合、重复和重合。
 

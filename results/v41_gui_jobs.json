@@ -1,0 +1,45 @@
+{
+  "status": "PASS",
+  "scope": "Linux Qt offscreen; real project geometry with previously audited nominal plans; actual hover/toggle events and all visible handles; expensive global yield evaluated separately.",
+  "cases": [
+    {
+      "project": "gd55-1105",
+      "source_sha256": "a4bccbb65058dc4023bc53d5a6916c4185b81f6d1710e365c8b21c9c6feb1b29",
+      "checks": [
+        {
+          "point": [
+            2799,
+            257
+          ],
+          "pickable_handles": 0
+        },
+        {
+          "point": [
+            -379,
+            -786
+          ],
+          "pickable_handles": 1
+        }
+      ],
+      "zones": 64,
+      "status": "PASS"
+    },
+    {
+      "project": "nu17123",
+      "source_sha256": "6bdd1614389450db9f57e80cbed109e42b3e374e8ad775da86f3da0a0e6df418",
+      "checks": [
+        {
+          "point": [
+            5000,
+            4250
+          ],
+          "pickable_handles": 38
+        }
+      ],
+      "zones": 65,
+      "status": "PASS"
+    }
+  ],
+  "runtime_sha256": "eedbbe9d9483f7aa0b959c1c85e6848454bc7c517c5d843b62922aee53b75398",
+  "verification": "GUI case plan inputs produced by tools/validate_v41_jobs.py at 74d721b; numerical code unchanged except tightened probability certificate; all displayed geometry computed using the recorded runtime."
+}

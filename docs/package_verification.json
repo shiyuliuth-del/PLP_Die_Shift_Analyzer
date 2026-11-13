@@ -1,11 +1,11 @@
 {
-  "version": "V40",
+  "version": "V41",
   "status": "PASS",
-  "tested_at_utc": "2026-11-13T03:45:30.183471+00:00",
+  "tested_at_utc": "2026-11-13T07:54:39.157186+00:00",
   "scope": "Clean source checkout, local platform. Windows executable verification is recorded separately.",
   "platform": "linux",
-  "verified_runtime_sha256": "d00af62dba4570c37d0faa01b46582c65104fb842f6af402173baae4e97755e0",
-  "gui_suites": 20,
+  "verified_runtime_sha256": "eedbbe9d9483f7aa0b959c1c85e6848454bc7c517c5d843b62922aee53b75398",
+  "gui_suites": 21,
   "runs": [
     {
       "args": [
@@ -21,7 +21,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "Ran 335 tests in 78.482s",
+        "Ran 350 tests in 71.838s",
         "",
         "OK (skipped=2)"
       ]
@@ -252,6 +252,18 @@
         "This plugin does not support raise()",
         "This plugin does not support grabbing the keyboard",
         "GUI_V40_PASS: rule colours/filter, shared canvas callouts, ignored source Jobs, cancelled rapid styles, boundary modes and no-reroute streaming export"
+      ]
+    },
+    {
+      "args": [
+        "tests/gui_v41.py"
+      ],
+      "env": {},
+      "status": "PASS",
+      "summary": [
+        "This plugin does not support raise()",
+        "This plugin does not support grabbing the keyboard",
+        "GUI_V41_PASS: drag-wheel rotations, retained angles, menus, serial zones, Jobs, cancel rollback, hidden overlay/pulse cleanup"
       ]
     },
     {
