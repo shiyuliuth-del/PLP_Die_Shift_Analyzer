@@ -52,6 +52,14 @@ def central_certificate(r,entry,entries):
     if b[2] or mu[2]:return None
     part,_=r.interval(entry)
     if part is None:return None
+    # The Lipschitz certificate is for the original arclength field. A manual
+    # slanted cut uses a different distance ratio and has no such bound here.
+    if any(abs(v)>1e-12 for v in part.get('angles',(0.,0.))):return None
+    if r.settings.reconstruction_style=='linear':
+        if part['near'].geom_type!='LineString' or part['far'].geom_type!='LineString':return None
+        hull=shapely.MultiPoint(np.vstack([shapely.get_coordinates(part['near']),shapely.get_coordinates(part['far'])])).convex_hull
+        # Four-point joining can remove rectangle corners even at zero shift.
+        if not hull.equals(part['A']):return None
     start=part['a'] if part['a'] else plan.land_end
     end=plan.fixed_start if part['far'].geom_type=='Point' else part['b'];span=end-start
     if span<=r.tol:return None

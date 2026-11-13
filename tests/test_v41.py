@@ -210,6 +210,36 @@ class V41Tests(unittest.TestCase):
             text=path.read_text();text=text.replace('\n10\n30\n','\n10\n30.00001\n',1);path.write_text(text)
             with self.assertRaises(ValueError):verify_written_contours(path)
 
+    def test_continuous_certificate_rejects_unbounded_manual_fields_and_changed_baselines(self):
+        from test_v40 import make_engine
+        from die_shift_studio.core import Parameters
+        from die_shift_studio.reconstruction_probability import central_certificate
+        shapes={'127/0':[box(-500,-400,1100,500)],'128/0':[box(-70,-70,70,70)],'3/0':[box(-20,-20,20,20)],
+                '4/0':[Point(0,0).buffer(10)],'5/0':[box(-100,-50,700,50),box(-150,164.9,100,200)],'6/0':[Point(600,0).buffer(10)]}
+        p=Parameters(single_bound_x_um=0,single_bound_y_um=100,bound_angle_deg=0,annulus_um=10,moving_annulus_um=5)
+        e,_,_=make_engine(shapes,p)
+        try:
+            r=e.reconstructor;entries=r._plans_for_all_poses(lambda *_:None)
+            self.assertTrue(central_certificate(r,entries[0],entries)['certified'])
+            q=r.frame(np.zeros((1,3)))['pieces'][0]
+            e.configure_reconstruction(True,rotate(r.settings,q,0,.05))
+            r=e.reconstructor;entries=r._plans_for_all_poses(lambda *_:None)
+            self.assertIsNone(central_certificate(r,entries[0],entries))
+        finally:e.close()
+        # A diagonal straight join removes rectangle corners even at zero.
+        # The original rectangle's edge separation cannot certify this result.
+        shapes={'127/0':[box(-500,-400,1100,500)],'128/0':[box(-100,-100,-60,-60)],
+                '3/0':[Point(-80,-80).buffer(15)],'4/0':[Point(-80,-80).buffer(5)],
+                '5/0':[box(-100,-100,100,100)],'6/0':[Point(80,80).buffer(5)]}
+        cfg=ViewSettings(reconstruction_style='linear',reconstruction_forced=(('5/0',0),))
+        e,_,_=make_engine(shapes,replace(p,single_bound_x_um=.01,single_bound_y_um=.01,annulus_um=2),cfg)
+        try:
+            r=e.reconstructor;entries=r._plans_for_all_poses(lambda *_:None);part,_=r.interval(entries[0])
+            hull=shapely.MultiPoint(np.vstack([shapely.get_coordinates(part['near']),shapely.get_coordinates(part['far'])])).convex_hull
+            self.assertGreater(hull.symmetric_difference(part['A']).area,10000)
+            self.assertIsNone(central_certificate(r,entries[0],entries))
+        finally:e.close()
+
     def test_new_project_fields_are_optional_and_roundtrip(self):
         cfg=ViewSettings.from_dict({})
         self.assertEqual(cfg.reconstruction_angles,());self.assertEqual(cfg.reconstruction_added,())
