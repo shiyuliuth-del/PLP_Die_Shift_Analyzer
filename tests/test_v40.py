@@ -11,7 +11,7 @@ from die_shift_studio.fast_preview import GeometryCache,PreviewEngine
 from die_shift_studio.settings import ViewSettings
 from die_shift_studio.statistics import ExtremeCatalog
 from die_shift_studio.extreme_filter import ProblemIndex
-from die_shift_studio.reconstruction_events import scan,current_failures,zone_key,color_for,active_region
+from die_shift_studio.reconstruction_events import scan,current_failures,scene_failure,zone_key,color_for,active_region
 from die_shift_studio.reconstruction_probability import attach
 
 
@@ -33,7 +33,7 @@ class Reconstruction40Tests(unittest.TestCase):
                 for i in range(-1,grid.total):
                     z=np.zeros((1,3)) if i<0 else grid[i]['states'];digits=[0] if i<0 else grid.choices(i)
                     actual=current_failures(e.reconstructor.frame(z));some_bad |= bool(actual)
-                    self.assertEqual(idx.matches(digits),bool(actual),(style,i))
+                    self.assertEqual(idx.matches(digits),scene_failure(e.reconstructor.frame(z)),(style,i))
                 self.assertTrue(some_bad);self.assertEqual(bank['geometry_checks'],3)
             finally:e.close()
 
@@ -91,11 +91,27 @@ class Reconstruction40Tests(unittest.TestCase):
             self.assertGreater(bank['pair_checks'],0)
             for i in range(-1,grid.total):
                 digits=[0,0] if i<0 else grid.choices(i);z=np.array([v[d] for v,d in zip(grid.locals,digits)])
-                f=e.reconstructor.frame(z);self.assertEqual(idx.matches(digits),bool(current_failures(f)),digits)
+                f=e.reconstructor.frame(z);self.assertEqual(idx.matches(digits),scene_failure(f),digits)
                 for q in f['pieces']:
                     zidx=ProblemIndex(grid,bank['zones'][zone_key(q)]['clauses'])
                     self.assertEqual(zidx.matches(digits),zone_key(q) in current_failures(f),(zone_key(q),digits))
         finally:e.close()
+
+    def test_spatial_join_excludes_incompatible_shared_states_before_query(self):
+        from die_shift_studio.reconstruction_events import compatible_candidates
+        def table(owners):
+            ds=np.array(list(itertools.product(range(3),repeat=len(owners))))
+            geos=np.array([box(i%3,0,i%3+2,2) for i in range(len(ds))],object)
+            return dict(owners=owners,digits=ds,geometries=geos,tree=shapely.STRtree(geos))
+        cases=[((0,1),owners) for owners in ((0,1),(1,2),(2,),())]+[((0,1,2,3),(4,))]
+        for own_a,owners in cases:
+            a,b=table(own_a),table(owners)
+            actual={(int(i),int(j)) for x,y in compatible_candidates(a,b,1) for i,j in zip(x,y)}
+            expected=set()
+            for i,x in enumerate(a['digits']):
+                for j,y in enumerate(b['digits']):
+                    if all(x[a['owners'].index(o)]==y[b['owners'].index(o)] for o in set(a['owners'])&set(b['owners'])) and a['geometries'][i].distance(b['geometries'][j])<=1:expected.add((i,j))
+            self.assertEqual(actual,expected,owners)
 
     def test_ignored_feature_stays_source_and_reuses_plans_after_unignore(self):
         e,d,c=fixture()
@@ -124,6 +140,18 @@ class Reconstruction40Tests(unittest.TestCase):
             self.assertTrue(first['replacements']['5/0'][0]['geometry'].equals(shapes['5/0'][0]))
             self.assertEqual(first['replacements']['5/0'][0]['geometry'].wkb,second['replacements']['5/0'][0]['geometry'].wkb)
             self.assertEqual(current_failures(first),current_failures(second))
+        finally:e.close()
+
+    def test_ignored_source_is_still_checked_by_scene_filter(self):
+        e,d,c=fixture();roles=e.roles;p=replace(e.p,line_width_um=50);e.close()
+        e=PreviewEngine(GeometryCache(d),c,roles,{},p,None,c['connections'])
+        e.configure_reconstruction(True,ViewSettings(reconstruction_ignored=(('5/0',0),)))
+        try:
+            grid=ExtremeCatalog(c,p);bank=scan(e.reconstructor,grid);index=ProblemIndex(grid,bank['red_factors'])
+            self.assertFalse(bank['zones']);self.assertEqual(index.total,grid.total);self.assertTrue(index.zero)
+            frame=e.reconstructor.frame(np.zeros((1,3)))
+            self.assertFalse(frame['pieces']);self.assertTrue(scene_failure(frame))
+            self.assertTrue(any(v['kind']=='线宽不足' for v in frame['violations']))
         finally:e.close()
 
     def test_source_bound_ignore_roundtrip_and_old_defaults(self):

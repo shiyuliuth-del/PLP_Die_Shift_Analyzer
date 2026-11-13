@@ -7,15 +7,21 @@ from die_shift_studio.core import read_gds,build_case,Parameters
 from die_shift_studio.fast_preview import GeometryCache,PreviewEngine
 from die_shift_studio.settings import ViewSettings
 from die_shift_studio.statistics import ExtremeCatalog
-from die_shift_studio.reconstruction_events import scan,current_failures,color_for,zone_key
+from die_shift_studio.reconstruction_events import scan,current_failures,scene_failure,color_for,zone_key
 from die_shift_studio.reconstruction_probability import attach
 from die_shift_studio.extreme_filter import ProblemIndex
 from die_shift_studio.resources import resource_profile
-parser=argparse.ArgumentParser();parser.add_argument('--gds',required=True);parser.add_argument('--output',default=str(ROOT/'results/v40_gd55.json'));parser.add_argument('--dxf');parser.add_argument('--checkpoint',help='Optional local developer snapshot; never load untrusted pickle files');args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('--gds',required=True);parser.add_argument('--output',default=str(ROOT/'results/v40_gd55.json'));parser.add_argument('--dxf');parser.add_argument('--checkpoint',help='Optional local developer snapshot; never load untrusted pickle files');parser.add_argument('--reuse-local-plans',help='Developer-only: own earlier local checkpoint, not an external pickle');args=parser.parse_args()
 code_hash=hashlib.sha256(b''.join(p.read_bytes() for p in sorted((ROOT/'die_shift_studio').glob('*.py')))).hexdigest()
 d=read_gds(args.gds);roles={k:'不参与' for k in d.layers};roles.update({'127/0':'封装边框','128/0':'芯片边框','3/0':'运动RDL','4/0':'运动过孔','5/0':'固定RDL','6/0':'固定过孔'})
 c=build_case(d,roles,layer_order=['6/0','5/0','4/0','3/0']);p=Parameters();cfg=ViewSettings();grid=ExtremeCatalog(c,p)
 e=PreviewEngine(GeometryCache(d),c,roles,{},p,None,c['connections']);e.configure_reconstruction(True,cfg);r=e.reconstructor
+seed_hash=None
+if args.reuse_local_plans:
+ import pickle
+ seed=pickle.loads(Path(args.reuse_local_plans).read_bytes())
+ if seed['source_sha256']!=d.sha256:raise ValueError('Local plan checkpoint is from a different GDS')
+ r.plan_pool.update(seed['plans']);seed_hash=seed['code_sha256']
 last=[0.]
 def progress(n,t):
  if time.monotonic()-last[0]>3 or n==100:print(n,t,flush=True);last[0]=time.monotonic()
@@ -34,7 +40,7 @@ try:
  actual=[];samples=[0,1,grid.total-1,*np.random.default_rng(40).integers(0,grid.total,9).tolist()]
  for i in samples:
   pose=grid[i];t=time.perf_counter();frame=r.frame(pose['states']);elapsed=time.perf_counter()-t
-  bad=current_failures(frame);assert idx.matches(pose['choices'])==bool(bad)
+  bad=current_failures(frame);assert idx.matches(pose['choices'])==scene_failure(frame)
   for q in frame['pieces']:
    found=ProblemIndex(grid,evidence['zones'][zone_key(q)]['clauses']).matches(pose['choices'])
    assert found==(zone_key(q) in bad),(i,zone_key(q),found,bad)
@@ -56,7 +62,7 @@ try:
    ends[tuple(xy[0])]+=1;ends[tuple(xy[-1])]+=1
   assert all(n%2==0 for n in ends.values());export['all_open']=True;export['unmatched_endpoints']=0
  result=dict(version='V40',source_sha256=d.sha256,code_sha256=code_hash,hardware=resource_profile(),cold_seconds=cold,
-             scan_seconds=scan_seconds,states=grid.total+1,filtered_states=idx.total+1,geometry_checks=evidence['geometry_checks'],local_checks=evidence['local_checks'],pair_checks=evidence['pair_checks'],
+             scan_seconds=scan_seconds,plan_cache_seed_sha256=seed_hash,states=grid.total+1,filtered_states=idx.total+1,geometry_checks=evidence['geometry_checks'],local_checks=evidence['local_checks'],pair_checks=evidence['pair_checks'],
              zones=len(evidence['zones']),nominal_colors={k:sum(color_for(q,evidence,True,6)==k for q in nominal['pieces']) for k in ('red','yellow','green','gray')},
              frame_parity=actual,export=export,scope='Linux CPU; complete discrete factor analysis, selected full-frame parity. No physical GPU or production-yield acceptance.')
  Path(args.output).write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n');print('V40_GD55_PASS',flush=True)

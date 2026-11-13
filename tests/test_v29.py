@@ -92,12 +92,12 @@ class V29Tests(unittest.TestCase):
             with patch.object(e.contact,'current',side_effect=AssertionError('unused contact computation')):
                 result=scan(e,g,cfg,True,None,lambda *_:None)
             self.assertTrue(result['edge_certified']);idx=ProblemIndex(g,result['red_factors'])
-            from die_shift_studio.reconstruction_events import current_failures
+            from die_shift_studio.reconstruction_events import current_failures,scene_failure
             for i in range(-1,g.total):
                 ds=[0]*g.count if i<0 else g.choices(i)
                 z=np.array([v[k] for v,k in zip(g.locals,ds)])
                 frame=e.frame(z);w=frame['width_analysis']
-                self.assertEqual(idx.matches(ds),bool(current_failures(frame['reconstruction'])))
+                self.assertEqual(idx.matches(ds),scene_failure(frame['reconstruction']))
                 self.assertFalse(w['edge_violations'])
         finally:e.close()
 

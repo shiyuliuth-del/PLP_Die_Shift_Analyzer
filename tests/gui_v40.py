@@ -59,7 +59,7 @@ try:
  click(point);menu_action('忽略选中图形的重构',point)
  assert w.view_settings.reconstruction_ignored==( ('5/0',0), )
  assert not w.current_frame['reconstruction']['pieces']
- assert w.extreme_table.rowCount()==1
+ assert w.extreme_table.rowCount()>1,'ignoring reconstruction must not hide original fixed-copper DRC'
  saved=folder/'saved.dshift.json';w.write_project(saved)
  assert json.loads(saved.read_text())['ignored_reconstruction']['refs']==[['5/0',0]]
  w.load_project(saved);wait();assert w.view_settings.reconstruction_ignored==( ('5/0',0), )

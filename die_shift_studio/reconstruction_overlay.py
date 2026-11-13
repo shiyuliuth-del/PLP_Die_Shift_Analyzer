@@ -136,6 +136,11 @@ class ReconstructionOverlay:
                 face=self.handles.get((self._key(q),kind),q.get(target))
                 if face is not None and face.geom_type=='Point':dot_list.append(face.coords[0])
                 else:line_list.extend(_lines(face))
+        # Ignoring deformation keeps real fixed copper, not an exemption from
+        # its physical rules. Its current witnesses must remain visible too.
+        for row in (data or {}).get('violations',()):
+            g=row['geometry']
+            if any(layer in vis for layer in row.get('layers',())) and not g.is_empty and _in_view(g.bounds,w.view_bounds):markers[g.wkb]=g
         for (layer,index,kind,status),values in sorted(region_groups.items(),key=lambda item:RANK.get(item[0][3],-1)):
             geos=tuple(values.values());cache_key=(layer,index,kind,status,tuple(values));previous=old_unions.get(cache_key)
             g=previous[1] if previous is not None and all(a is b for a,b in zip(previous[0],geos)) else (geos[0] if len(geos)==1 else shapely.union_all(geos))

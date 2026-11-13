@@ -73,6 +73,10 @@ def current_failures(frame):
     return out
 
 
+def scene_failure(frame):
+    return bool(frame.get('violations')) or bool(current_failures(frame))
+
+
 def color_for(q,bank,nominal,level,inside=True):
     key=zone_key(q);row=(bank or {}).get('zones',{}).get(key)
     bad=bool(q.get('rule_witnesses')) or bool(q.get('connection_failed'))
@@ -110,6 +114,37 @@ def _component_groups(r,bundles):
             vias=[v for v in r.rules.vias[key] if r.model.nodes[r.model.ids[v[0]]]['poly'].intersects(original)]
             groups.append((key,selected,vias))
     return groups
+
+
+def compatible_candidates(a,b,space):
+    """Join shared DIE digits BEFORE spatial comparison, not after an N² query."""
+    common=tuple(sorted(set(a['owners']) & set(b['owners'])))
+    if not common:
+        block=max(1,min(32,2_000_000//max(1,len(b['geometries']))))
+        for offset in range(0,len(a['geometries']),block):
+            cancel_check();x,y=b['tree'].query(a['geometries'][offset:offset+block],predicate='dwithin',distance=space)
+            yield x+offset,y
+        return
+    def groups(t):
+        cache=t.setdefault('joins',{})
+        if common not in cache:
+            cols=[t['owners'].index(o) for o in common];out=defaultdict(list)
+            for i,ds in enumerate(t['digits'][:,cols]):out[tuple(ds)].append(i)
+            cache[common]={ds:np.asarray(ids,int) for ds,ids in out.items()}
+        return cache[common]
+    aa,bb=groups(a),groups(b)
+    for digits,ia in aa.items():
+        cancel_check();ib=bb.get(digits)
+        if ib is None:continue
+        if len(ia)==1 or len(ib)==1:
+            ix=np.repeat(ia,len(ib));iy=np.tile(ib,len(ia))
+            keep=shapely.dwithin(a['geometries'][ix],b['geometries'][iy],space)
+            yield ix[keep],iy[keep]
+        else:
+            cache=b.setdefault('join_trees',{});key=(common,digits);tree=cache.get(key)
+            if tree is None:tree=shapely.STRtree(b['geometries'][ib]);cache[key]=tree
+            x,y=tree.query(a['geometries'][ia],predicate='dwithin',distance=space)
+            yield ia[x],ib[y]
 
 
 def scan(r,grid,progress=lambda *_:None):
@@ -159,14 +194,16 @@ def scan(r,grid,progress=lambda *_:None):
             term=PoseClause(((owner,(all_digits[owner],)),) if owner>=0 else ())
             routing_factors.append(term)
             strongest(routing_lines,[(row['layer'],i) for i in row['indices']],BLOCKED,None,binary,routing_witnesses,edge_witness(row,grid.index(all_digits),r.model,states))
-    records=defaultdict(set);witnesses={};locations=defaultdict(dict);reasons=defaultdict(set);zone_defs={};record_lock=threading.Lock()
+    records=defaultdict(set);witnesses={};locations=defaultdict(dict);reasons=defaultdict(set);zone_defs={};scene_records=set();record_lock=threading.Lock()
     for bundle in bundles.values():
         for v in bundle['values'].values():
             for q in v['pieces']:zone_defs.setdefault(zone_key(q),q)
-    def record(pieces,rows,axes,digits):
+    def record(pieces,rows,axes,digits,all_bad=False):
         all_digits=[0]*count
         for i,d in zip(axes,digits):all_digits[i]=d
         index=grid.index(all_digits);term=PoseClause(tuple((i,(int(d),)) for i,d in zip(axes,digits)))
+        if all_bad or any(rows.values()):
+            with record_lock:scene_records.add(term)
         for q in pieces:
             key=zone_key(q);issues=rows.get(key,())
             if not issues:continue
@@ -182,7 +219,6 @@ def scan(r,grid,progress=lambda *_:None):
     components=_component_groups(r,bundles)
     def local_table(item):
         number,(net,component,vias)=item;calls=0
-        active=any(v['pieces'] for ref in component for v in bundles[ref]['values'].values())
         axes=tuple(sorted({i for ref in component for i in bundles[ref]['owners']}))
         table={};digits_by_owner=[0]*count
         for digits in product(*(range(grid.radices[i]) for i in axes)):
@@ -191,9 +227,9 @@ def scan(r,grid,progress=lambda *_:None):
             items=[get(ref,digits_by_owner) for ref in component]
             geos=[v['geometry'] for v in items];g=geos[0] if len(geos)==1 else shapely.union_all(geos)
             ps=tuple(q for v in items for q in v['pieces'])
-            raw=r.rules.local(net,g,states,[]) if ps else ()
+            raw=r.rules.local(net,g,states,[])
             rows=[dict(kind=k,geometry=p,layers=tuple({ref[0] for ref in component}),net=net) for k,p in raw]
-            record(ps,associate(ps,rows,r.tol),axes,digits)
+            record(ps,associate(ps,rows,r.tol),axes,digits,bool(raw))
             table[digits]=(g,ps);calls+=1
         # Enclosure needs the copper owners plus ONE via owner, never every
         # independently moving via on the net in one Cartesian product.
@@ -202,18 +238,17 @@ def scan(r,grid,progress=lambda *_:None):
             for q in ps:
                 key=zone_key(q)
                 if key not in templates:templates[key]=shapely.union_all([r.model.nodes[r.model.ids[tuple(ref)]]['poly'] for ref in q.get('via_refs',())])
-        if active:
-            for ref,owner,required in vias:
-                scope=tuple(sorted(set(axes)|({owner} if owner>=0 and grid.radices[owner]>1 else set())))
-                for digits in product(*(range(grid.radices[o]) for o in scope)):
-                    cancel_check();z=np.zeros((count,3));d=dict(zip(scope,digits))
-                    for o,value in d.items():z[o]=grid.locals[o][value]
-                    g,ps=table[tuple(d[o] for o in axes)]
-                    missing=r.model.moved(required,owner,z).difference(g)
-                    if missing.area<=r.tol*r.tol:continue
-                    placed=tuple(dict(q,moving_terminals=r.model.moved(templates[zone_key(q)],q['die'],z)) for q in ps)
-                    rows=[dict(kind='孔盘包围不足',geometry=missing,layers=tuple({v[0] for v in component}),net=net)]
-                    record(placed,associate(placed,rows,r.tol),scope,digits)
+        for ref,owner,required in vias:
+            scope=tuple(sorted(set(axes)|({owner} if owner>=0 and grid.radices[owner]>1 else set())))
+            for digits in product(*(range(grid.radices[o]) for o in scope)):
+                cancel_check();z=np.zeros((count,3));d=dict(zip(scope,digits))
+                for o,value in d.items():z[o]=grid.locals[o][value]
+                g,ps=table[tuple(d[o] for o in axes)]
+                missing=r.model.moved(required,owner,z).difference(g)
+                if missing.area<=r.tol*r.tol:continue
+                placed=tuple(dict(q,moving_terminals=r.model.moved(templates[zone_key(q)],q['die'],z)) for q in ps)
+                rows=[dict(kind='孔盘包围不足',geometry=missing,layers=tuple({v[0] for v in component}),net=net)]
+                record(placed,associate(placed,rows,r.tol),scope,digits,True)
         envelope=shapely.union_all([bundles[ref]['envelope'] for ref in component]).envelope
         return dict(net=net,owners=axes,values=table,envelope=envelope),calls
     # The native backend serialises its database access. More frontend threads
@@ -233,17 +268,11 @@ def scan(r,grid,progress=lambda *_:None):
     def check_pair(item):
         n,(i,j)=item;pair_checks=0
         a,b=tables[i],tables[j];axes=tuple(sorted(set(a['owners'])|set(b['owners'])))
-        # If neither side has a reconstructed zone it cannot change a zone colour.
-        if not any(ps for g,ps in a['values'].values()) and not any(ps for g,ps in b['values'].values()):return 0
         # Query actual posed geometries in bulk before invoking native DRC.
         # The shared-DIE join is mandatory: spatial pairs alone would invent
         # incompatible positions for two traces belonging to the same DIE.
-        ia,ib=b['tree'].query(a['geometries'],predicate='dwithin',distance=r.rules.space)
-        keep=np.ones(len(ia),bool)
-        for owner in set(a['owners']) & set(b['owners']):
-            keep &= a['digits'][ia,a['owners'].index(owner)]==b['digits'][ib,b['owners'].index(owner)]
-        ia=ia[keep];ib=ib[keep]
-        for ka,kb in zip(ia,ib):
+        pairs_for_states=(pair for ia,ib in compatible_candidates(a,b,r.rules.space) for pair in zip(ia,ib))
+        for ka,kb in pairs_for_states:
             cancel_check();da,(ga,pa)=a['items'][int(ka)];db,(gb,pb)=b['items'][int(kb)]
             d={**dict(zip(a['owners'],da)),**dict(zip(b['owners'],db))};digits=tuple(d[o] for o in axes);pair_checks+=1
             bad=r.rules.pair(ga,gb)
@@ -251,10 +280,10 @@ def scan(r,grid,progress=lambda *_:None):
             if ga.intersects(gb):bad=shapely.union_all([bad,ga.intersection(gb).buffer(r.tol)])
             if bad.is_empty:continue
             ps=pa+pb;rows=[dict(kind='异网线距不足 / 接触',geometry=bad,layers=tuple({q['layer'] for q in ps}),net=(a['net'],b['net']))]
-            record(ps,associate(ps,rows,r.tol),axes,digits)
+            record(ps,associate(ps,rows,r.tol),axes,digits,True)
         return pair_checks
     pair_checks=sum(parallel_map(check_pair,list(enumerate(pairs)),profile=native_profile,progress=lambda n,total:progress(60+round(35*n/max(1,total)),f'重构异网组合 {n}/{total}')))
-    clauses=tuple(sorted(set().union(*records.values()) if records else set(),key=lambda c:c.allowed))
+    clauses=tuple(sorted(scene_records,key=lambda c:c.allowed))
     zones={}
     for key,q in zone_defs.items():
         local=tuple(sorted(records[key],key=lambda c:c.allowed));idx=ProblemIndex(grid,local)

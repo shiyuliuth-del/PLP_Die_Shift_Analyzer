@@ -2412,8 +2412,8 @@ class MainWindow(W.QMainWindow):
                     status=dict(checked=True,safe=not self._reconstruction_row_index.matches(item['choices']),reason='按实际重构规则检查')
                 else:status=dict(checked=False,safe=None,reason='重构极端核验中')
                 if item and key==current_key and frame and frame.get('reconstruction',{}).get('constraints_complete'):
-                    from .reconstruction_events import current_failures
-                    status=dict(checked=True,safe=not current_failures(frame['reconstruction']),reason='按当前重构几何检查')
+                    from .reconstruction_events import scene_failure
+                    status=dict(checked=True,safe=not scene_failure(frame['reconstruction']),reason='按当前重构几何检查')
             count=self._cached_pose_counts.get(key,0);safe=status.get('safe') is True
             check=('通过已检查规则' if safe else '存在已检查的问题' if status.get('safe') is False else '未作完整校验') if item else '名义位置 / 全局判定'
             if not item:
