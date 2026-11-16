@@ -105,6 +105,20 @@ def scene(r,grid,bundles,digits,diagnostics=True):
     decorate_problems(frame);return states,frame
 
 
+def decisions(r):
+    from .session_cache import EphemeralCache
+    bank=getattr(r,'_joint_decisions',None)
+    if bank is None:r._joint_decisions=bank=EphemeralCache(budget=2*1024**2,max_entries=8192)
+    return bank
+
+
+def remember(r,states,frame):
+    from .reconstruction_events import scene_failure
+    value=(scene_failure(frame),bool(frame['repair_refs']))
+    decisions(r).put(states.tobytes(),value,size=states.nbytes+128)
+    return value
+
+
 def scan(r,grid,bundles,progress=lambda *_:None):
     from .reconstruction_events import zone_key,active_region,current_failures
     from .width_keepout import routing_violations
@@ -115,6 +129,7 @@ def scan(r,grid,bundles,progress=lambda *_:None):
     routing_lines={};routing_witnesses={};routing_factors=[];binary=r.p.target_nsigma in (0.,math.inf);repairs=0
     for number,digits in enumerate(product(*(range(n) for n in grid.radices))):
         cancel_check();states,frame=scene(r,grid,bundles,digits);repairs+=bool(frame['repair_refs'])
+        remember(r,states,frame)
         clause=PoseClause(tuple((o,(int(d),)) for o,d in enumerate(digits)));index=grid.index(digits)
         if frame['violations'] or frame['hard_failures'] or current_failures(frame):scene_records.add(clause)
         for q in frame['pieces']:
@@ -146,8 +161,12 @@ def yield_value(r,p,cfg,grid,bundles,progress,partial=None):
     from .width_grid import weighted_pair
     clauses=[];count=0;repaired=0;choices=[tuple(map(int,np.flatnonzero(w))) for w in grid.weights]
     for digits in product(*choices):
-        cancel_check();states,frame=scene(r,grid,bundles,digits);count+=1;repaired+=bool(frame['repair_refs'])
-        if frame['violations'] or frame['hard_failures'] or any(q.get('connection_failed') for q in frame['pieces']):clauses.append(PoseClause(tuple((o,(d,)) for o,d in enumerate(digits))))
+        cancel_check();states=np.asarray([v[d] for v,d in zip(grid.locals,digits)])
+        hit=decisions(r).get(states.tobytes())
+        if hit is None:
+            states,frame=scene(r,grid,bundles,digits);hit=remember(r,states,frame)
+        bad,repair=hit;count+=1;repaired+=repair
+        if bad:clauses.append(PoseClause(tuple((o,(d,)) for o,d in enumerate(digits))))
         if count%16==0 or count==grid.combinations:
             progress(round(100*count/grid.combinations),f'补偿后联合良率 {count:,}/{grid.combinations:,}')
     success,failure=weighted_pair(ProblemIndex(grid,clauses),grid.weights)
