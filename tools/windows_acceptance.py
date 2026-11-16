@@ -110,6 +110,9 @@ def main():
         source_report=json.loads(source_out.read_text(encoding='utf8'))
         assert source_report['status']=='PASS' and not source_report['frozen']
         assert records[0]['standalone'] and records[1]['reconstruction_routes']>=1
+        ipc_env=dict(os.environ,DIE_SHIFT_TEST_EXE=str(exe))
+        subprocess.run([sys.executable,str(ROOT/'tests/gui_v43_process.py')],cwd=ROOT,env=ipc_env,check=True,timeout=480)
+        print('FROZEN_IPC_PASS: named pipe, custom pivot, GDS, batch OAS, shutdown and invalid startup',flush=True)
     print('WINDOWS_SOURCE_BUILD_PASS',__version__,platform.platform(),
           f'normal window {elapsed:.2f}s, {icons} icon sizes, source BAT and isolated EXE verified; no binary published',flush=True)
 

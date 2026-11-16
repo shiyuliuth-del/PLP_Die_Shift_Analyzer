@@ -122,6 +122,11 @@ try:
  task(rpc('session.prepare'));assert rpc('info')['result']['ready']
  rpc('project.close');assert rpc('info')['result']['project'] is None
  task(rpc('project.open',{'path':str(project)}));assert w.measured_output.ready
+ broken=folder/'broken.dshift.json';broken.write_text(json.dumps({**json.loads(project.read_text()),'gds_path':str(folder/'missing.gds')}))
+ bad=rpc('project.open',{'path':str(broken)})['task_id'];until(lambda:w.measured_output.jobs[bad]['status']=='error' and w.worker is None)
+ assert rpc('info')['result']['last_error'] is not None
+ errors.clear() # expected protocol failure, not a Qt unhandled exception
+ rpc('project.close');task(rpc('project.open',{'path':str(project)}));assert w.measured_output.ready
  w.measured_output.toggle.setChecked(False);until(lambda:not w.measured_output.stopping)
  assert not w.remote_locked and w.run_button.isEnabled() and not (folder/'endpoint.json').exists()
  assert not errors,errors

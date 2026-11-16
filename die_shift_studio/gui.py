@@ -969,6 +969,8 @@ class MainWindow(W.QMainWindow):
         def accepted(data):
             settings=project
             if isinstance(data,dict):
+                if self.remote_locked or getattr(self,'requested_measured',False):
+                    self.error('工程须明确指定top_cell；当前有多个顶层：'+', '.join(data['top_names'][:20]));return
                 name,ok=W.QInputDialog.getItem(self,'选择顶层Cell','待评估顶层：',data['top_names'],0,False)
                 if ok:QtCore.QTimer.singleShot(10,lambda:self.load_gds(path,name,project,project_path))
                 return
@@ -2734,7 +2736,7 @@ class MainWindow(W.QMainWindow):
 def launch(project=None,measured=False,ipc_endpoint=None):
     app=W.QApplication.instance() or W.QApplication([]);app.setApplicationName('Die Shift Analyze')
     startup_status={'failed':False}
-    window=MainWindow();window.requested_ipc_endpoint=ipc_endpoint;window.show()
+    window=MainWindow();window.requested_ipc_endpoint=ipc_endpoint;window.requested_measured=bool(measured);window.show()
     if measured:
         def startup_error(message):
             window.log_bus.emit(str(message),'ERROR');window._closing=True;startup_status['failed']=True

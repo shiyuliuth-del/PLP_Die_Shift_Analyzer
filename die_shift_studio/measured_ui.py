@@ -132,6 +132,7 @@ class MeasuredOutput(QtCore.QObject):
         self.apply_lock()
     def fail_transition(self,message):
         if self.transition:
+            if self.w.data is self.transition.get('previous_data') and 'previous_overlays' in self.transition:self.saved_overlays=self.transition['previous_overlays']
             self.last_error=dict(type='ProjectError',message=str(message))
             self.jobs[self.transition['job']].update(status='error',error=self.last_error);self.transition=None;self.ready=False
             self.w.statusBar().showMessage('实测准备失败：'+str(message).splitlines()[0]+'；关闭实测输出后可调整工程。')
@@ -217,7 +218,7 @@ class MeasuredOutput(QtCore.QObject):
         if self.stopping:raise RuntimeError('取消尚未完成，请等待running清空')
         if command in ('project.open','project.close'):
             if self.running or self.batch or self.transition:raise RuntimeError('请先取消或结束当前任务')
-            if w.data:w.write_project(w.project_path)
+            if w.data and w.project_path:w.write_project(w.project_path)
             self.ready=False;self.last_error=None;self.current=None
             if self.render_engine:self.render_engine.close();self.render_engine=None
             if self.session:self.session.close();self.session=None
@@ -230,7 +231,7 @@ class MeasuredOutput(QtCore.QObject):
             if not path.is_file():raise ValueError('工程文件不存在')
             from .project import normalize_project
             normalize_project(json.loads(path.read_text(encoding='utf8')))
-            key=self.new_job(command);self.transition=dict(job=key,phase='load');w.load_project(path)
+            key=self.new_job(command);self.transition=dict(job=key,phase='load',previous_data=w.data,previous_overlays=dict(self.saved_overlays));w.load_project(path)
             return dict(status='accepted',task_id=key)
         if command=='output.configure':
             if self.running or self.batch:raise RuntimeError('任务执行期间不能修改输出配置')
@@ -239,7 +240,7 @@ class MeasuredOutput(QtCore.QObject):
             if options.output_directory and not Path(options.output_directory).is_dir():raise ValueError('输出目录不存在')
             self.options=options
             self.restore(asdict(self.options),force=True)
-            if w.data:w.write_project(w.project_path)
+            if w.data and w.project_path:w.write_project(w.project_path)
             return dict(status='completed',result=asdict(self.options))
         if command=='session.prepare':
             if self.running or self.transition:raise RuntimeError('已有任务正在运行')
