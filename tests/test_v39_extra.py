@@ -144,27 +144,25 @@ class V39ConnectionTests(unittest.TestCase):
         e=PreviewEngine(GeometryCache(d),c,roles,{},p,None,c['connections']);e.configure_reconstruction(True,ViewSettings())
         try:
             first=e.reconstructor.frame(np.zeros((1,3)));qs=first['pieces']
-            self.assertEqual(len(qs),2);self.assertTrue(all(q['route_plan'] for q in qs))
-            self.assertEqual(len({q['route_identity'] for q in qs}),2)
-            rows=[]
-            for q in qs:
-                plan=q['route_plan'];rows.append((*plan.key,plan.identity,0.,plan.length))
+            members=list({q['route_identity']:q for zone in qs for q in zone.get('graph_members',(zone,))}.values())
+            self.assertEqual(len(members),2);self.assertTrue(all(q['route_plan'] for q in members))
+            rows=[(*q['route_plan'].key,q['route_plan'].identity,0.,q['route_plan'].length) for q in members]
             cfg=replace(e.reconstructor.settings,reconstruction_intervals=tuple(rows));e.configure_reconstruction(True,cfg)
             pose=np.array([[15.,10.,.01]]);frame=e.reconstructor.frame(pose);qs=frame['pieces']
+            self.assertEqual(len(qs),1)  # overlapping branches are now one transition domain
             self.assertTrue(all(q['valid'] for q in qs),[q['warning'] for q in qs])
-            self.assertTrue(all(q['moved_cut'].geom_type==q['extra_cut'].geom_type=='Point' for q in qs))
             copper=frame['replacements']['5/0'][0]['geometry']
             self.assertEqual(copper.geom_type,'Polygon');self.assertTrue(copper.is_valid)
             painted=shapely.union_all([g for q in qs for g in q['regions'].values()])
             self.assertLess(copper.symmetric_difference(painted).area,.001)
-            fig=Figure(figsize=(8,5));ax=fig.subplots();ax.set_xlim(-100,700);ax.set_ylim(-300,300)
-            overlay=object.__new__(ReconstructionOverlay);overlay.w=SimpleNamespace(ax=ax,current_frame={'states':pose,'rotation_centers':e.bound.centers})
-            handles=overlay.handle_geometries(qs);pts=[ax.transData.transform(handles[overlay._key(q),'moved'].coords[0]) for q in qs]
-            self.assertGreater(np.linalg.norm(pts[0]-pts[1]),18)
-            settings,part=e.reconstructor.edited(qs[0],1,qs[0]['route_plan'].route.interpolate(qs[0]['route_plan'].length-100).coords[0])
+            # The two fixed-end dots must be at the actual connected vias,
+            # never at the centroid between branches or an unrelated net.
+            actual=shapely.get_coordinates(qs[0]['extra_cut'])
+            np.testing.assert_allclose(actual[np.argsort(actual[:,1])],[(600.,-200.),(600.,200.)],rtol=0,atol=1e-9)
+            settings,part=e.reconstructor.edited(members[0],1,members[0]['route_plan'].route.interpolate(members[0]['route_plan'].length-100).coords[0])
             self.assertEqual(len(settings.reconstruction_intervals),2)
-            untouched=[row for row in settings.reconstruction_intervals if row[4]==qs[1]['route_identity']][0]
-            self.assertEqual(untouched[-2:],qs[1]['interval'])
+            untouched=[row for row in settings.reconstruction_intervals if row[4]==members[1]['route_identity']][0]
+            self.assertEqual(untouched[-2:],(0.,members[1]['route_plan'].length))
         finally:e.close()
 
 if __name__=='__main__':unittest.main()

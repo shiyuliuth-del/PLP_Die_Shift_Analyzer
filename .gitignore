@@ -30,3 +30,6 @@ dist/
 logs/
 startup-error.log
 results/*.log
+
+# Versioned project result sidecars are user data, not source
+*.dsresults

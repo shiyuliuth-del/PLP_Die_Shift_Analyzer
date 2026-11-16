@@ -7,6 +7,7 @@ import shapely
 from shapely.geometry import Polygon
 from shapely.strtree import STRtree
 from .resources import parallel_map,resource_profile
+from .session_cache import EphemeralCache
 from .preview import rigid_transform,default_motion
 
 
@@ -183,13 +184,15 @@ class PreviewEngine:
     def configure_reconstruction(self,enabled,settings):
         key=settings.reconstruction_key() if enabled else (False,)
         if getattr(self,'reconstruction_config',(False,))==key:return
-        self.reconstructor=None
+        previous=getattr(self,'reconstructor',None);self.reconstructor=None
         if enabled:
             from .reconstruction import Reconstructor
             if not hasattr(self,'reconstructors'):self.reconstructors={}
             if not hasattr(self,'reconstruction_plan_pool'):self.reconstruction_plan_pool={}
-            if key not in self.reconstructors:self.reconstructors[key]=Reconstructor(self.contact,self.p,settings,self.cache_group,self.reconstruction_plan_pool)
+            if not hasattr(self,'reconstruction_block_pool'):self.reconstruction_block_pool=EphemeralCache(budget=64*1024**2,max_entries=4096)
+            if key not in self.reconstructors:self.reconstructors[key]=Reconstructor(self.contact,self.p,settings,self.cache_group,self.reconstruction_plan_pool,self.reconstruction_block_pool)
             self.reconstructor=self.reconstructors[key]
+            self.reconstructor.predecessor=previous
             self.reconstructor.cache.pose_source=(getattr(self,'signature',None),'重构',key)
         self.reconstruction_config=key
     def cache_key(self):
@@ -198,6 +201,7 @@ class PreviewEngine:
     def close(self):
         if not self.shared_frames:self.frames.close()
         self.intermediate.clear()
+        if hasattr(self,'reconstruction_block_pool'):self.reconstruction_block_pool.clear()
         for d in self.deformers.values():d.close()
         self.deformers.clear()
         for analyzer in getattr(self,'width_analyzers',{}).values():analyzer.close()

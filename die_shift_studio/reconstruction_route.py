@@ -215,15 +215,24 @@ class RoutePlan:
         i=min(len(self.lengths)-1,max(0,int(np.searchsorted(self.marks,s,side='right')-1)))
         return (self.xy[i+1]-self.xy[i])/max(self.lengths[i],1e-12)
 
-    def snap(self,s,which,other):
+    def pad_hit(self,cursor,which):
+        if cursor is None:return True
+        terminals=getattr(self,'terminal_vias',None)
+        if terminals is None:return True
+        return any(g.buffer(self.guard).covers(shapely.Point(cursor)) for g in terminals[which])
+
+    def snap(self,s,which,other,allow_pad=True):
         eps=max(self.tolerance*8,1e-4)
         lo=0. if which==0 else max(other+eps,self.land_end+eps)
         hi=min(other-eps,self.fixed_start-eps) if which==0 else self.length
-        limits=getattr(self,'zone_limits',(0.,self.length));lo=max(lo,limits[0]);hi=min(hi,limits[1])
         if hi<lo:return lo
         s=float(np.clip(s,lo,hi))
-        if which==0 and s<=self.land_end+eps:return 0.
-        if which==1 and s>=self.fixed_start-eps:return self.length
+        margin=getattr(self,'pad_trigger',0.)
+        modes=getattr(self,'pad_modes',(True,True))
+        if which==0 and s<=self.land_end+eps:
+            return 0. if allow_pad and modes[0] and s<=max(0.,self.land_end-margin) else min(hi,self.land_end+eps)
+        if which==1 and s>=self.fixed_start-eps:
+            return self.length if allow_pad and modes[1] and s>=min(self.length,self.fixed_start+margin) else max(lo,self.fixed_start-eps)
         for corner,radius in self.corners:
             if corner-radius<s<corner+radius:
                 options=[x for x in (corner-radius,corner+radius) if lo<=x<=hi]
@@ -334,20 +343,20 @@ class RoutePlan:
         if not safe:self.warning='动区长度小于全输入位移的保守过渡余量；需检查当前重构'
         return best[3]
 
-    def edit(self,a,b,which,position):
-        target=self.snap(position,which,b if which==0 else a)
+    def edit(self,a,b,which,position,allow_pad=True):
+        target=self.snap(position,which,b if which==0 else a,allow_pad)
         start=a if which==0 else b
         trials=[target,*np.linspace(target,start,25)[1:]]
         for value in trials:
-            value=self.snap(float(value),which,b if which==0 else a)
+            value=self.snap(float(value),which,b if which==0 else a,allow_pad)
             part=self.partition(value,b) if which==0 else self.partition(a,value)
             if part is not None:return part,abs(value-position)>max(self.tolerance*8,.01)
         return self.partition(a,b),True
 
 
-    def edit_pose(self,a,b,which,position,center,state,style):
+    def edit_pose(self,a,b,which,position,center,state,style,cursor=None):
         """Independent source handle, with a physical-order stop in line mode."""
-        part,clamped=self.edit(a,b,which,position)
+        part,clamped=self.edit(a,b,which,position,self.pad_hit(cursor,which))
         if part is None or style!='linear':return part,clamped
         from .connection_curves import linear_gap
         minimum=self.tolerance*16

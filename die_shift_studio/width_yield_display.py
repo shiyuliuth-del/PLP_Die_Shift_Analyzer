@@ -80,6 +80,7 @@ class WidthYieldDisplay:
     def refresh(self):
         w=self.w
         if w.loading or w._closing:return
+        if w.result is None or getattr(w,'_restoring_project',False):self.reset();return
         if hasattr(w,'reconstruction_yield'):w.reconstruction_yield.refresh()
         enabled=w.width_toggle.isChecked()
         self.label.set_width_active(enabled)

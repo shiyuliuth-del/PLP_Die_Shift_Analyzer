@@ -1,0 +1,69 @@
+"""Cut a connected copper plane when a single separating trace cut is impossible.
+
+Terminal ownership is resolved by branch_regions after all source cuts have
+been combined. No nearest-DIE or fabricated cross-hole conductor is introduced.
+"""
+import math
+import numpy as np
+import shapely
+from .reconstruction_route import RoutePlan,EMPTY
+
+
+class PlaneRoute(RoutePlan):
+    plane_domain=True
+    def half(self,s,angle):
+        point=np.asarray(self.route.interpolate(s).coords[0]);n=self.tangent(s)
+        co,si=np.cos(angle),np.sin(angle);n=np.array([co*n[0]-si*n[1],si*n[0]+co*n[1]])
+        u=np.array([-n[1],n[0]]);size=self.source.length+self.length+1
+        return self.source.intersection(shapely.Polygon([point-u*size,point+u*size,point+u*size-n*size*2,point-u*size-n*size*2]))
+    def edit_pose(self,a,b,which,position,center,state,style,cursor=None):
+        part,clamped=self.edit(a,b,which,position,self.pad_hit(cursor,which))
+        if part is not None and style=='linear':
+            from .reconstruction import transform
+            direction=np.asarray(part['far'].centroid.coords[0])-np.asarray(transform(part['near'],center,state).centroid.coords[0])
+            if direction@self.tangent((part['a']+part['b'])/2)<=self.tolerance:return self.partition(a,b),True
+        return part,clamped
+
+    def partition(self,a,b,angles=(0.,0.)):
+        if not 0<=a<b<=self.length:return None
+        c=EMPTY if a==0 else self.half(a,angles[0])
+        fixed=EMPTY if b==self.length else self.source.difference(self.half(b,angles[1]))
+        overlap=c.intersection(fixed);c=c.difference(overlap);fixed=fixed.difference(overlap)
+        active=self.source.difference(shapely.union_all([c,fixed]))
+        if active.is_empty:return None
+        near=shapely.Point(self.route.coords[0]) if a==0 else active.boundary.intersection(c.boundary)
+        far=shapely.Point(self.route.coords[-1]) if b==self.length else active.boundary.intersection(fixed.boundary)
+        if near.is_empty or far.is_empty:return None
+        return dict(A=active,B=fixed,C=c,near=near,far=far,a=a,b=b,angles=tuple(angles))
+
+
+def candidate(base,lines,r):
+    """A bounded plane cut candidate; actual final copper is still native-checked."""
+    from .reconstruction_route import terminal_marks
+    for route in lines:
+        plan=PlaneRoute(base['layer'],base['index'],base['owner'],base['refs'],base['routing_source'],route,base['land'],tuple(base['anchors']),r.tol,r.settings.reconstruction_corner_guard_um)
+        plan.pad_trigger=r.settings.reconstruction_pad_trigger_um
+        fixed=tuple(v['poly'] for v in r.stays if v['net']==base['net'] and plan.source.intersects(v['poly']))
+        plan.terminal_vias=(tuple(v['poly'] for v in base['mine']),fixed)
+        plan.pad_modes=tuple(any(g.buffer(r.p.annulus_um).covers(shapely.Point(route.coords[0 if side==0 else -1])) for g in values) for side,values in enumerate(plan.terminal_vias))
+        eps=max(r.tol*32,.01);a=min(max(eps,plan.land_end+eps),plan.length*.3);b=max(min(plan.length-eps,plan.fixed_start-eps),plan.length*.7)
+        for left,right in ((a,b),(eps,plan.length-eps)):
+            part=plan.partition(left,right)
+            if part is not None:
+                plan.nominal_first=left;plan.nominal_second=right
+                return dict(base,plan=plan,orphan=False,graph_branch=True,moving_nominal=base['land'],fixed_nominal=shapely.union_all(base['anchors']),warning='二维铜面适配域：按全部端口约束重构，实际规则独立检查')
+    return None
+
+
+def live_part(r,plan,part,center,pose):
+    mode=r.settings.reconstruction_boundary_mode
+    if mode=='perpendicular':return part
+    from .reconstruction import transform
+    a=np.asarray(transform(part['near'],center,pose).centroid.coords[0]);b=np.asarray(part['far'].centroid.coords[0]);direction=b-a
+    heading=math.atan2(direction[1],direction[0]);angles=[]
+    for i,s in enumerate((part['a'],part['b'])):
+        tangent=plan.tangent(s);delta=(heading-math.atan2(tangent[1],tangent[0])+math.pi)%(2*math.pi)-math.pi
+        angles.append(float(np.clip(delta*(.5 if mode=='balanced' else 1.),-math.pi/3,math.pi/3)))
+    for i,locked in enumerate(part.get('manual_angles',(False,False))):
+        if locked:angles[i]=part['angles'][i]
+    return plan.partition(part['a'],part['b'],angles) or part

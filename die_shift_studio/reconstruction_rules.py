@@ -46,12 +46,12 @@ class FixedRules:
             # Circumscribed enclosure: do not silently under-check circle chords.
             required=node['poly'].buffer(p.annulus_um/math.cos(math.pi/128),quad_segs=32)
             for key in keys:self.vias[key].append((ref,int(node['owner']),required))
-        self.board=model.case.get('board');self.inside=self.board.buffer(-self.space) if self.board is not None else None
+        self.border=p.package_clearance_um;self.board=model.case.get('board');self.inside=self.board.buffer(-self.border) if self.board is not None else None
         from .width_keepout import forbidden
         self.keepout=forbidden(model)
         self.contexts={};self.hard_memo={};self._nominal_rows=None;self._nominal_lock=threading.Lock()
         from .session_cache import logical_fingerprint
-        self.identity=logical_fingerprint((model.data.geometry_id,model.roles,model.connections.order,self.width,self.space,p.annulus_um))
+        self.identity=logical_fingerprint((model.data.geometry_id,model.roles,model.connections.order,self.width,self.space,p.annulus_um,p.package_clearance_um))
 
     def nominal_check(self):
         if self._nominal_rows is None:
@@ -74,7 +74,7 @@ class FixedRules:
             target=self.model.moved(required,owner,states)
             missing=target.difference(g)
             if missing.area>self.dbu*self.dbu:out.append(('孔盘包围不足',missing))
-        if self.board is not None and (not self.board.covers(g) or g.distance(self.board.boundary)<self.space-self.dbu*.001):
+        if self.board is not None and (not self.board.covers(g) or g.distance(self.board.boundary)<self.border-self.dbu*.001):
             bad=g.difference(self.inside)
             if not bad.is_empty:out.append(('封装边缘线距不足',bad))
         if not self.keepout.is_empty and shapely.relate_pattern(g,self.keepout,'T********'):
@@ -97,7 +97,7 @@ class FixedRules:
         """Boolean version: cheap exact failures precede native edge-pair work."""
         for ref,owner,required in (self.vias[key] if vias is None else vias):
             if self.model.moved(required,owner,states).difference(g).area>self.dbu*self.dbu:return False
-        if self.board is not None and (not self.board.covers(g) or g.distance(self.board.boundary)<self.space-self.dbu*.001):return False
+        if self.board is not None and (not self.board.covers(g) or g.distance(self.board.boundary)<self.border-self.dbu*.001):return False
         if not self.keepout.is_empty and shapely.relate_pattern(g,self.keepout,'T********'):return False
         from .native_backend import any_violation
         return not (any_violation('width',g.wkb,self.dbu,self.width) or any_violation('space',g.wkb,self.dbu,self.space))

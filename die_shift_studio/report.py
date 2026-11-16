@@ -98,6 +98,10 @@ def report_document(r,motions=None,progress=lambda *_:None):
          [r'w_{DRC}=w-\tau,\qquad s_{DRC}=s-\tau,\qquad w_{DRC}>0,\ s_{DRC}>0'],
          f'实际DRC及型变验收门槛：线宽{rule_width:g} μm，线距{rule_space:g} μm',
          'τ是用户设置的带符号容差；正值放宽、负值收紧，默认0。线宽和线距共用该值，检查阈值按源DBU向上取整。包围量、接触概率、Space Map和三方案初筛仍使用工艺原值；异网短接始终报错，不由容差豁免。')
+    step('图形距封装边框',f'独立边距 c={p.package_clearance_um:g} μm',
+         [r'G\subseteq P,\qquad d(G,\partial P)\geq c'],
+         '按完整型变/位移后铜形检查，边距失效见对应规则位置表；未运行重构时不声称完成该型变验收。',
+         'G为本姿态完整铜形；P为由GDS封装边框组成的实际区域（含孔洞）；∂P为其全部边界。d为实体最短距离，c是工艺设置的独立边距，默认10μm，不随线宽/线距容差改变。')
     if r.get('preview_drc_rules'):
         q=r['preview_drc_rules'];blocks.append('<h3>当前预演的DRC输入快照（可与上次评估不同）</h3>'+grid(['工艺线宽 / μm','工艺线距 / μm','容差 / μm','有效线宽 / μm','有效线距 / μm','包围量 / μm'],[[q[k] for k in ('nominal_width_um','nominal_space_um','tolerance_um','effective_width_um','effective_space_um','annulus_um')]]))
     if binary:

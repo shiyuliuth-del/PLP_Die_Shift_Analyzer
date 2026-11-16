@@ -108,7 +108,7 @@ class V41Tests(unittest.TestCase):
         e=PreviewEngine(GeometryCache(d),c,roles,{},p,None,c['connections'])
         try:
             e.configure_reconstruction(True,ViewSettings());f=e.frame(np.array([[20.,20.,.01]]))['reconstruction']
-            self.assertFalse(f['pieces']);self.assertIn(('5/0',0),f['auto_ignored'])
+            self.assertNotIn(('5/0',0),f['auto_ignored']);self.assertTrue(f['pieces'])  # V42: moving whole copper would lose fixed-via enclosure
             e.configure_reconstruction(True,ViewSettings(reconstruction_forced=(('5/0',0),)))
             self.assertTrue(e.frame(np.zeros((1,3)))['reconstruction']['pieces'])
         finally:e.close()

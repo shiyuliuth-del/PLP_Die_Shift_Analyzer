@@ -121,7 +121,7 @@ class Reconstructor:
             candidates=((l,i,v,value) for (l,i,v),value in (exact or {}).items())
         return next(self._matching_cut_rows(candidates,layer,index,chain),None)
 
-    def __init__(self,model,parameters,settings,cache_group=None,plan_pool=None):
+    def __init__(self,model,parameters,settings,cache_group=None,plan_pool=None,geometry_pool=None):
         from .reconstruction_route import EMPTY
         self.model=model;self.p=parameters;self.settings=settings
         from .reconstruction_rules import FixedRules
@@ -133,6 +133,7 @@ class Reconstructor:
         self.auto_ignored={};self.safe_vias={}
         self.vias=[];self.stays=[];self.vias_by_target={};self._plans=None;self.manual_quality={};self.manual_masses={}
         self.plan_pool=plan_pool if plan_pool is not None else {}
+        self.geometry_pool=geometry_pool if geometry_pool is not None else EphemeralCache(budget=64*1024**2,max_entries=4096)
         self.cuts={(str(l),int(i),normalize_via_refs(v)):(nx,ny,x,y) for l,i,v,nx,ny,x,y in settings.reconstruction_cuts}
         self.extra_cuts={(str(l),int(i),normalize_via_refs(v)):(nx,ny,x,y) for l,i,v,nx,ny,x,y in settings.reconstruction_extra_cuts}
         self.second_cuts=settings.reconstruction_second_cuts
@@ -182,7 +183,10 @@ class Reconstructor:
             source=self.model.cache.layers[ref[0]]['geometry'][ref[1]]
             safe=[v for v in vias if enclosure_certificate(self.model,self.p,source,[v])]
             self.safe_vias[ref]=safe
-            if len(safe)==len(vias):self.auto_ignored[ref]=enclosure_certificate(self.model,self.p,source,vias)
+            from .ignored_motion import fixed_enclosures_safe
+            if len(safe)==len(vias):
+                if fixed_enclosures_safe(self,ref,vias):self.auto_ignored[ref]=enclosure_certificate(self.model,self.p,source,vias)
+                else:self.safe_vias[ref]=[]
         for (layer,index),vias in sorted(self.vias_by_target.items()):
             if (layer,index) in self.auto_ignored:continue
             safe_ids={(v['key'],v['index']) for v in self.safe_vias.get((layer,index),())}
@@ -229,7 +233,7 @@ class Reconstructor:
             from .reconstruction_clusters import anchor_clusters,inward_routes
             fixed=anchor_clusters(source,fixed,land,self._rule_width,self.tol)
             base=dict(layer=layer,index=index,owner=owner,refs=refs,source=original_source,land=land,net=net,mine=mine,anchors=fixed)
-            def build_source(source,land,fixed,moving=None):
+            def build_source(source,land,fixed,moving=None,pair_route=False):
                 moving=mine if moving is None else moving
                 local_base=dict(base,routing_source=source,land=land,anchors=fixed,mine=moving,refs=normalize_via_refs((v['key'],v['index']) for v in moving))
                 if not fixed:return dict(local_base,plan=None,orphan=True,warning='无固定连接端，整块按所属DIE平移')
@@ -240,15 +244,21 @@ class Reconstructor:
                 if len(moving)>1:
                     start=np.asarray(land.centroid.coords[0]);stop_all=shapely.union_all(fixed).centroid
                     if source.covers(shapely.Point(start)) and source.covers(stop_all):pairs.insert(0,(start,np.asarray(stop_all.coords[0])))
-                if len(moving)>1:pairs=inward_routes(source,moving)+pairs
-                else:pairs+=inward_routes(source,moving)
-                seen=set()
+                if not pair_route:
+                    if len(moving)>1:pairs=inward_routes(source,moving)+pairs
+                    else:pairs+=inward_routes(source,moving)
+                seen=set();traced=[]
                 for start,endpoint in pairs:
                     line=trace(source,start,endpoint,self._rule_width)
                     if line is not None and line.wkb in seen:continue
                     if line is not None:seen.add(line.wkb)
                     if line is None:continue
+                    traced.append(line)
                     plan=RoutePlan(layer,index,owner,local_base['refs'],source,line,land,tuple(fixed),self.tol,self.settings.reconstruction_corner_guard_um,memo_budget=memo_budget)
+                    terminal_fixed=tuple(v['poly'] for v in self.stays if v['net']==net and source.intersects(v['poly']) and any(a.intersects(v['poly']) for a in fixed))
+                    plan.terminal_vias=(tuple(v['poly'] for v in moving),terminal_fixed)
+                    plan.pad_modes=tuple(any(g.buffer(self.p.annulus_um).covers(shapely.Point(line.coords[0 if side==0 else -1])) for g in values) for side,values in enumerate(plan.terminal_vias))
+                    plan.pad_trigger=self.settings.reconstruction_pad_trigger_um
                     # Opposite moving terminals share a nominal middle seam. Neither
                     # owner's transition may consume the other owner's half-route.
                     opposite_owner=any(v['owner']!=owner and stop.intersects(v['poly']) for v in all_vias)
@@ -259,7 +269,11 @@ class Reconstructor:
                     travel=float(np.linalg.norm(np.abs(mu[:2])+bounds[:2])+2*radius*np.sin(min(np.pi,abs(mu[2])+bounds[2])/2))
                     partition=plan.choose(travel)
                     if partition is not None:candidates.append((not bool(plan.warning),partition['b']-partition['a'],plan))
-                if not candidates:return dict(local_base,plan=None,orphan=False,warning='拓扑无法分出相连的动/静/平移区；保留原图')
+                if not candidates:
+                    from .plane_route import candidate
+                    alternative=candidate(local_base,traced,self)
+                    if alternative is not None:return alternative
+                    return dict(local_base,plan=None,orphan=False,warning='拓扑无法分出相连的动/静/平移区；保留原图')
                 # The search is performed once over every local discrete extreme,
                 # never against the currently selected pose. Other-DIE windows use
                 # the full-input displacement envelope above; final per-pose spacing
@@ -291,6 +305,22 @@ class Reconstructor:
                 if space_unproven:warning=(warning+'；' if warning else '')+'全输入多DIE包络未证明线距充足，按当前几何复核'
                 if invalid:warning=f'基准曲线在{invalid}/{len(catalogue.locals[owner])}个本DIE极端需进一步适配；以当前样式最终检查为准'
                 return dict(local_base,plan=plan,orphan=False,warning=warning,extreme_checks=len(catalogue.locals[owner]),extreme_invalid=invalid,all_die_space_certified=not space_unproven,priority_failure_mass=mass)
+            if len(mine)>1 or len(fixed)>1:
+                rows=[]
+                pairs=[(i,j) for i in range(len(mine)) for j in range(len(fixed))]
+                if len(pairs)>64:
+                    # All terminals remain represented. The connected-component
+                    # classification promotes ANY mixed-terminal remainder to A,
+                    # so no moving-to-fixed path can bypass a transition domain.
+                    pairs=sorted({(i,min(range(len(fixed)),key=lambda j:mine[i]['poly'].distance(fixed[j]))) for i in range(len(mine))} |
+                                 {(min(range(len(mine)),key=lambda i:mine[i]['poly'].distance(fixed[j])),j) for j in range(len(fixed))})
+                for number,(i,j) in enumerate(pairs):
+                    cancel_check();via,anchor=mine[i],fixed[j]
+                    row=build_source(source,landing(via),[anchor],[via],pair_route=True)
+                    row.update(graph_branch=True,moving_nominal=land,fixed_nominal=shapely.union_all(fixed))
+                    rows.append(row)
+                    if number%8==0:progress(25,f'分叉连接 {layer} #{index+1}：{number+1}/{len(pairs)}')
+                if rows and all(q['plan'] is not None for q in rows):return rows
             from .reconstruction_route import branch_sources
             branches=branch_sources(source,land,fixed,mine[0]['center'],self._rule_width,self.tol,self.settings.reconstruction_corner_guard_um)
             if branches:
@@ -328,15 +358,18 @@ class Reconstructor:
         # Route construction is pose-independent and reused after every handle edit.
         from .session_cache import logical_fingerprint
         key=logical_fingerprint((self.model.data.geometry_id,self.model.roles,self.model.connections.order,
-                                'v41-shared-terminals-2',self.settings.reconstruction_forced,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
+                                'v42-plane-branches-2',self.settings.reconstruction_forced,self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
         if key not in self.plan_pool:
             from .resources import parallel_map,native_phase_profile
             self.plan_pool[key]=[entry for rows in parallel_map(build,groups,profile=native_phase_profile(),progress=lambda n,total:progress(round(65*n/max(1,total)),f'建立全姿态共用动区 {n}/{total}')) for entry in rows]
         from .reconstruction_zones import expand
         self._plans=expand(self,[e for e in self.plan_pool[key] if (e['layer'],e['index']) not in self.settings.reconstruction_ignored])
+        from .ignored_motion import entries as ignored_entries
+        self._plans.extend(ignored_entries(self))
         return self._plans
 
     def interval(self,entry):
+        if 'merged_part' in entry:return entry['merged_part'],True
         plan=entry['plan']
         if plan is None:return None,False
         a,b=plan.nominal_first,plan.nominal_second;manual=False
@@ -414,12 +447,15 @@ class Reconstructor:
     def frame(self,states,deformation=None,progress=lambda *_:None,quick=False,*,targets=None,diagnostics=True,render_cache=None):
         from .reconstruction_route import warp,EMPTY,failed_connection,missing_area
         states=np.asarray(states,float)
-        key=(states.tobytes(),'shared-route-v41',bool(diagnostics),None if targets is None else tuple(sorted(targets)))
+        key=(states.tobytes(),'shared-route-v42',bool(diagnostics),None if targets is None else tuple(sorted(targets)))
         hit=self.cache.get(key) if diagnostics else None
         if hit is not None:return hit
         entries=self._plans_for_all_poses(progress);pieces=[];features={}
         selected=None if targets is None else set(map(tuple,targets))
-        if selected is not None:entries=[q for q in entries if (q['layer'],q['index']) in selected]
+        from .reconstruction_incremental import reusable
+        retained,retained_pieces=reusable(self,states,selected)
+        retained_refs={(layer,i) for layer,rows in retained.items() for row in rows for i in row['indices']}
+        entries=[q for q in entries if (selected is None or (q['layer'],q['index']) in selected) and (q['layer'],q['index']) not in retained_refs]
         # Independent source features share no mutable geometry. GEOS releases
         # the GIL for warp/validation, so larger frames use the existing hardware
         # admission policy rather than serially processing every route.
@@ -431,12 +467,22 @@ class Reconstructor:
                 return part,manual,None if regions is None else dict(regions),error,warning
             cancel_check();part,manual=self.interval(entry)
             if part is None:return part,manual,None,None,entry['warning']
+            from .reconstruction_route import part_key
+            local_key=(entry['plan'].key,entry['plan'].identity,part_key(part),part.get('manual_angles'),bool(manual),bool(diagnostics),self.rules.identity,self.settings.reconstruction_style,self.settings.reconstruction_boundary_mode,token[1],entry.get('serial_left'),entry.get('serial_right'),entry.get('serial_block',shapely.Polygon()).wkb)
+            cached=self.geometry_pool.get(local_key)
+            if cached is not None:
+                saved_part,saved_manual,saved_regions,saved_error,saved_warning=cached
+                return saved_part,saved_manual,None if saved_regions is None else dict(saved_regions),saved_error,saved_warning
             from .reconstruction_angles import solve
-            if 'serial_left' in entry:
+            if getattr(entry['plan'],'plane_domain',False):
+                from .plane_route import live_part
+                part=live_part(self,entry['plan'],part,self.model.bound.centers[entry['owner']],states[entry['owner']]);regions={k:part[k] for k in 'ABC'};error=None
+            elif 'serial_left' in entry:
                 from .reconstruction_zones import serial_render
                 part,regions,error=serial_render(self,entry,part,self.model.bound.centers[entry['owner']],states[entry['owner']])
             else:part,regions,error,quality=solve(self,entry['plan'],part,self.model.bound.centers[entry['owner']],states[entry['owner']])
-            warning=self._manual_warning(entry,part) if manual and diagnostics and 'serial_left' not in entry and self.settings.reconstruction_boundary_mode=='perpendicular' else entry['warning']
+            warning=self._manual_warning(entry,part) if not getattr(entry['plan'],'plane_domain',False) and manual and diagnostics and 'serial_left' not in entry and self.settings.reconstruction_boundary_mode=='perpendicular' else entry['warning']
+            self.geometry_pool.put(local_key,(part,manual,None if regions is None else dict(regions),error,warning))
             if render_cache is not None:render_cache[token]=(part,manual,None if regions is None else dict(regions),error,warning)
             return part,manual,regions,error,warning
         from .resources import parallel_map,native_phase_profile
@@ -448,26 +494,27 @@ class Reconstructor:
             if self._cover_lookup(self.dropped,None,layer,index,entry['refs']):continue
             part,manual,regions,error,warning=prepared;valid=True;fallback=None
             if part is not None:
-                fallback=failed_connection(part,plan,self.model.bound.centers[owner],states[owner])
+                fallback=dict(A=EMPTY,B=part['B'],C=transform(part['C'],self.model.bound.centers[owner],states[owner])) if getattr(plan,'plane_domain',False) else failed_connection(part,plan,self.model.bound.centers[owner],states[owner])
                 if 'serial_left' in entry:
                     fallback=dict(A=EMPTY,B=entry['serial_fixed'],C=transform(entry['serial_block'],self.model.bound.centers[owner],states[owner]*entry['serial_left']))
                 if error:regions=dict(fallback);warning=error+'；已取消连接段';valid=False
                 near=part['near'];moved_cut=transform(near,self.model.bound.centers[owner],states[owner]*entry.get('serial_left',1.))
                 far=transform(part['far'],self.model.bound.centers[owner],states[owner]*entry.get('serial_right',0.));a,b=part['a'],part['b']
             elif entry['orphan']:
-                part=dict(A=EMPTY,B=EMPTY,C=source)
-                regions=dict(A=EMPTY,B=EMPTY,C=transform(source,self.model.bound.centers[owner],states[owner]))
+                scope=entry.get('routing_source',source)
+                part=dict(A=EMPTY,B=EMPTY,C=scope)
+                regions=dict(A=EMPTY,B=EMPTY,C=transform(scope,self.model.bound.centers[owner],states[owner]))
                 near=far=moved_cut=None;a=b=0.
             else:
                 part=dict(A=EMPTY,B=source,C=EMPTY);regions={k:part[k] for k in 'ABC'}
                 near=far=moved_cut=None;a=b=0.;valid=False
             shift=float(np.linalg.norm(self.model.moved(shapely.Point(entry['mine'][0]['center']),owner,states).coords[0]-entry['mine'][0]['center']))
             feature=features.setdefault((layer,index),dict(source=source,pieces=[],net=entry['net']))
-            piece=dict(die=owner,layer=layer,index=index,net=entry['net'],via_refs=entry['refs'],vias=[v[1] for v in entry['refs']],
+            piece=dict(graph_branch=entry.get('graph_branch',False),moving_nominal=entry.get('moving_nominal'),fixed_nominal=entry.get('fixed_nominal'),ignored=entry.get('ignored',False),die=owner,layer=layer,index=index,net=entry['net'],via_refs=entry['refs'],vias=[v[1] for v in entry['refs']],
                        fallback_regions=fallback if part.get('near') is not None else None,connection_failed=bool(error),
-                       missing_region=missing_area(part,plan,self.model.bound.centers[owner],states[owner]) if plan is not None and part.get('near') is not None else source,
+                       missing_region=part['A'] if getattr(plan,'plane_domain',False) else missing_area(part,plan,self.model.bound.centers[owner],states[owner]) if plan is not None and part.get('near') is not None else source,
                        moving_terminals=shapely.union_all([self.model.moved(v['poly'],owner,states) for v in entry['mine']]),
-                       source=source,source_scope_complete=bool(plan is None or plan.source is source),endpoint_weights=(entry.get('serial_left',1.),entry.get('serial_right',0.)),branch=entry.get('branch',1),branch_count=entry.get('branch_count',1),route_plan=plan,interval=(a,b),boundary_angles=part.get('angles',(0.,0.)),route_identity=None if plan is None else plan.identity,
+                       source=source,source_scope_complete=bool(entry.get('routing_source',source) is source if plan is None else plan.source is source),endpoint_weights=(entry.get('serial_left',1.),entry.get('serial_right',0.)),branch=entry.get('branch',1),branch_count=entry.get('branch_count',1),route_plan=plan,interval=(a,b),boundary_angles=part.get('angles',(0.,0.)),route_identity=None if plan is None else plan.identity,
                        nominal_regions={k:part[k] for k in 'ABC'},regions=regions,
                        movable=part['C'],moved=regions['C'],fixed=regions['B'],immovable=regions['B'],bridge=regions['A'],
                        cut=near,moved_cut=moved_cut,extra_cut=far,span=part['A'],frame_seam=False,
@@ -479,11 +526,18 @@ class Reconstructor:
                        clearance_um=None,conflict=False,conflict_net=None,conflict_link=None,manual=manual,manual_lost=False,
                        cut_clamped=False,cut_window=None,orphan=entry['orphan'],follows=entry['orphan'],warning=warning,valid=valid,priority_failure_mass=self.manual_masses.get((plan.key,plan.identity,a,b),entry.get('priority_failure_mass')) if plan else None)
             pieces.append(piece);feature['pieces'].append(piece)
+        from .branch_regions import consolidate
+        pieces=consolidate(self,pieces,states)
+        features={}
+        for q in pieces:
+            features.setdefault((q['layer'],q['index']),dict(source=q['source'],pieces=[],net=q['net']))['pieces'].append(q)
         out={};conflicts=0
         for (layer,index),feature in features.items():
             ps=feature['pieces'];source=feature['source']
             geometry,occupied=compose_feature(source,ps,self.tol,feature_moves(ps,states,self.settings.reconstruction_style))
             out.setdefault(layer,[]).append(dict(indices=(index,),geometry=geometry,net=feature['net'],movable=occupied,moved=shapely.union_all([q['moved'] for q in ps])))
+        for layer,rows in retained.items():out.setdefault(layer,[]).extend(rows)
+        pieces.extend(retained_pieces)
         # Measure against final neighbouring copper, not source poses.
         for layer in (out if diagnostics else ()):
             replaced={q['indices'][0]:q['geometry'] for q in out[layer]}
@@ -512,7 +566,7 @@ class Reconstructor:
             measures=dict(parallel_map(measure,sorted({(q['index'],q['net']) for q in layer_pieces})))
             for q in layer_pieces:
                 if measures[q['index']] is not None:q.update(measures[q['index']]);conflicts+=int(q['conflict'])
-        result=dict(complete=True,auto_ignored=self.auto_ignored,rules=dict(width_um=self.rules.width,space_um=self.rules.space,annulus_um=self.p.annulus_um),configuration=self.settings.reconstruction_key(),dbu_um=self.tol,pieces=pieces,replacements=out,scope='共同端点按全输入概率参考选择；保持所选样式比较有限候选。未形成有效连接时取消连接段并保留两端；实际工况规则另检。不代表全局最优布线或产线签认。',
+        result=dict(complete=True,reused_sources=len(retained_refs),auto_ignored=self.auto_ignored,rules=dict(width_um=self.rules.width,space_um=self.rules.space,annulus_um=self.p.annulus_um),configuration=self.settings.reconstruction_key(),dbu_um=self.tol,pieces=pieces,replacements=out,scope='共同端点按全输入概率参考选择；保持所选样式比较有限候选。未形成有效连接时取消连接段并保留两端；实际工况规则另检。不代表全局最优布线或产线签认。',
                     parameters=dict(length_um=0.,width_um=0.,overlap_um=self.p.annulus_um,landing_diameters=AUTO_LANDING_DIAMETERS,shared_nominal=True,connection_style=self.settings.reconstruction_style,boundary_mode=self.settings.reconstruction_boundary_mode),
                     summary=dict(pieces=len(pieces),bridges=sum(not q['bridge'].is_empty for q in pieces),orphans=sum(q['orphan'] for q in pieces),conflicts=conflicts,
                                  warnings=sum(bool(q['warning']) for q in pieces),groups_used=len(features),manual_cuts=sum(q['manual'] for q in pieces),

@@ -7,7 +7,7 @@ from .core import Parameters
 EXTREME_PAGE_SIZE=256
 
 OVERLAY_DEFAULTS = dict(drc=False, space=False,
-                        width=False, width_sufficient=False, repair=False, reconstruction=False, footprint=False)
+                        width=False, width_sufficient=False, reconstruction=False, footprint=False)
 
 
 def restored_width_ignores(project,data,name='ignored_width_lines'):

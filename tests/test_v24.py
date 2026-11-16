@@ -117,7 +117,7 @@ class V24Tests(unittest.TestCase):
         self.assertEqual([q['gap_um'] for q in result],[5.,5.,0.])
         replaced={'5/0':[dict(indices=[0],geometry=box(10,40,25,54))]}
         result=edge_violations(model,np.array([[-9.,0,0]]),p,ViewSettings(),replaced)
-        self.assertEqual(sorted((q['layer'],q['gap_um']) for q in result),[('3/0',16.),('5/0',0.),('5/0',5.),('5/0',5.),('5/0',10.)])
+        self.assertEqual(sorted((q['layer'],q['gap_um']) for q in result),[('5/0',0.),('5/0',5.),('5/0',5.)])
 
     def test_normal_preview_checks_copper_to_edge_without_a_display_toggle(self):
         d,_,_,_,engine=example('示例P_单点PATH与相邻孔盘')

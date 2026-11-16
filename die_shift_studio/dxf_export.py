@@ -18,7 +18,7 @@ class Snapshot:
     ignored_count: int
 
 
-def snapshot(data,cache,frame=None,*,deformation=False,reconstruction=False,repairs=None,progress=lambda *_:None):
+def snapshot(data,cache,frame=None,*,deformation=False,reconstruction=False,progress=lambda *_:None):
     """Capture all layers, including hidden/unused ones, at one completed pose."""
     replacements={}
     if frame:
@@ -55,9 +55,6 @@ def snapshot(data,cache,frame=None,*,deformation=False,reconstruction=False,repa
                 geoms.append(shapely.transform(g,lambda points:(points-nominal[j])@rotation+actual[j]))
         geoms.extend(q['geometry'] for q in items)
         layers[key]=tuple(g.wkb for g in geoms)
-    # Straight patches are extra physical copper; their DRC/range marks are not.
-    for repair in (repairs or {}).get('repairs',()):
-        if not repair.patch.is_empty:layers[repair.layer]=(*layers.get(repair.layer,()),repair.patch.wkb)
     return Snapshot(layers,data.top_name,None if frame is None else np.array(frame['states'],copy=True),
                     len(getattr(data,'ignored_geometry',())))
 

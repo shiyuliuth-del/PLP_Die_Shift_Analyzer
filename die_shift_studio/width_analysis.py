@@ -311,7 +311,7 @@ class WidthAnalyzer:
         self.model = model
         self.settings = settings
         self.width, self.space = effective_rules(parameters,settings)
-        self.annulus = parameters.annulus_um
+        self.annulus = parameters.annulus_um;self.border=parameters.package_clearance_um
         self.tol = max(1e-9,model.data.dbu_um*1e-5)
         self.board = model.case['board']
         self.inside = self.board.buffer(self.tol)
@@ -322,7 +322,7 @@ class WidthAnalyzer:
         if self.catalogue_store is not None:
             self.catalogue_key=('width-catalogue-v36',model.data.geometry_id,model.data.top_name,
                                 tuple(sorted(model.roles.items())),tuple(model.connections.order),
-                                self.width,self.space,self.annulus,self.tol)
+                                self.width,self.space,self.annulus,self.tol,self.border)
         self.planes = self._planes()
         from .width_probability import ChannelProbability
         self.probability=ChannelProbability(model,parameters,self.board,self.tol) if 0<parameters.target_nsigma<math.inf else None
@@ -721,7 +721,7 @@ class WidthAnalyzer:
         return rows,retained
 
     def margins(self,a,b):
-        return tuple(0. if w.kind=='禁布区' else self.space for w in (a,b))
+        return tuple(0. if w.kind=='禁布区' else self.border if w.kind=='边框' else self.space for w in (a,b))
 
     def demand(self,plane,gate):
         margins=self.margins(*(plane['walls'][i] for i in gate.pair))

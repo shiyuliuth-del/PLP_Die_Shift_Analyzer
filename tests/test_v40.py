@@ -119,7 +119,10 @@ class Reconstruction40Tests(unittest.TestCase):
             r=e.reconstructor;f=r.frame(np.zeros((1,3)));plan=f['pieces'][0]['route_plan'];pool=r.plan_pool
             cfg=replace(r.settings,reconstruction_ignored=(('5/0',0),))
             e.configure_reconstruction(True,cfg);g=e.frame(np.array([[20.,20.,.01]]))
-            self.assertFalse(g['reconstruction']['pieces']);self.assertFalse(g['reconstruction']['replacements'])
+            self.assertTrue(all(q['ignored'] for q in g['reconstruction']['pieces']));self.assertTrue(g['reconstruction']['replacements'])
+            from die_shift_studio.reconstruction import transform
+            expected=transform(e.contact.cache.layers['5/0']['geometry'][0],e.bound.centers[0],np.array([20.,20.,.01]))
+            self.assertLess(expected.symmetric_difference(g['reconstruction']['replacements']['5/0'][0]['geometry']).area,.001)
             self.assertTrue(shapely.Polygon(g['layers']['5/0']['polygons'][0]).equals(e.contact.cache.layers['5/0']['geometry'][0]))
             e.configure_reconstruction(True,replace(cfg,reconstruction_ignored=()))
             self.assertIs(e.reconstructor._plans_for_all_poses(lambda *_:None)[0]['plan'],plan)
@@ -148,9 +151,9 @@ class Reconstruction40Tests(unittest.TestCase):
         e.configure_reconstruction(True,ViewSettings(reconstruction_ignored=(('5/0',0),)))
         try:
             grid=ExtremeCatalog(c,p);bank=scan(e.reconstructor,grid);index=ProblemIndex(grid,bank['red_factors'])
-            self.assertFalse(bank['zones']);self.assertEqual(index.total,grid.total);self.assertTrue(index.zero)
+            self.assertTrue(all(not v['has_failure'] for v in bank['zones'].values()));self.assertEqual(index.total,grid.total);self.assertTrue(index.zero)
             frame=e.reconstructor.frame(np.zeros((1,3)))
-            self.assertFalse(frame['pieces']);self.assertTrue(scene_failure(frame))
+            self.assertTrue(all(q['ignored'] for q in frame['pieces']));self.assertTrue(scene_failure(frame))
             self.assertTrue(any(v['kind']=='线宽不足' for v in frame['violations']))
         finally:e.close()
 
@@ -162,7 +165,7 @@ class Reconstruction40Tests(unittest.TestCase):
             normalized=normalize_project(p)
             self.assertEqual(restored_width_ignores(normalized,d,'ignored_reconstruction'),{('5/0',0)})
             normalized['ignored_reconstruction']['sha256']='wrong';self.assertFalse(restored_width_ignores(normalized,d,'ignored_reconstruction'))
-            self.assertEqual(ViewSettings.from_dict({}).reconstruction_boundary_mode,'perpendicular')
+            self.assertEqual(ViewSettings.from_dict({}).reconstruction_boundary_mode,'wide')
             cfg=ViewSettings(reconstruction_boundary_mode='balanced',reconstruction_ignored=(('5/0',0),))
             self.assertEqual(ViewSettings.from_dict(json.loads(json.dumps(asdict(cfg)))),cfg)
         finally:e.close()

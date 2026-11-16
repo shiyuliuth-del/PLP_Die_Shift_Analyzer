@@ -48,7 +48,7 @@ SPECS={
  'panel_layers':('固定RDL层数',0,32,0), 'wafer_layers':('运动RDL层数',0,32,0),
  'line_width_um':('固定线宽 / μm',.01,10000,3),'line_space_um':('固定线距 / μm',.01,10000,3),
  'wafer_line_width_um':('运动线宽 / μm',.01,10000,3),'wafer_line_space_um':('运动线距 / μm',.01,10000,3),
- 'via_diameter_um':('连接孔直径 / μm',.01,10000,3),'annulus_um':('固定RDL包围量 / μm',0,10000,3),'moving_annulus_um':('运动RDL包围量 / μm',0,10000,3),
+ 'package_clearance_um':('图形距边框 / μm',0,10000,3),'via_diameter_um':('连接孔直径 / μm',.01,10000,3),'annulus_um':('固定RDL包围量 / μm',0,10000,3),'moving_annulus_um':('运动RDL包围量 / μm',0,10000,3),
    'min_die_gap_um':('芯片间要求净距 / μm',0,10000,3),
  'min_package_clearance_um':('芯片到封装边要求净距 / μm',0,10000,3),
  'single_bound_x_um':('单芯片 X 边界 / μm',0,10000,3),'single_bound_y_um':('单芯片 Y 边界 / μm',0,10000,3),
@@ -201,7 +201,7 @@ class MainWindow(W.QMainWindow):
         self.rendered_layers={};self.layer_artists={};self._layer_keys=[];self.geometry_cache=None;self.connections=None
         self.preview_worker=None;self.preview_workers=[];self.preview_pending=None;self.preview_ticket=0;self.engine=None;self.current_frame=None;self.shown_states=None
         self.die_labels=[];self._default_view=None;self._artist_frame=None;self.report_dirty=True;self._reordering=False
-        self.space_data=None;self.repair_data=None;self.space_artists=[];self.space_stamp=None;self.space_colorbar=None;self._resizing=False
+        self.space_data=None;self.space_artists=[];self.space_stamp=None;self.space_colorbar=None;self._resizing=False
         self._issue_table_stamp=None;self.dirty=False;self.manual_states=None;self.evaluation_motions={};self.probability_data=None;self.probability_artists=[];self.probability_stamp=None;self.legend=None;self.zone_artists=[];self.invalid_artists=[]
         from .dxf_settings import DxfSettings
         self.dxf_settings=DxfSettings();self.ignored_width_lines=frozenset();self.dxf_directory='';self.view_settings=ViewSettings();self.setting_fields={};self.layer_styles={};self.histogram_dirty=False
@@ -221,9 +221,6 @@ class MainWindow(W.QMainWindow):
         self.mouse_die=MouseDieMode(self)
         from .width_overlay import WidthOverlay
         self.width_overlay=WidthOverlay(self)
-        self.repair_data=None
-        from .repair_overlay import RepairOverlay
-        self.repair_overlay=RepairOverlay(self)
         from .reconstruction_overlay import ReconstructionOverlay, CutDrag, RegionSelect
         self.reconstruction_overlay=ReconstructionOverlay(self)
         self.cut_drag=CutDrag(self)
@@ -294,7 +291,7 @@ class MainWindow(W.QMainWindow):
         page=self._page('工艺')
         self._group(page,'目标层数与线宽线距',['panel_layers','wafer_layers','line_width_um','line_space_um','wafer_line_width_um','wafer_line_space_um'])
         page.addWidget(label('运动层按下层连接追溯所属芯片。固定层保持名义位置，层数由GDS用途自动统计。'))
-        self._group(page,'过孔包围量',['moving_annulus_um','annulus_um'])
+        self._group(page,'过孔包围量',['moving_annulus_um','annulus_um','package_clearance_um'])
         self._group(page,'机械净距',['min_die_gap_um','min_package_clearance_um'])
         self.fixed_assignment='all'
         page.addStretch()
@@ -333,8 +330,7 @@ class MainWindow(W.QMainWindow):
         self._width_grid_summary=None;self._problem_tag=None
         self.filter_job=None;self._coupled_key=None;self._coupled_data=None;self._coupled_error=False
         self.width_toggle=W.QCheckBox('宽度分析');self.width_toggle.setToolTip('按实际线路穿越数量检查局部通道容量：矩形颜色显示宽度余量，轮廓高亮风险线路；不代表全局可布通证明。');corner_layout.addWidget(self.width_toggle);self.width_toggle.toggled.connect(self.width_changed)
-        self.repair_toggle=W.QCheckBox('修复补块');self.repair_toggle.setToolTip('设备方修复模型：过孔偏移后脱离固定RDL时，在固定RDL层按偏移量拉直线补块，并对补块后的图形做DRC；补块是简化模型，不代表设备实际修复合格。');corner_layout.addWidget(self.repair_toggle);self.repair_toggle.toggled.connect(self.repair_changed)
-        self.reconstruction_toggle=W.QCheckBox('重构预演');self.reconstruction_toggle.setToolTip('沿原始走线划分A动区、B平移区、C静区；所有偏移状态共用端点。拖动蓝色/黄色边界可分别调整，动区轮廓可输出DXF。');corner_layout.addWidget(self.reconstruction_toggle);self.reconstruction_toggle.toggled.connect(self.reconstruction_changed)
+        self.reconstruction_toggle=W.QCheckBox('重构预演');self.reconstruction_toggle.setToolTip('沿原始走线划分A动区、B平移区、C静区；所有偏移状态共用端点。拖动蓝色边界可分别调整，动区轮廓可输出DXF。');corner_layout.addWidget(self.reconstruction_toggle);self.reconstruction_toggle.toggled.connect(self.reconstruction_changed)
         self.preview_tabs.setCornerWidget(corner)
         self.probability_toggle.toggled.connect(self.footprint_changed);self.space_toggle.toggled.connect(self.space_changed)
         extreme_page=W.QWidget();ep=W.QVBoxLayout(extreme_page);ep.setContentsMargins(0,0,0,0)
@@ -383,18 +379,6 @@ class MainWindow(W.QMainWindow):
         for caption,widget in [('图层随动设置',self.motion_table),('当前芯片状态',self.state_table),('逐芯片结果',self.die_table)]:
             pane=W.QWidget();pl=W.QVBoxLayout(pane);pl.setContentsMargins(2,2,2,2);pl.addWidget(W.QLabel(caption));pl.addWidget(widget);info.addWidget(pane)
         info.setSizes([360,330,340]);self.info_split=info;self.preview_tabs.addTab(info,'信息')
-        repair_page=W.QWidget();rv=W.QVBoxLayout(repair_page);rv.setContentsMargins(3,3,3,3)
-        self.repair_summary=label('勾选“修复补块”后，按当前姿态显示设备方在固定RDL层的直线补块，以及补块后的DRC。')
-        rv.addWidget(self.repair_summary)
-        self.repair_table=table(['固定RDL层','图形','运动过孔','所属','过孔偏移 / μm','补块直径 / μm','补块面积 / μm²','补块新增违规'])
-        self.repair_table.currentCellChanged.connect(lambda row,*_:self.repair_overlay.locate_patch(row))
-        rv.addWidget(self.repair_table)
-        rv.addWidget(W.QLabel('补块新增违规明细（点击可跳到该区域；视图定位随当前姿态）'))
-        self.repair_violation_table=table(['种类','面积 / μm²','关联补块','区域中心 / μm'])
-        self.repair_violation_table.setMaximumHeight(150)
-        self.repair_violation_table.currentCellChanged.connect(lambda row,*_:self.repair_overlay.locate_violation(row))
-        rv.addWidget(self.repair_violation_table)
-        self.preview_tabs.addTab(repair_page,'修复补块')
         width_page=W.QWidget();wv=W.QVBoxLayout(width_page);wv.setContentsMargins(3,3,3,3)
         self.width_summary=label(WIDTH_INTRO);wv.addWidget(self.width_summary)
         self.width_sufficient_toggle=W.QCheckBox('显示宽度足够');wv.addWidget(self.width_sufficient_toggle)
@@ -402,8 +386,8 @@ class MainWindow(W.QMainWindow):
         self.width_table=ChannelTable();wv.addWidget(self.width_table)
         self.width_table.selectionModel().currentRowChanged.connect(lambda index,_:self.width_overlay.locate(index.row()));self.preview_tabs.addTab(width_page,'宽度分析')
         self.reconstruction_page=W.QWidget();cv=W.QVBoxLayout(self.reconstruction_page);cv.setContentsMargins(3,3,3,3)
-        self.reconstruction_summary=label('启用后，蓝色/黄色边界分别控制共用动区两端，紫色轮廓表示约束无法满足。');cv.addWidget(self.reconstruction_summary)
-        self.reconstruction_table=table(['固定RDL层','所属','网络','移动区面积 / μm²','位移 / μm','裂隙 / μm','补线面积 / μm²','补块长度 / μm','切口缝长 / μm','间距 / μm','状态']);cv.addWidget(self.reconstruction_table)
+        self.reconstruction_summary=label('启用后，蓝色边界分别控制共用动区两端，紫色轮廓表示约束无法满足。');cv.addWidget(self.reconstruction_summary)
+        self.reconstruction_table=table(['固定RDL层','所属','网络','移动区面积 / μm²','位移 / μm','裂隙 / μm','补线面积 / μm²','动区长度 / μm','切口缝长 / μm','间距 / μm','状态']);cv.addWidget(self.reconstruction_table)
         row=W.QWidget();rv=W.QHBoxLayout(row);rv.setContentsMargins(0,0,0,0)
         self.region_move=W.QPushButton('框选动区');self.region_move.setCheckable(True)
         self.region_stay=W.QPushButton('框选静区');self.region_stay.setCheckable(True)
@@ -469,6 +453,8 @@ class MainWindow(W.QMainWindow):
             widget.setValue(getattr(Parameters(),key));widget.setKeyboardTracking(False)
             widget.valueChanged.connect(self.invalidate);biases.addRow(name,widget);self.fields[key]=widget
         hardware=group('硬件与计算资源')
+        saved=W.QCheckBox('保存工程时保存计算结果');self.setting_fields['save_project_results']=saved;hardware.addRow(saved);saved.toggled.connect(self.settings_changed)
+        directory=W.QLineEdit();directory.setPlaceholderText('默认与工程同目录');self.setting_fields['result_cache_directory']=directory;hardware.addRow('结果临时文件目录',directory);directory.editingFinished.connect(self.settings_changed)
         profile=resource_profile()
         self.hardware_label=label(f"{profile['cpu']} 逻辑CPU · 可用内存 {profile['available_memory_mb']} MB · 最多 {profile['workers']} 线程 / {profile['process_workers']} 进程\n显卡检测中…");hardware.addRow(self.hardware_label)
         accel=W.QComboBox();accel.addItem('自动（按任务大小）','auto');accel.addItem('CPU','cpu');accel.addItem('CUDA（等待设备自检）','cuda')
@@ -568,15 +554,12 @@ class MainWindow(W.QMainWindow):
         spin(drc_group,'drc_min_angle_deg','最小铜图形内角 / °',1,179,1)
         spin(drc_group,'drc_tolerance_um','线宽/线距容差 ± / μm',-10000,10000,3)
         self.setting_fields['drc_tolerance_um'].setToolTip('有效最小值 = 工艺值 − 容差。正值放宽，负值收紧；默认0。只影响DRC与型变验收，不改变包围量或概率。')
-        landing=W.QCheckBox('补块端部按包围量加孔盘');self.setting_fields['repair_landing_pad']=landing;drc_group.addRow(landing);landing.toggled.connect(self.settings_changed)
-        landing.setToolTip('“修复补块”的直线补块默认只有固定RDL线宽，通常无法满足最小包围量，DRC会报“孔盘包围不足”；勾选后额外在过孔位置补一个包围量半径的孔盘，用于对比两种模型。')
-        spin(drc_group,'repair_patch_width_um','补块直径 / μm（0=与过孔等宽）',0,10000,3)
-        self.setting_fields['repair_patch_width_um'].setToolTip('“修复补块”所画直线补块的直径。0 表示每块补块取所连过孔的最小外形尺寸（最小外接矩形的短边），即与孔等宽；填正数则所有补块统一使用该直径。')
         recon=group('重构预演')
         choices['reconstruction_style']=[('直线','linear'),('一阶','c1'),('二阶','c2'),('圆弧','arc')]
         choice(recon,'reconstruction_style','连接样式')
         choices['reconstruction_boundary_mode']=[('垂直','perpendicular'),('重构区优先','wide'),('两侧平均','balanced')]
         choice(recon,'reconstruction_boundary_mode','边界角度')
+        spin(recon,'reconstruction_pad_trigger_um','整孔盘触发余量 / μm',0,1000,3)
         spin(recon,'reconstruction_grid_nodes','良率积分每轴节点',3,9)
         self.setting_fields['reconstruction_grid_nodes'].setToolTip('完整有限网格，按区间概率质量积分；增大节点可检查连续空间误差。不是等概率极端计数。')
         live=W.QCheckBox('实时反馈动区变化');self.setting_fields['reconstruction_live']=live;recon.addRow(live);live.toggled.connect(self.settings_changed)
@@ -618,6 +601,7 @@ class MainWindow(W.QMainWindow):
             widget.blockSignals(True);value=getattr(self.view_settings,key)
             if isinstance(widget,W.QComboBox):widget.setCurrentIndex(max(0,widget.findData(value)))
             elif isinstance(widget,W.QCheckBox):widget.setChecked(value)
+            elif isinstance(widget,W.QLineEdit):widget.setText(value)
             else:widget.setValue(value)
             widget.blockSignals(False)
         if hasattr(self,'show_issues'):
@@ -643,7 +627,7 @@ class MainWindow(W.QMainWindow):
         for key in ('quadrature_order',):self.setting_fields[key].setEnabled(deterministic)
     def settings_changed(self,*_):
         if self.loading:return
-        values={k:(w.currentData() if isinstance(w,W.QComboBox) else w.isChecked() if isinstance(w,W.QCheckBox) else w.value()) for k,w in self.setting_fields.items()}
+        values={k:(w.currentData() if isinstance(w,W.QComboBox) else w.isChecked() if isinstance(w,W.QCheckBox) else w.text() if isinstance(w,W.QLineEdit) else w.value()) for k,w in self.setting_fields.items()}
         updated=ViewSettings.from_dict(dict(asdict(self.view_settings),**values))
         width_inputs=('width_yield_method','width_yield_exponent','width_yield_seed','width_grid_nodes')
         if all(getattr(updated,k)==getattr(self.view_settings,k) for k in values if k not in width_inputs):
@@ -671,18 +655,17 @@ class MainWindow(W.QMainWindow):
         except ValueError as exc:self.load_view_settings();self.error(str(exc));return
         deform=False;numeric=(updated.numeric_key()!=self.view_settings.numeric_key());self.view_settings=updated;self.enable_settings();self.refresh_extreme_colors();self.cache_group.limit(updated.cache_max_entries);self.refresh_cache_status()
         live_motion=any(getattr(updated,k)!=getattr(old_settings,k) for k in ('animation_enabled','animation_return_zero','animation_duration_ms','animation_fps','animation_speed','animation_strategy'))
-        repair_shape=(updated.repair_landing_pad!=old_settings.repair_landing_pad or updated.repair_patch_width_um!=old_settings.repair_patch_width_um)
         reconstruction_shape=updated.reconstruction_key()!=old_settings.reconstruction_key()
         if reconstruction_shape:self.invalidate_reconstruction_edit()
         if updated.reconstruction_grid_nodes!=old_settings.reconstruction_grid_nodes:self.reconstruction_yield.refresh()
         if numeric or updated.drc_tolerance_um!=old_settings.drc_tolerance_um:self.width_yield.refresh()
         if numeric:
             self.dirty=self.result is not None
-            self.revision+=1;self.probability_data=None;self.footprint_data=None;self.space_data=None;self.repair_data=None
+            self.revision+=1;self.probability_data=None;self.footprint_data=None;self.space_data=None
             if self.worker and self._evaluation_requested:self._coverage_pending=True;self.coverage_timer.start()
             if self.data:self.request_preview()
         elif live_motion and self.data and (self.preview_workers or intent or self.current_frame is not None):self.request_preview()
-        elif (deform or repair_shape or reconstruction_shape) and (False or self.drc_toggle.isChecked() or self.width_toggle.isChecked() or self.repair_toggle.isChecked() or self.reconstruction_toggle.isChecked()):self.request_preview()
+        elif (deform or reconstruction_shape) and (False or self.drc_toggle.isChecked() or self.width_toggle.isChecked() or self.reconstruction_toggle.isChecked()):self.request_preview()
         elif intent:
             if intent[0]=='frame':self.present_frame(intent[1])
             else:self.animate_view(*intent[1:])
@@ -870,7 +853,7 @@ class MainWindow(W.QMainWindow):
             from .reconstruction_enclosure import reachable_enclosure
             reachable_enclosure.cache_clear()
             from .reconstruction_ownership import divide
-            divide.cache_clear();self.reconstruction_yield.plan_pool.clear();self.reconstruction_yield.factor_pool.clear();self.constraint_feedback.context=None
+            divide.cache_clear();self.reconstruction_yield.plan_pool.clear();self.reconstruction_yield.factor_pool.clear();self.reconstruction_yield.geometry_pool.clear();self.constraint_feedback.context=None
         for group_ in self.parked_groups:
             if group_ is self.cache_group:continue
             group_.park_frames()
@@ -893,7 +876,7 @@ class MainWindow(W.QMainWindow):
         self._width_grid_summary=None;self._problem_tag=None;self._coupled_key=None;self._coupled_data=None
         if self.filter_job:self.filter_job.cancelled.set()
         self.extremes=None;self.active_preview=None;self.owner_cache=None;self.page_items=[];self._extreme_paint={};self.preview_page=0;self.state_result=None
-        self.preview_ticket+=1;self.preview_pending=None;self._prepared_motion=None;self.engine=None;self.current_frame=None;self.shown_states=None;self.report_dirty=True;self.repair_data=None
+        self.preview_ticket+=1;self.preview_pending=None;self._prepared_motion=None;self.engine=None;self.current_frame=None;self.shown_states=None;self.report_dirty=True
         self.extreme_table.blockSignals(True);self.extreme_table.clearContents();self.extreme_table.setRowCount(1);self.extreme_table.setCurrentCell(0,0);self.extreme_table.blockSignals(False)
         self.state_table.setRowCount(0);self.issue_table.setRowCount(0);self._issue_table_stamp=None;self.page_summary.setText('尚未评估');self.page_prev.setEnabled(False);self.page_next.setEnabled(False);self.page_edit.setText('1')
     def coverage_changed(self,*_):
@@ -902,7 +885,7 @@ class MainWindow(W.QMainWindow):
         self.width_yield.refresh()
         self._width_grid_summary=None;self._problem_tag=None
         self.enable_settings();self.stop_animation();self.revision+=1;self.engine=None;self.connections=None
-        self.probability_data=None;self.footprint_data=None;self.space_data=None;self.repair_data=None;self.preview_ticket+=1;self.preview_pending=None
+        self.probability_data=None;self.footprint_data=None;self.space_data=None;self.preview_ticket+=1;self.preview_pending=None
         self.cancel_previews()
         self._coverage_pending=True;self.coverage_timer.start()
         if self.target_sigma.currentText()=='∞' and self.result:
@@ -918,13 +901,13 @@ class MainWindow(W.QMainWindow):
         if self.loading:return
         self.width_yield.refresh()
         self._width_grid_summary=None;self._problem_tag=None
-        self.revision+=1;self.dirty=self.result is not None;self.refresh_extreme_colors();self.engine=None;self.connections=None;self.probability_data=None;self.footprint_data=None;self.space_data=None;self.repair_data=None
+        self.revision+=1;self.dirty=self.result is not None;self.refresh_extreme_colors();self.engine=None;self.connections=None;self.probability_data=None;self.footprint_data=None;self.space_data=None
         self.statusBar().showMessage('参数已修改；保留上次计算结果。预演控制区使用当前工艺，重新评估后更新统计结论。')
-        if self.data and (self.active_preview is not None or self.manual_states is not None or self.probability_toggle.isChecked() or self.space_toggle.isChecked() or False or self.drc_toggle.isChecked() or self.width_toggle.isChecked() or self.repair_toggle.isChecked() or self.reconstruction_toggle.isChecked()):
+        if self.data and (self.active_preview is not None or self.manual_states is not None or self.probability_toggle.isChecked() or self.space_toggle.isChecked() or False or self.drc_toggle.isChecked() or self.width_toggle.isChecked() or self.reconstruction_toggle.isChecked()):
             try:self.request_preview()
             except ValueError:pass
     def drop_result(self):
-        self.result=None;self.clear_preview();self.manual_states=None;self.dirty=False;self.probability_data=None;self.footprint_data=None;self.space_data=None;self.repair_data=None
+        self.result=None;self.clear_preview();self.manual_states=None;self.dirty=False;self.probability_data=None;self.footprint_data=None;self.space_data=None
         self.scheme_table.setRowCount(0);self.die_table.setRowCount(0)
         self.safe_range_plot_data=draw_safe_ranges(self.safe_range_figure,{});self.safe_range_canvas.setMinimumHeight(240);self.safe_range_canvas.draw_idle()
         self.scheme_figure.clear();self.scheme_canvas.draw_idle();self.detail.clear();self.plot_layout(preserve=True);self.update_histograms()
@@ -991,7 +974,7 @@ class MainWindow(W.QMainWindow):
         cache_settings=ViewSettings.from_dict(project.get('settings'))
         cache_id=logical_fingerprint((str(Path(project_path or data.path).resolve()),data.sha256,data.top_name))
         self.switch_project_cache(cache_id,cache_settings.cache_max_entries)
-        pars=Parameters.from_dict(project.get('parameters',{}),require_rdl=False);self.manual_states=None;self.probability_data=None;self.footprint_data=None;self.space_data=None;self.repair_data=None;self.dirty=False
+        pars=Parameters.from_dict(project.get('parameters',{}),require_rdl=False);self.manual_states=None;self.probability_data=None;self.footprint_data=None;self.space_data=None;self.dirty=False
         self.coverage_timer.stop();self._coverage_pending=False;self._evaluation_requested=False
         self.loading=True
         try:
@@ -1039,11 +1022,17 @@ class MainWindow(W.QMainWindow):
                 except ValueError:pass
             self.enable_settings();self.apply_automatic();self.per_die_changed();self.refresh_motion_table(project.get('motions',{}))
         finally:self.loading=False
+        self._restoring_project=True
         self.drop_result();self.invalidate();self.plot_layout()
+        from .project_results import restore
+        try:restored=restore(self,project,project_path)
+        finally:self._restoring_project=False
+        if restored:return
         remembered=self.cache_group.last_assessment
         if remembered is not None:
             key=self.assessment_identity(data,self.roles(),self.ordered_layers(),self.params(),self.view_settings)
             if remembered[0]==key:self.display_result(remembered[1]);self.log_bus.emit('已恢复本次运行中此工程的评估缓存')
+        if self.result is None and (self.width_toggle.isChecked() or self.reconstruction_toggle.isChecked()):self.request_preview()
     def role_changed(self,key):
         if self.loading:return
         self.stage_hints.pop(key,None)
@@ -1280,13 +1269,6 @@ class MainWindow(W.QMainWindow):
         self.filter_changed(pending_ok=True)
         if self.width_toggle.isChecked():self.request_preview()
         else:self.plot_layout(preserve=True)
-    def repair_changed(self,*_):
-        if self.loading:return
-        if self.repair_toggle.isChecked():
-            self.statusBar().showMessage('修复补块：按过孔偏移在固定RDL层生成直线补块，并重做补块后的DRC…')
-            self.request_preview()
-        else:
-            self.repair_data=None;self.plot_layout(preserve=True)
     def region_mode(self,mode,on):
         if self.loading:return
         if on:
@@ -1602,16 +1584,11 @@ class MainWindow(W.QMainWindow):
         if hl.get_visible():hl.set_segments(segments)
         if not hasattr(self,'violation_artist') or self.violation_artist.axes is None:
             self.violation_artist=PatchCollection([],facecolor='#e956b5',edgecolor='#ca398f',linewidth=.5,alpha=.48,zorder=10.2);self.ax.add_collection(self.violation_artist)
-        # Repair mode replaces the DRC source, so the two never disagree on screen.
-        if self.repair_toggle.isChecked() and self.repair_data is not None:
-            violations=self.repair_data['violations']
-        else:
-            violations=frame.get('drc',frame.get('deformation',{}).get('violations',[])) if frame else []
+        violations=frame.get('drc',frame.get('deformation',{}).get('violations',[])) if frame else []
         vp=[self.geometry_patch(q['geometry']) for q in violations if any(self.visible_boxes[k].isChecked() for k in q.get('layers',(q['layer'],))) and overlaps(q['geometry'].bounds,self.view_bounds)]
-        self.violation_artist.set_paths(vp);self.violation_artist.set_visible((self.drc_toggle.isChecked() or self.repair_toggle.isChecked()) and bool(vp))
+        self.violation_artist.set_paths(vp);self.violation_artist.set_visible((self.drc_toggle.isChecked()) and bool(vp))
         self.draw_probability();self.draw_space()
         self.footprint_overlay.draw()
-        if hasattr(self,'repair_overlay'):self.repair_overlay.draw()
         if hasattr(self,'reconstruction_overlay'):self.reconstruction_overlay.draw()
         if not getattr(self,'_in_animation',False):
             self.fill_issues()
@@ -1657,7 +1634,7 @@ class MainWindow(W.QMainWindow):
         return origin
     def refresh_legend(self):
         stamp=(tuple((k,self.visible_boxes[k].isChecked(),str(self.style_for(k))) for k in self.ordered_layers()),
-               self.view_settings.show_annulus_range,self.view_settings.show_spacing_range,self.show_issues.isChecked(),self.current_frame is not None,(self.current_frame or {}).get('width_summary') is not None,self.target_sigma.currentText(),False,self.probability_toggle.isChecked(),id(self.probability_data),self.view_settings.probability_cmap,self.view_settings.probability_alpha,self.view_settings.probability_gamma,self.view_settings.probability_show_ranges,self.view_settings.probability_ranges,self.view_settings.probability_target_color,self.view_settings.contact_marker_color,self.view_settings.unadapted_marker_color,self.width_toggle.isChecked(),self.width_sufficient_toggle.isChecked(),self.ignored_width_lines,self.repair_toggle.isChecked(),self.reconstruction_toggle.isChecked(),id(self.reconstruction_yield.evidence),bool(self.current_frame and self.current_frame.get('motion_issues')))
+               self.view_settings.show_annulus_range,self.view_settings.show_spacing_range,self.show_issues.isChecked(),self.current_frame is not None,(self.current_frame or {}).get('width_summary') is not None,self.target_sigma.currentText(),False,self.probability_toggle.isChecked(),id(self.probability_data),self.view_settings.probability_cmap,self.view_settings.probability_alpha,self.view_settings.probability_gamma,self.view_settings.probability_show_ranges,self.view_settings.probability_ranges,self.view_settings.probability_target_color,self.view_settings.contact_marker_color,self.view_settings.unadapted_marker_color,self.width_toggle.isChecked(),self.width_sufficient_toggle.isChecked(),self.ignored_width_lines,self.reconstruction_toggle.isChecked(),id(self.reconstruction_yield.evidence),bool(self.current_frame and self.current_frame.get('motion_issues')))
         if stamp==self._legend_stamp:return
         self._legend_stamp=stamp
         if self.legend is not None:self.legend.remove()
@@ -1668,9 +1645,6 @@ class MainWindow(W.QMainWindow):
             name=(key+' '+sty['label']) if key in self.layer_styles else sty['label']
             entries[name]=Patch(facecolor=sty['color'] if sty['fill'] else 'none',edgecolor=sty['color'],alpha=sty['alpha'],label=name)
         handles=list(entries.values())
-        if self.repair_toggle.isChecked():
-            handles += [Patch(facecolor='#d98a2b',edgecolor='#8a5a14',alpha=.45,label='固定RDL直线补块'),
-                        Patch(facecolor='#c0392b',edgecolor='#8e2b21',alpha=.5,hatch='///',label='补块新增违规')]
         if self.width_toggle.isChecked():
             modes=self.view_settings.width_display
             if self.ignored_width_lines and modes['描边']!='hide':handles.append(Patch(facecolor='#95c8a5',edgecolor='#95c8a5',alpha=.6,label='已忽略的宽度问题'))
@@ -1689,7 +1663,7 @@ class MainWindow(W.QMainWindow):
             from .reconstruction_events import PALETTE
             handles += [Patch(facecolor=PALETTE[k],alpha=.66,label=title) for k,title in [('red','动区违规'),('yellow','当前通过 / 其他极端风险'),('green','全部离散极端通过'),('gray','低概率满足要求')]]
             handles += [Patch(facecolor=COLORS[k],alpha=.66,label={'B':'C','C':'B'}[k]+' '+title) for k,title in [('B','静区'),('C','平移区')]]
-            handles += [Line2D([],[],color=CUT_COLOR,lw=2,label='运动侧边界 / 整孔盘蓝点'),Line2D([],[],color=SECOND_CUT_COLOR,lw=2,label='固定侧边界 / 整孔盘黄点'),Patch(facecolor='#dd5790',edgecolor='#bc386d',alpha=.45,label='具体违规位置 · 选中查看')]
+            handles += [Line2D([],[],color=CUT_COLOR,lw=2,label='运动侧边界 / 整孔盘蓝点'),Line2D([],[],color=SECOND_CUT_COLOR,lw=2,label='固定侧边界 / 整孔盘蓝点'),Patch(facecolor='#dd5790',edgecolor='#bc386d',alpha=.45,label='具体违规位置 · 选中查看')]
         if self.current_frame and self.current_frame.get('motion_issues'):handles.append(Line2D([],[],color='#bf862c',ls='--',label='运动归属未定：保持名义位置'))
         if getattr(self.data,'ignored_geometry',[]):handles.append(Line2D([],[],color='#d72b91',ls='--',lw=.7,label='忽略的无效图形'))
         if self.current_frame is not None:
@@ -1887,23 +1861,15 @@ class MainWindow(W.QMainWindow):
         except ValueError as exc:self.error(exc)
     def cancel_previews(self):
         for worker in self.preview_workers:worker.cancelled.set()
-    def repair_lookup(self,signature,state,deform):
-        """Adopt the cached post-patch result for one pose, or ask for a new one.
-
-        Repair data is cached per pose, so a cache hit lets the fast display
-        paths stay fast; a miss must fall through to the worker, otherwise the
-        panel would keep showing the patches of a previously displayed pose.
-        """
-        if not self.repair_toggle.isChecked():
-            self.repair_data=None;return True
-        key=('repair',signature,np.asarray(state,float).tobytes(),self.view_settings.drc_tolerance_um,
-             bool(self.view_settings.repair_landing_pad),bool(deform and self.result is not None),
-             float(self.view_settings.repair_patch_width_um))
-        self.repair_data=self.session_values.get(key)
-        return self.repair_data is not None
     def request_preview(self,direct=False,settle=False,quiet=False):
         self._preview_quiet=bool(quiet)
-        if not self.data:return
+        if not self.data or getattr(self,'_restoring_project',False):return
+        if self.result is None and (self.width_toggle.isChecked() or self.reconstruction_toggle.isChecked()):
+            self.log_bus.emit('分析需要完整方案评估，先建立全部极端情况。')
+            if self.worker is not None:
+                self._evaluation_requested=True;self._coverage_pending=True;self.coverage_timer.start()
+            else:self.run_evaluation(automatic=True)
+            return
         self.schedule_coupled_filter();self.stop_animation()
         self.preview_ticket+=1;ticket=self.preview_ticket;self._prepared_motion=None
         # Committed extreme poses finish into cache even if a later pose wins
@@ -1912,7 +1878,7 @@ class MainWindow(W.QMainWindow):
             if getattr(running,'transient',False):running.cancelled.set()
         state=self.manual_states if self.manual_states is not None else (self.extremes[self.active_preview]['states'].copy() if self.active_preview is not None and self.extremes else None)
         overlays=(self.footprint_toggle.isChecked() or self.probability_toggle.isChecked() or self.space_toggle.isChecked() or self.drc_toggle.isChecked() or self.width_toggle.isChecked()
-                  or self.repair_toggle.isChecked() or self.reconstruction_toggle.isChecked() or (False and self.result is not None))
+                  or self.reconstruction_toggle.isChecked() or (False and self.result is not None))
         shifted=self.shown_states is not None and np.any(self.shown_states)
         animate_back=bool(shifted and not direct and self.view_settings.animation_enabled and self.view_settings.animation_return_zero)
         if state is None and not overlays and not animate_back:
@@ -1941,7 +1907,7 @@ class MainWindow(W.QMainWindow):
         global_ready=show_frame or not (deform and self.result and math.isfinite(p.target_nsigma)) or bool(cached and cached.get('global_deformation'))
         matches=[e for e in self.session_engines.values() if getattr(e,'signature',None)==signature]
         actual=next((e for e in matches if not getattr(e,'busy',False) and e.cache_key()==expected),next(iter(matches),None))
-        if cached is not None and actual is not None and not getattr(actual,'busy',False) and ready and global_ready and self.repair_lookup(signature,state,deform):
+        if cached is not None and actual is not None and not getattr(actual,'busy',False) and ready and global_ready:
             actual.configure_deformation(deform,settings);actual.configure_drc(drc,settings)
             actual.configure_width(self.width_toggle.isChecked(),settings);actual.configure_reconstruction(self.reconstruction_toggle.isChecked(),settings)
             self.engine=actual
@@ -1965,7 +1931,7 @@ class MainWindow(W.QMainWindow):
                 else:self.present_frame(target)
                 return
         self.preview_pending=(self.revision,self.view_settings,ticket,state.copy(),self.motions(),roles,p,self.result,case,self.geometry_cache,self.connections,self.ordered_layers(),show_frame,self.probability_toggle.isChecked(),self.space_toggle.isChecked())
-        self.preview_pending+=(False,self.drc_toggle.isChecked(),direct,settle,origin,self.width_toggle.isChecked(),self.repair_toggle.isChecked(),self.reconstruction_toggle.isChecked(),self.footprint_toggle.isChecked())
+        self.preview_pending+=(False,self.drc_toggle.isChecked(),direct,settle,origin,self.width_toggle.isChecked(),self.reconstruction_toggle.isChecked(),self.footprint_toggle.isChecked())
         self.statusBar().showMessage('正在后台生成预演…保留已显示状态。');self.launch_preview()
     def launch_preview(self):
         if self._closing or self.motion_worker is not None or self.preview_pending is None:return
@@ -1985,7 +1951,7 @@ class MainWindow(W.QMainWindow):
                     self._preview_retry=False;self.launch_preview()
                 QtCore.QTimer.singleShot(400,retry)
             return
-        revision,settings,ticket,states,motions,roles,params,result,case,cache,connections,order,show_frame,heat,space,deform,drc,direct,settle,origin,width_analysis,repair_view,reconstruction_view,footprint_view=self.preview_pending;self.preview_pending=None;data=self.data
+        revision,settings,ticket,states,motions,roles,params,result,case,cache,connections,order,show_frame,heat,space,deform,drc,direct,settle,origin,width_analysis,reconstruction_view,footprint_view=self.preview_pending;self.preview_pending=None;data=self.data
         session_values=self.session_values;engines=self.session_engines;cache_group=self.cache_group
         start_states=origin.copy()
         view_span=max(np.ptp(self.ax.get_xlim()),np.ptp(self.ax.get_ylim()))
@@ -2021,7 +1987,7 @@ class MainWindow(W.QMainWindow):
             back=bool(not direct and settings.animation_enabled and settings.animation_return_zero and not np.any(states) and np.any(start_states))
             nominal_key=(signature,deform,settings.deformation_key(),drc,settings.numeric_key(),settings.width_key() if width_analysis else (False,),settings.reconstruction_key() if reconstruction_view else (False,))
             frame=None if show_frame else cache_group.nominal.get(nominal_key)
-            if frame is None and (show_frame or drc or width_analysis or reconstruction_view or repair_view or back or (deform and result is not None)):
+            if frame is None and (show_frame or drc or width_analysis or reconstruction_view or back or (deform and result is not None)):
                 frame=actual.frame(states,progress,quick=direct and not settle)
             if frame is not None and not show_frame and not frame.get('nominal_global'):
                 frame=dict(frame,nominal_global=True)
@@ -2036,24 +2002,13 @@ class MainWindow(W.QMainWindow):
                 if frame is not None and not show_frame:
                     frame=dict(frame,width_summary=summary)
                     cache_group.nominal[nominal_key]=frame
-            repair=None
-            if repair_view:
-                # A separate cached value, like the Space Map: the shared frame
-                # cache key is unchanged and the DRC instance stays local.
-                from .repair_patch import repair_frame
-                deform_replacements=(frame or {}).get('deformation',{}).get('replacements',{}) if frame else {}
-                repair_key=('repair',signature,states.tobytes(),settings.drc_tolerance_um,
-                            bool(settings.repair_landing_pad),bool(deform and result is not None),
-                            float(settings.repair_patch_width_um))
-                repair=session_values.get_or_compute(repair_key,lambda:repair_frame(
-                    actual.contact,states,settings,params,replacements=deform_replacements,progress=progress))
             if back or (settings.animation_enabled and not direct and np.any(states) and not np.array_equal(start_states,states)):
                 from .prepared_motion import prepare_motion
                 publish=(lambda intermediate:worker.publish((actual,intermediate,distribution,con,actual_cache,field))) if settings.animation_strategy=='stream' else None
                 motion=prepare_motion(actual,start_states,states,settings,view_span,cache_group.motions,progress,publish,worker.cancelled)
             if direct:motion=dict(direct=True,settled=settle)
-            if not show_frame and not (drc or width_analysis or repair_view or heat or space or reconstruction_view or (deform and result is not None)):frame=None
-            return actual,frame,distribution,con,actual_cache,field,prepared,motion,repair,footprints,summary
+            if not show_frame and not (drc or width_analysis or heat or space or reconstruction_view or (deform and result is not None)):frame=None
+            return actual,frame,distribution,con,actual_cache,field,prepared,motion,footprints,summary
         def work(progress):
             from .scheduling import job_budget
             with job_budget(admitted['threads'],admitted['processes']):return solve(progress)
@@ -2072,7 +2027,7 @@ class MainWindow(W.QMainWindow):
             worker.delivered=True
             if worker.cancelled.is_set():return
             if revision!=self.revision or data is not self.data or worker.view_ticket!=self.preview_ticket:return
-            self.engine,frame,self.probability_data,self.connections,self.geometry_cache,self.space_data,self._prepared_package,self._prepared_motion,self.repair_data,self.footprint_data,summary=value
+            self.engine,frame,self.probability_data,self.connections,self.geometry_cache,self.space_data,self._prepared_package,self._prepared_motion,self.footprint_data,summary=value
             if summary is not None and self._width_grid_summary is not summary:
                 self._width_grid_summary=summary
                 if self.problem_filter.isChecked() and self.width_toggle.isChecked():self.filter_changed(pending_ok=True)
@@ -2234,7 +2189,7 @@ class MainWindow(W.QMainWindow):
             self.issue_scheme.blockSignals(True);self.issue_scheme.setCurrentIndex(scheme);self.issue_scheme.blockSignals(False)
         else:self.tabs.setCurrentIndex(0);self.preview_tabs.setCurrentIndex(0)
         self.plot_layout(preserve=preserve)
-        self.refresh_motion_table();self.request_preview()
+        self.refresh_motion_table();self.request_preview();self.width_yield.refresh()
         if self.tabs.currentWidget() is self.detail:self.update_report()
         self.statusBar().showMessage('评估完成：选择下方极端行预演，或打开“报告”查看逐步计算')
     def tab_changed(self,*_):
@@ -2280,7 +2235,7 @@ class MainWindow(W.QMainWindow):
             evidence=self.reconstruction_yield.evidence;base=self._width_grid_summary
             if self.width_toggle.isChecked() and evidence and base:
                 extra=evidence['routing_summary']
-                self._coupled_data=dict(complete=True,grid_key=evidence['grid_key'],
+                self._coupled_data=dict(complete=True,grid_key=evidence['grid_key'],package_states=evidence['package_states'],
                     lines={**base['channel_lines'],**extra['lines']},witnesses={**base['channel_witnesses'],**extra['witnesses']},
                     red_factors=[*base['channel_factors'],*extra['red_factors']])
             else:self._coupled_data=None
@@ -2682,6 +2637,9 @@ class MainWindow(W.QMainWindow):
         source=os.path.relpath(gds,path.parent) if portable else str(gds)
         project=dict(self.project_settings(),gds_path=source)
         from .core import clean_json
+        from .project_results import save
+        try:project['saved_results']=save(self,path)
+        except (ValueError,TypeError,OSError) as exc:self.log_bus.emit('结果未保存：'+str(exc),'WARNING')
         atomic_save(path,clean_json(project));self.project_path=path
         from .session_cache import logical_fingerprint
         cache_id=logical_fingerprint((str(path),self.data.sha256,self.data.top_name))

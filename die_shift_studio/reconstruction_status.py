@@ -9,6 +9,7 @@ class ReconstructionYieldDisplay:
         self.w=w;self.worker=None;self.pending=None;self.key=None;self.bank=None;self.evidence=None;self.plan_pool={}
         from .session_cache import EphemeralCache
         from .resources import resource_profile
+        self.geometry_pool=EphemeralCache(budget=64*1024**2,max_entries=4096)
         self.factor_pool=EphemeralCache(budget=min(128*1024**2,int(resource_profile()['available_memory_mb']*1024**2*.06)),max_entries=512)
         self.timer=QtCore.QTimer(w);self.timer.setSingleShot(True);self.timer.setInterval(220);self.timer.timeout.connect(self.start)
     def reset(self):
@@ -19,6 +20,7 @@ class ReconstructionYieldDisplay:
     def refresh(self,settings=None):
         w=self.w
         if w.loading or w._closing:return
+        if w.result is None or getattr(w,'_restoring_project',False):self.reset();return
         if not w.reconstruction_toggle.isChecked() or w.data is None:self.reset();return
         try:p=replace(w.params(),target_nsigma=0)
         except ValueError:self.reset();return
@@ -56,7 +58,7 @@ class ReconstructionYieldDisplay:
                 from .reconstruction_yield import measure_reconstruction_yield
                 geom=cache or GeometryCache(data);con=Connections(data,roles,order,geom.geometries)
                 case=build_case(data,roles,connections=con);model=ContactModel(data,case,roles,con,geom,parameters=p)
-                engine=Reconstructor(model,p,cfg,plan_pool=self.plan_pool)
+                engine=Reconstructor(model,p,cfg,plan_pool=self.plan_pool,geometry_pool=self.geometry_pool)
                 try:
                     from .statistics import ExtremeCatalog
                     from .reconstruction_events import scan
@@ -109,6 +111,8 @@ class ConstraintFeedback:
         if self.worker or self.pending is None or self.w._closing:return
         ticket,frame,cfg,data,p,roles,order,cache=self.pending;self.pending=None
         from .gui import Worker
+        current=getattr(self.w.engine,'reconstructor',None)
+        pool=clone_plan_pool(current.plan_pool) if current is not None else {}
         def work(progress):
             key=logical_fingerprint((data.geometry_id,roles,order,asdict(p),cfg.drc_tolerance_um))
             if self.context is None or self.context[0]!=key:
@@ -119,12 +123,18 @@ class ConstraintFeedback:
                 con=Connections(data,roles,order,cache.geometries);case=build_case(data,roles,connections=con)
                 model=ContactModel(data,case,roles,con,cache,parameters=p)
                 self.context=(key,FixedRules(model,p,cfg))
+            if cfg.reconstruction_boundary_mode!='perpendicular':
+                from .reconstruction import Reconstructor
+                rebuilt=Reconstructor(self.context[1].model,p,cfg,plan_pool=pool)
+                try:return rebuilt.frame(frame['states'],progress=progress)
+                finally:rebuilt.cache.close()
             return self.context[1].check(frame['reconstruction']['replacements'],frame['states'],progress)
         worker=Worker(work,self.w);self.worker=worker;self.w.watch_worker(worker,'拖动约束检查',quiet=True)
         def accept(violations):
             w=self.w
             if ticket!=self.ticket or w.current_frame is not frame or w._closing:return
-            data=dict(frame['reconstruction'],pieces=[dict(q) for q in frame['reconstruction']['pieces']],violations=violations,constraints_complete=True)
+            data=violations if isinstance(violations,dict) else dict(frame['reconstruction'],pieces=[dict(q) for q in frame['reconstruction']['pieces']],violations=violations,constraints_complete=True)
+            violations=data['violations']
             from .reconstruction import decorate_problems
             decorate_problems(data)
             w.current_frame=dict(frame,reconstruction=data)
