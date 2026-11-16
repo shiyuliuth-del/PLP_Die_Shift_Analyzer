@@ -219,7 +219,36 @@ class RoutePlan:
         if cursor is None:return True
         terminals=getattr(self,'terminal_vias',None)
         if terminals is None:return True
-        return any(g.buffer(self.guard).covers(shapely.Point(cursor)) for g in terminals[which])
+        values=terminals[which]
+        if not values:return False
+        origin=shapely.Point(self.route.coords[0 if which==0 else -1]);point=shapely.Point(cursor)
+        # The hit area is the landing, not just the via plus corner guard.
+        # Enclosure often exceeds guard+trigger, which made a legitimate pad
+        # unreachable. Bind to this path's terminal, never another branch pad.
+        nearest=min(g.distance(origin) for g in values)
+        targets=[g for g in values if g.distance(origin)<=nearest+self.tolerance]
+        other=[g for g in values if all(g is not t for t in targets)]
+        if other and min(g.distance(point) for g in other)+self.tolerance<min(g.distance(point) for g in targets):return False
+        landing=self.land if which==0 else shapely.union_all([a for a in self.anchors if any(a.intersects(g) for g in targets)])
+        return not landing.is_empty and landing.buffer(self.tolerance*4).covers(point)
+
+    def drag_projection(self,cursor,previous,previous_cursor):
+        """Continuous local arclength projection; close return legs cannot steal it."""
+        cursor=np.asarray(cursor,float);travel=float(np.linalg.norm(cursor-np.asarray(previous_cursor,float)))
+        if travel<=self.tolerance*1e-6:return float(previous)
+        reach=max(travel*3,self.guard*2,self.tolerance*32)
+        lo=max(0.,previous-reach);hi=min(self.length,previous+reach)
+        indices=np.flatnonzero((self.marks[:-1]<=hi)&(self.marks[1:]>=lo))
+        best=None
+        for i in indices:
+            length=self.lengths[i]
+            if length<=1e-12:continue
+            unit=(self.xy[i+1]-self.xy[i])/length
+            s=float(np.clip(self.marks[i]+(cursor-self.xy[i])@unit,max(lo,self.marks[i]),min(hi,self.marks[i+1])))
+            projected=self.xy[i]+(s-self.marks[i])*unit
+            score=(float(np.linalg.norm(cursor-projected)),abs(s-previous))
+            if best is None or score<best[0]:best=(score,s)
+        return float(previous) if best is None else best[1]
 
     def snap(self,s,which,other,allow_pad=True):
         eps=max(self.tolerance*8,1e-4)

@@ -62,11 +62,15 @@ class V42Tests(unittest.TestCase):
    e,_,_=make_engine(shapes,Parameters(single_bound_x_um=5,single_bound_y_um=5,bound_angle_deg=0,annulus_um=5),ViewSettings(reconstruction_boundary_mode='perpendicular',reconstruction_forced=(('5/0',0),)))
    try:
     r=e.reconstructor;f=r.frame(np.zeros((1,3)));entries=r._plans
-    self.assertEqual(len(entries),len(moving)*len(fixed))
+    # A connected terminal tree covers all moving-to-fixed connectivity;
+    # duplicate Cartesian routes are no longer independent overlapping zones.
+    self.assertEqual(len(entries),len(moving)+len(fixed)-1)
+    self.assertEqual({tuple(np.round(v['center'],6)) for q in entries for v in q['mine']},set(moving))
     self.assertTrue(all(q['plan'] is not None for q in entries))
     self.assertLess(f['replacements']['5/0'][0]['geometry'].symmetric_difference(source).area,.01)
     moved=r.frame(np.array([[4.,3.,0.]]));g=moved['replacements']['5/0'][0]['geometry']
     self.assertTrue(g.is_valid)
+    self.assertEqual(g.geom_type,'Polygon','all terminal branches must remain connected')
     for p in moving:self.assertLess(transform(Point(p).buffer(8),e.bound.centers[0],np.array([4.,3.,0.])).difference(g).area,.01)
     for p in fixed:self.assertLess(Point(p).buffer(8).difference(g).area,.01)
    finally:e.close()
