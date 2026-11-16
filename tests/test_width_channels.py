@@ -36,7 +36,7 @@ class ChannelTests(unittest.TestCase):
     def test_three_routes_keep_their_nominal_assignment_after_pad_covers_them(self):
         _,_,_,_,engine=example(CASE)
         try:
-            engine.configure_width(True,ViewSettings())
+            engine.configure_width(True,ViewSettings(drc_tolerance_um=0))
             for dx,gap,current in [(0,110,3),(3,107,3),(35,75,2),(-35,145,4),(80,30,0),(140,0,0),(300,0,0)]:
                 rows=[r for r in central(frame_at(engine,dx)) if not r['split'] and r['required']]
                 self.assertTrue(rows)
@@ -57,7 +57,7 @@ class ChannelTests(unittest.TestCase):
     def test_fixed_only_traces_are_whole_obstacles_and_have_no_demand(self):
         _,_,_,_,engine=example('示例N_三线路窄通道宽度')
         try:
-            engine.configure_width(True,ViewSettings())
+            engine.configure_width(True,ViewSettings(drc_tolerance_um=0))
             f=frame_at(engine,35)
             # No nominal through-line means no width result even when the
             # rigid walls touch. Their entities must still remain as obstacles.
@@ -72,7 +72,7 @@ class ChannelTests(unittest.TestCase):
     def test_fixed_pad_to_boundaries_and_intruding_third_pad(self):
         _,_,_,_,engine=example(CASE)
         try:
-            engine.configure_width(True,ViewSettings())
+            engine.configure_width(True,ViewSettings(drc_tolerance_um=0))
             nominal=frame_at(engine)
             self.assertTrue(any('边框' in r['ends'] for r in nominal['rows']))
             self.assertTrue(any(o['kind']=='固定过孔孔盘' for o in nominal['retained']))
@@ -95,7 +95,7 @@ class ChannelTests(unittest.TestCase):
         c=build_case(d,roles,layer_order=['4/0','5/0','9/0','8/0'])
         e=PreviewEngine(GeometryCache(d),c,roles,{},Parameters(),None,c['connections'])
         try:
-            e.configure_width(True,ViewSettings())
+            e.configure_width(True,ViewSettings(drc_tolerance_um=0))
             for dx,expected in [(0,2),(60,0),(180,0)]:
                 selected=[r for r in frame_at(e,dx)['rows'] if r['pair'][0].endswith('#1') and '边框' in r['ends'] and r['nominal_gap_um']==85]
                 self.assertTrue(selected)
@@ -138,7 +138,7 @@ class ChannelTests(unittest.TestCase):
         p=replace(p,per_die_enabled=True,die_bounds=[[35,35,1],[35,35,1]],die_pivots=[['custom',35,70],['top_left',0,0]])
         e=PreviewEngine(GeometryCache(d),c,q['roles'],{},p,None,c['connections'])
         try:
-            e.configure_width(True,ViewSettings())
+            e.configure_width(True,ViewSettings(drc_tolerance_um=0))
             states=np.array([[35,-35,math.pi/180],[-35,35,-math.pi/180]])
             a=e.frame(states)
             for i in (0,1):
@@ -159,7 +159,7 @@ class ChannelTests(unittest.TestCase):
         c=build_case(data,roles,layer_order=['4/0','5/0'])
         e=PreviewEngine(GeometryCache(data),c,roles,{},Parameters(annulus_um=0),None,c['connections'])
         try:
-            e.configure_width(True,ViewSettings())
+            e.configure_width(True,ViewSettings(drc_tolerance_um=0))
             def mouths(a):
                 return [r for r in a['rows'] if r['pair']==('运动过孔孔盘 4/0 #1','固定障碍 5/0 #1') and abs(r['point'][1])<20]
             nominal=mouths(frame_at(e))

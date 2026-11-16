@@ -135,3 +135,7 @@ OAS基本记录编码参考 [gdstk OAS写入实现](https://github.com/heitzmann
 info新增instance_id、session_identity、batch_owner；冻结身份包括软件版本/源几何与Q节点/TopCell/层序用途/运动归属/参数设置。batch.begin可提供32位小写十六进制client_id，info返回以辨认恢复归属。不提供时保持原协议行为。入口JSON新增process_created与instance_id，不得记录token；PID重用不能当旧服务仍在。session.prepare在任何批次存续期间拒绝。
 
 客户端故障恢复只处理自己的批次；原临时几何在服务进程崩溃后不可靠，完整重放未提交批次。正常结果不allow_failed；超限内存可降低并发重试。服务存活但无响应时不强杀/不启动重复实例。当前客户端不会扫描其他安装路径。此扩展不改变批量跳过完整DRC的范围。
+
+## V45资源与交互DRC
+
+max_threads=0及max_memory_mb=0均表示自动（默认）。自动内存预算取当前可用内存35%，下限128 MB；显式预算不高于该可用内存预算。交互preview.submit在实际替换铜上执行运动/固定RDL的线宽、线距、名义连接过孔的包围量、封装边距与禁布区检查，表格和画布共用目录。batch.submit仍保留快速模式，明确不做完整显示DRC或概率分析。

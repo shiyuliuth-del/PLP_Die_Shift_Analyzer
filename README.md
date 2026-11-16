@@ -1,11 +1,11 @@
-# Die Shift Analyze V44
+# Die Shift Analyze V45
 
-V44修复多分支重构拖动与最终铜连接，并新增独立图形客户端[RealDataAnalyse](RealDataAnalyse/README.md)，与主程序同包发布，附[GD55测试案例](cases/GD55/README.md)。实际测试与限制见[验收记录](docs/V44_VALIDATION.md)。
+V45统一当前姿态DRC、精简界面并延迟结果分析计算；与[RealDataAnalyse](RealDataAnalyse/README.md)及[GD55案例](cases/GD55/README.md)继续同包发布。实际验证与限制见[V45记录](docs/V45_VALIDATION.md)。
 
 软件分析Die-first封装的DIE平移与旋转，提供三方案初筛、实体覆盖与极端足迹、通道宽度风险、重构动区编辑、规则/联合模型良率、工程结果保存、GDS/OAS导入、实测IPC及批量OAS输出。长度均为μm，GDS/OAS只读，工程节点可编辑。
 
 - [实测IPC接口与注意事项](docs/MEASURED_OUTPUT_API.md) · [GD55-1105独立验证脚本](tools/verify_measured_gd55.py)
-- [用户操作](docs/V44_使用说明.md)
+- [用户操作](docs/V45_使用说明.md)
 - [AI交接：主要功能、代码地图、算法和后续重点](docs/AI_HANDOFF.md)
 - [现行设计合同](docs/DESIGN_REQUIREMENTS.md)
 - [已知边界](docs/KNOWN_ISSUES.md)

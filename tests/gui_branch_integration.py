@@ -38,7 +38,7 @@ def main():
             settle()
             assert hasattr(w,'dxf_button') and w.dxf_fields['merge_layers'].isChecked()
             for key in ('width_yield_method','width_yield_seed','width_grid_nodes','width_show_probability',
-                        'show_annulus_range','show_spacing_range','show_low_contact','show_low_width'):
+                        'show_annulus_range','show_spacing_range','show_low_width'):
                 assert key in w.setting_fields,key
             assert w.setting_fields['width_yield_method'].currentData()=='grid'
             assert w.setting_fields['acceleration'].findData('cuda')>=0
@@ -62,7 +62,7 @@ def main():
                 assert [r[2] for r in w.view_settings.reconstruction_regions]==['move','stay']
                 assert preview.called
                 saved_regions=w.view_settings.reconstruction_regions
-                plane=('3/0',2,(('1/0',7),('2/0',7)),1.,0.,12.,14.)
+                plane=(next(k for k,r in w.roles().items() if r=='固定RDL'),0,tuple(sorted((k,0) for k,r in w.roles().items() if r in ('运动过孔','固定过孔'))),1.,0.,12.,14.)
                 w.view_settings=replace(w.view_settings,reconstruction_cuts=(plane,),
                     reconstruction_second_cuts=(plane,),reconstruction_extra_cuts=(plane,),
                     reconstruction_dropped_cuts=(plane[:3],))
@@ -70,34 +70,32 @@ def main():
                 w.setting_fields['width_yield_decimals'].setValue(4)
                 assert w.view_settings.reconstruction_cuts==(plane,)
                 before=preview.call_count
-                w.dirty=False;w.report_dirty=False;w._coupled_key=('old',);w._coupled_data={'old':True}
+                w.dirty=False;w._coupled_key=('old',);w._coupled_data={'old':True}
                 w.setting_fields['reconstruction_corner_guard_um'].setValue(w.view_settings.reconstruction_corner_guard_um+1)
                 assert preview.call_count>before
-                assert not w.dirty and w.report_dirty and w._coupled_key is None and w._coupled_data is None
+                assert not w.dirty and w._coupled_key is None and w._coupled_data is None
                 assert w.view_settings.reconstruction_regions==saved_regions
                 project=Path(tmp)/'integration.dshift.json';w.write_project(project)
                 raw=json.loads(project.read_text())
                 assert 'dxf_options' in raw and raw['settings']['width_yield_method']=='grid'
                 clear=next(b for b in w.findChildren(W.QPushButton) if b.text()=='清除全部手动切口')
-                w.dirty=False;w.report_dirty=False;clear.click();assert not w.dirty and w.report_dirty
+                w.dirty=False;clear.click();assert not w.dirty
                 for key in ('reconstruction_cuts','reconstruction_second_cuts','reconstruction_extra_cuts','reconstruction_dropped_cuts'):
                     assert not getattr(w.view_settings,key),key
-                w.dirty=False;w.report_dirty=False;w.clear_regions.click();assert not w.dirty and w.report_dirty
+                w.dirty=False;w.clear_regions.click();assert not w.dirty
                 assert not w.view_settings.reconstruction_regions
                 assert w.region_select.mode is None
                 # V40 keeps the original assessment usable; only reconstructed evidence
-                # and the report are invalidated. Verify these GUI edit routes
+                # are invalidated. Verify these GUI edit routes
                 # invalidate the same stale evidence even without mouse dragging.
                 changed=replace(w.view_settings,reconstruction_second_cuts=(plane,))
                 with patch.object(w,'_selected_reconstruction_piece',return_value={}), \
                      patch('die_shift_studio.reconstruction_overlay.nudge_cut',return_value=changed):
-                    w.dirty=False;w.report_dirty=False;w.nudge_selected_cut(5);assert not w.dirty and w.report_dirty
+                    w.dirty=False;w.nudge_selected_cut(5);assert not w.dirty
                 previous=w.current_frame
                 w.current_frame={'reconstruction':{'pieces':[{'layer':plane[0],'index':plane[1],'die':0,'vias':plane[2]}]}}
-                w.reconstruction_table.blockSignals(True)
-                w.reconstruction_table.setRowCount(1);w.reconstruction_table.setCurrentCell(0,0)
-                w.reconstruction_table.blockSignals(False)
-                w.dirty=False;w.report_dirty=False;w.delete_selected_cut();assert not w.dirty and w.report_dirty
+                with patch.object(w,'_selected_reconstruction_piece',return_value=w.current_frame['reconstruction']['pieces'][0]):
+                    w.dirty=False;w.delete_selected_cut();assert not w.dirty
                 assert not w.view_settings.reconstruction_second_cuts
                 w.current_frame=previous
                 status_frame={'states':np.zeros((len(w.case['dies']),3)),
@@ -107,7 +105,7 @@ def main():
                 assert '2 处手动动区归属不明确，未应用' in w.statusBar().currentMessage()
             w.load_project(project);settle()
             assert w.view_settings.reconstruction_regions==saved_regions
-            assert w.view_settings.reconstruction_second_cuts==(plane,)
+            assert w.view_settings.reconstruction_second_cuts==(plane,),(w.view_settings.reconstruction_second_cuts,plane)
             assert w.view_settings.reconstruction_dropped_cuts==(plane[:3],)
             assert w.view_settings.width_yield_decimals==4
             assert w.region_select.mode is None and not w.region_move.isChecked() and not w.region_stay.isChecked()

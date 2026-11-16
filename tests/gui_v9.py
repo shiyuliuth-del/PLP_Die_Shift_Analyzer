@@ -55,7 +55,7 @@ def expected(a,b,contained):
 for a,b in [([-28,975],[28,1025]),([28,1025],[-28,975])]:
     drag(a,b);assert set(w.selection.selected)==expected(a,b,b[0]>=a[0]),w.selection.selected
 # Selected geometry tracks a fanout via's connected owner beyond the DIE boundary.
-w.selection.selected=[('4/0',0)];w.selection.draw();w.manual_die.setCurrentIndex(0);w.manual_fields['dx'].setValue(65);w.apply_manual();wait()
+w.selection.selected=[('4/0',0)];w.selection.draw();w.manual_preview.rebuild();w.manual_preview.rows[0][0].setValue(65);w.apply_manual();wait()
 np.testing.assert_allclose(w.selection.artist.get_paths()[0].vertices[:-1],w.rendered_layers['4/0'][0])
 for scheme in (1,2,3):
     choose(w.issue_scheme,scheme);assert w.current_frame['contact']['intrusions']
@@ -101,14 +101,14 @@ for row in (1,2,3):
     np.testing.assert_array_equal(w.shown_states,w.extremes[row-1]['states'])
 w.extreme_table.setCurrentCell(4,0);app.processEvents();w.extreme_table.setCurrentCell(5,0);wait();np.testing.assert_array_equal(w.shown_states,w.extremes[4]['states'])
 w.extreme_table.setCurrentCell(0,0);wait();assert w.current_frame is None and w.shown_states is None
-w.manual_fields['dx'].setValue(65);w.apply_manual();wait()
+w.manual_preview.rows[0][0].setValue(65);w.apply_manual();wait()
 w.locate_issue(0,0);wait();issue=w.filtered_issues[0];np.testing.assert_allclose([np.mean(w.ax.get_xlim()),np.mean(w.ax.get_ylim())],issue['point'])
 metrics['fanout_animation_visual_ms']=visual;metrics['fanout_animation_total_ms']=samples;metrics['animation_configured_ms']=w.view_settings.animation_duration_ms
 assert w.view_settings.animation_fps==30
 w.fit_plot();w.controls.setCurrentIndex(2);shot('settings')
 # Inspect intermediate poses, not just endpoints: red areas and leaders update together.
 w.space_toggle.setChecked(False);w.probability_toggle.setChecked(False);wait()
-w.setting_fields['animation_enabled'].setChecked(False);w.manual_fields['dx'].setValue(0);w.manual_fields['dy'].setValue(0);w.manual_fields['angle'].setValue(0);w.apply_manual();wait()
+w.setting_fields['animation_enabled'].setChecked(False);w.manual_preview.rows[0][0].setValue(0);w.manual_preview.rows[0][1].setValue(0);w.manual_preview.rows[0][2].setValue(0);w.apply_manual();wait()
 live=[];original_plot=w.plot_layout
 def observed_plot(*args,**kwargs):
     original_plot(*args,**kwargs)
@@ -116,7 +116,7 @@ def observed_plot(*args,**kwargs):
         q=w.current_frame;count=len(q['contact']['intrusions']);live.append((time.perf_counter(),float(q['states'][0,0]),count))
         assert len(w.issue_artists[0].get_paths())==count
         for segment,issue in zip(w.issue_artists[2].get_segments(),w.display_issues):np.testing.assert_allclose(segment[0],w.issue_origin(issue))
-w.plot_layout=observed_plot;w.setting_fields['animation_enabled'].setChecked(True);w.manual_fields['dx'].setValue(65);w.apply_manual();wait();w.plot_layout=original_plot
+w.plot_layout=observed_plot;w.setting_fields['animation_enabled'].setChecked(True);w.manual_preview.rows[0][0].setValue(65);w.apply_manual();wait();w.plot_layout=original_plot
 assert len(live)>=2 and any(0<x<65 for _,x,_ in live)
 assert any(n>0 for _,x,n in live) or w.current_frame['contact']['intrusions'],live  # Deadline may skip the brief contact tail; endpoint is exact.
 metrics['live_annotation_frames']=len(live);metrics['live_annotation_contact_frames']=sum(n>0 for _,_,n in live)

@@ -255,6 +255,8 @@ class PreviewEngine:
                 check['problem_percent']=100 if check['failures'] else 0
         if getattr(self,'drc_enabled',False):
             frame['drc']=self.global_drc.frame(states,frame.get('reconstruction',{}).get('replacements'),settings=self.drc_settings,progress=progress)
+            from .current_drc import locations
+            frame['drc_locations']=locations(frame['drc'])
         if deformation is not None or getattr(self,'drc_enabled',False):
             from .drc_rules import effective_rules
             cfg=self.deformer.settings if self.deformer is not None else self.drc_settings

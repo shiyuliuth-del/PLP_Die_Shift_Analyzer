@@ -52,7 +52,7 @@ class V39Tests(unittest.TestCase):
         finally:e.close()
 
     def test_style_and_yield_grid_saved_and_old_jobs_default(self):
-        self.assertEqual(ViewSettings.from_dict({}).reconstruction_style,'c2')
+        self.assertEqual(ViewSettings.from_dict({}).reconstruction_style,'linear')
         keys=[]
         for style in ('linear','c1','c2','arc'):
             q=ViewSettings(reconstruction_style=style,reconstruction_grid_nodes=5)

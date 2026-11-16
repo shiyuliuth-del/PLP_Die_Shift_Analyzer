@@ -170,17 +170,20 @@ class ReconstructionOverlay:
         for (layer,index,kind,status),values in sorted(region_groups.items(),key=lambda item:RANK.get(item[0][3],-1)):
             geos=tuple(values.values());cache_key=(layer,index,kind,status,tuple(values));previous=old_unions.get(cache_key)
             g=previous[1] if previous is not None and all(a is b for a,b in zip(previous[0],geos)) else (geos[0] if len(geos)==1 else shapely.union_all(geos))
-            self.union_cache[cache_key]=(geos,g);paths.setdefault((layer,kind),[]).append(patch(g));colors.setdefault((layer,kind),[]).append(PALETTE[status] if kind=='A' else '#b49ac9' if status=='following' else w.style_for(layer)['color'])
+            from matplotlib.colors import to_rgba
+            color=PALETTE[status] if kind=='A' else '#dfd5ed' if status=='following' else w.style_for(layer)['color']
+            alpha=.66 if kind=='A' else .20 if status=='following' else w.style_for(layer)['alpha']
+            self.union_cache[cache_key]=(geos,g);paths.setdefault((layer,kind),[]).append(patch(g));colors.setdefault((layer,kind),[]).append(to_rgba(color,alpha))
         for key in paths:
             if key not in self.artists:
                 artist=PatchCollection([],alpha=.66,linewidths=.5);w.ax.add_collection(artist);self.artists[key]=artist
         for (layer,k),artist in self.artists.items():
             shapes=paths.get((layer,k),[]);artist.set_paths(shapes);artist.set_visible(bool(shapes));artist.set_facecolors(colors.get((layer,k),[]));artist.set_edgecolors(colors.get((layer,k),[]))
-            artist.set_alpha(.66 if k=='A' else w.style_for(layer)['alpha'])
+            artist.set_alpha(None)
             artist.set_zorder(2+(order.index(layer) if layer in order else 0)/max(1,len(order))+.001*('BCA'.index(k)+1))
-        self.constraints.set_paths([patch(g) for g in markers.values()]);self.constraints.set_visible(w.show_issues.isChecked() and bool(markers))
+        self.constraints.set_paths([patch(g) for g in markers.values()]);self.constraints.set_visible(False)
         points=[g.representative_point().coords[0] for g in markers.values()]
-        self.problem_points.set_data(np.array(points).T if points else [[],[]]);self.problem_points.set_visible(w.show_issues.isChecked() and bool(points))
+        self.problem_points.set_data(np.array(points).T if points else [[],[]]);self.problem_points.set_visible(False)
         self.problems.set_paths(red);self.problems.set_visible(bool(red));self.warning.set_paths(warnings);self.warning.set_visible(bool(warnings))
         self.cuts.set_segments(first);self.cuts.set_visible(bool(first));self.second_cuts.set_segments(second);self.second_cuts.set_visible(bool(second))
         self.points.set_data(np.array(dots).T if dots else [[],[]]);self.points.set_visible(bool(dots))
@@ -270,29 +273,6 @@ class ReconstructionOverlay:
         for artist in [*self.artists.values(),*self.labels,*self.end_artists,*self.region_artists,*self.arrow_artists,*[getattr(self,n,None) for n in ('warning','problems','constraints','problem_points','cuts','second_cuts','points','second_points')]]:
             if artist is not None:artist.set_visible(False)
         self.w.scene_renderer.external_draw(None)
-    def fill_table(self,data):
-        if getattr(self.w,'cut_drag',None) and self.w.cut_drag.state is not None:return
-        stamp=(id(data),self.active())
-        if stamp==self.table_stamp:return
-        self.table_stamp=stamp;w=self.w;rows=(data or {}).get('pieces',()) if self.active() else []
-        w.reconstruction_table.blockSignals(True);w.reconstruction_table.setRowCount(len(rows))
-        for i,q in enumerate(rows):
-            status=q.get('warning') or '已按共用动区重构'
-            if q['conflict']:status+='；异网间距不足'
-            if q.get('rule_violations'):status+='；'+('、'.join(q['rule_violations']))
-            values=[f"{q['layer']} #{q['index']+1}"+(f" · 分支{q['branch']}" if q.get('branch_count',1)>1 else ''),f"DIE{q['die']+1}",q['net'],f"{q['movable_area_um2']:.2f}",f"{q['shift_um']:.2f}",
-                    '—' if q['gap_um'] is None else f"{q['gap_um']:.2f}",f"{q['bridge_area_um2']:.2f}",f"{q['bridge_span_um']:.2f}",f"{q['bridge_length_um']:.2f}",
-                    '—' if q['clearance_um'] is None else f"{q['clearance_um']:.2f}",status]
-            for j,value in enumerate(values):w.reconstruction_table.setItem(i,j,W.QTableWidgetItem(str(value)))
-        w.reconstruction_table.blockSignals(False)
-        w.reconstruction_summary.setText(f'共用动区 {len(rows)} 处。两端蓝色控制柄分别对应运动侧和固定侧；分别沿原图追溯路径拖动，跨拐角自动吸附。圆点表示整孔盘；红色填充提示规则或连接问题，可单击查看。')
-    def locate(self,row,*_):
-        data=self.data()
-        if not data or not 0<=row<len(data['pieces']):return
-        q=data['pieces'][row];g=shapely.union_all(list(q['regions'].values()))
-        if g.is_empty:return
-        x0,y0,x1,y1=g.bounds;self.selected=self._key(q)
-        self.w.animate_view(((x0+x1)/2,(y0+y1)/2),max(100,(x1-x0)*1.25),max(100,(y1-y0)*1.25))
 
 
 class CutDrag:
@@ -397,6 +377,9 @@ class CutDrag:
     def scroll(self,event):
         if self.state is None:return
         event.reconstruction_cut_handled=True
+        # Apply a queued cursor move first. Otherwise the next timer tick can
+        # paint the old boundary over the newly rotated one.
+        if self.latest is not None:self._tick()
         state=self.state;piece=state['piece'];side=1 if state['kind']=='extra' else 0
         from .reconstruction_edits import rotate,apply_angles
         plan=piece['route_plan'];part=state['part'] or plan.partition(*piece['interval'],piece.get('boundary_angles',(0.,0.)))
@@ -408,7 +391,13 @@ class CutDrag:
             self.w.statusBar().showMessage('该角度无法分离原始连接端，已保留上一个有效角度');return
         state.update(updated=updated,part=angled,moved=True,rotated_only=True)
         if self.w.view_settings.reconstruction_live:self._live(angled)
-        self.w.reconstruction_overlay.stamp=None;self.w.reconstruction_overlay.draw();self.w.render_scene()
+        overlay=self.w.reconstruction_overlay;overlay.stamp=None;overlay.draw()
+        actual=state['part'] or angled;weight=piece.get('endpoint_weights',(1.,0.))[side]
+        line=transform(actual['far' if side else 'near'],state['frame']['rotation_centers'][piece['die']],state['frame']['states'][piece['die']]*weight)
+        handle=overlay.edited_handle(piece,state['kind'],line) if self.w.view_settings.reconstruction_live else line
+        segments=_lines(handle)
+        if segments:overlay.highlight((piece,segments[0],state['kind']))
+        self.w.scene_renderer.feedback_background=None;self.w.render_scene()
         self.w.statusBar().showMessage(f"边界旋转 {math.degrees(angled['angles'][side]):.1f}°；右键可撤销旋转")
 
     def _live(self,part):
@@ -452,7 +441,8 @@ class CutDrag:
         if failures:
             self.state['updated']=self.state['accepted_settings'];self.state['part']=self.state['accepted_part']
             self.w.statusBar().showMessage('该位置尚无连通且无异网接触的解，保留上一个有效边界。');return False
-        self.w.current_frame=frame;self.state['accepted_settings']=self.state['updated'];self.state['accepted_part']=self.state['part'];return True
+        frame=dict(frame,drc=[],drc_locations=[],drc_pending=True)
+        self.w.current_frame=frame;self.w.fill_issues();self.w.drc_overlay.draw();self.state['accepted_settings']=self.state['updated'];self.state['accepted_part']=self.state['part'];return True
     def release(self,event):
         if self.state is None:return
         if event.xdata is not None and event.ydata is not None and self.state['moved'] and not self.state.get('rotated_only'):self.latest=np.array([event.xdata,event.ydata])

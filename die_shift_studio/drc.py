@@ -49,88 +49,22 @@ class GlobalDRC:
     """
     def __init__(self,model,parameters):
         self.model=model;self.p=parameters;self.cache=OrderedDict();self.hits=0;self.misses=0
-        self.capacity=256
+        self.capacity=max(512,min(8192,len(model.nodes)*3));self.pairs={}
+        import threading
+        self.lock=threading.RLock()
     def cached(self,geometry,width,space,angle):
         key=(geometry.wkb,width,space,angle)
-        if key in self.cache:self.hits+=1;self.cache.move_to_end(key);return self.cache[key]
+        with self.lock:
+            if key in self.cache:self.hits+=1;self.cache.move_to_end(key);return self.cache[key]
         from .geometry_rules import angle_regions
         self.misses+=1;dbu=self.model.data.dbu_um
         out=[('线宽不足',rule_region(geometry,width,dbu)),('线距不足',rule_region(geometry,space,dbu,'space'))]
         if angle:out.append(('最小内角不足',angle_regions(geometry,angle,dbu)))
         out=[(k,g) for k,g in out if not g.is_empty]
-        self.cache[key]=out
-        while len(self.cache)>self.capacity:self.cache.popitem(last=False)
+        with self.lock:
+            self.cache[key]=out
+            while len(self.cache)>self.capacity:self.cache.popitem(last=False)
         return out
-    def fixed_regions(self,replacements,settings,progress):
-        from .drc_rules import effective_rules
-        m=self.model;p=self.p;dbu=m.data.dbu_um;replacements=replacements or {};groups={};items=[]
-        width,space=effective_rules(p,settings)
-        rule_key=(width,space,settings.drc_min_angle_deg if settings else 0)
-        if not replacements and getattr(self,'fixed_key',None)==rule_key:
-            self.hits+=1;return self.fixed_items
-        # Check the reconstructed fixed RDL, including unchanged source copper.
-        # Do not union different nets: union would erase shorted boundaries.
-        for key,role in m.roles.items():
-            if role=='固定RDL':groups.setdefault(key.split('/')[0],[]).append(key)
-        for n,(plane,keys) in enumerate(groups.items()):
-            progress(round(90*n/max(1,len(groups))),f'全局 DRC · 固定 RDL {plane}')
-            nets={};world=[]
-            for key in keys:
-                hidden={i for q in replacements.get(key,[]) for i in q['indices']}
-                for i,poly in enumerate(m.cache.layers[key]['geometry']):
-                    if i in hidden:continue
-                    net=m.nodes[m.ids[key,i]]['net'];nets.setdefault(net,[]).append((key,poly))
-                for q in replacements.get(key,[]):nets.setdefault(q['net'],[]).append((key,q['geometry']))
-            for net,rows in nets.items():
-                copper=shapely.union_all([v[1] for v in rows]);layers=tuple(sorted({v[0] for v in rows}));key=layers[0]
-                angle=settings.drc_min_angle_deg if settings else 0
-                for kind,g in self.cached(copper,width,space,angle):
-                    items.append(dict(layer=key,layers=layers,geometry=g,kind=kind,net=net))
-                world.append((key,copper,net,layers))
-            if world:
-                tree=STRtree([r[1] for r in world])
-                for i,(key,g,net,layers) in enumerate(world):
-                    for j in tree.query(g,predicate='dwithin',distance=space):
-                        if j<=i:continue
-                        other=world[j]
-                        bad=separation_region(g,other[1],space,dbu)
-                        if not bad.is_empty:
-                            items.append(dict(layer=key,layers=tuple(set(layers+other[3])),geometry=bad,kind='异网短接 / 线距不足',nets=(net,other[2])))
-        if not replacements:self.fixed_key=rule_key;self.fixed_items=items
-        return items
-
-    def frame(self,states,replacements=None,settings=None,progress=lambda *_:None,owners=None):
-        m=self.model;p=self.p;dbu=m.data.dbu_um
-        items=list(self.fixed_regions(replacements,settings,progress)) if owners is None else []
-        # Each nominal via→RDL interface uses the receiving RDL's enclosure.
-        # Visibility does not enter this catalogue. Via chains terminating in
-        # fixed copper retain Connections.fixed_interfaces() fallback semantics.
-        catalogue={}
-        for link in getattr(getattr(m,'connections',None),'links',()):
-            a=(link['upper'],link['upper_index']);b=(link['lower'],link['lower_index'])
-            for via,rdl in ((a,b),(b,a)):
-                vr=m.roles.get(via[0]);rr=m.roles.get(rdl[0])
-                if vr in ('运动过孔','固定过孔') and rr in ('运动RDL','固定RDL'):
-                    catalogue.setdefault((via,rdl[0].split('/')[0],rr),set()).add(rdl)
-        for r in m.records:
-            for ref in m.connections.fixed_interfaces(r['key'],r['index']):
-                catalogue.setdefault(((r['key'],r['index']),ref[0].split('/')[0],'固定RDL'),set()).add(tuple(ref))
-        for (ref,plane,role),receivers in catalogue.items():
-            node=m.nodes[m.ids[ref]]
-            if owners is not None and node['owner'] not in owners:continue
-            via=m.moved(node['poly'],node['owner'],states)
-            target=[]
-            for key,index in receivers:
-                original=m.nodes[m.ids[key,index]]
-                replacement=next((q['geometry'] for q in (replacements or {}).get(key,()) if index in q['indices']),None)
-                target.append(replacement if replacement is not None else m.moved(original['poly'],original['owner'],states))
-            enclosure=p.moving_annulus_um if role=='运动RDL' else p.annulus_um
-            missing=via.buffer(enclosure/math.cos(math.pi/128),quad_segs=32).difference(shapely.union_all(target))
-            if missing.area>dbu*dbu:
-                layers=tuple(sorted({k for k,i in receivers}))
-                items.append(dict(layer=layers[0],layers=layers,geometry=missing,kind='孔盘包围不足',owner=node['owner'],
-                                  source_layer=ref[0],source_index=ref[1],rdl_role=role,required_um=enclosure))
-        from .edge_clearance import edge_violations
-        items.extend(edge_violations(m,states,p,settings,replacements,owners))
-        progress(100,f'全局 DRC 完成 · {len(items)} 组标记')
-        return items
+    def frame(self,states,replacements=None,settings=None,progress=lambda *_:None,owners=None,scopes=None):
+        from .current_drc import frame
+        return frame(self,states,replacements,settings,progress,owners,scopes)

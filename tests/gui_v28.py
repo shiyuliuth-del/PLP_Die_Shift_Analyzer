@@ -66,8 +66,8 @@ w.target_sigma.setCurrentText('∞');wait()
 w.probability_toggle.setChecked(True);wait()
 assert w.probability_data['binary'] and w.probability_data['samples']==0
 assert not w.setting_fields['probability_show_ranges'].isEnabled() and w.setting_fields['probability_show_ranges'].isChecked()
-w.manual_die.setCurrentIndex(0);w.manual_fields['dx'].setValue(18);w.manual_fields['angle'].setValue(.8)
-QTest.mouseClick(w.manual_button,left);wait()
+w.manual_preview.rebuild();w.manual_preview.rows[0][0].setValue(18);w.manual_preview.rows[0][2].setValue(.8)
+QTest.mouseClick(w.manual_preview.preview_button,left);wait()
 a=next(a for a in w.probability_artists if a._owner==0)
 v=np.array(a._pivot)+[57.,-43.]
 from die_shift_studio.preview import rigid_transform

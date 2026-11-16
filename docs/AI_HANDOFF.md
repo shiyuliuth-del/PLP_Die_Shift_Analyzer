@@ -1,3 +1,11 @@
+# V45交接入口
+
+当前UI与计算合同见[V45说明](V45_使用说明.md)，验收见[V45验证](V45_VALIDATION.md)。V44已独立发布，不能回改标签。
+
+新增模块：current_drc.py统一实际铜规则/电连接依赖，drc_overlay.py画布定位，analysis_ui.py延迟任务控制，result_analysis.py概率与安全盒，manual_preview.py逐DIE弹窗。GlobalDRC缓存静态/同刚体检查，extreme_validation加入跨DIE规则因子；改变容差须改变零位帧缓存键。旧report.py/formula_render.py/width_yield_report.py已删除。
+
+注意：A颜色只反映A自身违规，当前DRC表检查全层，两者不相等；批量IPC为了吞吐跳过完整显示DRC，交互IPC预览则使用同一全层检查。不要重新加入报告、图形数量扫描或表格专用统计。
+
 # Die Shift Analyze：项目与算法交接
 
 ## 项目来由和用途

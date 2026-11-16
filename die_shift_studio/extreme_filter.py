@@ -107,3 +107,14 @@ class FilteredCatalog:
 def contact_factors(checks):
     if checks['base'][0]:return [((),True)]
     return [((i,),[row[0]>0 for row in rows]) for i,rows in enumerate(checks['local'])]
+
+
+def current_drc_factors(checks,moving_only=False):
+    if not checks or not checks.get('checked'):return []
+    if moving_only:
+        if checks.get('moving_drc_base'):return [((),True)]
+        local=[((i,),np.asarray(rows)>0) for i,rows in enumerate(checks.get('moving_drc_local',()))]
+    else:
+        if checks['base'][2]:return [((),True)]
+        local=[((i,),[row[2]>0 for row in rows]) for i,rows in enumerate(checks['local'])]
+    return local+[(tuple(f['owners']),np.asarray(f['moving_counts' if moving_only else 'counts'])>0) for f in checks.get('drc_factors',())]

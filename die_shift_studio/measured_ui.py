@@ -16,12 +16,12 @@ class MeasuredOutput(QtCore.QObject):
         super().__init__(w);self.w=w;self.server=None;self.session=None;self.options=Options();self.jobs=OrderedDict()
         self.pool=None;self.generation=0;self.batch=None;self.current=None;self.render_engine=None;self.ready=False;self.last_error=None;self.transition=None;self.running={};self.stopping=False;self.requests=OrderedDict()
         self.incoming.connect(self.dispatch);self.finished.connect(self.complete);self.progressed.connect(self.progress)
-        box=W.QGroupBox('实测输出');form=W.QFormLayout(box);layout.addWidget(box)
-        self.toggle=W.QCheckBox('实测输出');form.addRow(self.toggle);self.toggle.toggled.connect(self.toggled)
+        self.toggle=W.QCheckBox('实测输出');self.toggle.setStyleSheet('font-weight:bold; padding:4px 2px;');layout.addWidget(self.toggle)
+        box=W.QGroupBox();form=W.QFormLayout(box);layout.addWidget(box);self.toggle.toggled.connect(self.toggled)
         self.directory=W.QLineEdit();self.directory.setPlaceholderText('输出目录，可通过output.configure设置');form.addRow('输出目录',self.directory)
-        self.memory=W.QSpinBox();self.memory.setRange(128,1048576);self.memory.setValue(1024);form.addRow('最大内存 / MB',self.memory)
+        self.memory=W.QSpinBox();self.memory.setRange(0,1048576);self.memory.setSpecialValueText('自动');self.memory.setSingleStep(128);form.addRow('最大内存 / MB',self.memory)
         self.threads=W.QSpinBox();self.threads.setRange(0,256);self.threads.setSpecialValueText('自动');form.addRow('最大线程',self.threads)
-        self.endpoint=W.QLabel();self.endpoint.setWordWrap(True);form.addRow('本地IPC',self.endpoint)
+        self.endpoint=W.QLabel();self.endpoint.setWordWrap(True);form.addRow(self.endpoint)
         self.timer=QtCore.QTimer(self);self.timer.setInterval(75);self.timer.timeout.connect(self.tick);self.timer.start()
         w.task_control.button.clicked.connect(lambda:self.stop() if self.active() else None)
     def configuration(self):return asdict(Options.from_dict(dict(output_directory=self.directory.text(),max_memory_mb=self.memory.value(),max_threads=self.threads.value())))
@@ -32,10 +32,11 @@ class MeasuredOutput(QtCore.QObject):
         self.options=Options.from_dict(values);self.directory.setText(self.options.output_directory);self.memory.setValue(self.options.max_memory_mb);self.threads.setValue(self.options.max_threads)
     def active(self):return self.server is not None
     def apply_lock(self):
+        if hasattr(self.w,'manual_preview'):self.w.manual_preview.setEnabled(not self.active())
         locked=bool(self.w.remote_locked)
         for i in range(min(3,self.w.controls.count())):self.w.controls.widget(i).setEnabled(not locked)
         for widget in (self.w.run_button,self.w.job_combo,self.w.save_button,self.w.preview_tabs):widget.setEnabled(not locked)
-        for name in ('reconstruction_toggle','width_toggle','drc_toggle','space_toggle','probability_toggle','footprint_toggle'):
+        for name in ('reconstruction_toggle','width_toggle','show_issues','space_toggle','probability_toggle','footprint_toggle'):
             widget=getattr(self.w,name,None)
             if widget is not None:widget.setEnabled(not locked)
         for widget in (self.directory,self.memory,self.threads):widget.setEnabled(not self.active())
@@ -58,14 +59,14 @@ class MeasuredOutput(QtCore.QObject):
         # Saving is a prerequisite; no IPC endpoint exists if persistence fails.
         path=w.project_path or w.jobs_dir/('实测自动保存_'+time.strftime('%Y%m%d_%H%M%S')+'_'+uuid.uuid4().hex[:6]+'.dshift.json')
         w.write_project(path);w.refresh_jobs();w.stop_animation();w.cancel_previews();w.mouse_die.exit();w.exit_region_mode()
-        self.saved_overlays={name:getattr(w,name+'_toggle').isChecked() for name in ('reconstruction','width','drc','space','probability')}
+        self.saved_overlays={name:w.overlay_widget(name).isChecked() for name in ('reconstruction','width','drc','space','probability')}
         from .local_ipc import Server
         home=Path(os.environ.get('LOCALAPPDATA',Path.home()/'.local'/'state'))/'DieShiftAnalyze'/'ipc'
         endpoint=endpoint or getattr(w,'requested_ipc_endpoint',None) or home/'endpoint.json'
         self.server=Server(endpoint,lambda request,event,reply:self.incoming.emit(request,event,reply))
         w.requested_measured=False # startup-only guard; ordinary editing resumes after disabling IPC
         for name in self.saved_overlays:
-            widget=getattr(w,name+'_toggle');widget.blockSignals(True);widget.setChecked(False);widget.blockSignals(False)
+            widget=w.overlay_widget(name);widget.blockSignals(True);widget.setChecked(False);widget.blockSignals(False)
         w.width_yield.reset();w.reconstruction_yield.reset();w.constraint_feedback.cancel()
         self.endpoint.setText(str(self.server.endpoint));w.remote_locked=True;self.ready=False;self.last_error=None;self.current=None
         self.pool=ThreadPoolExecutor(max_workers=max(1,min(32,self.options.max_threads or resource_profile()['workers'])),thread_name_prefix='dsa-measured')
@@ -151,7 +152,7 @@ class MeasuredOutput(QtCore.QObject):
                 w.remote_locked=False
                 w.current_frame=None;w.shown_states=None;w.manual_states=None;w.active_preview=None;w.engine=None
                 for name,enabled in getattr(self,'saved_overlays',{}).items():
-                    widget=getattr(w,name+'_toggle');widget.blockSignals(True);widget.setChecked(enabled);widget.blockSignals(False)
+                    widget=w.overlay_widget(name);widget.blockSignals(True);widget.setChecked(enabled);widget.blockSignals(False)
                 if not getattr(w,'_closing',False) and w.data is not None:
                     w.plot_layout(preserve=True);w.request_preview()
                     w.statusBar().showMessage('实测输出已关闭，恢复工程参数和零偏移预览。')
@@ -276,7 +277,7 @@ class MeasuredOutput(QtCore.QObject):
             client_id=args.get('client_id')
             if client_id is not None and (not isinstance(client_id,str) or len(client_id)!=32 or any(c not in '0123456789abcdef' for c in client_id)):raise ValueError('client_id须为32位小写十六进制')
             from .oas_stream import Store
-            profile=resource_profile();memory=min(self.options.max_memory_mb,max(128,int(profile['available_memory_mb']*.65)))
+            profile=resource_profile();memory=self.options.memory_budget_mb(profile)
             per_lane=max(96,int(self.session.cache.bytes*24/1024**2));lanes=max(1,min(self.options.max_threads or profile['workers'],profile['workers'],int(memory*.7)//per_lane))
             if per_lane>memory:raise MemoryError(f'此图纸估计单任务需{per_lane} MB，超过批次内存限额{memory} MB')
             destination=self.destination(args.get('filename','measured.oas'),'.oas')

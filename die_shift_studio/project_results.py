@@ -111,7 +111,7 @@ def restore(w,project,path):
         e=PreviewEngine(cache,w.case,w.roles(),w.motions(),p,value['result'],con,cache_group=w.cache_group,cache_identity=signature)
         e.configure_deformation(False,w.view_settings)
         e.signature=signature;e.reconstruction_plan_pool=value['plans'];e.configure_reconstruction(w.reconstruction_toggle.isChecked(),w.view_settings)
-        e.configure_width(w.width_toggle.isChecked(),w.view_settings);e.configure_drc(w.drc_toggle.isChecked(),w.view_settings)
+        e.configure_width(w.width_toggle.isChecked(),w.view_settings);e.configure_drc(True,w.view_settings)
         applied=True
         w.engine=e;w.geometry_cache=cache;w.connections=con;w.session_engines[(signature,id(e))]=e
         if value['result'] is not None:

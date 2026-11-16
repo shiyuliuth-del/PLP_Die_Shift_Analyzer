@@ -1,6 +1,6 @@
 # Agent 自动入口
 
-源码、GitHub与发布只在本规范检出工作。先读 [Agent.md](Agent.md)、[AI交接](docs/AI_HANDOFF.md)、[现行合同](docs/DESIGN_REQUIREMENTS.md)、[已知问题](docs/KNOWN_ISSUES.md) 和 [轮次记录](docs/Agents.md)。当前说明：[V44使用说明](docs/V44_使用说明.md)。
+源码、GitHub与发布只在本规范检出工作。先读 [Agent.md](Agent.md)、[AI交接](docs/AI_HANDOFF.md)、[现行合同](docs/DESIGN_REQUIREMENTS.md)、[已知问题](docs/KNOWN_ISSUES.md) 和 [轮次记录](docs/Agents.md)。当前说明：[V45使用说明](docs/V45_使用说明.md)。
 
 唯一长期主线是main；最新用户要求优先。保留其他Agent的在途分支，不重写历史tag，不把研究目录整体提交。每轮同步主线、补有意义的回归、记录工程兼容与实际验收，通过PR提交GitHub。正式Release仅源码与校验值，保留RUN.bat及BUILD.bat两个入口。
 
@@ -11,3 +11,5 @@ V42：分叉按连通路径组织，碰接的动区合并且共享名义位置�
 V43最新要求优先：忽略重构默认整块静止，右键可改整块随动；多DIE不同刚体不能冒称整块随动。最小图形/孔洞面积统一用于导入、当前图、计算、导出并映射源索引。实测IPC默认关闭，启用先保存并冻结工程；任务状态/取消/并发有界，批量OAS流式写同一临时文件、Cell去重、原子提交。接口规范见docs/MEASURED_OUTPUT_API.md，独立验证见tools/verify_measured_gd55.py。必须回归真实Windows命名管道和LinuxUnixSocket、跨进程关闭、队列满、错误及旧目标保护。
 
 V44联合版本：RealDataAnalyse与主程序必须同包、同版本；只合并对方已提交历史，不复制未提交工作树。重构最终铜核验电连接/源拓扑/异网隔离；尺寸不足允许有标记的连通补偿，硬失败拒绝GUI与IPC提交。新自动端点树保留所有端点连接；有旧手工位置时保留旧路径身份。实际波形/统计都基于补偿后的铜。细节及729组合验证见V44_VALIDATION、V44_CONTINUITY。GUI测试关闭须等待异步任务/QThread完成，不把功能打印PASS当作进程正常退出。
+
+V45：报告和底部宽度/重构表退役；结果分析所有计算仅在主动进入页面后启动。显示接触位置是当前实际铜全层DRC的唯一开关，不能沿用概率窗口列表。原坐标刚体核验+见证变换，实际替换铜重新检查；表格/画布同目录，跨DIE组合因子必须和完整帧对照。默认最小面积.5、线性连接、尺寸容差+.1；旧工程显式值保留。名义缓存必须包含尺寸容差/角度；旋转拖动立即刷新并检验画面。手动弹窗、折叠工艺、避让空间、自动IPC预算需验证保存及旧工程迁移。

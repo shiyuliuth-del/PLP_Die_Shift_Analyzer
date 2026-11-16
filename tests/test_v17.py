@@ -15,7 +15,7 @@ class V17Tests(unittest.TestCase):
     def test_defaults_and_tolerance_validation(self):
         p=Parameters();cfg=ViewSettings()
         self.assertEqual((p.line_width_um,p.line_space_um,p.wafer_line_width_um,p.wafer_line_space_um,p.annulus_um),(15,)*5)
-        self.assertTrue(cfg.animation_enabled);self.assertEqual(effective_rules(p,cfg),(15,15))
+        self.assertTrue(cfg.animation_enabled);self.assertEqual(effective_rules(p,cfg),(14.9,14.9))
         for tolerance,rule in ((1,14),(-1,16)):
             q=replace(cfg,drc_tolerance_um=tolerance);self.assertEqual(effective_rules(p,q),(rule,rule));self.assertNotEqual(cfg.reconstruction_key(),q.reconstruction_key())
         with self.assertRaises(ValueError):effective_rules(p,replace(cfg,drc_tolerance_um=15))
@@ -25,6 +25,9 @@ class V17Tests(unittest.TestCase):
         polys=np.array([box(0,0,100,14.5),box(0,29,100,43.5)],object)
         model=SimpleNamespace(data=SimpleNamespace(dbu_um=.001),roles={'5/0':'固定RDL'},records=[],
             cache=SimpleNamespace(layers={'5/0':{'geometry':polys}}),ids={('5/0',0):0,('5/0',1):1},nodes=[{'net':0},{'net':1}])
+        model.connections=SimpleNamespace(links=[])
+        model.moved=lambda g,owner,z:g
+        for (key,i),j in model.ids.items():model.nodes[j].update(key=key,index=i,poly=model.cache.layers[key]['geometry'][i],owner=-1)
         d=GlobalDRC(model,Parameters());z=np.zeros((1,3))
         strict=d.frame(z,settings=ViewSettings());relaxed=d.frame(z,settings=ViewSettings(drc_tolerance_um=1))
         self.assertTrue(strict);self.assertFalse(relaxed)

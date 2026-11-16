@@ -93,7 +93,7 @@ class ReconstructionYieldDisplay:
         text='重构良率 '+('≤' if b.get('partial') else '≈')+percentage_text(b['value'],b['failure'],decimals)+('（检查中）' if b.get('partial') else '')
         tip=f"{b['scope']}\n每轴{b['grid_nodes']}节点，完整联合网格{b['total']:,}个姿态；局部{b['local_checks']:,}次、异网{b['pair_checks']:,}次。\n{b['limitation']}\n0/∞沿用最近有限概率尺度：{b['scale_nsigma']:g}σ。"
         self.w.width_yield.label.set_extra(text,tip)
-        if self.w.result is not None:self.w.result['reconstruction_yield']=b;self.w.report_dirty=True
+        if self.w.result is not None:self.w.result['reconstruction_yield']=b
 
 
 class ConstraintFeedback:
@@ -117,7 +117,7 @@ class ConstraintFeedback:
         changed=tuple(frame.get('_reconstruction_changed_refs',()))
         base=getattr(current,'_base_plans',None)
         local_pool=clone_plan_pool({'local':[q for q in base if (q['layer'],q['index']) in changed]}) if base is not None and changed else None
-        def work(progress):
+        def reconstruction(progress):
             key=logical_fingerprint((data.geometry_id,roles,order,asdict(p),cfg.drc_tolerance_um))
             if self.context is None or self.context[0]!=key:
                 from .core import build_case
@@ -147,11 +147,20 @@ class ConstraintFeedback:
                                 original_violations=self.context[1].nominal_check(),constraints_complete=True,repair_refs=repaired,hard_failures=blocked,electrically_valid=not bool(blocked))
                 finally:rebuilt.cache.close()
             return self.context[1].check(frame['reconstruction']['replacements'],frame['states'],progress)
+        def work(progress):
+            value=reconstruction(lambda n,t:progress(round(n*.6),t))
+            result=value if isinstance(value,dict) else dict(frame['reconstruction'],pieces=[dict(q) for q in frame['reconstruction']['pieces']],violations=value,constraints_complete=True)
+            from .drc import GlobalDRC
+            from .current_drc import locations
+            if getattr(self,'drc_context',None) is not self.context:
+                self.drc_context=self.context;self.global_drc=GlobalDRC(self.context[1].model,p)
+            drc=self.global_drc.frame(frame['states'],result['replacements'],cfg,lambda n,t:progress(60+round(n*.4),t))
+            return result,drc,locations(drc)
         worker=Worker(work,self.w);self.worker=worker;self.w.watch_worker(worker,'拖动约束检查',quiet=True)
-        def accept(violations):
+        def accept(value):
             w=self.w
             if ticket!=self.ticket or w.current_frame is not frame or w._closing:return
-            data=violations if isinstance(violations,dict) else dict(frame['reconstruction'],pieces=[dict(q) for q in frame['reconstruction']['pieces']],violations=violations,constraints_complete=True)
+            data,drc,locations=value
             if data.get('hard_failures'):
                 from .topology_routing import failure_message
                 w.statusBar().showMessage(failure_message(data['hard_failures']))
@@ -159,8 +168,8 @@ class ConstraintFeedback:
             violations=data['violations']
             from .reconstruction import decorate_problems
             decorate_problems(data)
-            w.current_frame=dict(frame,reconstruction=data)
-            w.reconstruction_overlay.draw();w.render_scene()
+            w.current_frame=dict(frame,reconstruction=data,drc=drc,drc_locations=locations,drc_pending=False)
+            w.plot_layout(preserve=True)
             w.statusBar().showMessage(f'重构约束：{len(violations)} 组违规' if violations else '当前固定RDL线宽、线距及过孔包围量检查通过')
         def finish():
             self.worker=None;worker.deleteLater()

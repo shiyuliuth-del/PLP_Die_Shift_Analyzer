@@ -1,0 +1,108 @@
+{
+  "assessment_seconds": 2.3254765489982674,
+  "status": "PASS",
+  "rows": [
+    {
+      "state": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "seconds": 14.491765580001811,
+      "drc_groups": 123,
+      "locations": 208,
+      "pieces": 151,
+      "native_cache_hits": 0,
+      "native_cache_misses": 298
+    },
+    {
+      "state": [
+        [
+          -15.0,
+          -15.0,
+          -0.017453292519943295
+        ],
+        [
+          -15.0,
+          -15.0,
+          -0.017453292519943295
+        ],
+        [
+          -15.0,
+          -15.0,
+          -0.017453292519943295
+        ]
+      ],
+      "seconds": 2.4329898249998223,
+      "drc_groups": 137,
+      "locations": 223,
+      "pieces": 152,
+      "native_cache_hits": 237,
+      "native_cache_misses": 359
+    },
+    {
+      "state": [
+        [
+          15.0,
+          15.0,
+          0.017453292519943295
+        ],
+        [
+          15.0,
+          15.0,
+          0.017453292519943295
+        ],
+        [
+          15.0,
+          15.0,
+          0.017453292519943295
+        ]
+      ],
+      "seconds": 2.528240141000424,
+      "drc_groups": 144,
+      "locations": 240,
+      "pieces": 151,
+      "native_cache_hits": 474,
+      "native_cache_misses": 420
+    },
+    {
+      "state": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "seconds": 7.279300189111382e-05,
+      "drc_groups": 123,
+      "locations": 208,
+      "pieces": 151,
+      "native_cache_hits": 474,
+      "native_cache_misses": 420
+    }
+  ],
+  "seconds": 21.817859666000004,
+  "source_sha256": "a4bccbb65058dc4023bc53d5a6916c4185b81f6d1710e365c8b21c9c6feb1b29"
+}

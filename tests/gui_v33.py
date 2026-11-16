@@ -63,9 +63,6 @@ def main():
     assert any('名义节点' in a.text() for a in menu.actions())
     action=next(a for a in menu.actions() if a.text()=='忽略选中的问题线路')
     old_bank=w.width_yield.bank;action.trigger();dismiss();settle()
-    from die_shift_studio.report import report_document
-    html,resources=report_document(w.result)
-    assert '整包两种宽度策略良率' in html and resources
     assert ref in w.ignored_width_lines and w.width_yield.bank is old_bank
     np.testing.assert_allclose((w.ax.get_xlim(),w.ax.get_ylim()),bounds)
     for k,on in visibility.items():w.visible_boxes[k].setChecked(on)
