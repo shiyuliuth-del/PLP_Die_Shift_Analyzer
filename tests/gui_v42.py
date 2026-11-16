@@ -35,6 +35,11 @@ try:
  frame=w.current_frame;w.show_issues.setChecked(False);w.plot_layout(preserve=True)
  assert not w.reconstruction_overlay.constraints.get_visible() and not w.reconstruction_overlay.problem_points.get_visible()
  w.show_issues.setChecked(True);wait()
+ # A queued statistics task is not a completed result, even before its
+ # worker appears in the active-task registry.
+ queued=folder/'queued.dshift.json';w.reconstruction_yield.timer.start(2000)
+ w.write_project(queued);assert not json.loads(queued.read_text()).get('saved_results')
+ w.reconstruction_yield.timer.stop()
  saved=folder/'restore.dshift.json';w.write_project(saved);doc=json.loads(saved.read_text());assert doc['saved_results'],w.runtime_view.toPlainText()[-3000:]
  assert (saved.parent/doc['saved_results']['path']).is_file()
  expected=w.current_frame['reconstruction']['replacements']['5/0'][0]['geometry'].wkb
@@ -57,6 +62,11 @@ try:
  assert w.result is not None and w.current_frame is not None
  assert w.params().package_clearance_um==10
  assert '未恢复结果缓存' in w.runtime_view.toPlainText()
+ # Older empty snapshots must not bypass assessment-first gating.
+ payload=decode(envelope['payload']);payload['result']=None;payload['frame']=None
+ envelope['payload']=encode(payload);raw=zlib.compress(json.dumps(envelope).encode());broken.write_bytes(raw)
+ bad['saved_results']['sha256']=hashlib.sha256(raw).hexdigest();broken_job.write_text(json.dumps(bad))
+ w.load_project(broken_job);wait();assert w.result is not None and w.extremes is not None
  # Native dialog contract and real DXF output must be independent of pose.
  from die_shift_studio.export_ui import export_dxf
  from die_shift_studio.qt_compat import ACCEPTED

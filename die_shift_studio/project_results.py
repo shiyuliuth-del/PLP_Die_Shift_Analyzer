@@ -68,8 +68,9 @@ def portable_path(target,base):
 
 
 def save(w,path):
-    if not w.view_settings.save_project_results:return None
-    if w._tasks or w.preview_pending or w.motion_pending:
+    if not w.view_settings.save_project_results or w.result is None:return None
+    queued=any(controller.pending is not None or controller.timer.isActive() for controller in (w.width_yield,w.reconstruction_yield))
+    if w._tasks or w.preview_pending or w.motion_pending or queued:
         w.log_bus.emit('计算尚未完成，本次仅保存设置，不保存不完整结果。','WARNING');return None
     folder=Path(w.view_settings.result_cache_directory).expanduser() if w.view_settings.result_cache_directory else path.parent
     folder.mkdir(parents=True,exist_ok=True)
@@ -103,6 +104,7 @@ def restore(w,project,path):
         item=json.loads(body)
         if item['version']!=__version__ or item['identity']!=identity(w):raise ValueError('结果版本不一致')
         value=decode(item['payload'])
+        if value.get('result') is None:raise ValueError('缓存中没有已完成的方案评估')
         from .fast_preview import GeometryCache,PreviewEngine
         cache=w.geometry_cache or GeometryCache(w.data);con=w.case['connections'];p=w.params()
         signature=w.preview_identity(w.data,w.roles(),w.ordered_layers(),w.motions(),p,value['result'])

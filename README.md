@@ -1,6 +1,6 @@
 # Die Shift Analyze V42
 
-V42基于已发布V41开发，本轮进度与验收见[工作记录](docs/V42_WORK.md)。正式交付以[GitHub Release](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/releases)为准，不把未验收任务分支当作发布版。
+V42变更见[工作记录](docs/V42_WORK.md)，实际测试与限制见[验收记录](docs/V42_VALIDATION.md)。源码交付见[V42 Release](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/releases/tag/V42)。
 
 软件分析Die-first封装的DIE平移与旋转，提供三方案初筛、实体覆盖与极端足迹、通道宽度风险、重构动区编辑、规则/联合模型良率、工程结果保存及DXF输出。长度均为μm，GDS只读，工程节点可编辑。
 
