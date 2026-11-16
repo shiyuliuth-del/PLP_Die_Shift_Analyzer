@@ -24,6 +24,8 @@ if /i "%~1"=="build" (
     if errorlevel 1 exit /b 1
     "%DSA_PYTHON%" -m PyInstaller --clean --noconfirm "%~dp0Die_Shift_Analyze.spec"
     if errorlevel 1 exit /b 1
+    "%DSA_PYTHON%" -m PyInstaller --clean --noconfirm "%~dp0RealDataAnalyse\RealDataAnalyse.spec"
+    if errorlevel 1 exit /b 1
     exit /b 0
 )
 for %%P in ("%DSA_PYTHON%") do if exist "%%~dpPpythonw.exe" set "DSA_PYTHON=%%~dpPpythonw.exe"

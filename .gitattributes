@@ -7,6 +7,8 @@ AGENTS.md export-ignore
 Agent.md export-ignore
 CONTRIBUTING.md export-ignore
 README.md export-ignore
+RealDataAnalyse/README.md -export-ignore
+cases/GD55/README.md -export-ignore
 DIE_SHIFT评估报告.md export-ignore
 die_shift_model.py export-ignore
 run.sh export-ignore

@@ -52,6 +52,9 @@ class Session:
         centers=rotation_centers(case,self.p)
         self.p=replace(self.p,die_pivots=[['custom',*(c-np.asarray(d.centroid.coords[0]))] for c,d in zip(centers,case['dies'])])
         self.settings=copy.deepcopy(settings);self.cache=cache;self.plan_pool=plan_pool or {}
+        from .session_cache import logical_fingerprint
+        from . import __version__
+        self.identity=logical_fingerprint((__version__,data.geometry_id,data.top_name,self.roles,list(cache.layers),self.motions,asdict(self.p),asdict(self.settings)))
         self.lock=threading.Lock();self.local=threading.local();self.instances=[]
     def model(self,p):
         from .contact import ContactModel

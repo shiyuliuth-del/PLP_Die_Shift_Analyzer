@@ -125,3 +125,13 @@ python verify_measured_gd55.py --app C:\DSA\main.py --project C:\work\gd55-1105.
 验证工程自动保存/准备、查询、全部芯片姿态与中心、单GDS输出、并发批量、共用Cell、TopCell坐标、取消和退出。输出verification.json保留每项结果；为了验证含实际不适配位置的图纸，其批量显式使用诊断模式，**验证通过仅证明接口/文件合同，不证明全部线路工艺合格**。脚本默认退出自己启动的软件；--keep-open保留窗口。源GDS/OAS不修改。
 
 OAS基本记录编码参考 [gdstk OAS写入实现](https://github.com/heitzmann/gdstk/blob/main/src/library.cpp) 与 [整数/点列编码](https://github.com/heitzmann/gdstk/blob/main/src/oasis.cpp)；本项目仅实现显式名、绝对坐标、多边形、引用和压缩块的输出子集，以两种独立读者复验。
+
+## V44 配套客户端与恢复扩展（仍为协议1）
+
+联合源码包附RealDataAnalyse GUI和GD55案例，操作见[客户端说明](../RealDataAnalyse/README.md)。15个指令均可手动调试；“大量封装并行处理”对应batch.begin/submit/end完整流程，不是单次preview.submit。
+
+`call(..., request_id=...)`允许通信重试复用同ID；命令回执去重保留最近10000项，Busy不缓存。超时不等于失败，控制端必须检查状态或放弃整个未提交批次，不能盲目生成新ID重复提交。同ID只能对应同一命令和参数。
+
+info新增instance_id、session_identity、batch_owner；冻结身份包括软件版本/源几何与Q节点/TopCell/层序用途/运动归属/参数设置。batch.begin可提供32位小写十六进制client_id，info返回以辨认恢复归属。不提供时保持原协议行为。入口JSON新增process_created与instance_id，不得记录token；PID重用不能当旧服务仍在。session.prepare在任何批次存续期间拒绝。
+
+客户端故障恢复只处理自己的批次；原临时几何在服务进程崩溃后不可靠，完整重放未提交批次。正常结果不allow_failed；超限内存可降低并发重试。服务存活但无响应时不强杀/不启动重复实例。当前客户端不会扫描其他安装路径。此扩展不改变批量跳过完整DRC的范围。

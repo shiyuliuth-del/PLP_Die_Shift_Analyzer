@@ -1,0 +1,5 @@
+openpyxl
+PyQt5
+psutil
+PyInstaller
+Pillow
