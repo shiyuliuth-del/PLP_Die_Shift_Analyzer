@@ -6,6 +6,7 @@ os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 import numpy as np
 from die_shift_studio.gui import MainWindow,W
+from qt_shutdown import close_window
 from die_shift_studio.qt_compat import Qt,QtCore,BINDING
 from die_shift_studio.width_witness import pose_text
 if BINDING=='PyQt6':from PyQt6.QtTest import QTest
@@ -112,5 +113,5 @@ poly=w.geometry_cache.layers[ref[0]]['geometry'][ref[1]];point=poly.representati
 w.set_view(point,240,160);w.viewport_changed(force=True);settle();click(point)
 assert ref in w.selection.selected and '封装边距' in labels() and '要求' in labels() and '不足' in labels() and '必过:' not in labels()
 assert pose_text(summary['grid_key'],item['index']) in labels()
-w.close();app.processEvents();tmp.cleanup()
+close_window(app,w);tmp.cleanup()
 print('GUI_V29_PASS real multi-select and remove, replayable offsets, zero-only fills, hidden sources and four-sided row border')

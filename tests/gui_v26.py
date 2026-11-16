@@ -4,6 +4,7 @@ from pathlib import Path
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 from die_shift_studio.gui import MainWindow,W
+from qt_shutdown import close_window
 from die_shift_studio.qt_compat import QtCore,Qt,BINDING
 from die_shift_studio.statistics import ExtremeCatalog
 if BINDING=='PyQt6':from PyQt6.QtTest import QTest
@@ -60,5 +61,5 @@ w.clear_cached_results(False);wait()
 deadline=time.monotonic()+15
 while w.cache_clear_worker is not None and time.monotonic()<deadline:app.processEvents();time.sleep(.005)
 assert row_info(1)[0]==0
-w.close();app.processEvents();QtCore.QCoreApplication.sendPostedEvents(None,getattr(QtCore.QEvent,'Type',QtCore.QEvent).DeferredDelete);tmp.cleanup()
+close_window(app,w);tmp.cleanup()
 print('GUI_V26_PASS 729-state pagination, frozen DIE, cache depth, clearing and exact footprint visibility/Job restore.')

@@ -8,6 +8,7 @@ from matplotlib.backend_bases import MouseEvent
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 from die_shift_studio.gui import MainWindow,W
+from qt_shutdown import close_window
 app=W.QApplication([]);tmp=tempfile.TemporaryDirectory();w=MainWindow(jobs_dir=Path(tmp.name)/'Jobs');w.resize(1450,950);w.show();errors=[];w.error=lambda s:errors.append(str(s))
 def wait():
  end=time.monotonic()+180
@@ -126,4 +127,4 @@ try:
  if os.environ.get('DSA_QA_SCREENSHOT'):w.grab().save(os.environ['DSA_QA_SCREENSHOT'])
  print('GUI_V39_PASS: four styles, saved options, animated point hover/drag, constraints, whole-input yield')
 finally:
- w.close();app.processEvents();tmp.cleanup()
+ close_window(app,w);tmp.cleanup()

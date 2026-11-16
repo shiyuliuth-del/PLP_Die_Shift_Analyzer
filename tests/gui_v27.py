@@ -7,6 +7,7 @@ ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 import numpy as np
 import gdstk
 from die_shift_studio.gui import MainWindow,W
+from qt_shutdown import close_window
 from die_shift_studio.qt_compat import QtCore,Qt,BINDING
 from die_shift_studio.width_overlay import low_risk
 from die_shift_studio.width_analysis import WidthAnalyzer
@@ -98,5 +99,5 @@ w.setting_fields['show_low_contact'].setChecked(True);wait()
 assert w.result['issues'] and len(w.filtered_issues)==2 and all(q['low_probability'] for q in w.filtered_issues)
 w.setting_fields['show_low_contact'].setChecked(False);wait()
 assert not w.filtered_issues and w.result['issues'] and not w.issue_artists[1].get_visible()
-w.close();app.processEvents();tmp.cleanup()
+close_window(app,w);tmp.cleanup()
 print('GUI_V27_PASS focused pages, compact controls, manual/M restore, Job migration, 2/6 sigma independent contact/width styles and retained binary outcomes')

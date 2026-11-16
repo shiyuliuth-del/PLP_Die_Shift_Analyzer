@@ -9,6 +9,7 @@ os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT));sys.path.insert(0,str(ROOT/'tests'))
 from test_v38 import fixture
 from die_shift_studio.gui import MainWindow,W
+from qt_shutdown import close_window
 from die_shift_studio.core import Parameters
 from die_shift_studio.reconstruction_events import zone_key,active_region
 app=W.QApplication([]);tmp=tempfile.TemporaryDirectory();folder=Path(tmp.name)
@@ -94,4 +95,4 @@ try:
  w.write_project(saved);w.load_project(saved);wait();assert w.view_settings.reconstruction_boundary_mode=='wide'
  if os.environ.get('DSA_QA_SCREENSHOT'):w.grab().save(os.environ['DSA_QA_SCREENSHOT'])
  print('GUI_V40_PASS: rule colours/filter, shared canvas callouts, ignored source Jobs, cancelled rapid styles, boundary modes and no-reroute streaming export')
-finally:w.close();app.processEvents();tmp.cleanup()
+finally:close_window(app,w);tmp.cleanup()

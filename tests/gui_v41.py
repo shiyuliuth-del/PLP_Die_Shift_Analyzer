@@ -8,6 +8,7 @@ os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT));sys.path.insert(0,str(ROOT/'tests'))
 from test_v38 import fixture
 from die_shift_studio.gui import MainWindow,W
+from qt_shutdown import close_window
 from die_shift_studio.reconstruction_edits import key
 app=W.QApplication([]);tmp=tempfile.TemporaryDirectory();folder=Path(tmp.name)
 w=MainWindow(jobs_dir=folder/'Jobs');w.resize(1400,950);w.show();errors=[];w.error=lambda s:errors.append(str(s))
@@ -84,4 +85,4 @@ try:
   assert not any(a.get_visible() for a in (o.cuts,o.second_cuts,o.points,o.second_points,o.problem_points))
   assert not o.pulse_timer.isActive()
  print('GUI_V41_PASS: drag-wheel rotations, retained angles, menus, serial zones, Jobs, cancel rollback, hidden overlay/pulse cleanup')
-finally:w.close();app.processEvents();tmp.cleanup()
+finally:close_window(app,w);tmp.cleanup()

@@ -10,6 +10,7 @@ os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 import numpy as np
 from die_shift_studio.gui import MainWindow,W
+from qt_shutdown import close_window
 from die_shift_studio.qt_compat import BINDING,QtCore,Qt
 if BINDING=='PyQt6':from PyQt6.QtTest import QTest
 else:from PyQt5.QtTest import QTest
@@ -175,5 +176,5 @@ assert w.view_settings.width_display['边距']=='hide' and not w.view_settings.a
 w.load_project(ROOT/'Jobs'/(name+'.dshift.json'));wait()
 assert not w.data.node_edits and shape_nodes(w.data,'4/0',0)[1].tolist()==[[-85.,0.]]
 assert w.view_settings.width_display['标注']=='show' and w.view_settings.animation_return_zero
-w.close();app.processEvents();QtCore.QCoreApplication.sendPostedEvents(None,getattr(QtCore.QEvent,'Type',QtCore.QEvent).DeferredDelete);tmp.cleanup()
+close_window(app,w);tmp.cleanup()
 print('GUI_V24_PASS: Q keyboard, source and preview nodes, atomic validation, saved edits, fresh evaluation, independent visibility, clipped styles, cached origin transitions and right-button navigation.')

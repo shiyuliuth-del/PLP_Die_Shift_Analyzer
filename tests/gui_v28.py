@@ -6,6 +6,7 @@ os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 import numpy as np
 from die_shift_studio.gui import MainWindow,W
+from qt_shutdown import close_window
 from die_shift_studio.qt_compat import Qt,QtCore,BINDING
 from die_shift_studio.extreme_filter import ProblemIndex,contact_factors
 if BINDING=='PyQt6':from PyQt6.QtTest import QTest
@@ -86,5 +87,5 @@ assert all(not a.get_visible() for a in w.width_overlay.labels)
 table.setCurrentCell(1,0);wait();assert w.width_overlay.boxes.get_visible()
 with patch('die_shift_studio.width_summary.summarize',side_effect=AssertionError('cache miss')):
     QTest.mouseClick(w.restore_button,left);wait();assert not w.width_overlay.boxes.get_visible()
-w.close();app.processEvents();tmp.cleanup()
+close_window(app,w);tmp.cleanup()
 print('GUI_V28_PASS native Shift/Ctrl picking, filtering, unchanged scroll position, exact infinity footprints and nominal outlines')

@@ -9,6 +9,7 @@ os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT));sys.path.insert(0,str(ROOT/'tests'))
 from test_v38 import fixture
 from die_shift_studio.gui import MainWindow,W
+from qt_shutdown import close_window
 from die_shift_studio.reconstruction_edits import key
 app=W.QApplication([]);tmp=tempfile.TemporaryDirectory();folder=Path(tmp.name)
 w=MainWindow(jobs_dir=folder/'Jobs');w.resize(1400,950);w.show();errors=[];w.error=lambda s:errors.append(str(s))
@@ -98,4 +99,4 @@ try:
  assert geometry.symmetric_difference(original).area<.01,(geometry.symmetric_difference(original).area,geometry.area,original.area)
  assert all(v['geometry'].is_valid for v in w.current_frame['reconstruction']['replacements']['5/0'])
  print('GUI_V42_BRANCH_PASS: real merged-handle drag across junction and back, deferred native validation and exact nominal copper')
-finally:w.close();app.processEvents();tmp.cleanup()
+finally:close_window(app,w);tmp.cleanup()
