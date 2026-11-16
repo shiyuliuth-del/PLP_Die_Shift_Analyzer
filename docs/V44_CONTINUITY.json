@@ -1,0 +1,20 @@
+{
+  "source": "PDS-AH020-NU17123CPEMB-AAA1(PAH020PQ0008)-1.0.gds",
+  "source_sha256": "6bdd1614389450db9f57e80cbed109e42b3e374e8ad775da86f3da0a0e6df418",
+  "scope": "all discrete joint poses",
+  "planning_seconds": 37.461618099005136,
+  "full_frame_comparisons": 12,
+  "states": 729,
+  "failed_states": 0,
+  "seconds": 479.7798766900014,
+  "repaired_states": 579,
+  "scene_seconds_percentiles": {
+    "min": 0.13444339099805802,
+    "median": 0.6775547430006554,
+    "p95": 1.9809423177997814,
+    "max": 3.8952481070009526
+  },
+  "failed_rows": [],
+  "parameters_note": "saved job: 2 DIE, XY ±15 um, rotation ±1 degree, width/space/annulus 15 um; c2/wide",
+  "runtime_scope": "electrical continuity and topology; not DRC signoff, not production yield; timings under simultaneous regression load"
+}
