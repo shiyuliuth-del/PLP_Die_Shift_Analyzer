@@ -4,7 +4,7 @@ import struct
 import zlib
 
 
-def verify_crc(path):
+def verify_crc(path, stop=None):
     path = Path(path)
     size = path.stat().st_size
     if size < 280:
@@ -19,6 +19,8 @@ def verify_crc(path):
         stream.seek(0)
         left, crc = size - 4, 0
         while left:
+            if stop is not None and stop.is_set():
+                raise InterruptedError('已停止OAS校验')
             data = stream.read(min(left, 1024 * 1024))
             if not data:
                 return False

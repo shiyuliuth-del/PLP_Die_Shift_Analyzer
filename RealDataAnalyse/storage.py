@@ -14,10 +14,12 @@ def dumps(value):
     return json.dumps(value, ensure_ascii=False, allow_nan=False, sort_keys=True)
 
 
-def sha256(path):
+def sha256(path, stop=None):
     h = hashlib.sha256()
     with Path(path).open('rb') as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+            if stop is not None and stop.is_set():
+                raise InterruptedError('已停止文件校验')
             h.update(chunk)
     return h.hexdigest()
 

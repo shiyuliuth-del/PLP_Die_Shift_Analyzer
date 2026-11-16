@@ -300,6 +300,21 @@ class Contracts(unittest.TestCase):
             self.runner().run()
         self.assertEqual((self.root / 'out.oas').read_bytes(), b'external change')
 
+    def test_stop_during_final_verification_keeps_old_output(self):
+        self.read()
+        out = self.root / 'out.oas'
+        out.write_bytes(b'previous output')
+        runner = self.runner(stop=self.stop)
+        from die_shift_studio.oas_validation import verify_crc
+        def stop_after_crc(path, **kwargs):
+            good = verify_crc(path)
+            self.stop.set()
+            return good
+        with patch('die_shift_studio.oas_validation.verify_crc', stop_after_crc):
+            with self.assertRaises(InterruptedError):
+                runner.run()
+        self.assertEqual(out.read_bytes(), b'previous output')
+
     def test_lease_prevents_double_run(self):
         with Lease(self.db):
             with self.assertRaises(RuntimeError):

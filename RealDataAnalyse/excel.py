@@ -23,7 +23,7 @@ def _read_file(path, profile, scratch, stop, progress):
     from openpyxl import load_workbook
     if path.suffix.lower() != '.xlsx':
         raise ValueError(f'{path.name}: 当前适配器支持 .xlsx，请先将旧 .xls 另存为 .xlsx')
-    before = sha256(path)
+    before = sha256(path, stop)
     book = load_workbook(path, read_only=True, data_only=False, keep_links=False)
     db = sqlite3.connect(scratch)
     db.execute('create table rows(package text primary key, die integer, x real, y real, payload text, source text, row_number integer)')
@@ -84,7 +84,7 @@ def _read_file(path, profile, scratch, stop, progress):
         db.commit()
         if not count:
             raise ValueError('没有实测数据')
-        if before != sha256(path):
+        if before != sha256(path, stop):
             raise ValueError('读取过程中Excel已被修改，请关闭编辑后重新导入')
         return dict(path=str(path), sha256=before, die=file_die, rows=count, scratch=str(scratch))
     except Exception as exc:
@@ -160,6 +160,8 @@ def import_files(paths, database, die_count, workers, stop, progress=lambda _: N
         finally:
             ledger.close()
         # Exclusive file creation prevents two imports overwriting one another.
+        if stop.is_set():
+            raise InterruptedError('已停止导入；未发布任务数据库')
         __import__('os').link(stage, database)
     return dict(packages=seq, dies=die_count, database=str(database))
 

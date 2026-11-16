@@ -185,9 +185,9 @@ class Runner:
         if receipt.get('cells') != ledger.get('count') or Path(receipt['path']).resolve() != stage:
             raise ValueError('OAS完成回执与请求数量或路径不符')
         from die_shift_studio.oas_validation import verify_crc
-        if not verify_crc(stage):
+        if not verify_crc(stage, stop=self.stop):
             raise ValueError('实际OAS的CRC校验失败')
-        digest = sha256(stage)
+        digest = sha256(stage, self.stop)
         # Write-ahead commit record: recover a crash between rename and DB update.
         ledger.set('publish', dict(stage=str(stage), sha256=digest, receipt=receipt))
         self.publish()
@@ -197,15 +197,19 @@ class Runner:
         record = ledger.get('publish')
         if not record:
             return False
+        if self.stop.is_set():
+            raise InterruptedError('已停止发布；验证后的暂存文件保留供继续')
         stage = Path(record['stage'])
         digest = record['sha256']
-        if self.output.is_file() and sha256(self.output) == digest:
+        if self.output.is_file() and sha256(self.output, self.stop) == digest:
             pass  # previous rename succeeded before the journal commit
-        elif stage.is_file() and sha256(stage) == digest:
+        elif stage.is_file() and sha256(stage, self.stop) == digest:
             previous = ledger.get('previous_output')
-            current = sha256(self.output) if self.output.is_file() else None
+            current = sha256(self.output, self.stop) if self.output.is_file() else None
             if current != previous or self.output.is_symlink():
                 raise ValueError('目标文件被其他程序修改，保留新旧输出等待人工处理')
+            if self.stop.is_set():
+                raise InterruptedError('已停止发布；旧输出未替换')
             os.replace(stage, self.output)
         else:
             raise ValueError('已完成批次文件缺失或校验不符，请保留日志检查磁盘')
@@ -230,7 +234,7 @@ class Runner:
                     raise ValueError('继续任务须使用原入口、工程和输出路径')
                 if not ledger.get('config'):
                     ledger.set('config', config)
-                    ledger.set('previous_output', sha256(self.output) if self.output.is_file() else None)
+                    ledger.set('previous_output', sha256(self.output, self.stop) if self.output.is_file() else None)
                 if self.publish():
                     return {'state': 'completed', 'output': str(self.output)}
                 for retry in range(self.retries + 1):
