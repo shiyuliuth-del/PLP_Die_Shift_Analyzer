@@ -115,7 +115,18 @@ def main():
                 config.write_text(json.dumps(kwargs), encoding='utf8')
                 subprocess.run([os.environ['REALDATA_TEST_EXE'], '--run', str(config), '--result', str(result)], cwd=folder, check=True, timeout=300)
                 assert len(gdstk.read_oas(folder / 'restart.oas').top_level()[0].references) == 5
+                # app.shutdown acknowledges cancellation, not process exit.
+                # Wait for both onefile processes before removing their EXEs/logs.
+                import psutil
+                descriptor = json.loads(endpoint.read_text(encoding='utf8'))
+                child = psutil.Process(descriptor['pid'])
+                processes = [child]
+                parent = child.parent()
+                if parent and Path(parent.exe()).resolve() == Path(os.environ['DIE_SHIFT_TEST_EXE']).resolve():
+                    processes.append(parent)
                 t.request('app.shutdown')
+                _, alive = psutil.wait_procs(processes, timeout=60)
+                assert not alive, 'Restarted frozen server has not safely exited'
         finally:
             try:
                 t.request('app.shutdown', retries=0)
