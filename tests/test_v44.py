@@ -244,6 +244,17 @@ class Contracts(unittest.TestCase):
         self.assertGreater(l.counts().get('error', 0), 0)
         l.close()
 
+    def test_failed_batch_releases_database_even_with_retained_traceback(self):
+        import psutil
+        self.read()
+        held = []
+        try:
+            self.runner(FakeService(self.root, fail='geometry')).run()
+        except RemoteError as exc:
+            held.append(exc)
+        self.assertTrue(held)
+        self.assertNotIn(str(self.db), {f.path for f in psutil.Process().open_files()})
+
     def test_other_client_not_cancelled(self):
         self.read()
         fake = FakeService(self.root)

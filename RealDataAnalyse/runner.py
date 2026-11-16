@@ -1,5 +1,6 @@
 """Transactional batch orchestration with persistent receipts and whole-batch replay."""
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
+from contextlib import closing
 import json
 import os
 from pathlib import Path
@@ -138,7 +139,9 @@ class Runner:
         cursor = ledger.db.execute('select seq,payload from packages order by seq')
         completed = 0
         # Only O(workers) Futures; never enqueue the entire lot in Python.
-        with ThreadPoolExecutor(max_workers=lanes, thread_name_prefix='rda-package') as pool:
+        # An interrupted SELECT can retain a Windows file handle through the
+        # exception traceback even after Connection.close(). Finalize it here.
+        with closing(cursor), ThreadPoolExecutor(max_workers=lanes, thread_name_prefix='rda-package') as pool:
             exhausted = False
             while pending or not exhausted:
                 if self.stop.is_set():
