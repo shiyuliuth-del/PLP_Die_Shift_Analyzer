@@ -233,8 +233,10 @@ class Runner:
                 if ledger.get('config') and ledger.get('config') != config:
                     raise ValueError('继续任务须使用原入口、工程和输出路径')
                 if not ledger.get('config'):
-                    ledger.set('config', config)
                     ledger.set('previous_output', sha256(self.output, self.stop) if self.output.is_file() else None)
+                    # Config is the initialization commit marker; cancellation
+                    # during the previous-file hash must leave this retryable.
+                    ledger.set('config', config)
                 if self.publish():
                     return {'state': 'completed', 'output': str(self.output)}
                 for retry in range(self.retries + 1):

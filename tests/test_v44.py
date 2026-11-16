@@ -315,6 +315,20 @@ class Contracts(unittest.TestCase):
                 runner.run()
         self.assertEqual(out.read_bytes(), b'previous output')
 
+    def test_cancel_during_initial_hash_can_resume(self):
+        self.read()
+        out = self.root / 'out.oas'
+        out.write_bytes(b'previous output')
+        self.stop.set()
+        with self.assertRaises(InterruptedError):
+            self.runner(stop=self.stop).run()
+        self.assertEqual(out.read_bytes(), b'previous output')
+        self.stop.clear()
+        self.runner(stop=self.stop).run()
+        ledger = Ledger(self.db)
+        self.assertEqual(ledger.get('state'), 'completed')
+        ledger.close()
+
     def test_lease_prevents_double_run(self):
         with Lease(self.db):
             with self.assertRaises(RuntimeError):
