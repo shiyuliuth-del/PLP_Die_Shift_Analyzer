@@ -20,7 +20,7 @@ def wait(timeout=100):
  end=time.monotonic()+timeout
  while time.monotonic()<end:
   app.processEvents()
-  if not any((w.worker,w.preview_workers,w.preview_pending,w.motion_worker,w.motion_pending,w.viewport_timer.isActive(),w.transition.timer.isActive(),w.constraint_feedback.worker,w.constraint_feedback.pending)):break
+  if not any((w.worker,w.preview_workers,w.preview_pending,w.motion_worker,w.motion_pending,w.coverage_timer.isActive(),w._coverage_pending,w.viewport_timer.isActive(),w.transition.timer.isActive(),w.constraint_feedback.worker,w.constraint_feedback.pending)):break
   time.sleep(.003)
  else:raise AssertionError(('timeout',w.runtime_view.toPlainText()[-5000:]))
  assert not errors,errors
@@ -60,7 +60,7 @@ try:
  w.manual_states=np.array([[15.,10.,.005]]);w.request_preview();wait()
  assert all(q['valid'] for q in w.current_frame['reconstruction']['pieces'])
  q=w.current_frame['reconstruction']['pieces'][0];menu('删除动区',q['bridge'].representative_point().coords[0]);assert len(w.current_frame['reconstruction']['pieces'])==1
- q=w.current_frame['reconstruction']['pieces'][0];menu('删除动区',q['bridge'].representative_point().coords[0]);assert not w.current_frame['reconstruction']['pieces']
+ q=w.current_frame['reconstruction']['pieces'][0];menu('删除动区',q['bridge'].representative_point().coords[0]);assert all(q.get('ignored') and q['regions']['A'].is_empty for q in w.current_frame['reconstruction']['pieces'])
  assert ('5/0',0) in w.view_settings.reconstruction_ignored
  menu('增加动区',(300.,0.));assert w.current_frame['reconstruction']['pieces'];assert not w.view_settings.reconstruction_ignored
  save=folder/'edited.dshift.json';w.write_project(save);expected=w.view_settings.reconstruction_key();w.load_project(save);wait();assert w.view_settings.reconstruction_key()==expected

@@ -22,7 +22,7 @@ class TaskControl(QtCore.QObject):
         if w._tasks:return
         self.snapshot=(w.data,w.current_frame,w.result,
                        None if w.shown_states is None else w.shown_states.copy(),
-                       w.probability_data,w.space_data,w.footprint_data,w.repair_data,w.engine,w.case,w.connections)
+                       w.probability_data,w.space_data,w.footprint_data,w.engine,w.case,w.connections)
         self.report_cancelled=False
 
     def cancel(self):
@@ -38,9 +38,9 @@ class TaskControl(QtCore.QObject):
         for worker in w.findChildren(Worker):
             worker.cancelled.set()
         if self.snapshot and self.snapshot[0] is w.data:
-            _,frame,result,shown,probability,space,footprints,repair,engine,case,connections=self.snapshot
+            _,frame,result,shown,probability,space,footprints,engine,case,connections=self.snapshot
             w.current_frame=frame;w.result=result;w.shown_states=shown;w.engine=engine;w.case=case;w.connections=connections
-            w.probability_data=probability;w.space_data=space;w.footprint_data=footprints;w.repair_data=repair
+            w.probability_data=probability;w.space_data=space;w.footprint_data=footprints
             w.manual_states=shown.copy() if shown is not None and np.any(shown) else None
             w.active_preview=None;w._interpolated_states=None
             w.extreme_table.blockSignals(True);w.extreme_table.setCurrentCell(-1 if w.manual_states is not None else 0,0);w.extreme_table.blockSignals(False)

@@ -108,7 +108,7 @@ class V26Tests(unittest.TestCase):
         store.pose_source=('A','预演帧',None)
         a=bytes(24);b=np.array([10.,0.,0.]).tobytes();key=(('mask',),b,False)
         store[key]='frame';group.motions[('validated-motion-v25','A',(),a,b,3)]={'complete':True}
-        group.values[('repair','A',b)]=1
+        group.values[('package','A',b)]=1
         recent=list(group.recent)
         try:
             with patch.object(SessionCache,'__getitem__',side_effect=AssertionError('reading consumed cache')):

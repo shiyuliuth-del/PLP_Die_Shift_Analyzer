@@ -1,0 +1,902 @@
+{
+  "status": "PASS",
+  "numeric_runtime_sha256": "9943f36e075ad5b927f03ff2eaec3582f0423bf4987aebe1f55524782454a53d",
+  "cases": [
+    {
+      "project": "A.dshift",
+      "source_sha256": "02947d2643f07998cb2e4ecdb97dc999d0c78efbf5e2f2e43fb445487b85af77",
+      "parameters": {
+        "panel_layers": 1,
+        "wafer_layers": 1,
+        "line_width_um": 15.0,
+        "line_space_um": 15.0,
+        "wafer_line_width_um": 15.0,
+        "wafer_line_space_um": 15.0,
+        "via_diameter_um": 40.00100998725256,
+        "annulus_um": 15.0,
+        "moving_annulus_um": 15.0,
+        "residual_budget_um": 5.0,
+        "transition_length_um": 200.0,
+        "max_route_angle_deg": 30.0,
+        "package_clearance_um": 10.0,
+        "routing_edge_keepout_um": 40.0,
+        "min_die_gap_um": 20.0,
+        "min_package_clearance_um": 20.0,
+        "single_bound_x_um": 25.0,
+        "single_bound_y_um": 25.0,
+        "multi_bound_x_um": 35.0,
+        "multi_bound_y_um": 35.0,
+        "bound_angle_deg": 1.0,
+        "per_die_enabled": false,
+        "die_bounds": [],
+        "rotation_center": "center",
+        "rotation_x_um": 0.0,
+        "rotation_y_um": 0.0,
+        "die_pivots": [
+          [
+            "center",
+            0.0,
+            0.0
+          ],
+          [
+            "center",
+            0.0,
+            0.0
+          ],
+          [
+            "center",
+            0.0,
+            0.0
+          ]
+        ],
+        "input_nsigma": 6.0,
+        "target_nsigma": 6.0,
+        "reference_nsigma": 6.0,
+        "mean_x_um": 0.0,
+        "mean_y_um": 0.0,
+        "mean_angle_deg": 0.0,
+        "rho_xy": 0.0,
+        "interdie": "unknown",
+        "fixed_via_assignment": "all"
+      },
+      "dies": 3,
+      "interfaces": 158,
+      "covered_interfaces": 158,
+      "inferred_fixed_interfaces": 0,
+      "auto_ignored": 0,
+      "nominal_zones": 152,
+      "nominal_valid_zones": 152,
+      "cold_seconds": 8.807343591999597,
+      "planning_reused_from": "040e7e4; planner AST identical; all posed geometries and rules recomputed",
+      "scan_seconds": 1697.632037075,
+      "states": 19683,
+      "geometry_checks": 20036,
+      "local_checks": 20036,
+      "pair_checks": 25063,
+      "colours": {
+        "red": 101,
+        "yellow": 0,
+        "green": 51,
+        "gray": 0
+      },
+      "parity": [
+        {
+          "index": -1,
+          "seconds": 4.00890003220411e-05,
+          "rule_groups": 2,
+          "problem_zones": 1,
+          "disconnected": 0
+        },
+        {
+          "index": 0,
+          "seconds": 11.346005376999528,
+          "rule_groups": 30,
+          "problem_zones": 16,
+          "disconnected": 14
+        },
+        {
+          "index": 19681,
+          "seconds": 2.353419787000348,
+          "rule_groups": 66,
+          "problem_zones": 39,
+          "disconnected": 12
+        },
+        {
+          "index": 13071,
+          "seconds": 10.895678494999629,
+          "rule_groups": 59,
+          "problem_zones": 42,
+          "disconnected": 16
+        },
+        {
+          "index": 18779,
+          "seconds": 11.919035593999979,
+          "rule_groups": 63,
+          "problem_zones": 42,
+          "disconnected": 17
+        },
+        {
+          "index": 16312,
+          "seconds": 12.065569026000048,
+          "rule_groups": 48,
+          "problem_zones": 36,
+          "disconnected": 18
+        },
+        {
+          "index": 15114,
+          "seconds": 7.269592218000071,
+          "rule_groups": 69,
+          "problem_zones": 48,
+          "disconnected": 22
+        },
+        {
+          "index": 13935,
+          "seconds": 7.5264598719995774,
+          "rule_groups": 51,
+          "problem_zones": 48,
+          "disconnected": 22
+        },
+        {
+          "index": 2479,
+          "seconds": 3.643320631000279,
+          "rule_groups": 58,
+          "problem_zones": 45,
+          "disconnected": 21
+        },
+        {
+          "index": 5002,
+          "seconds": 8.777956344999438,
+          "rule_groups": 60,
+          "problem_zones": 47,
+          "disconnected": 20
+        },
+        {
+          "index": 16276,
+          "seconds": 17.704956847000176,
+          "rule_groups": 65,
+          "problem_zones": 51,
+          "disconnected": 19
+        },
+        {
+          "index": 6571,
+          "seconds": 14.004367198000182,
+          "rule_groups": 41,
+          "problem_zones": 37,
+          "disconnected": 26
+        }
+      ],
+      "exports": [
+        {
+          "pose": "zero",
+          "contours": [
+            {
+              "layer": "5/0",
+              "hausdorff_um": 2.2737367544323206e-13,
+              "length_error_um": 4.0745362639427185e-10
+            },
+            {
+              "layer": "128/0",
+              "hausdorff_um": 0.0,
+              "length_error_um": 0.0
+            },
+            {
+              "layer": "127/0",
+              "hausdorff_um": 0.0,
+              "length_error_um": 0.0
+            }
+          ],
+          "polygons": 634,
+          "layers": 5,
+          "sha256": "b1548e1ee95083a8c16cda4f95921757bfa65551f3f14b643c5a09c97c16c5ed",
+          "ignored": 0,
+          "input_polygons": 124,
+          "merged_polygons": 124,
+          "flattened": true,
+          "merge_layers": true,
+          "scale": 1.0,
+          "regions": true,
+          "topology": {
+            "L127_D0": {
+              "segments": 4,
+              "nodes": 4,
+              "closed": true,
+              "overlap": false
+            },
+            "L128_D0": {
+              "segments": 12,
+              "nodes": 12,
+              "closed": true,
+              "overlap": false
+            },
+            "L5_D0": {
+              "segments": 17829,
+              "nodes": 17829,
+              "closed": true,
+              "overlap": false
+            }
+          },
+          "unresolved_regions": 0,
+          "seconds": 2.4015050960006192
+        },
+        {
+          "pose": "mixed",
+          "contours": [
+            {
+              "layer": "5/0",
+              "hausdorff_um": 2.2737367544323206e-13,
+              "length_error_um": 4.0745362639427185e-10
+            },
+            {
+              "layer": "128/0",
+              "hausdorff_um": 0.0,
+              "length_error_um": 0.0
+            },
+            {
+              "layer": "127/0",
+              "hausdorff_um": 0.0,
+              "length_error_um": 0.0
+            }
+          ],
+          "polygons": 634,
+          "layers": 5,
+          "sha256": "b1548e1ee95083a8c16cda4f95921757bfa65551f3f14b643c5a09c97c16c5ed",
+          "ignored": 0,
+          "input_polygons": 124,
+          "merged_polygons": 124,
+          "flattened": true,
+          "merge_layers": true,
+          "scale": 1.0,
+          "regions": true,
+          "topology": {
+            "L127_D0": {
+              "segments": 4,
+              "nodes": 4,
+              "closed": true,
+              "overlap": false
+            },
+            "L128_D0": {
+              "segments": 12,
+              "nodes": 12,
+              "closed": true,
+              "overlap": false
+            },
+            "L5_D0": {
+              "segments": 17829,
+              "nodes": 17829,
+              "closed": true,
+              "overlap": false
+            }
+          },
+          "unresolved_regions": 0,
+          "seconds": 2.2808588689995304
+        }
+      ],
+      "styles": [
+        {
+          "style": "linear",
+          "seconds": 8.582192087999829,
+          "pieces": 152,
+          "disconnected": 16,
+          "rule_groups": 42
+        },
+        {
+          "style": "c1",
+          "seconds": 22.777852168999743,
+          "pieces": 152,
+          "disconnected": 26,
+          "rule_groups": 40
+        },
+        {
+          "style": "c2",
+          "seconds": 0.0019750660003410303,
+          "pieces": 152,
+          "disconnected": 26,
+          "rule_groups": 41
+        },
+        {
+          "style": "arc",
+          "seconds": 34.31719783900007,
+          "pieces": 150,
+          "disconnected": 12,
+          "rule_groups": 42
+        }
+      ]
+    },
+    {
+      "project": "nu17123.dshift",
+      "source_sha256": "6bdd1614389450db9f57e80cbed109e42b3e374e8ad775da86f3da0a0e6df418",
+      "parameters": {
+        "panel_layers": 1,
+        "wafer_layers": 0,
+        "line_width_um": 15.0,
+        "line_space_um": 15.0,
+        "wafer_line_width_um": 15.0,
+        "wafer_line_space_um": 15.0,
+        "via_diameter_um": 30.145805744756366,
+        "annulus_um": 15.0,
+        "moving_annulus_um": 15.0,
+        "residual_budget_um": 5.0,
+        "transition_length_um": 200.0,
+        "max_route_angle_deg": 30.0,
+        "package_clearance_um": 10.0,
+        "routing_edge_keepout_um": 40.0,
+        "min_die_gap_um": 20.0,
+        "min_package_clearance_um": 20.0,
+        "single_bound_x_um": 25.0,
+        "single_bound_y_um": 25.0,
+        "multi_bound_x_um": 15.0,
+        "multi_bound_y_um": 15.0,
+        "bound_angle_deg": 1.0,
+        "per_die_enabled": false,
+        "die_bounds": [],
+        "rotation_center": "center",
+        "rotation_x_um": 0.0,
+        "rotation_y_um": 0.0,
+        "die_pivots": [
+          [
+            "center",
+            0.0,
+            0.0
+          ],
+          [
+            "center",
+            0.0,
+            0.0
+          ]
+        ],
+        "input_nsigma": 6.0,
+        "target_nsigma": 6.0,
+        "reference_nsigma": 6.0,
+        "mean_x_um": 0.0,
+        "mean_y_um": 0.0,
+        "mean_angle_deg": 0.0,
+        "rho_xy": 0.0,
+        "interdie": "unknown",
+        "fixed_via_assignment": "all"
+      },
+      "dies": 2,
+      "interfaces": 235,
+      "covered_interfaces": 235,
+      "inferred_fixed_interfaces": 82,
+      "auto_ignored": 0,
+      "nominal_zones": 64,
+      "nominal_valid_zones": 64,
+      "cold_seconds": 5.271177476000048,
+      "planning_reused_from": "040e7e4; planner AST identical; all posed geometries and rules recomputed",
+      "scan_seconds": 856.5931507199994,
+      "states": 729,
+      "geometry_checks": 6966,
+      "local_checks": 6966,
+      "pair_checks": 1043,
+      "colours": {
+        "red": 32,
+        "yellow": 0,
+        "green": 32,
+        "gray": 0
+      },
+      "parity": [
+        {
+          "index": -1,
+          "seconds": 3.235700023651589e-05,
+          "rule_groups": 0,
+          "problem_zones": 0,
+          "disconnected": 0
+        },
+        {
+          "index": 0,
+          "seconds": 4.912935739000204,
+          "rule_groups": 134,
+          "problem_zones": 13,
+          "disconnected": 13
+        },
+        {
+          "index": 727,
+          "seconds": 2.0375707779994627,
+          "rule_groups": 117,
+          "problem_zones": 14,
+          "disconnected": 11
+        },
+        {
+          "index": 483,
+          "seconds": 16.29433262800012,
+          "rule_groups": 117,
+          "problem_zones": 13,
+          "disconnected": 11
+        },
+        {
+          "index": 694,
+          "seconds": 3.8317088970006807,
+          "rule_groups": 116,
+          "problem_zones": 21,
+          "disconnected": 16
+        },
+        {
+          "index": 603,
+          "seconds": 13.879560545000459,
+          "rule_groups": 124,
+          "problem_zones": 17,
+          "disconnected": 13
+        },
+        {
+          "index": 559,
+          "seconds": 6.240872357999251,
+          "rule_groups": 114,
+          "problem_zones": 19,
+          "disconnected": 16
+        },
+        {
+          "index": 515,
+          "seconds": 6.520561351999277,
+          "rule_groups": 37,
+          "problem_zones": 17,
+          "disconnected": 7
+        },
+        {
+          "index": 91,
+          "seconds": 15.632072411000081,
+          "rule_groups": 126,
+          "problem_zones": 15,
+          "disconnected": 13
+        },
+        {
+          "index": 185,
+          "seconds": 7.998421082999812,
+          "rule_groups": 101,
+          "problem_zones": 9,
+          "disconnected": 9
+        },
+        {
+          "index": 602,
+          "seconds": 6.7258015970001,
+          "rule_groups": 134,
+          "problem_zones": 20,
+          "disconnected": 15
+        },
+        {
+          "index": 243,
+          "seconds": 8.512488631000451,
+          "rule_groups": 135,
+          "problem_zones": 10,
+          "disconnected": 9
+        }
+      ],
+      "exports": [
+        {
+          "pose": "zero",
+          "contours": [
+            {
+              "layer": "1/0",
+              "hausdorff_um": 0.0,
+              "length_error_um": 0.0
+            },
+            {
+              "layer": "2/0",
+              "hausdorff_um": 4.547473508864641e-13,
+              "length_error_um": 1.1641532182693481e-10
+            },
+            {
+              "layer": "4/0",
+              "hausdorff_um": 0.0,
+              "length_error_um": 1.8189894035458565e-12
+            }
+          ],
+          "polygons": 250,
+          "layers": 5,
+          "sha256": "a21ed43d6c6b55444555b208a1cac63666fe7f8be7f4c0c7f85a67c06d67f2ef",
+          "ignored": 0,
+          "input_polygons": 53,
+          "merged_polygons": 53,
+          "flattened": true,
+          "merge_layers": true,
+          "scale": 1.0,
+          "regions": true,
+          "topology": {
+            "L1_D0": {
+              "segments": 4,
+              "nodes": 4,
+              "closed": true,
+              "overlap": false
+            },
+            "L2_D0": {
+              "segments": 11898,
+              "nodes": 11898,
+              "closed": true,
+              "overlap": false
+            },
+            "L4_D0": {
+              "segments": 8,
+              "nodes": 8,
+              "closed": true,
+              "overlap": false
+            }
+          },
+          "unresolved_regions": 0,
+          "seconds": 2.4278120270000727
+        },
+        {
+          "pose": "mixed",
+          "contours": [
+            {
+              "layer": "1/0",
+              "hausdorff_um": 0.0,
+              "length_error_um": 0.0
+            },
+            {
+              "layer": "2/0",
+              "hausdorff_um": 4.547473508864641e-13,
+              "length_error_um": 1.1641532182693481e-10
+            },
+            {
+              "layer": "4/0",
+              "hausdorff_um": 0.0,
+              "length_error_um": 1.8189894035458565e-12
+            }
+          ],
+          "polygons": 250,
+          "layers": 5,
+          "sha256": "a21ed43d6c6b55444555b208a1cac63666fe7f8be7f4c0c7f85a67c06d67f2ef",
+          "ignored": 0,
+          "input_polygons": 53,
+          "merged_polygons": 53,
+          "flattened": true,
+          "merge_layers": true,
+          "scale": 1.0,
+          "regions": true,
+          "topology": {
+            "L1_D0": {
+              "segments": 4,
+              "nodes": 4,
+              "closed": true,
+              "overlap": false
+            },
+            "L2_D0": {
+              "segments": 11898,
+              "nodes": 11898,
+              "closed": true,
+              "overlap": false
+            },
+            "L4_D0": {
+              "segments": 8,
+              "nodes": 8,
+              "closed": true,
+              "overlap": false
+            }
+          },
+          "unresolved_regions": 0,
+          "seconds": 2.973707628999364
+        }
+      ],
+      "styles": [
+        {
+          "style": "linear",
+          "seconds": 16.399554065999837,
+          "pieces": 65,
+          "disconnected": 16,
+          "rule_groups": 145
+        },
+        {
+          "style": "c1",
+          "seconds": 17.224287613000342,
+          "pieces": 64,
+          "disconnected": 9,
+          "rule_groups": 136
+        },
+        {
+          "style": "c2",
+          "seconds": 0.0015388090005217236,
+          "pieces": 64,
+          "disconnected": 9,
+          "rule_groups": 135
+        },
+        {
+          "style": "arc",
+          "seconds": 37.34275461299967,
+          "pieces": 64,
+          "disconnected": 14,
+          "rule_groups": 141
+        }
+      ]
+    },
+    {
+      "project": "gd55-1105.dshift",
+      "source_sha256": "a4bccbb65058dc4023bc53d5a6916c4185b81f6d1710e365c8b21c9c6feb1b29",
+      "parameters": {
+        "panel_layers": 1,
+        "wafer_layers": 1,
+        "line_width_um": 15.0,
+        "line_space_um": 15.0,
+        "wafer_line_width_um": 15.0,
+        "wafer_line_space_um": 15.0,
+        "via_diameter_um": 40.00100998725171,
+        "annulus_um": 15.0,
+        "moving_annulus_um": 15.0,
+        "residual_budget_um": 5.0,
+        "transition_length_um": 200.0,
+        "max_route_angle_deg": 30.0,
+        "package_clearance_um": 10.0,
+        "routing_edge_keepout_um": 40.0,
+        "min_die_gap_um": 20.0,
+        "min_package_clearance_um": 20.0,
+        "single_bound_x_um": 25.0,
+        "single_bound_y_um": 25.0,
+        "multi_bound_x_um": 15.0,
+        "multi_bound_y_um": 15.0,
+        "bound_angle_deg": 1.0,
+        "per_die_enabled": false,
+        "die_bounds": [],
+        "rotation_center": "center",
+        "rotation_x_um": 0.0,
+        "rotation_y_um": 0.0,
+        "die_pivots": [
+          [
+            "center",
+            0.0,
+            0.0
+          ],
+          [
+            "center",
+            0.0,
+            0.0
+          ],
+          [
+            "center",
+            0.0,
+            0.0
+          ]
+        ],
+        "input_nsigma": 6.0,
+        "target_nsigma": 6.0,
+        "reference_nsigma": 6.0,
+        "mean_x_um": 0.0,
+        "mean_y_um": 0.0,
+        "mean_angle_deg": 0.0,
+        "rho_xy": 0.0,
+        "interdie": "unknown",
+        "fixed_via_assignment": "all"
+      },
+      "dies": 3,
+      "interfaces": 155,
+      "covered_interfaces": 155,
+      "inferred_fixed_interfaces": 0,
+      "auto_ignored": 88,
+      "nominal_zones": 64,
+      "nominal_valid_zones": 64,
+      "cold_seconds": 3.2123637590002545,
+      "planning_reused_from": "040e7e4; planner AST identical; all posed geometries and rules recomputed",
+      "scan_seconds": 241.9794997909994,
+      "states": 19683,
+      "geometry_checks": 4077,
+      "local_checks": 4077,
+      "pair_checks": 118,
+      "colours": {
+        "red": 17,
+        "yellow": 0,
+        "green": 47,
+        "gray": 0
+      },
+      "parity": [
+        {
+          "index": -1,
+          "seconds": 3.7818999771843664e-05,
+          "rule_groups": 0,
+          "problem_zones": 0,
+          "disconnected": 0
+        },
+        {
+          "index": 0,
+          "seconds": 1.2506868880000184,
+          "rule_groups": 4,
+          "problem_zones": 3,
+          "disconnected": 3
+        },
+        {
+          "index": 19681,
+          "seconds": 1.3754829680001421,
+          "rule_groups": 13,
+          "problem_zones": 4,
+          "disconnected": 3
+        },
+        {
+          "index": 13071,
+          "seconds": 1.33944385399991,
+          "rule_groups": 15,
+          "problem_zones": 7,
+          "disconnected": 5
+        },
+        {
+          "index": 18779,
+          "seconds": 1.4714214710002125,
+          "rule_groups": 13,
+          "problem_zones": 5,
+          "disconnected": 3
+        },
+        {
+          "index": 16312,
+          "seconds": 2.730466064999746,
+          "rule_groups": 6,
+          "problem_zones": 5,
+          "disconnected": 2
+        },
+        {
+          "index": 15114,
+          "seconds": 0.9037657720000425,
+          "rule_groups": 12,
+          "problem_zones": 7,
+          "disconnected": 6
+        },
+        {
+          "index": 13935,
+          "seconds": 1.0903124679998655,
+          "rule_groups": 9,
+          "problem_zones": 5,
+          "disconnected": 3
+        },
+        {
+          "index": 2479,
+          "seconds": 1.0707983849997618,
+          "rule_groups": 10,
+          "problem_zones": 7,
+          "disconnected": 4
+        },
+        {
+          "index": 5002,
+          "seconds": 1.4610010839996903,
+          "rule_groups": 13,
+          "problem_zones": 5,
+          "disconnected": 3
+        },
+        {
+          "index": 16276,
+          "seconds": 1.0980255730000863,
+          "rule_groups": 14,
+          "problem_zones": 7,
+          "disconnected": 5
+        },
+        {
+          "index": 6571,
+          "seconds": 1.903183307999825,
+          "rule_groups": 2,
+          "problem_zones": 1,
+          "disconnected": 1
+        }
+      ],
+      "exports": [
+        {
+          "pose": "zero",
+          "contours": [
+            {
+              "layer": "5/0",
+              "hausdorff_um": 1.1368683772161603e-13,
+              "length_error_um": 8.294591680169106e-10
+            },
+            {
+              "layer": "127/0",
+              "hausdorff_um": 0.0,
+              "length_error_um": 0.0
+            },
+            {
+              "layer": "128/0",
+              "hausdorff_um": 0.0,
+              "length_error_um": 0.0
+            }
+          ],
+          "polygons": 429,
+          "layers": 5,
+          "sha256": "f213829cd7979eda6d9a249c05172ea36559069a932ba2140fee3e6661f4312d",
+          "ignored": 0,
+          "input_polygons": 155,
+          "merged_polygons": 155,
+          "flattened": true,
+          "merge_layers": true,
+          "scale": 1.0,
+          "regions": true,
+          "topology": {
+            "L127_D0": {
+              "segments": 4,
+              "nodes": 4,
+              "closed": true,
+              "overlap": false
+            },
+            "L128_D0": {
+              "segments": 12,
+              "nodes": 12,
+              "closed": true,
+              "overlap": false
+            },
+            "L5_D0": {
+              "segments": 8165,
+              "nodes": 8165,
+              "closed": true,
+              "overlap": false
+            }
+          },
+          "unresolved_regions": 0,
+          "seconds": 1.059246768999401
+        },
+        {
+          "pose": "mixed",
+          "contours": [
+            {
+              "layer": "5/0",
+              "hausdorff_um": 1.1368683772161603e-13,
+              "length_error_um": 8.294591680169106e-10
+            },
+            {
+              "layer": "127/0",
+              "hausdorff_um": 0.0,
+              "length_error_um": 0.0
+            },
+            {
+              "layer": "128/0",
+              "hausdorff_um": 0.0,
+              "length_error_um": 0.0
+            }
+          ],
+          "polygons": 429,
+          "layers": 5,
+          "sha256": "f213829cd7979eda6d9a249c05172ea36559069a932ba2140fee3e6661f4312d",
+          "ignored": 0,
+          "input_polygons": 155,
+          "merged_polygons": 155,
+          "flattened": true,
+          "merge_layers": true,
+          "scale": 1.0,
+          "regions": true,
+          "topology": {
+            "L127_D0": {
+              "segments": 4,
+              "nodes": 4,
+              "closed": true,
+              "overlap": false
+            },
+            "L128_D0": {
+              "segments": 12,
+              "nodes": 12,
+              "closed": true,
+              "overlap": false
+            },
+            "L5_D0": {
+              "segments": 8165,
+              "nodes": 8165,
+              "closed": true,
+              "overlap": false
+            }
+          },
+          "unresolved_regions": 0,
+          "seconds": 1.4067742490005912
+        }
+      ],
+      "styles": [
+        {
+          "style": "linear",
+          "seconds": 4.70697640599974,
+          "pieces": 152,
+          "disconnected": 1,
+          "rule_groups": 3
+        },
+        {
+          "style": "c1",
+          "seconds": 5.5223071170003095,
+          "pieces": 152,
+          "disconnected": 1,
+          "rule_groups": 2
+        },
+        {
+          "style": "c2",
+          "seconds": 0.003178814999955648,
+          "pieces": 152,
+          "disconnected": 1,
+          "rule_groups": 2
+        },
+        {
+          "style": "arc",
+          "seconds": 11.312594828000329,
+          "pieces": 152,
+          "disconnected": 1,
+          "rule_groups": 6
+        }
+      ]
+    }
+  ],
+  "scope": "Linux CPU. Unchanged nominal plans reused from a verified developer run; all discrete geometries and native rules recomputed. Public ABC export always uses nominal source; two displayed poses produce byte-identical DXF."
+}

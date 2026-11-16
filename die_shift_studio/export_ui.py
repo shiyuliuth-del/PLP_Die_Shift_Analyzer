@@ -26,8 +26,7 @@ def export_dxf(window,regions=False):
     options=window.dxf_settings
     selected=frozenset(data.layers) if options.layer_scope=='all' else frozenset(k for k,v in window.visible_boxes.items() if v.isChecked()) if options.layer_scope=='visible' else frozenset(k for k,v in window.roles().items() if v!='不参与')
     if not selected:window.error('所选导出范围没有图层');return
-    flags=dict(reconstruction=window.reconstruction_toggle.isChecked(),
-               repairs=window.repair_data if window.repair_toggle.isChecked() else None)
+    flags=dict(reconstruction=window.reconstruction_toggle.isChecked())
     if frame is not None and getattr(window,'preview_pending',None):
         window.error('当前预演仍在更新，请显示完成后再输出');return
     roles=window.roles()
@@ -47,7 +46,7 @@ def export_dxf(window,regions=False):
         current_frame=frame
         if regions:
             split=(frame or {}).get('reconstruction')
-            reusable=bool(flags['reconstruction'] and split and split.get('complete') and split.get('constraints_complete') and split.get('configuration')==view.reconstruction_key())
+            reusable=bool(frame is not None and not __import__('numpy').any(frame['states']) and flags['reconstruction'] and split and split.get('complete') and split.get('constraints_complete') and split.get('configuration')==view.reconstruction_key())
             if reusable:
                 progress(4,'复用当前已完成的重构图形')
             else:
@@ -55,11 +54,13 @@ def export_dxf(window,regions=False):
                 import numpy as np
                 rebuild=Reconstructor(model,process,view,plan_pool=export_plans)
                 try:
-                    states=frame['states'] if frame is not None else np.zeros((len(model.case['dies']),3))
+                    states=np.zeros((len(model.case['dies']),3))
                     split=rebuild.frame(states,progress=progress)
-                    current_frame=dict(frame or {},states=states,reconstruction=split)
+                    current_frame=dict(states=states,layers=model.bound.transform(states),reconstruction=split)
                 finally:rebuild.close()
-            flags['reconstruction']=True
+            split=dict(split,pieces=[dict(q,regions=q['nominal_regions']) for q in split['pieces']])
+            flags['reconstruction']=False
+            current_frame=dict(states=__import__('numpy').zeros((len(model.case['dies']),3)))
         current=snapshot(data,cache or GeometryCache(data),current_frame,progress=lambda n,t:progress(round(n*.2),t),**flags)
         from dataclasses import replace
         current=replace(current,layers={k:v for k,v in current.layers.items() if k in selected})

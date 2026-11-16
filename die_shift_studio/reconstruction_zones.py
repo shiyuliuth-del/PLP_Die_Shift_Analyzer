@@ -58,6 +58,18 @@ def expand(r,entries):
             rows.append(local)
         usable=[e for e in rows if e['plan'] is not None]
         usable.sort(key=lambda e:e['serial_part']['a'])
+        merged=[]
+        for e in usable:
+            if merged and e['serial_part']['a']<=merged[-1]['serial_part']['b']+r.tol:
+                lead=merged[-1];a=lead['serial_part']['a'];b=max(lead['serial_part']['b'],e['serial_part']['b'])
+                joined=lead['plan'].partition(a,b)
+                if joined is not None:
+                    lead['serial_part']=joined;lead['merged_part']=joined
+                    lead['plan'].merged_keys=(*getattr(lead['plan'],'merged_keys',()),key(e['plan']))
+                    continue
+            merged.append(e)
+        usable=merged
+        rows=[e for e in rows if e['plan'] is None]+usable
         total=sum(max(r.tol,e['serial_part']['b']-e['serial_part']['a']) for e in usable);used=0.;occupied=shapely.Polygon()
         fixed=usable[-1]['serial_part']['B'] if usable else entry['source']
         for e in usable:
@@ -65,9 +77,6 @@ def expand(r,entries):
             e.update(serial_left=1-used/total,serial_right=max(0.,1-(used+length)/total),
                      serial_block=part['C'].difference(occupied),serial_fixed=fixed)
             occupied=shapely.union_all([occupied,part['A'],part['C']]);used+=length
-        for i,e in enumerate(usable):
-            e['plan'].zone_limits=(usable[i-1]['serial_part']['b']+r.tol*16 if i else 0.,
-                                  usable[i+1]['serial_part']['a']-r.tol*16 if i+1<len(usable) else e['plan'].length)
         result.extend(rows)
     return result
 
@@ -82,8 +91,12 @@ def serial_render(r,entry,part,center,pose):
     geos,error=warp(part,entry['plan'],center,relative,r.settings.reconstruction_style)
     adjusted=dict(part,C=entry['serial_block'],B=entry['serial_fixed'])
     if error:return adjusted,None,error
-    regions=dict(A=transform(geos['A'],center,pose*right),
-                 C=transform(entry['serial_block'],center,pose*left),B=entry['serial_fixed'])
+    active=transform(geos['A'],center,pose*right)
+    seams=shapely.union_all([transform(part['C'],center,pose*left).boundary,transform(part['B'],center,pose*right).boundary])
+    # Native candidate coordinates may have been rounded by one DBU. Restore
+    # shared source endpoints AFTER composing partial rigid rotations.
+    active=shapely.snap(active,seams,r.tol*2)
+    regions=dict(A=active,C=transform(entry['serial_block'],center,pose*left),B=entry['serial_fixed'])
     return adjusted,regions,None
 
 
@@ -92,11 +105,18 @@ def live_serial(window,settings,old,ref):
     from .reconstruction import Reconstructor
     from .reconstruction_status import clone_plan_pool
     original=window.engine.reconstructor
-    rebuilt=Reconstructor(original.model,original.p,settings,plan_pool=clone_plan_pool(original.plan_pool))
-    try:local=rebuilt.frame(old['states'],targets={ref},diagnostics=False)
+    # Only this source's nominal paths are needed during a pointer move. Reuse
+    # completed ownership/enclosure classification; do not rebuild all targets.
+    base=getattr(original,'_base_plans',None)
+    pool=clone_plan_pool({'local':[q for q in base if (q['layer'],q['index'])==ref]}) if base is not None else clone_plan_pool(original.plan_pool)
+    rebuilt=Reconstructor(original.model,original.p,settings,plan_pool=pool)
+    if base is not None:
+        rebuilt.auto_ignored=dict(original.auto_ignored);rebuilt.safe_vias=dict(original.safe_vias)
+        rebuilt._envelopes=original._envelopes;rebuilt._plans=expand(rebuilt,pool['local'])
+    try:local=rebuilt.frame(old['states'],targets={ref},diagnostics=False,quick=True)
     finally:
         rebuilt.cache.close();rebuilt.block_cache.clear()
     data=old['reconstruction'];rows=[q for q in data['pieces'] if (q['layer'],q['index'])!=ref]+local['pieces']
     changed={k:[v for v in values if not (k==ref[0] and ref[1] in v['indices'])] for k,values in data['replacements'].items()}
     for k,values in local['replacements'].items():changed.setdefault(k,[]).extend(values)
-    return dict(old,reconstruction=dict(data,configuration=settings.reconstruction_key(),pieces=rows,replacements=changed,violations=[],constraints_complete=False))
+    return dict(old,_reconstruction_changed_refs=(ref,),reconstruction=dict(data,configuration=settings.reconstruction_key(),pieces=rows,replacements=changed,violations=[],constraints_complete=False))

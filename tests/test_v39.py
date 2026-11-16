@@ -183,6 +183,7 @@ class V39Tests(unittest.TestCase):
         class Window(QtCore.QObject):pass
         w=Window();fig=Figure();w.ax=fig.add_subplot();w._closing=False
         on=SimpleNamespace(isChecked=lambda:True)
+        w.show_issues=on;w.layer_styles={};w.style_for=lambda layer:dict(color='#aabbcc',alpha=.5)
         w.reconstruction_toggle=on;w.visible_boxes={'5/0':on};w.view_bounds=(-10,-10,210,110)
         w.ordered_layers=lambda:['5/0'];w.geometry_patch=lambda g:PathPatch(geometry_path(g))
         empty=shapely.Polygon();pieces=[]

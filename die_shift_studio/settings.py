@@ -19,6 +19,9 @@ def normalize_display(values):
 
 @dataclass(frozen=True)
 class ViewSettings:
+    reconstruction_pad_trigger_um:float=5.
+    save_project_results:bool=True
+    result_cache_directory:str=''
     width_display:dict=field(default_factory=lambda:dict(DEFAULTS),hash=False)
     width_label_font_pt:float=8.
     width_label_decimals:int=2
@@ -73,8 +76,6 @@ class ViewSettings:
     animation_speed:int=3
     camera_speed:int=4
     contact_box_budget:int=2048
-    repair_landing_pad:bool=False
-    repair_patch_width_um:float=0.
     reconstruction_regions:tuple=()
 
     # 重构预演初始参数
@@ -87,7 +88,7 @@ class ViewSettings:
     reconstruction_enabled:bool=False
     reconstruction_live:bool=True
     reconstruction_style:str="c2"
-    reconstruction_boundary_mode:str="perpendicular"
+    reconstruction_boundary_mode:str="wide"
     reconstruction_ignored:tuple=()
     reconstruction_forced:tuple=()  # explicit edits override enclosure-based auto-ignore
     reconstruction_angles:tuple=() # layer,index,owner,refs,route,side,absolute nominal blade angle
@@ -184,6 +185,7 @@ class ViewSettings:
             if new not in values and old in values:values[new]=values[old]
         if 'width_yield_method' not in values and values.get('yield_method')=='partition':values['width_yield_method']='grid'
         known={f.name for f in fields(cls)};q=cls(**{k:v for k,v in (values or {}).items() if k in known})
+        if not isinstance(q.result_cache_directory,str):raise ValueError('结果临时文件目录必须为文本')
         choices={'reconstruction_boundary_mode':('perpendicular','wide','balanced'),'reconstruction_style':('linear','c1','c2','arc'),'width_yield_method':('importance','grid'),'yield_method':('monte_carlo','partition'),'acceleration':('auto','cpu','cuda'),'probability_method':('sobol','monte_carlo','quadrature'),
                  'space_cmap':('pastel','YlGnBu','BuPu','viridis','cividis'),
                  'space_interpolation':('nearest','bilinear','bicubic'),
@@ -199,16 +201,16 @@ class ViewSettings:
                 'animation_fps':(10,120),'animation_speed':(1,5),'camera_speed':(1,5),'contact_box_budget':(128,32768),'animation_duration_ms':(80,3000),'animation_steps':(2,60),'probability_alpha':(.05,.95),'space_alpha':(.05,.95),'intrusion_alpha':(.05,.85)}
         integers={'width_yield_decimals','width_label_decimals','animation_fps','animation_speed','camera_speed','contact_box_budget','sample_exponent','random_seed','quadrature_order','angle_bins','footprint_samples','space_resolution','animation_duration_ms','animation_steps'}
         limits.update(width_yield_exponent=(8,20),width_yield_seed=(0,2147483647),width_grid_nodes=(3,21))
-        limits.update(reconstruction_grid_nodes=(3,9),reconstruction_corner_guard_um=(0,1000),cache_max_entries=(10,100000),yield_sample_exponent=(8,20),yield_box_budget=(64,65536),yield_tolerance=(.000001,.1),
+        limits.update(reconstruction_pad_trigger_um=(0,1000),reconstruction_grid_nodes=(3,9),reconstruction_corner_guard_um=(0,1000),cache_max_entries=(10,100000),yield_sample_exponent=(8,20),yield_box_budget=(64,65536),yield_tolerance=(.000001,.1),
 
                       safe_box_precision=(.0001,.1),
-                      safe_box_budget=(32,32768),safe_box_starts=(1,6),safe_box_passes=(1,8),repair_patch_width_um=(0,10000))
+                      safe_box_budget=(32,32768),safe_box_starts=(1,6),safe_box_passes=(1,8))
         integers.update(('reconstruction_grid_nodes','width_yield_exponent','width_yield_seed','width_grid_nodes','cache_max_entries','yield_sample_exponent','yield_box_budget','safe_box_budget','safe_box_starts','safe_box_passes'))
         for key,(lo,hi) in limits.items():
             v=getattr(q,key)
             if not isinstance(v,(int,float)) or not math.isfinite(v) or not lo<=v<=hi or (key in integers and int(v)!=v):
                 raise ValueError(f'设置 {key} 超出范围 {lo}—{hi}')
-        for key in ('show_contact_markers','reconstruction_live','width_show_probability','show_annulus_range','show_spacing_range','show_low_contact','show_low_width','animation_enabled','animation_return_zero','probability_show_ranges','contact_marker_absolute','unadapted_marker_absolute','repair_landing_pad'):
+        for key in ('save_project_results','show_contact_markers','reconstruction_live','width_show_probability','show_annulus_range','show_spacing_range','show_low_contact','show_low_width','animation_enabled','animation_return_zero','probability_show_ranges','contact_marker_absolute','unadapted_marker_absolute'):
             if not isinstance(getattr(q,key),bool):raise ValueError(key+'必须为布尔值')
         import re
         color=lambda v:isinstance(v,str) and re.fullmatch(r'#[0-9a-fA-F]{6}',v)
@@ -229,7 +231,7 @@ class ViewSettings:
 
     def reconstruction_key(self):
         """Everything the reconstruction result depends on besides the pose."""
-        return (True,'nominal-route-partition-v41',self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_ignored,self.drc_tolerance_um,
+        return (True,'nominal-route-partition-v42',self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_pad_trigger_um,self.reconstruction_ignored,self.drc_tolerance_um,
                 self.reconstruction_corner_guard_um,tuple(self.reconstruction_intervals),
                 self.reconstruction_forced,self.reconstruction_angles,self.reconstruction_deleted,self.reconstruction_added,
                 tuple(self.reconstruction_regions),tuple(self.reconstruction_cuts),

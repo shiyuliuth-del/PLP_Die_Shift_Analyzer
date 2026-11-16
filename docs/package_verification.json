@@ -1,11 +1,11 @@
 {
-  "version": "V41",
+  "version": "V42",
   "status": "PASS",
-  "tested_at_utc": "2026-11-13T07:54:39.157186+00:00",
+  "tested_at_utc": "2026-11-16T02:32:08.072377+00:00",
   "scope": "Clean source checkout, local platform. Windows executable verification is recorded separately.",
   "platform": "linux",
-  "verified_runtime_sha256": "eedbbe9d9483f7aa0b959c1c85e6848454bc7c517c5d843b62922aee53b75398",
-  "gui_suites": 21,
+  "verified_runtime_sha256": "9efcb750740870a3c222a637143b146a48e13f683fa746bf84266a09c6112ccc",
+  "gui_suites": 23,
   "runs": [
     {
       "args": [
@@ -21,7 +21,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "Ran 350 tests in 71.838s",
+        "Ran 355 tests in 68.993s",
         "",
         "OK (skipped=2)"
       ]
@@ -60,18 +60,6 @@
         "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
         "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
         "{'status': 'PASS', 'high_load_queued': True, 'low_load_parallel': True, 'stale_result_did_not_overwrite': True, 'cached_return_without_worker': True, 'engine_count': 2}"
-      ]
-    },
-    {
-      "args": [
-        "tests/gui_repair.py"
-      ],
-      "env": {},
-      "status": "PASS",
-      "summary": [
-        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
-        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
-        "GUI_REPAIR_PASS: straight-line patch drawn, per-via default diameter, post-patch DRC attributed, row click-through navigation to patch and violation, layer visibility, cached poses and landing option"
       ]
     },
     {
@@ -264,6 +252,42 @@
         "This plugin does not support raise()",
         "This plugin does not support grabbing the keyboard",
         "GUI_V41_PASS: drag-wheel rotations, retained angles, menus, serial zones, Jobs, cancel rollback, hidden overlay/pulse cleanup"
+      ]
+    },
+    {
+      "args": [
+        "tests/gui_v42.py"
+      ],
+      "env": {},
+      "status": "PASS",
+      "summary": [
+        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
+        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
+        "GUI_V42_PASS assessment-first, saved results without recompute, native zero-only DXF across two poses, clicked-point zone and controls"
+      ]
+    },
+    {
+      "args": [
+        "tests/gui_v42_branches.py"
+      ],
+      "env": {},
+      "status": "PASS",
+      "summary": [
+        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
+        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
+        "GUI_V42_BRANCH_PASS: real merged-handle drag across junction and back, deferred native validation and exact nominal copper"
+      ]
+    },
+    {
+      "args": [
+        "tests/gui_v42_saved_process.py"
+      ],
+      "env": {},
+      "status": "PASS",
+      "summary": [
+        "FRESH_PROCESS_RESTORE_PASS",
+        "",
+        "GUI_V42_FRESH_PROCESS_PASS: actual new interpreter restores complete frame and statistics without reconstruction"
       ]
     },
     {

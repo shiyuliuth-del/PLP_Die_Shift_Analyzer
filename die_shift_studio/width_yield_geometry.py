@@ -154,7 +154,7 @@ class WidthEvents:
         for node in self.model.nodes:
             key=node['key'];role=self.model.roles[key]
             if role not in ('运动RDL','固定RDL'):continue
-            rule=(params.line_space_um if role=='固定RDL' else params.wafer_line_space_um)-analyzer.settings.drc_tolerance_um
+            rule=params.package_clearance_um
             geo=node['poly'];o=node['owner'];travel=0.
             if o>=0:
                 mu,b=mean_and_bounds(params.for_die(o),n)

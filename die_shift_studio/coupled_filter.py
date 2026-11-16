@@ -25,7 +25,7 @@ def reconstruction_edge_scopes(engine,grid,progress):
         if owner>=0 and grid.radices[owner]>1:
             for ref in via['targets']:owners[ref].add(owner)
     board=model.case['board'];boundary=board.boundary
-    rule=engine.p.line_space_um-recon.settings.drc_tolerance_um
+    rule=engine.p.package_clearance_um
     scopes=defaultdict(list)
     for n,((layer,index),dies) in enumerate(owners.items()):
         if n%32==0:progress(round(100*n/max(1,len(owners))),'核对重构铜整包可达边界')

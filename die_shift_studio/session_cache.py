@@ -79,8 +79,8 @@ class ProjectCacheGroup:
                 if key[1]==signature:
                     for state in {key[3],key[4]}:add(state,'动画',key)
             for key in self.values.sizes:
-                if isinstance(key,tuple) and len(key)>2 and key[0] in ('repair','package') and key[1]==signature:
-                    add(key[2] if key[2] is not None else zero,'补块' if key[0]=='repair' else '整包间距图',key)
+                if isinstance(key,tuple) and len(key)>2 and key[0]=='package' and key[1]==signature:
+                    add(key[2] if key[2] is not None else zero,'整包间距图',key)
             result=(self.revision,{state:len(entries) for state,entries in by_pose.items()})
             if config is None:return result
             store=self.frame_stores.get(signature)
@@ -139,25 +139,29 @@ class ProjectCacheRegistry:
 
 
 class EphemeralCache:
-    """Intermediate poses live in animation bundles; do not evict real results."""
+    """Bounded intermediate cache shared safely by geometry worker threads."""
     def __init__(self,budget=32*1024**2,max_entries=64):
-        self.budget=budget;self.max_entries=max_entries;self.memory=OrderedDict();self.used=0
+        self.budget=budget;self.max_entries=max_entries;self.memory=OrderedDict();self.used=0;self.lock=threading.RLock()
     def get(self,key):
-        entry=self.memory.get(key)
-        if entry is None:return None
-        self.memory.move_to_end(key);return entry[0]
+        with self.lock:
+            entry=self.memory.get(key)
+            if entry is None:return None
+            self.memory.move_to_end(key);return entry[0]
     def put(self,key,value,size=None):
         if size is None:size=2*len(pickle.dumps(value,protocol=5))
-        old=self.memory.pop(key,None)
-        if old is not None:self.used-=old[1]
-        if size>self.budget:return
-        self.memory[key]=(value,size);self.used+=size
-        while self.used>self.budget or len(self.memory)>self.max_entries:
-            _,(_,amount)=self.memory.popitem(last=False);self.used-=amount
+        with self.lock:
+            old=self.memory.pop(key,None)
+            if old is not None:self.used-=old[1]
+            if size>self.budget:return
+            self.memory[key]=(value,size);self.used+=size
+            while self.used>self.budget or len(self.memory)>self.max_entries:
+                _,(_,amount)=self.memory.popitem(last=False);self.used-=amount
     def discard(self,key):
-        old=self.memory.pop(key,None)
-        if old is not None:self.used-=old[1]
-    def clear(self):self.memory.clear();self.used=0
+        with self.lock:
+            old=self.memory.pop(key,None)
+            if old is not None:self.used-=old[1]
+    def clear(self):
+        with self.lock:self.memory.clear();self.used=0
 
 
 class SessionCache(MutableMapping):

@@ -195,12 +195,10 @@ class DxfTests(unittest.TestCase):
             np.testing.assert_array_equal(shape_nodes(data,'4/0',0)[1],xy)
             changes={'5/0':[dict(indices=(0,),geometry=box(210,200,230,220))]}
             f=dict(f,deformation={'replacements':changes})
-            repair=SimpleNamespace(layer='5/0',patch=box(225,200,240,210))
-            d=snapshot(data,e.contact.cache,f,deformation=True,repairs={'repairs':[repair]})
+            d=snapshot(data,e.contact.cache,f,deformation=True)
             copper=[shapely.from_wkb(wkb) for wkb in d.layers['5/0']]
             self.assertTrue(any(g.equals(changes['5/0'][0]['geometry']) for g in copper))
-            self.assertTrue(any(g.equals(repair.patch) for g in copper))
-            self.assertEqual(len(copper),len(data.layers['5/0'])+1)
+            self.assertEqual(len(copper),len(data.layers['5/0']))
             self.assertEqual(set(d.layers),set(data.layers))
         finally:e.close()
 

@@ -13,13 +13,13 @@ def edge_violations(model,states,parameters,settings,replacements=None,owners=No
             continue
         if owners is not None and role=='固定RDL':continue
         if replacements_only and key not in replacements:continue
-        rule=(parameters.line_space_um if role=='固定RDL' else parameters.wafer_line_space_um)-getattr(settings,'drc_tolerance_um',0.)
-        if rule<=0:
+        rule=parameters.package_clearance_um
+        if rule<0:
             raise ValueError(f'图层 {key} 的有效线距必须大于零')
         if not hasattr(model,'_edge_interiors'):model._edge_interiors={}
         if rule not in model._edge_interiors:
             error=min(rule*.001,max(model.data.dbu_um/4,1.e-8))
-            segments=max(32,math.ceil(math.pi/(4*math.acos(max(0.,1-error/rule)))))
+            segments=max(32,math.ceil(math.pi/(4*math.acos(max(0.,1-error/rule))))) if rule else 32
             inner=board.buffer(-rule,quad_segs=segments)
             shapely.prepare(inner)
             model._edge_interiors[rule]=inner
@@ -57,6 +57,9 @@ def edge_violations(model,states,parameters,settings,replacements=None,owners=No
                 items.append(((i,),geo,node['net']))
         for q in replacements.get(key,[]):
             ids=tuple(q['indices']);items.append((ids,q['geometry'],model.nodes[model.ids[key,ids[0]]]['net']))
+        # Missing/ignored import geometries carry no spatial boundary. Failed
+        # reconstruction is reported by its connection record, not a NaN gap.
+        items=[row for row in items if row[1] is not None and not row[1].is_empty]
         if not items:continue
         geometries=np.array([g for _,g,_ in items],object)
         boundary=board.boundary

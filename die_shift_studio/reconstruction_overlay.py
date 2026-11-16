@@ -15,7 +15,7 @@ REGION_COLORS={'move':'#2f7bd6','stay':'#c2571f'}
 REGION_LABELS={'move':'动区','stay':'静区'}
 COLORS={'A':'#edbb77','B':'#b6c8dd','C':'#a5c7bd'}
 CUT_COLOR='#237ab9'
-SECOND_CUT_COLOR='#c2912e'
+SECOND_CUT_COLOR=CUT_COLOR
 WARNING_COLOR='#b570b8'
 DRAG_FIRST_CUT=True
 
@@ -97,14 +97,14 @@ class ReconstructionOverlay:
             self.problem_points=Line2D([],[],ls='none',marker='o',fillstyle='none',markersize=4,color='#bb354d',alpha=.8,zorder=10.7);w.ax.add_line(self.problem_points)
             self.cuts=LineCollection([],colors=CUT_COLOR,linewidths=2.2,zorder=11.5);w.ax.add_collection(self.cuts)
             self.second_cuts=LineCollection([],colors=SECOND_CUT_COLOR,linewidths=2.2,zorder=11.6);w.ax.add_collection(self.second_cuts)
-            self.points=Line2D([],[],ls='none',marker='o',markersize=10,color=CUT_COLOR,markeredgecolor='white',markeredgewidth=.8,zorder=12);w.ax.add_line(self.points)
-            self.second_points=Line2D([],[],ls='none',marker='o',markersize=10,color=SECOND_CUT_COLOR,markeredgecolor='white',markeredgewidth=.8,zorder=12);w.ax.add_line(self.second_points)
+            self.points=Line2D([],[],ls='none',marker='o',markersize=8,color=CUT_COLOR,markeredgecolor='white',markeredgewidth=.8,zorder=12);w.ax.add_line(self.points)
+            self.second_points=Line2D([],[],ls='none',marker='o',markersize=8,color=SECOND_CUT_COLOR,markeredgecolor='white',markeredgewidth=.8,zorder=12);w.ax.add_line(self.second_points)
             self.stamp=None
         data=self.data() if self.active() else None;bank=self.risk_bank() if self.active() else None
         vis=tuple(k for k,v in w.visible_boxes.items() if v.isChecked());order=tuple(w.ordered_layers())
         nominal=bool((w.current_frame or {}).get('nominal_global'));level_text=w.target_sigma.currentText() if hasattr(w,'target_sigma') else '6'
         level=math.inf if level_text=='∞' else float(level_text)
-        stamp=(id(data),id(bank),vis,w.view_bounds,order,nominal,level)
+        stamp=(id(data),id(bank),vis,w.view_bounds,order,nominal,level,w.show_issues.isChecked(),repr(w.layer_styles))
         if stamp==self.stamp:self.draw_labels();return
         self.stamp=stamp;paths={};colors={};first=[];second=[];dots=[];far_dots=[];warnings=[];region_groups={};red=[];markers={}
         old_unions=self.union_cache;self.union_cache={};old_cache=self.path_cache;self.path_cache={};self.zone_views={}
@@ -134,7 +134,7 @@ class ReconstructionOverlay:
                 if not g.is_empty and _in_view(g.bounds,w.view_bounds):markers[g.wkb]=g
             for kind,target,dot_list,line_list in (('moved','moved_cut',dots,first),('extra','extra_cut',far_dots,second)):
                 face=self.handles.get((self._key(q),kind),q.get(target))
-                if face is not None and face.geom_type=='Point':dot_list.append(face.coords[0])
+                if face is not None and face.geom_type in ('Point','MultiPoint'):dot_list.extend(shapely.get_coordinates(face))
                 else:line_list.extend(_lines(face))
         # Ignoring deformation keeps real fixed copper, not an exemption from
         # its physical rules. Its current witnesses must remain visible too.
@@ -144,16 +144,17 @@ class ReconstructionOverlay:
         for (layer,index,kind,status),values in sorted(region_groups.items(),key=lambda item:RANK.get(item[0][3],-1)):
             geos=tuple(values.values());cache_key=(layer,index,kind,status,tuple(values));previous=old_unions.get(cache_key)
             g=previous[1] if previous is not None and all(a is b for a,b in zip(previous[0],geos)) else (geos[0] if len(geos)==1 else shapely.union_all(geos))
-            self.union_cache[cache_key]=(geos,g);paths.setdefault((layer,kind),[]).append(patch(g));colors.setdefault((layer,kind),[]).append(PALETTE[status] if kind=='A' else COLORS[kind])
+            self.union_cache[cache_key]=(geos,g);paths.setdefault((layer,kind),[]).append(patch(g));colors.setdefault((layer,kind),[]).append(PALETTE[status] if kind=='A' else w.style_for(layer)['color'])
         for key in paths:
             if key not in self.artists:
                 artist=PatchCollection([],alpha=.66,linewidths=.5);w.ax.add_collection(artist);self.artists[key]=artist
         for (layer,k),artist in self.artists.items():
             shapes=paths.get((layer,k),[]);artist.set_paths(shapes);artist.set_visible(bool(shapes));artist.set_facecolors(colors.get((layer,k),[]));artist.set_edgecolors(colors.get((layer,k),[]))
+            artist.set_alpha(.66 if k=='A' else w.style_for(layer)['alpha'])
             artist.set_zorder(2+(order.index(layer) if layer in order else 0)/max(1,len(order))+.001*('BCA'.index(k)+1))
-        self.constraints.set_paths([patch(g) for g in markers.values()]);self.constraints.set_visible(bool(markers))
+        self.constraints.set_paths([patch(g) for g in markers.values()]);self.constraints.set_visible(w.show_issues.isChecked() and bool(markers))
         points=[g.representative_point().coords[0] for g in markers.values()]
-        self.problem_points.set_data(np.array(points).T if points else [[],[]]);self.problem_points.set_visible(bool(points))
+        self.problem_points.set_data(np.array(points).T if points else [[],[]]);self.problem_points.set_visible(w.show_issues.isChecked() and bool(points))
         self.problems.set_paths(red);self.problems.set_visible(bool(red));self.warning.set_paths(warnings);self.warning.set_visible(bool(warnings))
         self.cuts.set_segments(first);self.cuts.set_visible(bool(first));self.second_cuts.set_segments(second);self.second_cuts.set_visible(bool(second))
         self.points.set_data(np.array(dots).T if dots else [[],[]]);self.points.set_visible(bool(dots))
@@ -225,7 +226,7 @@ class ReconstructionOverlay:
             return False
         q,xy,kind=picked;self.hover.set_data(xy.T);self.hover.set_visible(True)
         self.hover.set_color(SECOND_CUT_COLOR if kind=='extra' else CUT_COLOR)
-        self.hover.set_marker('o' if np.linalg.norm(xy[-1]-xy[0])<1e-8 else '');self.hover.set_markersize(11)
+        self.hover.set_marker('o' if np.linalg.norm(xy[-1]-xy[0])<1e-8 else '');self.hover.set_markersize(9)
         self.hover_key=(self._key(q),kind)
         if not self.pulse_timer.isActive():self.pulse_timer.start()
         return True
@@ -233,8 +234,8 @@ class ReconstructionOverlay:
         if self.hover is None or not self.hover.get_visible() or not self.active() or self.w._closing:
             self.pulse_timer.stop();return
         wave=.5+.5*math.sin(time.monotonic()*7)
-        self.hover.set_alpha(.55+.4*wave);self.hover.set_linewidth(3.+2.*wave)
-        self.hover.set_markersize(12.+4.*wave)
+        self.hover.set_alpha(.68+.12*wave);self.hover.set_linewidth(2.5+.35*wave)
+        self.hover.set_markersize(9.+.6*wave)
         self.w.scene_renderer.draw_feedback(self.hover,(id(self.data()),self.stamp),self.w.legend)
     def clear_hover(self):self.highlight(None)
     def hide(self):
@@ -257,7 +258,7 @@ class ReconstructionOverlay:
                     '—' if q['clearance_um'] is None else f"{q['clearance_um']:.2f}",status]
             for j,value in enumerate(values):w.reconstruction_table.setItem(i,j,W.QTableWidgetItem(str(value)))
         w.reconstruction_table.blockSignals(False)
-        w.reconstruction_summary.setText(f'共用动区 {len(rows)} 处。蓝色为运动侧边界，黄色为固定侧边界；分别沿原图追溯路径拖动，跨拐角自动吸附。圆点表示整孔盘；红色填充提示规则或连接问题，可单击查看。')
+        w.reconstruction_summary.setText(f'共用动区 {len(rows)} 处。两端蓝色控制柄分别对应运动侧和固定侧；分别沿原图追溯路径拖动，跨拐角自动吸附。圆点表示整孔盘；红色填充提示规则或连接问题，可单击查看。')
     def locate(self,row,*_):
         data=self.data()
         if not data or not 0<=row<len(data['pieces']):return
@@ -280,7 +281,10 @@ class CutDrag:
         if getattr(w,'region_select',None) and w.region_select.mode is not None:return
         picked=w.reconstruction_overlay.pick(event.xdata,event.ydata,self._tolerance())
         if picked is None:return
-        piece,xy,kind=picked;overlay=w.reconstruction_overlay;overlay.selected=overlay._key(piece);overlay.selected_kind=kind
+        piece,xy,kind=picked
+        from .branch_regions import editable_piece
+        piece=editable_piece(piece,(event.xdata,event.ydata))
+        overlay=w.reconstruction_overlay;overlay.selected=overlay._key(piece);overlay.selected_kind=kind
         if kind in ('bridge','problem'):return
         if event.button!=1:return
         event.reconstruction_cut_handled=True
@@ -314,7 +318,7 @@ class CutDrag:
             plan=piece.get('route_plan')
             if plan is not None:
                 which=1 if state['kind']=='extra' else 0
-                part,clamped=plan.edit_pose(*piece['interval'],which,float(plan.route.project(shapely.Point(cursor))),frame['rotation_centers'][owner],frame['states'][owner],self.w.view_settings.reconstruction_style)
+                part,clamped=plan.edit_pose(*piece['interval'],which,float(plan.route.project(shapely.Point(cursor))),frame['rotation_centers'][owner],frame['states'][owner],self.w.view_settings.reconstruction_style,cursor=cursor)
                 if part is not None:
                     from .reconstruction_edits import apply_angles
                     part=apply_angles(state['updated'],plan,part)
@@ -352,7 +356,7 @@ class CutDrag:
     def _live(self,part):
         from .reconstruction_route import warp,failed_connection,missing_area
         state=self.state;old=state['frame'];piece=state['piece'];plan=piece['route_plan']
-        if piece.get('endpoint_weights',(1.,0.))!=(1.,0.):
+        if piece.get('graph_edit') or piece.get('endpoint_weights',(1.,0.))!=(1.,0.):
             from .reconstruction_zones import live_serial
             self.w.current_frame=live_serial(self.w,state['updated'],old,(piece['layer'],piece['index']))
             self.w.constraint_feedback.request(self.w.current_frame,state['updated']);self.w.reconstruction_yield.refresh(state['updated'])
@@ -375,7 +379,7 @@ class CutDrag:
         copper,_=compose_feature(piece.get('source',plan.source),feature,plan.tolerance,feature_moves(feature,old['states'],self.w.view_settings.reconstruction_style))
         for q in replacements.get(piece['layer'],()):
             if piece['index'] in q['indices']:q['geometry']=copper
-        self.w.current_frame=dict(old,reconstruction=dict(data,configuration=state['updated'].reconstruction_key(),pieces=items,replacements=replacements,violations=[],constraints_complete=False))
+        self.w.current_frame=dict(old,_reconstruction_changed_refs=((piece['layer'],piece['index']),),reconstruction=dict(data,configuration=state['updated'].reconstruction_key(),pieces=items,replacements=replacements,violations=[],constraints_complete=False))
         from .reconstruction import decorate_problems
         decorate_problems(self.w.current_frame['reconstruction'])
         self.w.constraint_feedback.request(self.w.current_frame,state['updated'])
@@ -390,7 +394,8 @@ class CutDrag:
         self.state=None;self.latest=None;self.timer.stop()
         self.w.reconstruction_overlay.clear_hover()
         if not state['moved']:return
-        self.w.view_settings=state['updated']
+        from .reconstruction_edits import commit_merges
+        self.w.view_settings=commit_merges(state['updated'],self.w.current_frame)
         self.w.invalidate_reconstruction_edit();self.w.request_preview(quiet=True)
     def cancel(self):
         if self.state is None:return False

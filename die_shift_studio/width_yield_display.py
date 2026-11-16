@@ -80,9 +80,10 @@ class WidthYieldDisplay:
     def refresh(self):
         w=self.w
         if w.loading or w._closing:return
-        if hasattr(w,'reconstruction_yield'):w.reconstruction_yield.refresh()
         enabled=w.width_toggle.isChecked()
         self.label.set_width_active(enabled)
+        if hasattr(w,'reconstruction_yield'):w.reconstruction_yield.refresh()
+        if w.result is None or getattr(w,'_restoring_project',False):self.reset();return
         if not enabled or not w.data:
             self.reset()
             if enabled:self.label.setText('宽度良率 · 等待图纸')

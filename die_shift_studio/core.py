@@ -31,7 +31,7 @@ PARAMETER_DESCRIPTIONS = {
     'wafer_line_width_um':'运动线宽 / μm', 'wafer_line_space_um':'运动线距 / μm',
     'via_diameter_um':'连接孔直径 / μm', 'annulus_um':'固定RDL包围量 / μm', 'moving_annulus_um':'运动RDL包围量 / μm',
     'residual_budget_um':'套刻和形变确定性预留 / μm', 'transition_length_um':'动态过渡长度 / μm',
-    'max_route_angle_deg':'通道允许斜角 / °', 'routing_edge_keepout_um':'边端禁布长度 / μm',
+    'package_clearance_um':'图形距边框 / μm', 'max_route_angle_deg':'通道允许斜角 / °', 'routing_edge_keepout_um':'边端禁布长度 / μm',
     'min_die_gap_um':'要求芯片间净距 / μm', 'min_package_clearance_um':'要求芯片到封装边净距 / μm',
     'single_bound_x_um':'单芯片X单边幅度 / μm', 'single_bound_y_um':'单芯片Y单边幅度 / μm',
     'multi_bound_x_um':'多芯片每颗X单边幅度 / μm', 'multi_bound_y_um':'多芯片每颗Y单边幅度 / μm',
@@ -59,6 +59,7 @@ class Parameters:
     residual_budget_um: float = 5.0
     transition_length_um: float = 200.0
     max_route_angle_deg: float = 30.0
+    package_clearance_um: float = 10.0
     routing_edge_keepout_um: float = 40.0
     min_die_gap_um: float = 20.0
     min_package_clearance_um: float = 20.0
@@ -152,7 +153,7 @@ class Parameters:
         for key in positive:
             if getattr(self,key) <= 0:
                 raise ValueError(f"{key} 必须大于0")
-        for key in ("moving_annulus_um", "annulus_um", "residual_budget_um", "routing_edge_keepout_um", "min_die_gap_um",
+        for key in ("package_clearance_um", "moving_annulus_um", "annulus_um", "residual_budget_um", "routing_edge_keepout_um", "min_die_gap_um",
                     "min_package_clearance_um", "single_bound_x_um", "single_bound_y_um",
                     "multi_bound_x_um", "multi_bound_y_um", "bound_angle_deg"):
             if getattr(self,key) < 0:

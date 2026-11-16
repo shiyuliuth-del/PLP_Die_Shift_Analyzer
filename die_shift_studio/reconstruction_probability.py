@@ -43,7 +43,7 @@ def central_certificate(r,entry,entries):
     """
     if len(entries)!=1:return None
     plan=entry.get('plan')
-    if plan is None or r.settings.reconstruction_style=='arc':return None
+    if plan is None or entry.get('graph_branch') or r.settings.reconstruction_style=='arc':return None
     source=plan.source
     if source.geom_type!='Polygon' or source.interiors or not source.equals(source.minimum_rotated_rectangle):return None
     chord=shapely.LineString([plan.route.coords[0],plan.route.coords[-1]])
