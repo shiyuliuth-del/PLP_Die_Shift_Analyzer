@@ -181,6 +181,24 @@ class V42Tests(unittest.TestCase):
    geometry,_=compose_feature(source,pieces,.001,True)
    self.assertTrue(geometry.is_valid);self.assertTrue(all(q['connection_failed'] for q in pieces))
   finally:e.close()
+ def test_geometry_pool_does_not_reuse_another_rotation_center(self):
+  from die_shift_studio.reconstruction import Reconstructor
+  from die_shift_studio.reconstruction_status import clone_plan_pool
+  from die_shift_studio.session_cache import EphemeralCache
+  e,_,_=fixture();pool=EphemeralCache(max_entries=2048)
+  try:
+   cfg=replace(e.reconstructor.settings,reconstruction_boundary_mode='perpendicular',reconstruction_forced=(('5/0',0),))
+   first=Reconstructor(e.contact,e.p,cfg,geometry_pool=pool);z=np.array([[0.,0.,.02]])
+   old=first.frame(z,diagnostics=False)
+   e.contact.bound.centers[0]=np.array([500.,200.])
+   warm=Reconstructor(e.contact,e.p,cfg,geometry_pool=pool,plan_pool=clone_plan_pool(first.plan_pool))
+   cold=Reconstructor(e.contact,e.p,cfg,plan_pool=clone_plan_pool(first.plan_pool))
+   a=warm.frame(z,diagnostics=False)['replacements']['5/0'][0]['geometry']
+   b=cold.frame(z,diagnostics=False)['replacements']['5/0'][0]['geometry']
+   self.assertEqual(a.wkb,b.wkb)
+   self.assertFalse(a.equals(old['replacements']['5/0'][0]['geometry']))
+   first.close();warm.close();cold.close()
+  finally:pool.clear();e.close()
  def test_defaults_and_removed_patch_options(self):
   self.assertEqual(Parameters().package_clearance_um,10)
   self.assertEqual(ViewSettings().reconstruction_boundary_mode,'wide')

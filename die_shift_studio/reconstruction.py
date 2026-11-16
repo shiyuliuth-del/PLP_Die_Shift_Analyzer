@@ -482,7 +482,7 @@ class Reconstructor:
             cancel_check();part,manual=self.interval(entry)
             if part is None:return part,manual,None,None,entry['warning']
             from .reconstruction_route import part_key
-            local_key=(entry['plan'].key,entry['plan'].identity,part_key(part),part.get('manual_angles'),bool(manual),bool(diagnostics),bool(quick),self.rules.identity,self.settings.reconstruction_style,self.settings.reconstruction_boundary_mode,token[1],entry.get('serial_left'),entry.get('serial_right'),entry.get('serial_block',shapely.Polygon()).wkb)
+            local_key=(entry['plan'].key,entry['plan'].identity,part_key(part),part.get('manual_angles'),bool(manual),bool(diagnostics),bool(quick),self.rules.identity,self.settings.reconstruction_style,self.settings.reconstruction_boundary_mode,tuple(self.model.bound.centers[entry['owner']]),token[1],entry.get('serial_left'),entry.get('serial_right'),entry.get('serial_block',shapely.Polygon()).wkb)
             cached=self.geometry_pool.get(local_key)
             if cached is not None:
                 saved_part,saved_manual,saved_regions,saved_error,saved_warning=cached
