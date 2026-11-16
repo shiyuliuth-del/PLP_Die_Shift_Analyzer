@@ -199,6 +199,24 @@ class V42Tests(unittest.TestCase):
    self.assertFalse(a.equals(old['replacements']['5/0'][0]['geometry']))
    first.close();warm.close();cold.close()
   finally:pool.clear();e.close()
+ def test_empty_failed_region_never_erases_source_or_crashes_border_check(self):
+  from die_shift_studio.reconstruction import compose_feature
+  from die_shift_studio.edge_clearance import edge_violations
+  from unittest.mock import patch
+  e,_,_=fixture()
+  try:
+   source=box(0,0,100,50);empty=shapely.Polygon();q=dict(valid=False,connection_failed=True)
+   with patch('die_shift_studio.reconstruction._compose_feature',return_value=(empty,source)):
+    copper,_=compose_feature(source,[q],.001,True)
+   self.assertTrue(copper.equals(source));self.assertTrue(q['connection_failed'])
+   self.assertEqual(edge_violations(e.contact,np.zeros((1,3)),e.p,ViewSettings(),{'5/0':[dict(indices=(0,),geometry=empty)]},replacements_only=True),[])
+  finally:e.close()
+ def test_result_sidecar_can_be_on_another_windows_drive(self):
+  from unittest.mock import patch
+  from die_shift_studio.project_results import portable_path
+  target=Path(tempfile.gettempdir())/'results.dsresults'
+  with patch('die_shift_studio.project_results.os.path.relpath',side_effect=ValueError('different drives')):
+   self.assertEqual(portable_path(target,Path.cwd()),str(target.resolve()))
  def test_defaults_and_removed_patch_options(self):
   self.assertEqual(Parameters().package_clearance_um,10)
   self.assertEqual(ViewSettings().reconstruction_boundary_mode,'wide')

@@ -58,7 +58,11 @@ def main():
     print(name,'PARITY',parity[-1],flush=True)
    poses=[('zero',np.zeros((grid.count,3))),('mixed',z)];exports=[]
    for label,z in poses:
-    f=r.frame(z);full=dict(states=z,layers=e.bound.transform(z),reconstruction=f);frozen=snapshot(d,e.bound.cache,full,reconstruction=True)
+    # V42 public region export is always nominal, even from a shifted view.
+    # The generic writer's shifted-copper path is not this product contract.
+    r.frame(z);nominal=r.frame(np.zeros((grid.count,3)))
+    f=dict(nominal,pieces=[dict(q,regions=q['nominal_regions']) for q in nominal['pieces']])
+    frozen=snapshot(d,e.bound.cache,dict(states=np.zeros((grid.count,3))),reconstruction=False)
     start=time.perf_counter();out=write_regions(frozen,f,job['roles'],scratch/(name+'_'+label+'.dxf'));out['seconds']=time.perf_counter()-start
     doc=ezdxf.readfile(out['path']);assert not doc.audit().errors;entities=list(doc.modelspace());metrics=[]
     allowed=set()
@@ -73,6 +77,7 @@ def main():
      metrics.append(dict(layer=layer,hausdorff_um=distance,length_error_um=difference))
     assert all(ent.dxftype()=='LWPOLYLINE' and not ent.closed and ent.dxf.layer in allowed for ent in entities)
     out.pop('path');exports.append(dict(pose=label,contours=metrics,**out));print(name,'EXPORT',label,'PASS',flush=True)
+   assert exports[0]['sha256']==exports[1]['sha256'],'region export depends on displayed pose'
    def positions(frame):return {zone_key(q):q['interval'] for piece in frame['pieces'] for q in piece.get('graph_members',(piece,))}
    styles=[];fixed_positions=positions(zero)
    for style in ('linear','c1','c2','arc'):

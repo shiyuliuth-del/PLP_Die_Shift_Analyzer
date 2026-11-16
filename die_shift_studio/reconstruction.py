@@ -72,13 +72,16 @@ def _compose_feature(source,ps,tolerance,moving):
 
 def compose_feature(source,ps,tolerance,moving):
     """A failed numerical overlay cannot erase copper or publish a success."""
-    try:return _compose_feature(source,ps,tolerance,moving)
-    except shapely.errors.GEOSException as exc:
-        from .reconstruction_route import EMPTY
-        for q in ps:
-            q.update(valid=False,connection_failed=True,warning='型变布尔运算未通过；保留原铜：'+str(exc),
-                     regions=dict(A=EMPTY,B=source,C=EMPTY),bridge=EMPTY,moved=EMPTY,fixed=source)
-        return source,EMPTY
+    try:
+        result=_compose_feature(source,ps,tolerance,moving)
+        if not result[0].is_empty or source.is_empty:return result
+        reason='型变后没有有效铜；保留原铜并标记失败'
+    except shapely.errors.GEOSException as exc:reason='型变布尔运算未通过；保留原铜：'+str(exc)
+    from .reconstruction_route import EMPTY
+    for q in ps:
+        q.update(valid=False,connection_failed=True,warning=reason,
+                 regions=dict(A=EMPTY,B=source,C=EMPTY),bridge=EMPTY,moved=EMPTY,fixed=source)
+    return source,EMPTY
 
 
 def feature_moves(pieces,states,style):

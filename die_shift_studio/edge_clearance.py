@@ -57,6 +57,9 @@ def edge_violations(model,states,parameters,settings,replacements=None,owners=No
                 items.append(((i,),geo,node['net']))
         for q in replacements.get(key,[]):
             ids=tuple(q['indices']);items.append((ids,q['geometry'],model.nodes[model.ids[key,ids[0]]]['net']))
+        # Missing/ignored import geometries carry no spatial boundary. Failed
+        # reconstruction is reported by its connection record, not a NaN gap.
+        items=[row for row in items if row[1] is not None and not row[1].is_empty]
         if not items:continue
         geometries=np.array([g for _,g,_ in items],object)
         boundary=board.boundary

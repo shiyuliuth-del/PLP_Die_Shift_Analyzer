@@ -62,6 +62,11 @@ def identity(w):
     return logical_fingerprint((__version__,w.data.geometry_id,w.data.top_name,w.roles(),w.ordered_layers(),w.motions(),asdict(w.params()),asdict(w.view_settings)))
 
 
+def portable_path(target,base):
+    try:return os.path.relpath(target,base)
+    except ValueError:return str(Path(target).resolve())  # Windows: different drives.
+
+
 def save(w,path):
     if not w.view_settings.save_project_results:return None
     if w._tasks or w.preview_pending or w.motion_pending:
@@ -80,7 +85,7 @@ def save(w,path):
         os.replace(name,target)
     finally:
         if os.path.exists(name):os.unlink(name)
-    return dict(path=os.path.relpath(target,path.parent),sha256=digest,identity=identity(w))
+    return dict(path=portable_path(target,path.parent),sha256=digest,identity=identity(w))
 
 
 def restore(w,project,path):
