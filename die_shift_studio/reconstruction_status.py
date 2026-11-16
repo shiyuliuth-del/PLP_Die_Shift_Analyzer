@@ -105,13 +105,14 @@ class ConstraintFeedback:
         if self.worker:self.worker.cancelled.set()
     def request(self,frame,settings):
         self.cancel();w=self.w
-        self.pending=(self.ticket,frame,settings,w.data,w.params(),w.roles(),w.ordered_layers(),w.geometry_cache)
+        self.pending=(self.ticket,frame,settings,w.data,w.params(),w.roles(),w.ordered_layers(),w.geometry_cache,getattr(w.engine,'reconstructor',None))
         self.timer.start()
     def start(self):
         if self.worker or self.pending is None or self.w._closing:return
-        ticket,frame,cfg,data,p,roles,order,cache=self.pending;self.pending=None
+        ticket,frame,cfg,data,p,roles,order,cache,current=self.pending;self.pending=None
         from .gui import Worker
-        current=getattr(self.w.engine,'reconstructor',None)
+        # The foreground may lease/reset w.engine before this timer runs.
+        # Keep the completed source solver captured with the drag snapshot.
         pool=clone_plan_pool(current.plan_pool) if current is not None else {}
         changed=tuple(frame.get('_reconstruction_changed_refs',()))
         base=getattr(current,'_base_plans',None)

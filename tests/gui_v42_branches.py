@@ -1,6 +1,7 @@
 """Real mouse regression for merged branch domains and reversible crossing."""
 import os,sys,time,tempfile,json,threading
 from pathlib import Path
+from unittest.mock import patch
 from dataclasses import asdict,replace
 import numpy as np,gdstk
 from matplotlib.backend_bases import MouseEvent
@@ -64,7 +65,16 @@ try:
  event('motion_notify_event',cursor);w.cut_drag._tick();assert w.cut_drag.state['part'] is not None
  assert not w.current_frame['reconstruction']['constraints_complete']
  assert all(v['geometry'].is_valid for v in w.current_frame['reconstruction']['replacements']['5/0'])
- event('button_release_event',cursor);wait()
+ # Starting the debounce task after the foreground clears its active engine
+ # must still use the completed solver captured with this drag request.
+ from die_shift_studio.reconstruction import Reconstructor
+ original_plans=Reconstructor._plans_for_all_poses
+ def cached_plans(solver,progress):
+  assert solver._plans is not None or solver.plan_pool,'feedback rebuilt all paths'
+  return original_plans(solver,progress)
+ with patch.object(Reconstructor,'_plans_for_all_poses',cached_plans):
+  saved_engine=w.engine;w.engine=None;w.constraint_feedback.start();w.engine=saved_engine
+  event('button_release_event',cursor);wait()
  assert w.current_frame['reconstruction']['constraints_complete']
  assert all(v['geometry'].is_valid for v in w.current_frame['reconstruction']['replacements']['5/0'])
  assert not errors
