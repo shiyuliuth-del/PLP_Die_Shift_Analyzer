@@ -113,6 +113,12 @@ def main():
         ipc_env=dict(os.environ,DIE_SHIFT_TEST_EXE=str(exe))
         subprocess.run([sys.executable,str(ROOT/'tests/gui_v43_process.py')],cwd=ROOT,env=ipc_env,check=True,timeout=480)
         print('FROZEN_IPC_PASS: named pipe, custom pivot, GDS, batch OAS, shutdown and invalid startup',flush=True)
+        client=install/'RealDataAnalyse.exe'
+        shutil.copy2(source/'dist'/client.name,client)
+        normal_launch(client,cwd,'RealDataAnalyse '+__version__)
+        paired_env=dict(ipc_env,REALDATA_TEST_EXE=str(client))
+        subprocess.run([sys.executable,str(ROOT/'tests/gui_v44_process.py')],cwd=ROOT,env=paired_env,check=True,timeout=600)
+        print('FROZEN_REALDATA_PASS: both sibling EXEs, named pipe, Excel join, OAS and sibling restart',flush=True)
     print('WINDOWS_SOURCE_BUILD_PASS',__version__,platform.platform(),
           f'normal window {elapsed:.2f}s, {icons} icon sizes, source BAT and isolated EXE verified; no binary published',flush=True)
 

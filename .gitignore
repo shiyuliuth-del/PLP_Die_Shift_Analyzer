@@ -36,3 +36,9 @@ results/*.log
 
 ipc/
 .dsa-batch-*/
+.rda-import-*/
+RealDataAnalyse-output/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.lock
