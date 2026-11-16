@@ -1,5 +1,6 @@
 """Replaceable Excel adapter: one workbook per DIE, join by package ID."""
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import closing
 import json
 import math
 from pathlib import Path
@@ -114,7 +115,7 @@ def import_files(paths, database, die_count, workers, stop, progress=lambda _: N
                 sources = []
                 for future in as_completed(futures):
                     info = future.result()
-                    with sqlite3.connect(info['scratch']) as part:
+                    with closing(sqlite3.connect(info['scratch'])) as part:
                         try:
                             with ledger.db:
                                 ledger.db.executemany('insert into measurements values(?,?,?,?,?,?,?)', part.execute('select * from rows'))

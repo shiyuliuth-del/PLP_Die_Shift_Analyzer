@@ -1,5 +1,6 @@
 """Qt GUI; all IO/Excel/IPC work stays outside the GUI thread."""
 import json
+from contextlib import closing
 from pathlib import Path
 import threading
 import time
@@ -368,7 +369,7 @@ class Window(W.QMainWindow):
         # Read-only connection: viewing an arbitrary file cannot create schema.
         import sqlite3
         try:
-            with sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=.05) as db:
+            with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=.05)) as db:
                 meta = {k: json.loads(v) for k, v in db.execute('select key,value from meta')}
                 count = meta.get('count', 0)
                 self.page = min(self.page, max(0, (count - 1) // 200))

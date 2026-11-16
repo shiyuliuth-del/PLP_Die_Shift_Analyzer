@@ -182,9 +182,6 @@ jobs:
           "%DIE_SHIFT_PYTHON%" tests/gui_v40.py
           if errorlevel 1 exit /b %errorlevel%
           "%DIE_SHIFT_PYTHON%" tests/gui_v39.py
-      - name: Exercise the one-click BUILD.bat from the extracted source
-        shell: cmd
-        run: call "%DSA_TEST_SOURCE%\BUILD.bat"
       - name: Verify V44 Excel client and durable recovery
         shell: cmd
         run: |
@@ -194,6 +191,9 @@ jobs:
           "%DIE_SHIFT_PYTHON%" tests/gui_v44.py
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" tests/gui_v44_process.py
+      - name: Exercise the one-click BUILD.bat from the extracted source
+        shell: cmd
+        run: call "%DSA_TEST_SOURCE%\BUILD.bat"
       - name: Verify the startup and clean up the temporary executable
         run: |
           try {

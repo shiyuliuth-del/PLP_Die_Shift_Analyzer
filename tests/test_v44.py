@@ -137,6 +137,24 @@ class Contracts(unittest.TestCase):
             self.read()
         self.assertFalse(self.db.exists())
 
+    def test_import_closes_all_sqlite_handles_before_publication(self):
+        import sqlite3
+        connections = []
+        original = sqlite3.connect
+        class Tracked(sqlite3.Connection):
+            closed = False
+            def close(self):
+                self.closed = True
+                super().close()
+        def connect(*args, **kwargs):
+            connection = original(*args, **kwargs, factory=Tracked)
+            connections.append(connection)
+            return connection
+        with patch('sqlite3.connect', connect):
+            self.read()
+        self.assertTrue(connections)
+        self.assertTrue(all(connection.closed for connection in connections))
+
     def test_duplicate_rejected(self):
         self.edit(self.files[0], lambda s: setattr(s['A3'], 'value', s['A2'].value))
         with self.assertRaisesRegex(ValueError, '重复封装'):
