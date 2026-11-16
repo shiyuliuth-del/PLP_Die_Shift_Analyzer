@@ -1,11 +1,11 @@
 {
   "version": "V44",
   "status": "PASS",
-  "tested_at_utc": "2026-11-16T10:13:21.275752+00:00",
+  "tested_at_utc": "2026-11-16T10:31:13.984105+00:00",
   "scope": "Clean source checkout, local platform. Windows executable verification is recorded separately.",
   "platform": "linux",
-  "verified_runtime_sha256": "dca2e2dca9f7d57c8e7e0cc49bbbfe206417f42c8583b707d618e806cc73d2ce",
-  "gui_suites": 27,
+  "verified_runtime_sha256": "b8b9c7563471e73c9427a580379b2100f30fee7b47eb390de1e168192afa7a9e",
+  "gui_suites": 28,
   "runs": [
     {
       "args": [
@@ -21,7 +21,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "Ran 404 tests in 50.643s",
+        "Ran 404 tests in 51.197s",
         "",
         "OK (skipped=2)"
       ]
@@ -333,6 +333,16 @@
         "等待后补算整批（剩余自动重试2次）",
         "服务已退出，尝试启动同目录 Die Shift Analyze",
         "GUI_V44_PROCESS_PASS: Excel join, real local IPC, all OAS placements, durable recovery, same session identity after relaunch"
+      ]
+    },
+    {
+      "args": [
+        "tests/gui_v44_gd55.py"
+      ],
+      "env": {},
+      "status": "PASS",
+      "summary": [
+        "GD55_ACTUAL_CLIENT_PASS: imported all three bundled XLSX in the client process, 12 packages, OAS CRC/independent read/placements, unchanged source"
       ]
     },
     {

@@ -54,4 +54,10 @@ nu17123保存的±15μm/±1°、15μm规则：零位与8组同符号XYZ极端均
 
 Windows6303cf0工作流43843991585 clean/with-cupy两环境完整通过，包含实际构建两EXE、离线CPU回退、命名管道、Excel匹配/OAS、同目录启动/重启和正常退出。随后b349a2e仅合并PR #31的README、客户端验收记录与三份Excel说明K1更新；逐单元格核对其数值、格式与冻结窗格不变，程序、测试、构建与6303cf0逐文件相同。发布前继续核对联合最终头Windows检查。工厂离线镜像/物理RTX A5000未实测。
 
-联合源码包154文件、2,092,374字节；SHA-256 `18acccbaf8c621aee0d19f7d0ee7be1130d44706fb1b77fb90f419b5541791b1`。包含两个程序、双程序BUILD及明确授权GD55案例，无图片、EXE、Jobs缓存。7-Zip/CRC通过；发布后还需回下载实际Release与GitHub自动ZIP/tar逐文件核对，结果补充Release说明。
+较早候选源码包154文件、2,092,374字节；SHA-256 `18acccbaf8c621aee0d19f7d0ee7be1130d44706fb1b77fb90f419b5541791b1`。包含两个程序、双程序BUILD及明确授权GD55案例，无图片、EXE、Jobs缓存。7-Zip/CRC通过；发布后还需回下载实际Release与GitHub自动ZIP/tar逐文件核对，结果补充Release说明。
+
+### 最后并入客户端导入入口
+
+PR #31最终8ab7735新增`--import-data`与实际客户端进程GD55导入测试；0c2c047已包含双方最终程序。隔离父驱动完整48命令退出0，570.73秒：404核心（2外部另测）、28GUI/进程组、两后端、17工程。新增GD55链路由实际客户端读取随包三份Excel、启动同目录服务、输出12封装，核对OAS CRC/放置坐标及输入GDS哈希；记录在package_verification.json。DSA摘要仍为`b8b9c7563471e73c9427a580379b2100f30fee7b47eb390de1e168192afa7a9e`，客户端Python摘要为`9ee2109eeb879c1c73d1eec5dff881d30ec98906d86f04fdc778a368942476fc`。
+
+最终候选源码154文件、2,093,283字节，SHA-256 `6423028156f5ed1b760b2f325f8fadf1049da0a5cd1d83e7cf7d9c07cd6bcf0c`；CRC/7-Zip通过。Windows按包含此新增路径的最终程序头0c2c047核对，实际两EXE测试结果与发布回下载结果追加Release说明。后续验收文档和main历史合并不得改变上述运行文件。
