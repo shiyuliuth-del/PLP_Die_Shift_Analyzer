@@ -56,7 +56,18 @@ class Lease:
 class Ledger:
     def __init__(self, path):
         self.path = Path(path).resolve()
+        existing = self.path.exists()
         self.db = sqlite3.connect(self.path, timeout=30)
+        if existing:
+            try:
+                schema = self.db.execute("select value from meta where key='schema'").fetchone()
+                run_id = self.db.execute("select value from meta where key='run_id'").fetchone()
+                if not schema or json.loads(schema[0]) != 1 or not run_id:
+                    raise ValueError('Invalid ledger metadata')
+                uuid.UUID(hex=json.loads(run_id[0]))
+            except (sqlite3.Error, ValueError, TypeError, AttributeError):
+                self.db.close()
+                raise ValueError('不是受支持的RealDataAnalyse任务数据库；未修改所选文件') from None
         self.db.execute('pragma journal_mode=WAL')
         self.db.execute('pragma synchronous=FULL')
         self.db.executescript('''

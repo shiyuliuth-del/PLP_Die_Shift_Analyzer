@@ -305,6 +305,17 @@ class Contracts(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 Lease(self.db)
 
+    def test_unrelated_sqlite_is_not_modified(self):
+        import sqlite3
+        db = sqlite3.connect(self.db)
+        db.execute('create table unrelated(value text)')
+        db.commit()
+        db.close()
+        before = self.db.read_bytes()
+        with self.assertRaisesRegex(ValueError, '任务数据库'):
+            Ledger(self.db)
+        self.assertEqual(self.db.read_bytes(), before)
+
     def test_retry_uses_identical_operation_id(self):
         t = Transport(self.root / 'endpoint')
         ids = []
