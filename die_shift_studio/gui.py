@@ -910,6 +910,7 @@ class MainWindow(W.QMainWindow):
             try:self.request_preview()
             except ValueError:pass
     def drop_result(self):
+        if hasattr(self,'analysis'):self.analysis.cancel()
         self.result=None;self.clear_preview();self.manual_states=None;self.dirty=False;self.probability_data=None;self.footprint_data=None;self.space_data=None
         self.scheme_table.setRowCount(0)
         self.safe_range_plot_data=draw_safe_ranges(self.safe_range_figure,{});self.safe_range_canvas.setMinimumHeight(240);self.safe_range_canvas.draw_idle()

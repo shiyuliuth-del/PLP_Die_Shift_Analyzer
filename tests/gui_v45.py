@@ -81,5 +81,18 @@ try:
  w.manual_preview.hide();w.load_project(saved);wait()
  assert w.params().for_die(0).rotation_y_um==5
  assert w.params().minimum_area_um2==.5
+ # A project/result reset cooperatively cancels an explicitly requested analysis.
+ import threading
+ started=threading.Event()
+ w.run_evaluation();wait();w.tabs.setCurrentIndex(0)
+ def slow(*args,**kwargs):
+  started.set()
+  for i in range(1000):kwargs['progress'](i%100,'取消测试');time.sleep(.003)
+  raise AssertionError('obsolete analysis completed')
+ with patch('die_shift_studio.core.evaluate',side_effect=slow):
+  w.tabs.setCurrentWidget(w.analysis_page)
+  end=time.monotonic()+5
+  while not started.is_set() and time.monotonic()<end:app.processEvents();time.sleep(.005)
+  assert started.is_set();w.drop_result();wait();assert w.result is None
  print('GUI_V45_PASS compact layout, lazy analysis, manual pose/pivot Jobs, current copper DRC parity, style restore, auto IPC budgets',flush=True)
 finally:close_window(app,w);tmp.cleanup()
