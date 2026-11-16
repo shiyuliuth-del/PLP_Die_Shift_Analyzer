@@ -74,7 +74,7 @@ class Transport:
                 raise InterruptedError('用户停止')
             try:
                 response = self.rpc(command, args, key)
-            except (OSError, EOFError, TimeoutError):
+            except (OSError, EOFError, TimeoutError, json.JSONDecodeError):
                 if attempt == retries:
                     raise
             else:
@@ -141,7 +141,7 @@ class Transport:
                 if info.get('last_error'):
                     raise RemoteError(dict(error=info['last_error']))
                 last = '工程仍在准备'
-            except (OSError, EOFError, TimeoutError) as exc:
+            except (OSError, EOFError, TimeoutError, json.JSONDecodeError) as exc:
                 last = str(exc)
                 if self.process is not None and self.process.poll() is not None:
                     raise RuntimeError(f'程序启动退出 {self.process.returncode}；见RealDataAnalyse-child.log') from exc
