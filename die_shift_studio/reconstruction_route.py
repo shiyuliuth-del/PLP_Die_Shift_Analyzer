@@ -307,10 +307,13 @@ class RoutePlan:
         return shapely.Point(origin+toward/length*min(radius*.45,length*.2,20.))
 
     def width_variation(self,a,b):
+        key=('width-profile',float(a),float(b))
+        if key in self.cache:return self.cache[key]
         sections=[self.section(float(t)) for t in np.linspace(a,b,9)]
         widths=[g.length for g in sections if g is not None]
         if len(widths)!=9:return float('inf')
-        return (max(widths)-min(widths))/max(min(widths),self.tolerance)
+        value=(max(widths)-min(widths))/max(min(widths),self.tolerance)
+        self.cache[key]=value;return value
 
     def choose(self,max_travel):
         """Longest straight candidate; motion envelope determines its margin.
@@ -340,7 +343,28 @@ class RoutePlan:
                 part=self.partition(0.,float(b))
                 if part is not None:candidates.append((float(b),0.,float(b),part));break
         if not candidates:return None
-        rank=lambda q:(self.width_variation(q[1],q[2])>.05,self.width_variation(q[1],q[2]),-q[0])
+        # A long straight centreline may begin inside a wide junction/pad.
+        # Search its interior for a constant-width run instead of ranking the
+        # whole segment (which can hide a perfectly usable uniform section).
+        uniform=[]
+        for length,a,b,_ in candidates:
+            stations=np.linspace(a,b,25)
+            widths=[self.section(float(t)) for t in stations]
+            widths=[g.length if g is not None else float('nan') for g in widths]
+            best=None
+            for left in range(len(stations)-1):
+                for right in range(left+1,len(stations)):
+                    w=widths[left:right+1]
+                    if not np.isfinite(w).all() or min(w)<=self.tolerance or max(w)>min(w)*1.05:break
+                    if best is None or stations[right]-stations[left]>stations[best[1]]-stations[best[0]]:best=(left,right)
+            if best:
+                lo,hi=map(float,stations[list(best)])
+                part=self.partition(lo,hi)
+                if part is not None:uniform.append((hi-lo,lo,hi,part))
+        candidates.extend(uniform)
+        def rank(q):
+            variation=self.width_variation(q[1],q[2])
+            return (variation>.05,variation if variation>.05 else 0.,-q[0])
         candidates.sort(key=rank)
         self.candidate_intervals=tuple((q[1],q[2]) for q in candidates)
         # Sufficient bound on smoothstep shear; an insufficient length remains

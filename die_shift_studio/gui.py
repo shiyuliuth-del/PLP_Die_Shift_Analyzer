@@ -2593,8 +2593,8 @@ class MainWindow(W.QMainWindow):
     def change_reconstruction_mode(self,refs,following):
         if getattr(self,'remote_locked',False):return
         refs=set(refs);old=set(self.view_settings.reconstruction_following)
-        self.view_settings=replace(self.view_settings,reconstruction_following=tuple(sorted(old|refs if following else old-refs)))
-        self.change_reconstruction_ignores(refs,True)
+        self.view_settings=replace(self.view_settings,reconstruction_following=tuple(sorted(old|refs if following else old-refs)),
+                                   reconstruction_ignored=tuple(sorted(set(self.view_settings.reconstruction_ignored)|refs)))
         self.invalidate_reconstruction_edit();self.request_preview()
     def change_reconstruction_ignores(self,refs,ignore):
         if getattr(self,'remote_locked',False):return
@@ -2688,6 +2688,7 @@ class MainWindow(W.QMainWindow):
     def closeEvent(self,event):
         measured=getattr(self,'measured_output',None)
         if measured and (measured.active() or measured.running or measured.stopping):
+            self._closing=True
             if measured.active():measured.stop(disable=True)
             if measured.running or measured.stopping:
                 event.ignore();QtCore.QTimer.singleShot(100,self.close);return
@@ -2715,12 +2716,18 @@ def launch(project=None,measured=False,ipc_endpoint=None):
     app=W.QApplication.instance() or W.QApplication([]);app.setApplicationName('Die Shift Analyze')
     window=MainWindow();window.requested_ipc_endpoint=ipc_endpoint;window.show()
     if measured:
+        def startup_error(message):
+            window.log_bus.emit(str(message),'ERROR');window._closing=True;window._startup_failed=True
+            window.close()
+        window.error=startup_error
         def activate():
+            if window._closing:return
             if window.data is not None and window.worker is None and not window.preview_workers:
                 window.measured_output.toggle.setChecked(True)
+                if window.measured_output.active():window.error=MainWindow.error.__get__(window,MainWindow)
             else:QtCore.QTimer.singleShot(100,activate)
         QtCore.QTimer.singleShot(150,activate)
     if project:QtCore.QTimer.singleShot(0,lambda:window.load_project(project))
     code=app.exec() if hasattr(app,'exec') else app.exec_()
     QtCore.QCoreApplication.sendPostedEvents(None,getattr(QtCore.QEvent,'Type',QtCore.QEvent).DeferredDelete)
-    return code
+    return 1 if getattr(window,'_startup_failed',False) else code

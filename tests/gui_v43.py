@@ -35,12 +35,46 @@ try:
  e,data,c=fixture();roles=e.roles;p=e.p;e.close();lib=gdstk.Library(unit=1e-6,precision=1e-9);cell=lib.new_cell('TOP')
  for key,rows in data.layers.items():
   layer,datatype=map(int,key.split('/'));cell.add(*(gdstk.Polygon(xy,layer=layer,datatype=datatype) for xy in rows))
+ from die_shift_studio.gds_merge import winding_outline
+ import shapely
+ cell.add(gdstk.rectangle((900,0),(901,1),layer=99),gdstk.Polygon(winding_outline(shapely.box(920,0,940,20).difference(shapely.box(925,5,926,6))),layer=99))
  source=folder/'case.oas';lib.write_oas(source)
  project=folder/'source.dshift.json';project.write_text(json.dumps(dict(schema_version=5,gds_path=str(source),top_cell='TOP',roles=roles,
    layer_order=['6/0','5/0','4/0','3/0','128/0','127/0'],parameters=asdict(p),settings=dict(animation_enabled=False,safe_box_budget=32),overlays={})))
  w.load_project(project);until(lambda:w.data is not None and w.worker is None and not w._tasks)
  assert w.data.path.endswith('.oas')
- assert all('补块' not in w.controls.tabText(i) for i in range(w.controls.count()))
+ assert all('补块' not in tabs.tabText(i) for tabs in w.findChildren(W.QTabWidget) for i in range(tabs.count()))
+ w.fields['minimum_area_um2'].setValue(2);until(lambda:w.worker is None and not w._tasks)
+ assert len(w.data.layers['99/0'])==1 and abs(shapely.Polygon(w.data.layers['99/0'][0]).area-400)<1e-8
+ from die_shift_studio.gds_shapes import shape_nodes,node_fingerprint
+ kind,xy,_=shape_nodes(w.data,'99/0',0)
+ w.apply_node_edits([dict(layer='99/0',index=0,original=node_fingerprint(kind,xy),nodes=(xy+[2,0]).tolist())])
+ until(lambda:w.worker is None and not w._tasks)
+ w.write_project(project);w.load_project(project);until(lambda:w.worker is None and not w._tasks)
+ assert shapely.Polygon(w.data.layers['99/0'][0]).bounds[0]==922
+ w.fields['minimum_area_um2'].setValue(0);until(lambda:w.worker is None and not w._tasks)
+ assert len(w.data.layers['99/0'])==2 and shapely.Polygon(w.data.layers['99/0'][1]).bounds[0]==922
+ # Press a tilted blade away from its path intersection. Drag distance must
+ # start at that press, not jump by the blade's pre-existing lateral offset.
+ w.reconstruction_toggle.setChecked(True)
+ until(lambda:w.current_frame is not None and w.current_frame.get('reconstruction',{}).get('constraints_complete') and not w._tasks and not w.preview_pending)
+ from dataclasses import replace
+ from die_shift_studio.reconstruction_edits import key,rotate
+ from matplotlib.backend_bases import MouseEvent
+ q=w.current_frame['reconstruction']['pieces'][0];plan=q['route_plan']
+ settings=replace(w.view_settings,reconstruction_intervals=((*key(plan),100.,500.),))
+ w.view_settings=rotate(settings,q,0,.4);w.invalidate_reconstruction_edit();w.request_preview()
+ until(lambda:not w._tasks and not w.preview_pending)
+ q=w.current_frame['reconstruction']['pieces'][0];pressed=q['moved_cut'].interpolate(.2,normalized=True).coords[0]
+ w.ax.set_xlim(50,150);w.ax.set_ylim(-50,50);w.plot_layout(preserve=True);w.canvas.draw()
+ def event(name,point):
+  x,y=w.ax.transData.transform(point);w.canvas.callbacks.process(name,MouseEvent(name,w.canvas,x,y,button=1))
+ event('button_press_event',pressed);assert w.cut_drag.state is not None
+ before=w.cut_drag.state['piece']['interval'][0]
+ event('motion_notify_event',(pressed[0]+4,pressed[1]));w.cut_drag._tick()
+ assert abs(w.cut_drag.state['part']['a']-before-4)<.05,w.cut_drag.state['part']
+ w.cut_drag.cancel();until(lambda:not w._tasks)
+ w.reconstruction_toggle.setChecked(False);until(lambda:not w._tasks and not w.preview_pending)
  w.requested_ipc_endpoint=folder/'endpoint.json';w.measured_output.toggle.setChecked(True)
  until(lambda:w.measured_output.ready)
  assert w.remote_locked and w.project_path==project and project.is_file()

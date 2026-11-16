@@ -25,7 +25,10 @@ class MeasuredOutput(QtCore.QObject):
         self.timer=QtCore.QTimer(self);self.timer.setInterval(75);self.timer.timeout.connect(self.tick);self.timer.start()
         w.task_control.button.clicked.connect(lambda:self.stop() if self.active() else None)
     def configuration(self):return asdict(Options.from_dict(dict(output_directory=self.directory.text(),max_memory_mb=self.memory.value(),max_threads=self.threads.value())))
-    def restore(self,values):
+    def restore(self,values,force=False):
+        # An active controller's chosen destination/limits apply across project
+        # switches. Ordinary GUI opening still restores per-project preferences.
+        if self.active() and not force:return
         self.options=Options.from_dict(values);self.directory.setText(self.options.output_directory);self.memory.setValue(self.options.max_memory_mb);self.threads.setValue(self.options.max_threads)
     def active(self):return self.server is not None
     def apply_lock(self):
@@ -50,6 +53,7 @@ class MeasuredOutput(QtCore.QObject):
         w=self.w
         if w.data is None:raise ValueError('请先打开并设置工程，再进入实测输出')
         if w.worker is not None or w.preview_workers:raise ValueError('请等当前图纸任务完成后进入实测输出')
+        w.cut_drag.cancel();w.exit_region_mode()
         self.options=Options.from_dict(self.configuration())
         # Saving is a prerequisite; no IPC endpoint exists if persistence fails.
         path=w.project_path or w.jobs_dir/('实测自动保存_'+time.strftime('%Y%m%d_%H%M%S')+'_'+uuid.uuid4().hex[:6]+'.dshift.json')
@@ -198,7 +202,7 @@ class MeasuredOutput(QtCore.QObject):
         if not self.active():raise RuntimeError('实测输出已关闭，不接受新的遥控命令')
         if command=='compute.cancel':self.stop();return dict(status='completed',result={'cancellation_requested':True,'running':list(self.running)})
         if command=='app.shutdown':
-            self.stop(disable=True);QtCore.QTimer.singleShot(100,w.close);return dict(status='completed',result={'shutdown_requested':True})
+            w._closing=True;self.stop(disable=True);QtCore.QTimer.singleShot(100,w.close);return dict(status='completed',result={'shutdown_requested':True})
         if self.stopping:raise RuntimeError('取消尚未完成，请等待running清空')
         if command in ('project.open','project.close'):
             if self.running or self.batch or self.transition:raise RuntimeError('请先取消或结束当前任务')
@@ -219,7 +223,7 @@ class MeasuredOutput(QtCore.QObject):
             options=Options.from_dict({**asdict(self.options),**args})
             if options.output_directory and not Path(options.output_directory).is_dir():raise ValueError('输出目录不存在')
             self.options=options
-            self.restore(asdict(self.options))
+            self.restore(asdict(self.options),force=True)
             if w.data:w.write_project(w.project_path)
             return dict(status='completed',result=asdict(self.options))
         if command=='session.prepare':

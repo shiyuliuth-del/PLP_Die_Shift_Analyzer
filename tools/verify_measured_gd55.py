@@ -82,7 +82,10 @@ def main():
             import gdstk
             lib=gdstk.read_oas(report['oas']['path']);top=lib.top_level()
             assert len(top)==1 and top[0].name=='TopCell' and len(top[0].references)==args.count
-            assert gdstk.oas_validate(report['oas']['path'])[0];assert gdstk.read_gds(report['gds']['path']).top_level()
+            # Isolate the external checksum reader: some gdstk builds keep the
+            # file open, which would otherwise lock the output on Windows.
+            subprocess.run([sys.executable,'-c','import gdstk,sys; assert gdstk.oas_validate(sys.argv[1])[0]',report['oas']['path']],check=True)
+            assert gdstk.read_gds(report['gds']['path']).top_level()
             report['independent_readback']='gdstk passed'
         except ImportError:report['independent_readback']='not run; caller has no gdstk'
         checked(endpoint,'compute.cancel');report['status']='PASS';report['seconds']=time.perf_counter()-started

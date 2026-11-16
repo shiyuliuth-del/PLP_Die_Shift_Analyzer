@@ -71,7 +71,14 @@ class Server:
                 if self.closed.is_set():break
                 continue
             if self.closed.is_set():connection.close();break
-            if not self.slots.acquire(blocking=False):connection.close();continue
+            if not self.slots.acquire(blocking=False):
+                try:
+                    if connection.poll(.5):
+                        request=decode(connection.recv_bytes(MAX_MESSAGE))
+                        connection.send_bytes(json.dumps(dict(id=request.get('id'),status='error',error=dict(type='Busy',message='IPC transport busy',retry_after_ms=200))).encode())
+                except (OSError,EOFError,ValueError):pass
+                finally:connection.close()
+                continue
             try:self.pool.submit(self._handle,connection)
             except RuntimeError:connection.close();self.slots.release();break
         self.listener.close()
@@ -101,6 +108,7 @@ class Server:
             except (OSError,EOFError):pass
         threading.Thread(target=wake,daemon=True).start()
         self.pool.shutdown(wait=False,cancel_futures=True)
+        self.thread.join(.5)
         try:
             info=json.loads(self.endpoint.read_text())
             if info.get('token')==self.token.hex():self.endpoint.unlink()

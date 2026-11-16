@@ -24,6 +24,26 @@ def string(s):
 def real(v):return b'\x07'+struct.pack('<d',float(v))
 
 
+def verify_crc(path):
+    """Verify our CRC32 OAS with an explicitly closed descriptor on every OS.
+
+    Some gdstk oas_validate builds leave their FILE open; on Windows that prevents
+    rename/delete. Independent reader tests remain separate from atomic publish.
+    """
+    path=Path(path);size=path.stat().st_size
+    if size<280:return False
+    with path.open('rb') as stream:
+        if stream.read(13)!=b'%SEMI-OASIS\r\n':return False
+        stream.seek(-256,2);end=stream.read(256)
+        if end[0]!=2 or end[-5]!=1:return False
+        stream.seek(0);left=size-4;crc=0
+        while left:
+            cancel_check();data=stream.read(min(left,1024**2))
+            if not data:return False
+            left-=len(data);crc=zlib.crc32(data,crc)
+    return crc==struct.unpack('<I',end[-4:])[0]
+
+
 def placement(name,origin=(0.,0.),angle=0.,dbu=.001):
     xy=np.rint(np.asarray(origin)/dbu)
     if not np.isfinite(xy).all() or np.max(abs(xy),initial=0)>2**52:raise ValueError('Placement coordinates outside safe range')
@@ -62,18 +82,19 @@ class Store:
     only the index/placements, never all copper. Finalization appends TopCell.
     """
     def __init__(self,directory,dbu,memory_bytes=64*1024**2):
+        if not math.isfinite(dbu) or dbu<=0:raise ValueError('Output DBU must be finite and positive')
         self.temp=tempfile.TemporaryDirectory(prefix='.dsa-batch-',dir=directory)
         self.db=sqlite3.connect(str(Path(self.temp.name)/'cells.sqlite'),check_same_thread=False)
         self.db.execute('pragma journal_mode=OFF');self.db.execute('pragma temp_store=FILE');self.db.execute('pragma cache_size=-4096')
         self.db.execute('create table cells(name text primary key)')
         self.db.execute('create table packages(name text primary key, x real, y real)')
-        self.dbu=float(dbu);self.limit=max(1024**2,int(memory_bytes));self.pending=[];self.bytes=0;self.count=0
+        self.dbu=float(dbu);self.limit=max(1024**2,int(memory_bytes));self.pending=[];self.pending_names=set();self.bytes=0;self.count=0
         self.stage=Path(self.temp.name)/'stage.oas';self.stream=self.stage.open('wb');self.crc=0;self.finished=False
         self.emit(b'%SEMI-OASIS\r\n\x01'+string('1.0')+real(1/self.dbu)+b'\0'+b'\0'*12)
     def add(self,name,layers,position,board_origin):
         if not name or len(name)>120 or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-' for c in name):raise ValueError('Cell name must be 1–120 ASCII letters/digits/_/-')
         if name=='TopCell' or name.startswith('G_'):raise ValueError('Reserved cell name')
-        if self.db.execute('select 1 from packages where name=?',(name,)).fetchone() or any(q[0]==name for q in self.pending):raise ValueError('Duplicate package Cell: '+name)
+        if name in self.pending_names or self.db.execute('select 1 from packages where name=?',(name,)).fetchone():raise ValueError('Duplicate package Cell: '+name)
         children=[];cells=[]
         # Reuse canonical source features, not just whole layers. Changing one
         # trace must not duplicate all unchanged traces in the same fixed layer.
@@ -88,7 +109,7 @@ class Store:
                 children.append(placement(child,origin,dbu=self.dbu))
         body=b''.join(children);shift=np.asarray(position,dtype=float)-np.asarray(board_origin)
         if shift.shape!=(2,) or not np.isfinite(shift).all():raise ValueError('Package origin must have two finite coordinates')
-        self.pending.append((name,cells,body,tuple(shift)));self.bytes+=sum(len(b) for _,b in cells)+len(body)
+        self.pending.append((name,cells,body,tuple(shift)));self.pending_names.add(name);self.bytes+=sum(len(b) for _,b in cells)+len(body)
         self.count+=1
         if self.bytes>=self.limit:self.flush()
     def emit(self,data):
@@ -105,9 +126,10 @@ class Store:
                 if cursor.rowcount:self.cell(child,content)
             self.db.execute('insert into cells values (?)',(name,));self.cell(name,body)
             self.db.execute('insert into packages values (?,?,?)',(name,x,y))
-        self.db.commit();self.stream.flush();self.pending.clear();self.bytes=0
+        self.db.commit();self.stream.flush();self.pending.clear();self.pending_names.clear();self.bytes=0
     def write(self,destination,progress=lambda *_:None):
         if self.finished:raise RuntimeError('Batch OAS already finalized')
+        if not self.count:raise ValueError('批次没有成功的封装Cell，不替换已有文件')
         self.flush();destination=Path(destination);self.emit(b'\x0e'+string('TopCell'))
         total=self.db.execute('select count(*) from cells').fetchone()[0]
         for i,(name,x,y) in enumerate(self.db.execute('select name,x,y from packages order by name')):
@@ -115,9 +137,7 @@ class Store:
             if i%256==0:progress(round(90*i/max(self.count,1)),'输出TopCell封装引用')
         self.emit(b'\x02'+uint(248)+b'\0'*248+b'\x01');self.stream.write(struct.pack('<I',self.crc))
         self.stream.flush();os.fsync(self.stream.fileno());self.stream.close();self.finished=True
-        import gdstk
-        valid,_=gdstk.oas_validate(self.stage)
-        if not valid:raise ValueError('OAS checksum validation failed')
+        if not verify_crc(self.stage):raise ValueError('OAS checksum validation failed')
         cancel_check();os.replace(self.stage,destination)
         return dict(path=str(destination.resolve()),cells=self.count,unique_geometry_cells=total-self.count,bytes=destination.stat().st_size,dbu_um=self.dbu,top_cell='TopCell')
     def close(self):

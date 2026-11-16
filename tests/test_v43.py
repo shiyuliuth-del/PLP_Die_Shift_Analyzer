@@ -10,6 +10,32 @@ from die_shift_studio.settings import ViewSettings
 
 
 class V43Tests(unittest.TestCase):
+ def test_oas_crc_corruption_and_empty_batch_keep_old_destination(self):
+  from die_shift_studio.oas_stream import Store,verify_crc
+  with tempfile.TemporaryDirectory() as tmp:
+   target=Path(tmp)/'existing.oas';target.write_bytes(b'old')
+   store=Store(tmp,.001)
+   try:
+    with self.assertRaises(ValueError):store.write(target)
+    self.assertEqual(target.read_bytes(),b'old')
+    store.add('P',{'1/0':[box(0,0,1,1).wkb]},(0,0),(0,0));store.write(target)
+    self.assertTrue(verify_crc(target));changed=bytearray(target.read_bytes());changed[40]^=1;target.write_bytes(changed)
+    self.assertFalse(verify_crc(target))
+    # Actual rename/delete, not just a checksum success assertion: Windows
+    # rejects this when a reader has leaked its open file descriptor.
+    renamed=target.with_name('renamed.oas');target.rename(renamed);renamed.unlink()
+   finally:store.close()
+ def test_uniform_candidates_precede_long_taper_when_both_feasible(self):
+  from die_shift_studio.reconstruction_route import RoutePlan
+  # Longer horizontal taper plus a shorter constant-width vertical run.
+  route=shapely.LineString([(0,0),(500,0),(500,300)])
+  taper=shapely.Polygon([(-20,-15),(500,-40),(520,0),(500,40),(-20,15)])
+  source=shapely.union_all([taper,box(480,0,520,300),Point(0,0).buffer(20),Point(500,300).buffer(25)])
+  plan=RoutePlan('5/0',0,0,(('4/0',0),),source,route,Point(0,0).buffer(10),(Point(500,300).buffer(10),),.001,3.)
+  part=plan.choose(0)
+  self.assertIsNotNone(part)
+  self.assertGreater(part['a'],500)
+  self.assertLess(plan.width_variation(part['a'],part['b']),.05)
  def test_oas_stream_holes_reuse_origins_and_integer_endpoints(self):
   from die_shift_studio.oas_stream import Store
   import klayout.db as db
