@@ -56,15 +56,15 @@ def measure(part,plan,center,pose,regions):
     return width,min(angles),float(np.mean(angles))-face_penalty
 
 
-def solve(r,plan,base,center,pose,quick=False):
+def solve(r,plan,base,center,pose,quick=False,native_check=True):
     mode=r.settings.reconstruction_boundary_mode;style=r.settings.reconstruction_style
     if mode=='perpendicular' and quick:
         regions,error=warp(base,plan,center,pose,style)
         return base,regions,error,None
-    if mode=='perpendicular':
+    if mode=='perpendicular' and native_check:
         regions,error,quality=r.rules.best_regions(plan,base,center,pose,style)
         return base,regions,error,quality
-    key=('angle-v41',mode,style,quick,base.get('manual_angles'),part_key(base),np.asarray(center).tobytes(),np.asarray(pose).tobytes())
+    key=('angle-continuity',mode,style,quick,native_check,base.get('manual_angles'),part_key(base),np.asarray(center).tobytes(),np.asarray(pose).tobytes())
     hit=plan.cache.get(key)
     if hit is not None:
         part,regions,error,quality=hit
@@ -77,7 +77,7 @@ def solve(r,plan,base,center,pose,quick=False):
         if mode=='balanced':goal*=.5
         angles=[goal,goal*.5,goal*1.5,np.array([goal[0],0.]),np.array([0.,goal[1]])]
         for delta in (() if quick else (-math.pi/12,math.pi/12)):angles.append(np.clip(goal+delta,-math.pi/3,math.pi/3))
-        for values in (angles[:1] if quick else angles):
+        for values in (() if mode=='perpendicular' else angles[:1] if quick else angles):
             cancel_check()
             values=np.clip(np.asarray(values,float),-math.pi/3,math.pi/3)
             for side,locked in enumerate(base.get('manual_angles',(False,False))):
@@ -91,17 +91,24 @@ def solve(r,plan,base,center,pose,quick=False):
     for part in trials:
         cancel_check();regions,error=warp(part,plan,center,pose,style)
         if error:continue
-        try:width,least,mean=measure(part,plan,center,pose,regions)
-        except (ValueError,shapely.errors.GEOSException):continue
-        rank=(-width,-least,-mean) if mode=='wide' else (-least,-mean,-width)
-        ranked.append((rank,part))
-    if quick:
-        part=min(ranked,key=lambda q:q[0])[1] if ranked else base
-        regions,error=warp(part,plan,center,pose,style)
-        return part,regions,error,None
+        candidates=[regions]
+        if not native_check and not quick and style!='linear' and np.any(pose):
+            alternate,reason=warp(part,plan,center,pose,style,-1)
+            if reason is None:candidates.append(alternate)
+        for geometry in candidates:
+            try:width,least,mean=measure(part,plan,center,pose,geometry)
+            except (ValueError,shapely.errors.GEOSException):continue
+            rank=(-width,-least,-mean) if mode in ('wide','perpendicular') else (-least,-mean,-width)
+            ranked.append((rank,part,geometry))
+    if quick or not native_check:
+        if ranked:_,part,regions=min(ranked,key=lambda q:q[0]);answer=(part,regions,None,None)
+        else:
+            regions,error=warp(base,plan,center,pose,style);answer=(base,regions,error,None)
+        if len(plan.cache)>512:plan.cache.clear()
+        plan.cache[key]=(answer[0],None if answer[1] is None else dict(answer[1]),answer[2],answer[3]);return answer
     # Test the base plus the three best geometric angles against native rules.
     best=None
-    finalists=[base,*[part for _,part in sorted(ranked,key=lambda q:q[0])[:3]]]
+    finalists=[base,*[part for _,part,_ in sorted(ranked,key=lambda q:q[0])[:3]]]
     seen=set()
     for part in finalists:
         if part_key(part) in seen:continue

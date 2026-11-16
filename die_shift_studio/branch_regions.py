@@ -36,7 +36,7 @@ def assemble(r,source,rows,states):
         if m and f:active=shapely.union_all([active,g]);continue
         index=len(rigid);rigid.append(g)
         if m or f:known[index]=float(m)
-    domains=parts(clean_overlay(active,r.tol));physical_count=len(rigid)
+    domains=sorted(parts(clean_overlay(active,r.tol)),key=lambda g:g.bounds);physical_count=len(rigid)
     # Real terminal regions provide Dirichlet conditions even in whole-pad mode.
     for g,v in ((moving,1.),(fixed,0.)):
         known[len(rigid)]=v;rigid.append(g)
@@ -76,7 +76,7 @@ def assemble(r,source,rows,states):
             return np.column_stack([co*v[:,0]-si*v[:,1],si*v[:,0]+co*v[:,1]])+center+fraction[:,None]*pose[:2]
         return shapely.transform(dense,coordinates)
     result=[]
-    for group,ids in zip(domains,neighbours):
+    for domain_index,(group,ids) in enumerate(zip(domains,neighbours)):
         members=[q for q in rows if group.intersects(q['nominal_regions']['A'])]
         if not members or not ids:continue
         q=dict(members[0]);posed=deform(group,ids);valid=posed.is_valid and posed.geom_type=='Polygon'
@@ -94,19 +94,35 @@ def assemble(r,source,rows,states):
             if alternative is not None:posed=alternative;valid=True
         if not valid:posed=shapely.Polygon()
         high=max(values[i] for i in ids);low=min(values[i] for i in ids)
-        def face(weight):
-            interfaces=[group.boundary.intersection(rigid[i].boundary) for i in ids if i<physical_count and abs(values[i]-weight)<1e-10]
-            surface=shapely.union_all(interfaces)
-            if not surface.is_empty:return surface
-            terminals=[r.model.nodes[r.model.ids[ref]]['poly'].centroid for member in members for ref in member['via_refs']] if weight>.5 else [v['poly'].centroid for v in r.stays if v['net']==q['net'] and source.intersects(v['poly'])]
+        def face(weight,side):
+            # Difference/union can leave ulp-different seam coordinates. A
+            # display-only sub-DBU neighbourhood recovers the real line; isolated
+            # touch points are NOT whole-pad controls.
+            interfaces=[rigid[i].boundary.intersection(group.buffer(r.tol*.05)) for i in ids if i<physical_count and abs(values[i]-weight)<1e-10]
+            lines=[line for g in interfaces for line in shapely.get_parts(g) if line.geom_type=='LineString' and line.length>r.tol*8]
+            if lines:return shapely.line_merge(shapely.union_all(lines))
+            terminals=[]
+            for member in members:
+                plan=member['route_plan'];s=member['interval'][side]
+                endpoint=plan.route.coords[0 if side==0 else -1]
+                landing=plan.land if side==0 else shapely.union_all(plan.anchors)
+                whole=(s==0 if side==0 else abs(s-plan.length)<=r.tol)
+                if getattr(plan,'pad_modes',(True,True))[side] and (whole or landing.difference(group).area<=r.tol*r.tol):
+                    actual=getattr(plan,'terminal_vias',((),()))[side]
+                    terminal=min(actual,key=lambda g:g.distance(shapely.Point(endpoint))).centroid if actual else shapely.Point(endpoint)
+                    terminals.append(terminal)
             return shapely.union_all(terminals)
-        nearcut,farcut=face(high),face(low)
+        nearcut,farcut=face(high,0),face(low,1)
+        # Whole-pad controls are physical terminal locations. Floating material
+        # weights apply to interface lines, never to the terminal itself.
+        if nearcut.geom_type in ('Point','MultiPoint'):high=1.
+        if farcut.geom_type in ('Point','MultiPoint'):low=0.
         q.update(regions=dict(A=posed,B=b,C=cposed),nominal_regions=dict(A=group,B=b,C=c),
                  bridge=posed,movable=c,moved=cposed,fixed=b,immovable=b,span=group,
                  moved_cut=transform(nearcut,center,pose*high),cut=nearcut,extra_cut=transform(farcut,center,pose*low),endpoint_weights=(high,low),
                  fallback_regions=dict(A=shapely.Polygon(),B=b,C=cposed),connection_failed=not valid,valid=valid,missing_region=group,
                  warning=q['warning'] if valid else '分叉动区型变折叠，已取消连接段',
-                 graph_members=tuple(members),route_identity='graph:'+':'.join(sorted(v['route_identity'] for v in members)),
+                 graph_members=tuple(members),route_identity='graph:'+':'.join(sorted(v['route_identity'] for v in members))+'@'+str(domain_index),
                  source_scope_complete=False,flow_steps=flow_steps,bridge_area_um2=posed.area,movable_area_um2=c.area,moved_area_um2=cposed.area,fixed_area_um2=b.area,
                  whole_landing=nearcut.geom_type in ('Point','MultiPoint'),whole_fixed_landing=farcut.geom_type in ('Point','MultiPoint'),
                  via_refs=tuple(sorted({ref for v in members for ref in v['via_refs']})))

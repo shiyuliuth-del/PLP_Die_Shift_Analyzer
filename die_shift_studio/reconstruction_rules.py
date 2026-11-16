@@ -18,9 +18,9 @@ from .resources import cancel_check
 @lru_cache(maxsize=512)
 def intrinsic(wkb,width,space,dbu):
     g=shapely.from_wkb(wkb)
-    return tuple((name,bad) for name,bad in
-                 (('线宽不足',rule_region(g,width,dbu)),('线距不足',rule_region(g,space,dbu,'space')))
-                 if not bad.is_empty)
+    from .native_backend import any_violation
+    return tuple((name,rule_region(g,value,dbu,op)) for name,op,value in
+                 (('线宽不足','width',width),('线距不足','space',space)) if any_violation(op,wkb,dbu,value))
 
 
 class FixedRules:

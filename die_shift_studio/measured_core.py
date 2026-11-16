@@ -78,6 +78,9 @@ class Session:
         # Batch omits global probability, width analysis, UI artwork and complete
         # DRC marker scans. The same curve solver still rejects invalid geometry.
         result=r.frame(states,progress=progress,diagnostics=preview)
+        if result.get('hard_failures'):
+            from .topology_routing import failure_message
+            raise ValueError(failure_message(result['hard_failures']))
         bound=self.cache.bind(self.case,self.motions,list(self.cache.layers),p)
         bound.acceleration=self.settings.acceleration
         layers=bound.transform(states)

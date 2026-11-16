@@ -85,7 +85,32 @@ class ReconstructionOverlay:
                     distance+=24.;point=center+distance*direction
                 placed.append(point)
                 result[rows[j][0]]=shapely.Point(self.w.ax.transData.inverted().transform(point))
+        drag=getattr(getattr(self.w,'cut_drag',None),'state',None)
+        if drag is not None and drag.get('part') is not None:
+            side=1 if drag['kind']=='extra' else 0;face=drag['part']['far' if side else 'near']
+            if face.geom_type=='Point':
+                selected=drag['piece'];owner=selected['die'];weight=selected.get('endpoint_weights',(1.,0.))[side]
+                actual=transform(face,frame['rotation_centers'][owner],frame['states'][owner]*weight)
+                candidates=[]
+                for q in pieces:
+                    if (q['layer'],q['index'])!=(selected['layer'],selected['index']):continue
+                    if not any(m.get('route_plan') is not None and m['route_plan'].identity==selected['route_plan'].identity for m in q.get('graph_members',(q,))):continue
+                    key=(self._key(q),drag['kind']);g=result.get(key)
+                    if g is not None and g.geom_type in ('Point','MultiPoint'):candidates.append((g.distance(actual),key,g))
+                if candidates:
+                    _,key,g=min(candidates,key=lambda item:item[0]);xy=shapely.get_coordinates(g).copy()
+                    i=int(np.argmin(np.linalg.norm(xy-np.asarray(actual.coords[0]),axis=1)));xy[i]=np.asarray(actual.coords[0])+drag['handle_offset']
+                    result[key]=shapely.Point(xy[0]) if len(xy)==1 else shapely.MultiPoint(xy)
         return result
+
+    def edited_handle(self,piece,kind,fallback):
+        candidates=[]
+        for q in self.pieces():
+            if (q['layer'],q['index'])!=(piece['layer'],piece['index']):continue
+            if not any(m.get('route_plan') is not None and m['route_plan'].identity==piece['route_plan'].identity for m in q.get('graph_members',(q,))):continue
+            g=self.handles.get((self._key(q),kind))
+            if g is not None and not g.is_empty:candidates.append(g)
+        return min(candidates,key=lambda g:g.distance(fallback)) if candidates else fallback
     def risk_bank(self):return getattr(getattr(self.w,'reconstruction_yield',None),'evidence',None)
     def draw(self):
         w=self.w
@@ -128,6 +153,7 @@ class ReconstructionOverlay:
                 region_groups.setdefault((q['layer'],q['index'],k,status if k=='A' else ('following' if q.get('ignored_following') else '')),{})[id(g)]=g
             if status=='red' and not gactive.is_empty and _in_view(gactive.bounds,w.view_bounds):red.append(patch(gactive))
             if status=='pending' and not gactive.is_empty and _in_view(gactive.bounds,w.view_bounds):warnings.append(patch(gactive))
+            if q.get('routing_recovered') and not gactive.is_empty and _in_view(gactive.bounds,w.view_bounds):warnings.append(patch(gactive))
             row=(bank or {}).get('zones',{}).get(zone_key(q))
             geos=[row['markers']] if nominal and row else [v['geometry'] for v in q.get('rule_witnesses',())]
             for g in geos:
@@ -168,13 +194,14 @@ class ReconstructionOverlay:
             from .width_witness import pose_text
             labels={'red':'当前存在违规（动区型变前／后）','yellow':'当前通过，其他极端存在问题','green':'全部离散极端通过','gray':'失效概率上界满足良率要求','pending':'当前通过，全极端核验中'}
             for key,(q,status,g) in self.zone_views.items():
-                if (q['layer'],q['index']) not in selected or status=='green':continue
+                if (q['layer'],q['index']) not in selected or (status=='green' and not q.get('routing_recovered')):continue
                 if g.is_empty:g=q['source']
                 row=(bank or {}).get('zones',{}).get(key,{})
                 kinds=q.get('problem_reasons',()) if not nominal else row.get('kinds',q.get('problem_reasons',()))
                 if not kinds and status=='yellow':kinds=row.get('kinds',())
                 text=f"{q['layer']} #{q['index']+1} · DIE{q['die']+1} · {labels[status]}"
                 text+='\n'+('、'.join(kinds) if kinds else q.get('warning') or '核验尚未完成')
+                if q.get('routing_note') and kinds:text+='\n'+q['routing_note']
                 rules=(self.data() or {}).get('rules',{})
                 if rules:text+=f"\n要求线宽≥{rules['width_um']:g} μm，线距≥{rules['space_um']:g} μm"
                 angles=q.get('boundary_angles',(0.,0.));text+=f"\n边界角度 {math.degrees(angles[0]):.1f}° / {math.degrees(angles[1]):.1f}°"
@@ -307,6 +334,7 @@ class CutDrag:
         self.state['press_projection']=float(np.clip(piece['interval'][side]+(np.asarray(nominal.coords[0])-origin)@plan.tangent(piece['interval'][side]),0.,plan.length))
         self.state['projection_cursor']=np.asarray(nominal.coords[0]);self.state['projection']=self.state['press_projection']
         self.state['press_interval']=piece['interval'][side]
+        self.state['accepted_settings']=w.view_settings;self.state['accepted_part']=None
         self.state['companions']=[]
         for member in piece.get('drag_members',()):
             other=member['route_plan']
@@ -362,7 +390,8 @@ class CutDrag:
                     if self.w.view_settings.reconstruction_live:self._live(part)
                     view_piece=dict(piece,moved_cut=near,extra_cut=far)
                     handles=self.w.reconstruction_overlay.handles if self.w.view_settings.reconstruction_live else self.w.reconstruction_overlay.handle_geometries([view_piece])
-                    handle=handles.get((self.w.reconstruction_overlay._key(piece),state['kind']),line)
+                    handle=handles.get((self.w.reconstruction_overlay._key(piece),state['kind']))
+                    if handle is None:handle=self.w.reconstruction_overlay.edited_handle(piece,state['kind'],line)
                     self.w.reconstruction_overlay.highlight((piece,_lines(handle)[0],state['kind']))
                     self.w.render_scene()
     def scroll(self,event):
@@ -387,7 +416,8 @@ class CutDrag:
         state=self.state;old=state['frame'];piece=state['piece'];plan=piece['route_plan']
         if piece.get('graph_edit') or piece.get('endpoint_weights',(1.,0.))!=(1.,0.):
             from .reconstruction_zones import live_serial
-            self.w.current_frame=live_serial(self.w,state['updated'],old,(piece['layer'],piece['index']))
+            proposed=live_serial(self.w,state['updated'],old,(piece['layer'],piece['index']))
+            if not self._accept_live(proposed):return
             self.w.constraint_feedback.request(self.w.current_frame,state['updated']);self.w.reconstruction_yield.refresh(state['updated'])
             self.w.reconstruction_overlay.stamp=None;self.w.reconstruction_overlay.draw();return
         from .reconstruction_angles import solve
@@ -408,12 +438,21 @@ class CutDrag:
         copper,_=compose_feature(piece.get('source',plan.source),feature,plan.tolerance,feature_moves(feature,old['states'],self.w.view_settings.reconstruction_style))
         for q in replacements.get(piece['layer'],()):
             if piece['index'] in q['indices']:q['geometry']=copper
-        self.w.current_frame=dict(old,_reconstruction_changed_refs=((piece['layer'],piece['index']),),reconstruction=dict(data,configuration=state['updated'].reconstruction_key(),pieces=items,replacements=replacements,violations=[],constraints_complete=False))
+        from .topology_routing import resolve
+        replacements,items,repaired,blocked=resolve(self.w.engine.reconstructor,replacements,items,old['states'])
+        proposed=dict(old,_reconstruction_changed_refs=tuple(sorted({(piece['layer'],piece['index']),*repaired})),reconstruction=dict(data,configuration=state['updated'].reconstruction_key(),pieces=items,replacements=replacements,violations=[],constraints_complete=False,repair_refs=repaired,hard_failures=blocked,electrically_valid=not bool(blocked)))
+        if not self._accept_live(proposed):return
         from .reconstruction import decorate_problems
         decorate_problems(self.w.current_frame['reconstruction'])
         self.w.constraint_feedback.request(self.w.current_frame,state['updated'])
         self.w.reconstruction_yield.refresh(state['updated'])
         self.w.reconstruction_overlay.stamp=None;self.w.reconstruction_overlay.draw()
+    def _accept_live(self,frame):
+        failures=frame['reconstruction'].get('hard_failures',())
+        if failures:
+            self.state['updated']=self.state['accepted_settings'];self.state['part']=self.state['accepted_part']
+            self.w.statusBar().showMessage('该位置尚无连通且无异网接触的解，保留上一个有效边界。');return False
+        self.w.current_frame=frame;self.state['accepted_settings']=self.state['updated'];self.state['accepted_part']=self.state['part'];return True
     def release(self,event):
         if self.state is None:return
         if event.xdata is not None and event.ydata is not None and self.state['moved'] and not self.state.get('rotated_only'):self.latest=np.array([event.xdata,event.ydata])

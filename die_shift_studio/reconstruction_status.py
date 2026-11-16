@@ -25,7 +25,7 @@ class ReconstructionYieldDisplay:
         try:p=replace(w.params(),target_nsigma=0)
         except ValueError:self.reset();return
         cfg=settings or w.view_settings
-        token=('reconstruction-analysis-v40',logical_fingerprint((w.data.geometry_id,w.data.top_name,w.roles(),w.ordered_layers(),asdict(p),cfg.reconstruction_key(),cfg.reconstruction_grid_nodes)))
+        token=('reconstruction-analysis-continuity',logical_fingerprint((w.data.geometry_id,w.data.top_name,w.roles(),w.ordered_layers(),asdict(p),cfg.reconstruction_key(),cfg.reconstruction_grid_nodes)))
         key=(id(w.cache_group),token)
         if key==self.key:self.render();return
         self.reset();self.key=key
@@ -63,7 +63,7 @@ class ReconstructionYieldDisplay:
                     from .statistics import ExtremeCatalog
                     from .reconstruction_events import scan
                     from .reconstruction_probability import attach
-                    evidence_key=('reconstruction-extreme-events-v40',logical_fingerprint((data.geometry_id,data.top_name,roles,order,asdict(p),cfg.reconstruction_key())))
+                    evidence_key=('reconstruction-extreme-events-continuity',logical_fingerprint((data.geometry_id,data.top_name,roles,order,asdict(p),cfg.reconstruction_key())))
                     evidence=group.values.get_or_compute(evidence_key,lambda:attach(scan(engine,ExtremeCatalog(case,p),lambda n,t:progress(round(n*.8),t),source_cache=group.values),engine))
                     worker.publish({'evidence':evidence})
                     bank=measure_reconstruction_yield(engine,p,cfg,lambda n,t:progress(80+round(n*.2),t),self.factor_pool,
@@ -136,13 +136,15 @@ class ConstraintFeedback:
                         from .reconstruction_zones import expand
                         rebuilt.auto_ignored=dict(current.auto_ignored);rebuilt.safe_vias=dict(current.safe_vias)
                         rebuilt._envelopes=current._envelopes;rebuilt._plans=expand(rebuilt,local_pool['local'])
-                    local=rebuilt.frame(frame['states'],targets=changed,diagnostics=False,progress=progress)
+                    local=rebuilt.frame(frame['states'],targets=changed,diagnostics=False,progress=progress,_raw=True)
                     frame_data=frame['reconstruction'];refs=set(changed)
                     copper={k:[v for v in rows if not any((k,i) in refs for i in v['indices'])] for k,rows in frame_data['replacements'].items()}
                     for k,rows in local['replacements'].items():copper.setdefault(k,[]).extend(rows)
                     pieces=[dict(q) for q in frame_data['pieces'] if (q['layer'],q['index']) not in refs]+local['pieces']
+                    from .topology_routing import resolve
+                    copper,pieces,repaired,blocked=resolve(rebuilt,copper,pieces,frame['states'])
                     return dict(frame_data,pieces=pieces,replacements=copper,violations=self.context[1].check(copper,frame['states'],progress),
-                                original_violations=self.context[1].nominal_check(),constraints_complete=True)
+                                original_violations=self.context[1].nominal_check(),constraints_complete=True,repair_refs=repaired,hard_failures=blocked,electrically_valid=not bool(blocked))
                 finally:rebuilt.cache.close()
             return self.context[1].check(frame['reconstruction']['replacements'],frame['states'],progress)
         worker=Worker(work,self.w);self.worker=worker;self.w.watch_worker(worker,'拖动约束检查',quiet=True)
@@ -150,6 +152,10 @@ class ConstraintFeedback:
             w=self.w
             if ticket!=self.ticket or w.current_frame is not frame or w._closing:return
             data=violations if isinstance(violations,dict) else dict(frame['reconstruction'],pieces=[dict(q) for q in frame['reconstruction']['pieces']],violations=violations,constraints_complete=True)
+            if data.get('hard_failures'):
+                from .topology_routing import failure_message
+                w.statusBar().showMessage(failure_message(data['hard_failures']))
+                return
             violations=data['violations']
             from .reconstruction import decorate_problems
             decorate_problems(data)

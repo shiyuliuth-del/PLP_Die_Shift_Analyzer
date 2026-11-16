@@ -56,10 +56,14 @@ def measure_reconstruction_yield(reconstructor,p,cfg,progress,local_cache=None,p
     entries=r._plans_for_all_poses(lambda n,t:progress(round(n*.15),t))
     book=independent_components(book,entries,p,cfg.reconstruction_style)
     grid=WidthGrid(p,len(r.model.bound.centers),cfg.reconstruction_grid_nodes)
+    from . import reconstruction_joint
+    prepared=reconstruction_joint.prepare(r,grid,lambda n,t:progress(round(n*.15),t))
+    if reconstruction_joint.needed(r,prepared,grid):return reconstruction_joint.yield_value(r,p,cfg,grid,prepared,lambda n,t:progress(15+round(n*.85),t),partial)
     choices=[tuple(map(int,np.flatnonzero(w))) for w in grid.weights]
     owners={key:set() for key in book.nets}
     for entry in entries:
-        if entry['plan'] is not None or entry['orphan']:owners[book.refnet[entry['layer'],entry['index']]].add(entry['owner'])
+        affected=entry.get('follow_owners',(entry['owner'],)) if entry.get('following') else (entry['owner'],) if entry['plan'] is not None or entry['orphan'] else ()
+        owners[book.refnet[entry['layer'],entry['index']]].update(affected)
     owners={k:tuple(sorted(o for o in v if len(choices[o])>1 or np.any(grid.locals[o][choices[o][0]]))) for k,v in owners.items()}
     tables={};clauses=set();checks=0;reused=0
     def clause(dependencies,digits):return PoseClause(tuple((owner,(int(digit),)) for owner,digit in zip(dependencies,digits)))
@@ -78,7 +82,7 @@ def measure_reconstruction_yield(reconstructor,p,cfg,progress,local_cache=None,p
             part,_=r.interval(entry)
             definitions.append((entry['owner'],entry['source'].wkb_hex,entry['orphan'],
                                 None if part is None else tuple(part[k].wkb_hex for k in 'ABC')))
-        factor_key=logical_fingerprint((r.rules.identity,'branch2',tuple(targets),book.original[key].wkb_hex,definitions,cfg.reconstruction_style,cfg.reconstruction_boundary_mode,tuple(ref for ref in cfg.reconstruction_ignored if ref in targets),
+        factor_key=logical_fingerprint((r.rules.identity,'continuity1',tuple(targets),book.original[key].wkb_hex,definitions,cfg.reconstruction_style,cfg.reconstruction_boundary_mode,tuple(ref for ref in cfg.reconstruction_ignored if ref in targets),tuple(ref for ref in cfg.reconstruction_following if ref in targets),
                     tuple((o,grid.locals[o].tobytes().hex(),book.model.bound.centers[o].tobytes().hex()) for o in deps),book.width,book.space,book.border,book.dbu,
                     None if book.board is None else book.board.wkb_hex,book.keepout.wkb_hex))
         hit=local_cache.get(factor_key) if local_cache is not None else None
@@ -89,7 +93,7 @@ def measure_reconstruction_yield(reconstructor,p,cfg,progress,local_cache=None,p
         for digits in (() if hit is not None else product(*(choices[o] for o in deps))):
             states=np.zeros((grid.count,3))
             for owner,digit in zip(deps,digits):states[owner]=grid.locals[owner][digit]
-            frame=r.frame(states,targets=targets,diagnostics=False,render_cache=render_cache)
+            frame=r.frame(states,targets=targets,diagnostics=False,render_cache=render_cache,_raw=True)
             # Only assemble the requested net; other nets need no union here.
             changed={}
             for layer,values in frame['replacements'].items():

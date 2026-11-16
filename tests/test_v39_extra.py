@@ -111,17 +111,18 @@ class V39ConnectionTests(unittest.TestCase):
             self.assertLess(clamped['a'],301)
         finally:e.close()
 
-    def test_disconnected_result_is_marked_and_never_outputs_missing_strip(self):
+    def test_exhausted_style_uses_verified_connected_compensation(self):
         from dataclasses import replace
         e,_,_=fixture()
         try:
             e.configure_reconstruction(True,replace(e.reconstructor.settings,reconstruction_style='linear'))
             f=e.reconstructor.frame(np.array([[800.,0.,0.]]));q=f['pieces'][0]
-            self.assertTrue(q['connection_failed']);self.assertFalse(q['valid'])
-            self.assertFalse(q['problem_region'].is_empty);self.assertTrue(q['problem_reasons'])
-            self.assertTrue(q['regions']['A'].is_empty)
+            self.assertFalse(q['connection_failed']);self.assertTrue(q['valid'])
+            self.assertTrue(q['routing_recovered']);self.assertTrue(q['routing_note'])
+            self.assertFalse(q['regions']['A'].is_empty)
             copper=f['replacements']['5/0'][0]['geometry']
-            self.assertTrue(copper.is_valid);self.assertEqual(copper.geom_type,'MultiPolygon')
+            self.assertTrue(copper.is_valid);self.assertEqual(copper.geom_type,'Polygon');self.assertEqual(len(copper.interiors),0)
+            self.assertTrue(f['electrically_valid'])
             self.assertLess(Point(800,0).buffer(10).difference(copper).area,.001)
             self.assertLess(Point(600,0).buffer(10).difference(copper).area,.001)
         finally:e.close()
