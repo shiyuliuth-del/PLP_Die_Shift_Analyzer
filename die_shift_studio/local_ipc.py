@@ -46,8 +46,15 @@ class Server:
         except OSError:
             self.lock_file.close();raise RuntimeError('此IPC入口正在使用')
         if self.endpoint.exists():
+            try:
+                existing=decode(self.endpoint.read_bytes())
+                if existing.get('protocol')!=1 or not all(k in existing for k in ('family','address','token','pid')):raise ValueError('Not an IPC descriptor')
+            except (OSError,ValueError) as exc:
+                self.lock_file.close();raise ValueError('IPC入口已存在且不是有效连接文件，拒绝覆盖；请选择其他路径') from exc
             try:active=call(self.endpoint,'ping',timeout=1).get('status')=='completed'
-            except (OSError,EOFError,TimeoutError,ValueError):active=False
+            except (OSError,EOFError,TimeoutError):active=False
+            except Exception:
+                self.lock_file.close();raise
             if active:self.lock_file.close();raise RuntimeError('此IPC入口已被另一实例占用')
         self.family='AF_PIPE' if os.name=='nt' else 'AF_UNIX'
         self.address=(r'\\.\pipe\DieShift-'+uuid.uuid4().hex if os.name=='nt' else str(self.endpoint.parent/('s-'+uuid.uuid4().hex[:12])))

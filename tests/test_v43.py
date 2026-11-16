@@ -100,6 +100,9 @@ class V43Tests(unittest.TestCase):
    try:self.assertEqual(call(endpoint,'info')['result']['command'],'info')
    finally:server.close();server.thread.join(3)
    self.assertFalse(endpoint.exists());self.assertFalse(server.thread.is_alive())
+   endpoint.write_bytes(b'existing drawing or other user file')
+   with self.assertRaises(ValueError):Server(endpoint,dispatch)
+   self.assertEqual(endpoint.read_bytes(),b'existing drawing or other user file')
  def test_measured_snapshot_includes_moved_die_border_and_real_copper(self):
   from die_shift_studio.measured_core import Session,write_gds
   e,d,c=fixture()
