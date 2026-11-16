@@ -58,7 +58,9 @@ def show_shape_menu(window,event,point):
         if picked:
             piece,_,kind=picked
             if kind in ('moved','extra'):
-                menu.addAction('撤销旋转',lambda:edit_zone('rotate_reset',piece=piece,side=1 if kind=='extra' else 0))
+                from .branch_regions import editable_piece
+                member=editable_piece(piece,point,kind)
+                menu.addAction('撤销旋转',lambda:edit_zone('rotate_reset',piece=member,side=1 if kind=='extra' else 0))
             menu.addAction('删除动区',lambda:edit_zone('delete',piece=piece))
         at_cursor=[ref for ref in selection.hits(Point(point).buffer(window.cut_drag._tolerance()),point=True) if window.roles().get(ref[0])=='固定RDL']
         if picked or at_cursor:

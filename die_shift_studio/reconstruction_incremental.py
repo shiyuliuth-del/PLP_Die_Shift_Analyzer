@@ -14,7 +14,7 @@ def source_settings(settings,ref):
 def reusable(r,states,selected):
     previous=getattr(r,'predecessor',None)
     if previous is None or previous is r or previous.rules.identity!=r.rules.identity:return {},[]
-    frame=previous.cache.get((states.tobytes(),'shared-route-v42',True,None))
+    frame=getattr(previous,'_last_raw_frames',{}).get(states.tobytes())
     if frame is None:return {},[]
     refs={(layer,i) for layer,rows in frame['replacements'].items() for row in rows for i in row['indices']}
     refs={ref for ref in refs if (selected is None or ref in selected) and source_settings(r.settings,ref)==source_settings(previous.settings,ref)}

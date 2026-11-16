@@ -96,6 +96,13 @@ class V29Tests(unittest.TestCase):
             for i in range(-1,g.total):
                 ds=[0]*g.count if i<0 else g.choices(i)
                 z=np.array([v[k] for v,k in zip(g.locals,ds)])
+                raw=e.reconstructor.frame(z)
+                if raw.get('hard_failures'):
+                    # The fixed isolated obstacle is immutable. A via entering
+                    # it cannot be solved by changing an unrelated route.
+                    self.assertTrue(idx.matches(ds))
+                    with self.assertRaisesRegex(ValueError,'未提交该结果'):e.frame(z)
+                    continue
                 frame=e.frame(z);w=frame['width_analysis']
                 self.assertEqual(idx.matches(ds),scene_failure(frame['reconstruction']))
                 self.assertFalse(w['edge_violations'])

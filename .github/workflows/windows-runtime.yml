@@ -188,6 +188,8 @@ jobs:
           set PYTHONPATH=.;tests
           "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_v44.py -v
           if errorlevel 1 exit /b 1
+          "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_reconstruction_continuity.py -v
+          if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" tests/gui_v44.py
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" tests/gui_v44_process.py

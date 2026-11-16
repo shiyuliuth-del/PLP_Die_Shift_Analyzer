@@ -105,7 +105,7 @@ def compose_feature(source,ps,tolerance,moving):
 
 def feature_moves(pieces,states,style):
     """Quantisation may depend only on owners that actually alter this source."""
-    return style in ('linear','arc') or any(np.any(states[q['die']]) and
+    return any(np.any(states[q['die']]) and
         any(not q['nominal_regions'][k].is_empty for k in 'AC') for q in pieces)
 
 
@@ -168,6 +168,7 @@ class Reconstructor:
         self.auto_ignored={};self.safe_vias={}
         self.vias=[];self.stays=[];self.vias_by_target={};self._plans=None;self.manual_quality={};self.manual_masses={}
         self.plan_pool=plan_pool if plan_pool is not None else {}
+        self._last_raw_frames={}
         self.geometry_pool=geometry_pool if geometry_pool is not None else EphemeralCache(budget=64*1024**2,max_entries=4096)
         self.cuts={(str(l),int(i),normalize_via_refs(v)):(nx,ny,x,y) for l,i,v,nx,ny,x,y in settings.reconstruction_cuts}
         self.extra_cuts={(str(l),int(i),normalize_via_refs(v)):(nx,ny,x,y) for l,i,v,nx,ny,x,y in settings.reconstruction_extra_cuts}
@@ -498,7 +499,39 @@ class Reconstructor:
         updated=replace(self.settings,reconstruction_intervals=tuple(rows))
         return updated,dict(part,clamped=clamped)
 
-    def frame(self,states,deformation=None,progress=lambda *_:None,quick=False,*,targets=None,diagnostics=True,render_cache=None):
+    def frame(self,states,deformation=None,progress=lambda *_:None,quick=False,*,targets=None,diagnostics=True,render_cache=None,_raw=False):
+        if _raw:return self._raw_frame(states,deformation,progress,quick,targets=targets,diagnostics=diagnostics,render_cache=render_cache)
+        states=np.asarray(states,float);key=(states.tobytes(),'electrical-continuity',bool(quick),bool(diagnostics),None if targets is None else tuple(sorted(targets)))
+        hit=self.cache.get(key) if diagnostics else None
+        if hit is not None:return hit
+        raw=self._raw_frame(states,deformation,progress,quick,diagnostics=False,render_cache=render_cache)
+        from .topology_routing import resolve,spacing
+        out,pieces,changed,blocked=resolve(self,raw['replacements'],raw['pieces'],states)
+        if blocked and not quick:
+            alternate=self._raw_frame(states,deformation,progress,True,diagnostics=False)
+            ao,ap,ac,ab=resolve(self,alternate['replacements'],alternate['pieces'],states)
+            if len(ab)<len(blocked):raw,out,pieces,changed,blocked=alternate,ao,ap,ac,ab
+        result=dict(raw,replacements=out,pieces=pieces,repair_refs=changed,hard_failures=blocked,
+                    electrically_valid=not bool(blocked),constraints_complete=bool(diagnostics))
+        result['violations']=self.rules.check(out,states,progress) if diagnostics else []
+        result['original_violations']=self.rules.nominal_check() if diagnostics else ()
+        if diagnostics:spacing(self,out,pieces)
+        decorate_problems(result)
+        result['summary']=dict(raw['summary'],bridges=sum(not q['bridge'].is_empty for q in pieces),
+                               conflicts=sum(bool(q['conflict']) for q in pieces),warnings=sum(bool(q['warning']) for q in pieces),
+                               electrical_repairs=len(changed),unroutable=len(blocked))
+        if targets is not None:
+            include=set(map(tuple,targets))|set(changed)
+            result['pieces']=[q for q in pieces if (q['layer'],q['index']) in include]
+            result['replacements']={layer:[q for q in rows if any((layer,i) in include for i in q['indices'])] for layer,rows in out.items()}
+            result['replacements']={layer:rows for layer,rows in result['replacements'].items() if rows}
+        if diagnostics:
+            if not np.any(states) and targets is None:self.cache.pin(key)
+            self.cache[key]=result
+        progress(100,f'重构预演完成；{len(changed)}处电连接补偿，{len(blocked)}处无可用解')
+        return result
+
+    def _raw_frame(self,states,deformation=None,progress=lambda *_:None,quick=False,*,targets=None,diagnostics=True,render_cache=None):
         from .reconstruction_route import warp,EMPTY,failed_connection,missing_area
         states=np.asarray(states,float)
         key=(states.tobytes(),'shared-route-v42-quick' if quick else 'shared-route-v42',bool(diagnostics),None if targets is None else tuple(sorted(targets)))
@@ -528,19 +561,21 @@ class Reconstructor:
                 saved_part,saved_manual,saved_regions,saved_error,saved_warning=cached
                 return saved_part,saved_manual,None if saved_regions is None else dict(saved_regions),saved_error,saved_warning
             from .reconstruction_angles import solve
-            if entry.get('graph_branch') or getattr(entry['plan'],'plane_domain',False):
+            if not np.any(states[entry['owner']]) and 'serial_left' not in entry:
+                regions={k:part[k] for k in 'ABC'};error=None
+            elif entry.get('graph_branch') or getattr(entry['plan'],'plane_domain',False):
                 from .plane_route import live_part
                 part=live_part(self,entry['plan'],part,self.model.bound.centers[entry['owner']],states[entry['owner']]);regions={k:part[k] for k in 'ABC'};error=None
             elif 'serial_left' in entry:
                 from .reconstruction_zones import serial_render
                 part,regions,error=serial_render(self,entry,part,self.model.bound.centers[entry['owner']],states[entry['owner']])
-            else:part,regions,error,quality=solve(self,entry['plan'],part,self.model.bound.centers[entry['owner']],states[entry['owner']],quick=quick)
+            else:part,regions,error,quality=solve(self,entry['plan'],part,self.model.bound.centers[entry['owner']],states[entry['owner']],quick=quick,native_check=False)
             warning=self._manual_warning(entry,part) if not getattr(entry['plan'],'plane_domain',False) and manual and diagnostics and 'serial_left' not in entry and self.settings.reconstruction_boundary_mode=='perpendicular' else entry['warning']
             self.geometry_pool.put(local_key,(part,manual,None if regions is None else dict(regions),error,warning))
             if render_cache is not None:render_cache[token]=(part,manual,None if regions is None else dict(regions),error,warning)
             return part,manual,regions,error,warning
-        from .resources import parallel_map,native_phase_profile
-        rendered=parallel_map(render,entries,profile=native_phase_profile()) if len(entries)>16 else list(map(render,entries))
+        from .resources import parallel_map
+        rendered=parallel_map(render,entries) if len(entries)>16 else list(map(render,entries))
         for number,(entry,prepared) in enumerate(zip(entries,rendered)):
 
             layer,index,owner=entry['layer'],entry['index'],entry['owner'];source=entry['source'];plan=entry['plan']
@@ -548,7 +583,7 @@ class Reconstructor:
             if self._cover_lookup(self.dropped,None,layer,index,entry['refs']):continue
             part,manual,regions,error,warning=prepared;valid=True;fallback=None
             if part is not None:
-                fallback=dict(A=EMPTY,B=part['B'],C=transform(part['C'],self.model.bound.centers[owner],states[owner])) if getattr(plan,'plane_domain',False) else failed_connection(part,plan,self.model.bound.centers[owner],states[owner])
+                fallback=dict(A=EMPTY,B=part['B'],C=transform(part['C'],self.model.bound.centers[owner],states[owner])) if entry.get('graph_branch') or getattr(plan,'plane_domain',False) else failed_connection(part,plan,self.model.bound.centers[owner],states[owner])
                 if 'serial_left' in entry:
                     fallback=dict(A=EMPTY,B=entry['serial_fixed'],C=transform(entry['serial_block'],self.model.bound.centers[owner],states[owner]*entry['serial_left']))
                 if error:regions=dict(fallback);warning=error+'；已取消连接段';valid=False
@@ -602,7 +637,19 @@ class Reconstructor:
         out={};conflicts=0
         for (layer,index),feature in features.items():
             ps=feature['pieces'];source=feature['source']
-            geometry,occupied=compose_feature(source,ps,self.tol,feature_moves(ps,states,self.settings.reconstruction_style))
+            owners=sorted({q['die'] for q in ps}|{v['owner'] for v in self.vias_by_target.get((layer,index),()) if v['owner']>=0})
+            compose_key=('composed-continuity',self.rules.identity,layer,index,quick,self.settings.reconstruction_style,
+                         tuple((owner,states[owner].tobytes(),self.model.bound.centers[owner].tobytes()) for owner in owners),
+                         tuple((q['route_identity'],q['interval'],q['boundary_angles'],q.get('ignored'),q.get('ignored_following'),q['endpoint_weights']) for q in ps))
+            saved=self.geometry_pool.get(compose_key)
+            if saved is None:
+                geometry,occupied=compose_feature(source,ps,self.tol,feature_moves(ps,states,self.settings.reconstruction_style))
+                names=('regions','bridge','fixed','moved','connection_failed','valid','warning','seam_repair_area_um2','bridge_area_um2','fixed_area_um2','moved_area_um2')
+                updates=tuple({k:(dict(q[k]) if k=='regions' else q[k]) for k in names if k in q} for q in ps)
+                self.geometry_pool.put(compose_key,(geometry,occupied,updates))
+            else:
+                geometry,occupied,updates=saved
+                for q,update in zip(ps,updates):q.update(update);q['regions']=dict(q['regions'])
             out.setdefault(layer,[]).append(dict(indices=(index,),geometry=geometry,net=feature['net'],movable=occupied,moved=shapely.union_all([q['moved'] for q in ps])))
         for layer,rows in retained.items():out.setdefault(layer,[]).extend(rows)
         pieces.extend(retained_pieces)
@@ -648,5 +695,8 @@ class Reconstructor:
         if diagnostics:
             if not np.any(states) and targets is None:self.cache.pin(key)
             self.cache[key]=result
+        if targets is None:
+            self._last_raw_frames[states.tobytes()]=result
+            while len(self._last_raw_frames)>4:self._last_raw_frames.pop(next(iter(self._last_raw_frames)))
         progress(100,f'重构预演：{len(pieces)} 个共用动区')
         return result

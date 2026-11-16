@@ -10,6 +10,7 @@ ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 import numpy as np
 import shapely
 from die_shift_studio.gui import MainWindow,W
+from qt_shutdown import close_window
 from die_shift_studio.qt_compat import QtCore,Qt,BINDING
 from die_shift_studio.fast_preview import PreviewEngine
 from die_shift_studio.width_analysis import gate_rectangle,WidthAnalyzer
@@ -122,5 +123,5 @@ path=w.jobs_dir/'test.dshift.json';w.write_project(path);w.load_project(path);wa
 assert w.setting_sections['宽度分析'].isChecked() and size.value()==16
 w.load_project(job);wait()
 assert not any(b.isChecked() for b in w.setting_sections.values()) and size.value()==8
-w.close();app.processEvents();QtCore.QCoreApplication.sendPostedEvents(None,getattr(QtCore.QEvent,'Type',QtCore.QEvent).DeferredDelete);tmp.cleanup()
+close_window(app,w);tmp.cleanup()
 print(f'GUI_V25_PASS cached mouse/numeric/zero motions, no disk churn; folded Jobs; resized/panned callouts clear real rectangles ({n} visible).')

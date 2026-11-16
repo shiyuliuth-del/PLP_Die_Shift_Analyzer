@@ -113,10 +113,12 @@ def live_serial(window,settings,old,ref):
     if base is not None:
         rebuilt.auto_ignored=dict(original.auto_ignored);rebuilt.safe_vias=dict(original.safe_vias)
         rebuilt._envelopes=original._envelopes;rebuilt._plans=expand(rebuilt,pool['local'])
-    try:local=rebuilt.frame(old['states'],targets={ref},diagnostics=False,quick=True)
+    try:local=rebuilt.frame(old['states'],targets={ref},diagnostics=False,quick=True,_raw=True)
     finally:
         rebuilt.cache.close();rebuilt.block_cache.clear()
     data=old['reconstruction'];rows=[q for q in data['pieces'] if (q['layer'],q['index'])!=ref]+local['pieces']
     changed={k:[v for v in values if not (k==ref[0] and ref[1] in v['indices'])] for k,values in data['replacements'].items()}
     for k,values in local['replacements'].items():changed.setdefault(k,[]).extend(values)
-    return dict(old,_reconstruction_changed_refs=(ref,),reconstruction=dict(data,configuration=settings.reconstruction_key(),pieces=rows,replacements=changed,violations=[],constraints_complete=False))
+    from .topology_routing import resolve
+    changed,rows,repaired,blocked=resolve(original,changed,rows,old['states'])
+    return dict(old,_reconstruction_changed_refs=tuple(sorted({ref,*repaired})),reconstruction=dict(data,configuration=settings.reconstruction_key(),pieces=rows,replacements=changed,violations=[],constraints_complete=False,repair_refs=repaired,hard_failures=blocked,electrically_valid=not bool(blocked)))

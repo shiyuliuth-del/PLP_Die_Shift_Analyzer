@@ -105,3 +105,13 @@ A颜色仅由A自身型变前/后的见证决定。两侧铜默认图层颜色�
 独立客户端目录：excel.py只读解析/磁盘join及可替换列映射；storage.py SQLite WAL/FULL日志与OS文件锁；transport.py有界认证/响应截止、同目录进程启动与PID出生时间检查；runner.py批次回执、冻结身份、整批重放与write-ahead发布；gui.py后台QThread和200行分页；main.py图形/自动化入口。新本地接口字段为info.session_identity、instance_id、batch_owner及batch.begin.client_id，协议1向后兼容，可靠客户端要求这些字段。Busy不缓存为最终回执，同request_id通信重试不重复接受命令。
 
 发布白名单增RealDataAnalyse全部运行必需文件与cases/GD55六文件；GD55公开授权来自本轮用户后续明确指令，其余私人数据仍禁止发布。新回归test_v44/gui_v44/gui_v44_process；Windows验收实际两个相邻EXE及从非安装cwd启动。未提交批次必须整批重放，单项computed不是成品。日志不写IPC密钥。真实Excel模板尚待提供；在excel适配层扩展而不是更改姿态/几何内核。
+
+## V44重构内核增量
+
+`topology_routing.py`检查最终整面铜而非单条候选：同网组件/孔洞数量、真实端孔正面积相接、异网铜/过孔隔离。先共享窄口切分，再有界收窄/自由空间绕接；真实尺寸违规仍由原生DRC标记。无法满足硬约束时GUI/IPC拒绝提交并保留上一状态，不能把断线/警示画成铜。`continuous_warp.py`逐步推移复杂多端域，防止一步位移场折叠。
+
+`branch_regions.terminal_tree`为新自动方案构造连通端点树；有旧手工位置的图形保留完整旧路径身份。动区标识区分同一源的多个域；共享端柄同步对应分支，弧长沿本地指针步进，不跳到相邻回头段。整孔盘圆点按真实端孔中心而非中间权重变换。
+
+`reconstruction_joint.py`在跨网络补偿会耦合几何时，复用局部原始形状并联合执行与画布相同的补偿/检查。扫描和良率复用完成判定；不能继续乘单网边际概率。无耦合时保留原有因子分解。可用`tools/verify_reconstruction_continuity.py <工程> --all --output <JSON>`验证完整离散目录，`tools/verify_nu_handles.py <nu17123工程>`复验真实鼠标。外部图纸不会写入报告。
+
+V45用户清单单独排期：必须先完成V44双方联合发布，再做新的UI精简/统一当前态DRC/按需结果分析等改动。不得提前更改V44缺省值。

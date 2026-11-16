@@ -108,9 +108,11 @@ class V42Tests(unittest.TestCase):
    z=np.array([[10.,5.,.005]]);first=e.frame(z)['reconstruction'];q=next(q for q in first['pieces'] if q['index']==0)
    old=next(v['geometry'].wkb for v in first['replacements']['5/0'] if v['indices']==(1,))
    cfg=replace(cfg,reconstruction_intervals=((*key(q['route_plan']),q['interval'][0]+30,q['interval'][1]),))
-   e.configure_reconstruction(True,cfg);calls=[];rules=e.reconstructor.rules;original=rules.best_regions
-   def counted(plan,*args,**kwargs):calls.append(plan.index);return original(plan,*args,**kwargs)
-   with patch.object(rules,'best_regions',counted):f=e.frame(z)['reconstruction']
+   e.configure_reconstruction(True,cfg);calls=[]
+   import die_shift_studio.reconstruction_angles as angles
+   original=angles.solve
+   def counted(solver,plan,*args,**kwargs):calls.append(plan.index);return original(solver,plan,*args,**kwargs)
+   with patch.object(angles,'solve',counted):f=e.frame(z)['reconstruction']
    self.assertTrue(calls);self.assertEqual(set(calls),{0})
    self.assertEqual(next(v['geometry'].wkb for v in f['replacements']['5/0'] if v['indices']==(1,)),old)
   finally:e.close()
@@ -177,7 +179,8 @@ class V42Tests(unittest.TestCase):
    r=e.reconstructor;r._plans_for_all_poses(lambda *_:None)
    r._plans=[dict(r._plans[0],plan=None,orphan=False,warning='无法形成路径')]
    frame=r.frame(np.zeros((1,3)))
-   self.assertTrue(current_failures(frame));self.assertTrue(frame['replacements']['5/0'][0]['geometry'].equals(r._plans[0]['source']))
+   self.assertFalse(current_failures(frame));self.assertTrue(frame['replacements']['5/0'][0]['geometry'].equals(r._plans[0]['source']))
+   self.assertTrue(frame['pieces'][0]['routing_recovered'])
    source=box(0,0,20,10);empty=shapely.Polygon();pieces=[]
    for die,a,b,dy in ((0,0,10,10),(1,10,20,-10)):
     nominal=box(a,0,b,10);moved=box(a,dy,b,10+dy)

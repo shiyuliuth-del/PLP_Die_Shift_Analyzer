@@ -246,6 +246,13 @@ class PreviewEngine:
             # Reconstructed fixed RDL is a hypothesis about an operator's split,
             # so the plot and the piece table share its accepted display geometry.
             frame['reconstruction']=self.reconstructor.frame(states,deformation,progress,quick=quick)
+            if frame['reconstruction'].get('hard_failures'):
+                from .topology_routing import failure_message
+                raise ValueError(failure_message(frame['reconstruction']['hard_failures']))
+            current=self.contact.current(states,self.p,frame['reconstruction']['replacements']);frame['contact']=current
+            for scheme,check in checks.items():
+                check['failures']=list(mechanical['failures'])+[dict(kind=q['kind'],point=q['point']) for q in current['issues'] if q['scheme']==scheme]
+                check['problem_percent']=100 if check['failures'] else 0
         if getattr(self,'drc_enabled',False):
             frame['drc']=self.global_drc.frame(states,frame.get('reconstruction',{}).get('replacements'),settings=self.drc_settings,progress=progress)
         if deformation is not None or getattr(self,'drc_enabled',False):

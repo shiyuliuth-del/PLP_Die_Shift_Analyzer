@@ -12,6 +12,7 @@ from matplotlib.backend_bases import MouseEvent
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 from die_shift_studio.gui import MainWindow,W
+from qt_shutdown import close_window
 
 
 def main():
@@ -111,6 +112,6 @@ def main():
             assert w.view_settings.width_yield_decimals==4
             assert w.region_select.mode is None and not w.region_move.isChecked() and not w.region_stay.isChecked()
             print('GUI_BRANCH_INTEGRATION_PASS: preserved controls, real bidirectional region events, edit retention, cache refresh, save/reopen, clear all')
-        finally:w.close();app.processEvents()
+        finally:close_window(app,w)
 
 if __name__=='__main__':main()

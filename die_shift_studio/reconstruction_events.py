@@ -72,7 +72,7 @@ def current_failures(frame):
 
 
 def scene_failure(frame):
-    return bool(frame.get('violations')) or bool(current_failures(frame))
+    return bool(frame.get('violations')) or bool(frame.get('hard_failures')) or bool(current_failures(frame))
 
 
 def color_for(q,bank,nominal,level,inside=True):
@@ -93,7 +93,7 @@ def color_for(q,bank,nominal,level,inside=True):
 
 
 def _compact(q):
-    names=('layer','index','die','net','via_refs','route_identity','regions','nominal_regions','missing_region','moving_terminals','moved_cut','extra_cut','connection_failed','valid','warning','interval','boundary_angles')
+    names=('layer','index','die','net','via_refs','route_identity','regions','nominal_regions','missing_region','moving_terminals','moved_cut','extra_cut','connection_failed','valid','warning','interval','boundary_angles','ignored','ignored_following','orphan')
     return {k:q[k] for k in names if k in q}
 
 
@@ -165,7 +165,7 @@ def scan(r,grid,progress=lambda *_:None,source_cache=None):
             for digits in product(*(range(grid.radices[i]) for i in owners)):
                 cancel_check();states=np.zeros((count,3))
                 for i,d in zip(owners,digits):states[i]=grid.locals[i][d]
-                f=r.frame(states,diagnostics=False,targets=(ref,),render_cache=render_cache)
+                f=r.frame(states,diagnostics=False,targets=(ref,),render_cache=render_cache,_raw=True)
                 row=f['replacements'][ref[0]][0]
                 values[digits]=dict(geometry=row['geometry'],pieces=tuple(_compact(q) for q in f['pieces']))
         bounds=np.array([v['geometry'].bounds for v in values.values()])
@@ -178,10 +178,13 @@ def scan(r,grid,progress=lambda *_:None,source_cache=None):
         from .reconstruction_incremental import source_settings
         # Independent copper is reused across handle edits. Actual net and pair
         # checks below still see every updated neighbour and shared DIE digit.
-        token=('reconstruction-source-v42',logical_fingerprint((r.rules.identity,ref,asdict(r.p),
+        token=('reconstruction-source-continuity',logical_fingerprint((r.rules.identity,ref,asdict(r.p),
             source_settings(r.settings,ref),tuple(v.tolist() for v in grid.locals))))
         return source_cache.get_or_compute(token,lambda:build_uncached(ref))
-    bundles=dict(parallel_map(build,refs,profile=native_phase_profile(),progress=lambda n,total:progress(12+round(28*n/max(1,total)),f'重构逐图形几何 {n}/{total}')))
+    bundles=dict(parallel_map(build,refs,progress=lambda n,total:progress(12+round(28*n/max(1,total)),f'重构逐图形几何 {n}/{total}')))
+    from . import reconstruction_joint
+    r._joint_catalog=(tuple(v.tobytes() for v in grid.locals),bundles)
+    if reconstruction_joint.needed(r,bundles,grid):return reconstruction_joint.scan(r,grid,bundles,lambda n,t:progress(40+round(n*.6),t))
     from .width_keepout import routing_violations
     from .width_witness import edge_witness
     from .width_analysis import BLOCKED
