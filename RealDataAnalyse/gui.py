@@ -45,7 +45,7 @@ class Window(W.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('RealDataAnalyse ' + __version__)
-        self.resize(1120, 980)
+        self.resize(1120, 860)
         self.worker = None
         self.pending_close = False
         self.page = 0
@@ -75,7 +75,10 @@ class Window(W.QMainWindow):
         tabs = W.QTabWidget()
         layout.addWidget(tabs, 1)
         batch = W.QWidget()
-        tabs.addTab(batch, 'Excel批量 / 故障恢复')
+        batch_scroll = W.QScrollArea()
+        batch_scroll.setWidgetResizable(True)
+        batch_scroll.setWidget(batch)
+        tabs.addTab(batch_scroll, 'Excel批量 / 故障恢复')
         batch_layout = W.QVBoxLayout(batch)
         row = W.QHBoxLayout()
         self.add_files = W.QPushButton('选择各DIE Excel')
@@ -87,7 +90,7 @@ class Window(W.QMainWindow):
         batch_layout.addLayout(row)
         self.file_view = W.QPlainTextEdit()
         self.file_view.setReadOnly(True)
-        self.file_view.setMaximumHeight(65)
+        self.file_view.setMaximumHeight(50)
         batch_layout.addWidget(self.file_view)
         settings_form = W.QFormLayout()
         batch_layout.addLayout(settings_form)
