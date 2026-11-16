@@ -367,6 +367,18 @@ class Contracts(unittest.TestCase):
             self.assertEqual(t.request('batch.submit', {}, retries=1)['task_id'], 'a')
         self.assertEqual(len(calls), 2)
 
+    def test_startup_descriptor_partial_write_retries_same_operation(self):
+        t = Transport(self.root / 'endpoint')
+        calls = []
+        def rpc(command, args, key):
+            calls.append(key)
+            if len(calls) == 1:
+                raise json.JSONDecodeError('partial startup descriptor', '{', 1)
+            return dict(status='completed', result={'ready': True})
+        with patch.object(t, 'rpc', rpc):
+            self.assertTrue(t.request('info', retries=1)['result']['ready'])
+        self.assertEqual(calls[0], calls[1])
+
     def test_deadline_also_bounds_authentication(self):
         import time
         p = self.root / 'endpoint'
