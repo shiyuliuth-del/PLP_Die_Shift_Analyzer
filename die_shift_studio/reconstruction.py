@@ -61,6 +61,8 @@ def _compose_feature(source,ps,tolerance,moving):
             if q.get('fallback_regions') is not None:
                 regions=dict(q['fallback_regions']);regions['B']=fixed
                 q.update(valid=False,connection_failed=True,warning='组合连接发生冲突，已取消连接段',regions=regions,bridge=regions['A'],moved=regions['C'],fixed=fixed)
+            else:
+                q.update(valid=False,connection_failed=True,warning='随动分支连接关系已改变；保留各分支实体并标记')
         geometry=shapely.union_all([fixed,*[q['regions'][k] for q in ps for k in 'AC']])
         if not geometry.is_valid:
             geometry=source
@@ -523,7 +525,7 @@ class Reconstructor:
             shift=float(np.linalg.norm(self.model.moved(shapely.Point(entry['mine'][0]['center']),owner,states).coords[0]-entry['mine'][0]['center']))
             feature=features.setdefault((layer,index),dict(source=source,pieces=[],net=entry['net']))
             piece=dict(graph_branch=entry.get('graph_branch',False),moving_nominal=entry.get('moving_nominal'),fixed_nominal=entry.get('fixed_nominal'),ignored=entry.get('ignored',False),die=owner,layer=layer,index=index,net=entry['net'],via_refs=entry['refs'],vias=[v[1] for v in entry['refs']],
-                       fallback_regions=fallback if part.get('near') is not None else None,connection_failed=bool(error),
+                       fallback_regions=fallback if part.get('near') is not None else None,connection_failed=bool(error) or not valid,
                        missing_region=part['A'] if getattr(plan,'plane_domain',False) else missing_area(part,plan,self.model.bound.centers[owner],states[owner]) if plan is not None and part.get('near') is not None else source,
                        moving_terminals=shapely.union_all([self.model.moved(v['poly'],owner,states) for v in entry['mine']]),
                        source=source,source_scope_complete=bool(entry.get('routing_source',source) is source if plan is None else plan.source is source),endpoint_weights=(entry.get('serial_left',1.),entry.get('serial_right',0.)),branch=entry.get('branch',1),branch_count=entry.get('branch_count',1),route_plan=plan,interval=(a,b),boundary_angles=part.get('angles',(0.,0.)),route_identity=None if plan is None else plan.identity,

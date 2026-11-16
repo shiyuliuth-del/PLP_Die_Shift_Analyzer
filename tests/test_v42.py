@@ -165,6 +165,22 @@ class V42Tests(unittest.TestCase):
     copper,_=compose_feature(q['source'],[dict(q)],r.tol,True)
    self.assertTrue(copper.equals(q['source']))
   finally:e.close()
+ def test_unresolved_route_and_disconnected_ignored_copper_are_failures(self):
+  from die_shift_studio.reconstruction import compose_feature
+  from die_shift_studio.reconstruction_events import current_failures
+  e,_,_=fixture()
+  try:
+   r=e.reconstructor;r._plans_for_all_poses(lambda *_:None)
+   r._plans=[dict(r._plans[0],plan=None,orphan=False,warning='无法形成路径')]
+   frame=r.frame(np.zeros((1,3)))
+   self.assertTrue(current_failures(frame));self.assertTrue(frame['replacements']['5/0'][0]['geometry'].equals(r._plans[0]['source']))
+   source=box(0,0,20,10);empty=shapely.Polygon();pieces=[]
+   for die,a,b,dy in ((0,0,10,10),(1,10,20,-10)):
+    nominal=box(a,0,b,10);moved=box(a,dy,b,10+dy)
+    pieces.append(dict(die=die,nominal_regions=dict(A=empty,B=empty,C=nominal),regions=dict(A=empty,B=empty,C=moved),fallback_regions=None,connection_failed=False,valid=True))
+   geometry,_=compose_feature(source,pieces,.001,True)
+   self.assertTrue(geometry.is_valid);self.assertTrue(all(q['connection_failed'] for q in pieces))
+  finally:e.close()
  def test_defaults_and_removed_patch_options(self):
   self.assertEqual(Parameters().package_clearance_um,10)
   self.assertEqual(ViewSettings().reconstruction_boundary_mode,'wide')
