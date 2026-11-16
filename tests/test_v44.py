@@ -207,6 +207,31 @@ class Contracts(unittest.TestCase):
         self.assertEqual(fake.begin_count, 2)
         self.assertEqual(len(fake.rows), 7)
 
+    def test_client_respects_service_allocated_lanes(self):
+        import time
+        self.read()
+        class OneLane(FakeService):
+            active = 0
+            peak = 0
+            def request(self, command, *args, **kwargs):
+                response = super().request(command, *args, **kwargs)
+                if command == 'batch.begin':
+                    response['result']['threads'] = 1
+                return response
+            def wait_task(self, task, *args):
+                with self.lock:
+                    self.active += 1
+                    self.peak = max(self.peak, self.active)
+                try:
+                    time.sleep(.02)
+                    return super().wait_task(task, *args)
+                finally:
+                    with self.lock:
+                        self.active -= 1
+        fake = OneLane(self.root)
+        self.runner(fake).run()
+        self.assertEqual(fake.peak, 1)
+
     def test_geometry_failure_preserves_old_output(self):
         self.read()
         out = self.root / 'out.oas'

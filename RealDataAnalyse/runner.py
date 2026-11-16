@@ -126,6 +126,7 @@ class Runner:
         t.request('output.configure', {'output_directory': str(self.output.parent), 'max_threads': self.workers, 'max_memory_mb': self.memory_mb}, stop=self.stop)
         begin = t.request('batch.begin', {'filename': stage_name, 'client_id': run}, request_id=uuid.uuid5(uuid.UUID(run), f'begin:{attempt}').hex, stop=self.stop)['result']
         batch = begin['batch_id']
+        lanes = max(1, min(self.workers, int(begin['threads'])))
         ledger.set('batch', batch)
         ledger.set('state', 'running')
         with ledger.db:
@@ -137,13 +138,13 @@ class Runner:
         cursor = ledger.db.execute('select seq,payload from packages order by seq')
         completed = 0
         # Only O(workers) Futures; never enqueue the entire lot in Python.
-        with ThreadPoolExecutor(max_workers=self.workers, thread_name_prefix='rda-package') as pool:
+        with ThreadPoolExecutor(max_workers=lanes, thread_name_prefix='rda-package') as pool:
             exhausted = False
             while pending or not exhausted:
                 if self.stop.is_set():
                     abort.set()
                     exhausted = True
-                while not exhausted and not abort.is_set() and len(pending) < self.workers:
+                while not exhausted and not abort.is_set() and len(pending) < lanes:
                     row = cursor.fetchone()
                     if row is None:
                         exhausted = True
