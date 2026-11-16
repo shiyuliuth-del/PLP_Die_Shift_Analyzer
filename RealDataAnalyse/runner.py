@@ -11,6 +11,21 @@ from .storage import Ledger, Lease, dumps, sha256
 from .transport import Transport, RemoteError
 
 
+class StopToken:
+    """A peer failure or a user stop interrupts every outstanding client waiter."""
+    def __init__(self, *events):
+        self.events = events
+
+    def is_set(self):
+        return any(event.is_set() for event in self.events)
+
+    def wait(self, seconds):
+        until = time.monotonic() + seconds
+        while not self.is_set() and time.monotonic() < until:
+            self.events[0].wait(min(.05, max(0, until - time.monotonic())))
+        return self.is_set()
+
+
 class Runner:
     def __init__(self, database, endpoint, project, output, workers=4, memory_mb=2048,
                  retries=3, timeout=900, stop=None, progress=lambda _: None, transport=None):
@@ -88,12 +103,13 @@ class Runner:
         if abort.is_set() or self.stop.is_set():
             raise InterruptedError('停止提交')
         key = uuid.uuid5(uuid.UUID(self.run_id), f'{attempt}:{seq}').hex
+        stop = StopToken(self.stop, abort)
         # SQLite belongs to coordinator; worker receives immutable data only.
-        response = self.transport.request('batch.submit', dict(payload, batch_id=batch), request_id=key, stop=self.stop)
+        response = self.transport.request('batch.submit', dict(payload, batch_id=batch), request_id=key, stop=stop)
         if response.get('status') != 'accepted':
             raise RemoteError(response)
         task = response['task_id']
-        result = self.transport.wait_task(task, self.stop, self.timeout)
+        result = self.transport.wait_task(task, stop, self.timeout)
         if result.get('cell') != payload['cell'] or result.get('connection_failure_count', 0):
             raise RemoteError(dict(error=dict(type='GeometryFailure', message='封装结果不匹配或存在未连接动区'), result=result))
         return task, result
@@ -229,7 +245,7 @@ class Runner:
                         if ledger.get('publish'):
                             raise  # never overwrite a pending publication record
                         # Deterministic input/geometry failures need correction.
-                        if isinstance(exc, RemoteError) and exc.kind not in ('Busy', 'MemoryError', 'Cancelled', 'TimeoutError'):
+                        if isinstance(exc, RemoteError) and exc.kind not in ('Busy', 'MemoryError', 'TimeoutError'):
                             raise
                         if retry >= self.retries:
                             raise

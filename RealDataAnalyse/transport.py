@@ -36,7 +36,7 @@ class RemoteError(RuntimeError):
 
 
 class Transport:
-    def __init__(self, endpoint, timeout=15, capacity=64):
+    def __init__(self, endpoint, timeout=15, capacity=128):
         self.endpoint = Path(endpoint).resolve()
         self.timeout = timeout
         self.slots = threading.BoundedSemaphore(capacity)
