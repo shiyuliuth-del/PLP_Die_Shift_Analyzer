@@ -119,6 +119,9 @@ def main():
         paired_env=dict(ipc_env,REALDATA_TEST_EXE=str(client))
         subprocess.run([sys.executable,str(ROOT/'tests/gui_v44_process.py')],cwd=ROOT,env=paired_env,check=True,timeout=600)
         print('FROZEN_REALDATA_PASS: both sibling EXEs, named pipe, Excel join, OAS and sibling restart',flush=True)
+        gd55_env=dict(paired_env,REALDATA_TEST_CASE=str(source/'cases/GD55'))
+        subprocess.run([sys.executable,str(ROOT/'tests/gui_v44_gd55.py')],cwd=ROOT,env=gd55_env,check=True,timeout=1350)
+        print('FROZEN_GD55_XLSX_PASS: actual packaged Excel parser, paired EXEs and bundled case',flush=True)
     print('WINDOWS_SOURCE_BUILD_PASS',__version__,platform.platform(),
           f'normal window {elapsed:.2f}s, {icons} icon sizes, source BAT and isolated EXE verified; no binary published',flush=True)
 

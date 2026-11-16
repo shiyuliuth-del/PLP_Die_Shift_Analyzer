@@ -53,5 +53,143 @@
     "reconstruction_commit": "c83c405fd95b79ea0b28d68598d263b146461162",
     "diagnostic_state": "error",
     "diagnostic_preserved_previous_output": true
+  },
+  "second_integrated_validation": {
+    "commit": "cef1017ab18c301e260bed3ed1b5733a4f4f9d33",
+    "baseline_packages": 12,
+    "diagnostic": {
+      "commit": "cef1017ab18c301e260bed3ed1b5733a4f4f9d33",
+      "packages": 12,
+      "all_layers_exact_xor_empty": true,
+      "packages_checked": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ]
+    },
+    "mode_parity": {
+      "commit": "cef1017ab18c301e260bed3ed1b5733a4f4f9d33",
+      "records": [
+        {
+          "index": 0,
+          "pose": [
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              0
+            ]
+          ],
+          "preview": "completed",
+          "batch": "completed",
+          "end": "completed",
+          "xor_differences": []
+        },
+        {
+          "index": 1,
+          "pose": [
+            [
+              -0.004,
+              0.002,
+              -4e-05
+            ],
+            [
+              -0.002,
+              0.001,
+              -2e-05
+            ],
+            [
+              0,
+              0,
+              0
+            ]
+          ],
+          "preview": "completed",
+          "batch": "completed",
+          "end": "completed",
+          "xor_differences": []
+        },
+        {
+          "index": 2,
+          "pose": [
+            [
+              15,
+              -15,
+              1
+            ],
+            [
+              15,
+              -15,
+              1
+            ],
+            [
+              15,
+              -15,
+              1
+            ]
+          ],
+          "preview": "error",
+          "batch": "error",
+          "end": "error",
+          "preview_error": {
+            "type": "ValueError",
+            "message": "当前姿态无法生成保持电连接、原拓扑且无异网接触的图形，未提交该结果；保留上一完成状态。5/0 #94：固定RDL仍接触其他网络的实际过孔或同层金属"
+          },
+          "batch_error": {
+            "type": "ValueError",
+            "message": "当前姿态无法生成保持电连接、原拓扑且无异网接触的图形，未提交该结果；保留上一完成状态。5/0 #94：固定RDL仍接触其他网络的实际过孔或同层金属"
+          }
+        },
+        {
+          "index": 3,
+          "pose": [
+            [
+              15,
+              -15,
+              1
+            ],
+            [
+              -15,
+              15,
+              -1
+            ],
+            [
+              15,
+              15,
+              -1
+            ]
+          ],
+          "preview": "error",
+          "batch": "error",
+          "end": "error",
+          "preview_error": {
+            "type": "ValueError",
+            "message": "当前姿态无法生成保持电连接、原拓扑且无异网接触的图形，未提交该结果；保留上一完成状态。5/0 #65：固定RDL仍接触其他网络的实际过孔或同层金属"
+          },
+          "batch_error": {
+            "type": "ValueError",
+            "message": "当前姿态无法生成保持电连接、原拓扑且无异网接触的图形，未提交该结果；保留上一完成状态。5/0 #65：固定RDL仍接触其他网络的实际过孔或同层金属"
+          }
+        }
+      ]
+    }
   }
 }
