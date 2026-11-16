@@ -19,6 +19,13 @@ def cancel_check():
     event=getattr(_local,'cancel',None)
     if event is not None and event.is_set():raise InterruptedError('用户取消')
 
+@contextmanager
+def serial_scope():
+    """Outer batch workers own their slots; inner maps must not oversubscribe."""
+    previous=getattr(_local,'nested',False);_local.nested=True
+    try:yield
+    finally:_local.nested=previous
+
 
 def resource_profile():
     cpu=os.cpu_count() or 1

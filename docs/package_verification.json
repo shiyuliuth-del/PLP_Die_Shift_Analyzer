@@ -1,11 +1,11 @@
 {
-  "version": "V42",
+  "version": "V43",
   "status": "PASS",
-  "tested_at_utc": "2026-11-16T02:32:08.072377+00:00",
+  "tested_at_utc": "2026-11-16T05:44:28.795248+00:00",
   "scope": "Clean source checkout, local platform. Windows executable verification is recorded separately.",
   "platform": "linux",
-  "verified_runtime_sha256": "9efcb750740870a3c222a637143b146a48e13f683fa746bf84266a09c6112ccc",
-  "gui_suites": 23,
+  "verified_runtime_sha256": "4344538a1dd2e7a6474003b89bfa7703146875c7c0f38be970b325255b632286",
+  "gui_suites": 25,
   "runs": [
     {
       "args": [
@@ -21,7 +21,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "Ran 355 tests in 68.993s",
+        "Ran 366 tests in 196.208s",
         "",
         "OK (skipped=2)"
       ]
@@ -288,6 +288,28 @@
         "FRESH_PROCESS_RESTORE_PASS",
         "",
         "GUI_V42_FRESH_PROCESS_PASS: actual new interpreter restores complete frame and statistics without reconstruction"
+      ]
+    },
+    {
+      "args": [
+        "tests/gui_v43.py"
+      ],
+      "env": {},
+      "status": "PASS",
+      "summary": [
+        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
+        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
+        "GUI_V43_PASS: authenticated local IPC, assessment-first, locks, pivots, GDS, concurrent OAS cells, cancel, project switching and release"
+      ]
+    },
+    {
+      "args": [
+        "tests/gui_v43_process.py"
+      ],
+      "env": {},
+      "status": "PASS",
+      "summary": [
+        "GUI_V43_PROCESS_PASS: new application process, nondefault pivot, GDS and OAS output, clean IPC shutdown, failed startup exits without modal dialog"
       ]
     },
     {

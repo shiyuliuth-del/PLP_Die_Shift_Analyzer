@@ -16,6 +16,7 @@ class MouseDieMode:
         if event.key=='f':self.w.stop_animation();self.w.fit_plot();self.w.plot_layout(preserve=True)
         elif event.key=='m':self.choose()
     def choose(self):
+        if getattr(self.w,"remote_locked",False):return
         w=self.w
         if not w.case:return
         names=[f'DIE {i+1}' for i in range(len(w.case['dies']))]

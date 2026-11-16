@@ -96,7 +96,8 @@ def restore_project_geometry(data,project):
     from .gds_shapes import edited_snapshot
     p=copy.deepcopy(project or {})
     if not hasattr(data,'_legacy_snapshot'):
-        return edited_snapshot(data,p.get('node_edits',[])),p
+        from .area_filter import apply
+        return apply(edited_snapshot(data,p.get('node_edits',[])),p)
     modern=p.get('geometry_indexing')=='merged-v39'
     old=p.get('legacy_node_edits',[]) if modern else p.get('node_edits',[])
     if old:
@@ -110,7 +111,7 @@ def restore_project_geometry(data,project):
         for name in ('reconstruction_cuts','reconstruction_extra_cuts','reconstruction_second_cuts','reconstruction_dropped_cuts'):
             cfg[name]=[(l,ref(l,i),vias(v),*tail) for l,i,v,*tail in cfg.get(name,())]
         cfg['reconstruction_intervals']=[(l,ref(l,i),owner,vias(v),identity,a,b) for l,i,owner,v,identity,a,b in cfg.get('reconstruction_intervals',())]
-        for name in ('reconstruction_forced','reconstruction_ignored'):
+        for name in ('reconstruction_forced','reconstruction_ignored','reconstruction_following'):
             cfg[name]=[(l,ref(l,i)) for l,i in cfg.get(name,())]
         for name in ('reconstruction_angles','reconstruction_deleted'):
             cfg[name]=[(l,ref(l,i),owner,vias(v),identity,*tail) for l,i,owner,v,identity,*tail in cfg.get(name,())]
@@ -122,4 +123,5 @@ def restore_project_geometry(data,project):
         if cfg['reconstruction_intervals'] and data.merge_notes:
             data.import_warnings=list(data.import_warnings)+['工程图形已按完整轮廓合并：旧分区引用已映射；不匹配的旧路径保留记录并重新选区。']
     data=edited_snapshot(data,p.get('node_edits',[]))
-    return data,p
+    from .area_filter import apply
+    return apply(data,p)

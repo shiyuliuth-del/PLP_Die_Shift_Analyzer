@@ -10,9 +10,10 @@ if __name__=='__main__':
         if not {'--smoke-test','--gpu-info'}.intersection(sys.argv):hide_owned_console()
         prepare_runtime()
         parser=argparse.ArgumentParser(description='Die Shift Analyze')
-        parser.add_argument('--project');parser.add_argument('--smoke-test',help=argparse.SUPPRESS)
+        parser.add_argument('--project');parser.add_argument('--measured-output',action='store_true');parser.add_argument('--ipc-endpoint');parser.add_argument('--smoke-test',help=argparse.SUPPRESS)
         parser.add_argument('--gpu-info',metavar='FILE',help='write offline GPU self-test results to a JSON file')
         args=parser.parse_args()
+        if args.measured_output and not args.project:parser.error('--measured-output requires --project')
         if args.gpu_info:
             import json
             from pathlib import Path
@@ -24,7 +25,7 @@ if __name__=='__main__':
         verify()
         if args.smoke_test:raise SystemExit(smoke(args.smoke_test))
         from die_shift_studio.gui import launch
-        raise SystemExit(launch(args.project))
+        raise SystemExit(launch(args.project,True,args.ipc_endpoint) if args.measured_output else launch(args.project))
     except Exception:
         import traceback
         from pathlib import Path

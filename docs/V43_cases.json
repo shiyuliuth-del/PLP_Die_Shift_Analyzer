@@ -1,0 +1,273 @@
+{
+  "geometry_test_commit": "644ff0fc46541617d32a7cdee352653c86ff5e1c",
+  "runtime_sha256": "86684a8eb214a790796fb89191fdfde76d4927b4ff6aa15db00b5b063ba8d44c",
+  "final_functional_commit": "237174141ff8d55b66e47ddaf75ed386d8391bc5",
+  "final_runtime_sha256": "4344538a1dd2e7a6474003b89bfa7703146875c7c0f38be970b325255b632286",
+  "delta": "Final code only reorders endpoint creation before disabling overlays and clears the startup-only guard; geometry, output and batch kernels unchanged. Final aggregate and Windows separately recorded.",
+  "gd55": {
+    "source_name": "GD55_1105.gds",
+    "source_sha256": "a4bccbb65058dc4023bc53d5a6916c4185b81f6d1710e365c8b21c9c6feb1b29",
+    "diagnostic_only": true,
+    "status": "PASS",
+    "die_count": 3,
+    "seconds": 289.84828949800067,
+    "timing_scope": "end-to-end with concurrent regression load; not an isolated throughput benchmark",
+    "preview": {
+      "connection_failures": [],
+      "connection_failure_count": 0,
+      "fixed_rdl_drc_checked": true,
+      "rule_groups": 0,
+      "scope": "当前实际铜；已检查重构固定RDL规则，不代表全图签核"
+    },
+    "gds": {
+      "bytes": 574266,
+      "dbu_um": 0.001,
+      "connection_failures": [],
+      "connection_failure_count": 0,
+      "fixed_rdl_drc_checked": true,
+      "rule_groups": 0,
+      "scope": "当前实际铜；已检查重构固定RDL规则，不代表全图签核"
+    },
+    "batch": {
+      "threads": 4,
+      "max_memory_mb": 1024,
+      "queue_limit": 16
+    },
+    "poses": [
+      {
+        "cell": "Package_000000",
+        "connection_failures": [],
+        "connection_failure_count": 0,
+        "fixed_rdl_drc_checked": false,
+        "rule_groups": 0,
+        "scope": "当前实际铜；快速批量不计算全局DRC、概率或良率"
+      },
+      {
+        "cell": "Package_000001",
+        "connection_failures": [
+          {
+            "layer": "5/0",
+            "index": 5,
+            "reason": "分叉动区型变折叠，已取消连接段"
+          },
+          {
+            "layer": "5/0",
+            "index": 78,
+            "reason": "分叉动区型变折叠，已取消连接段"
+          },
+          {
+            "layer": "5/0",
+            "index": 80,
+            "reason": "组合连接发生冲突，已取消连接段"
+          },
+          {
+            "layer": "5/0",
+            "index": 126,
+            "reason": "组合连接发生冲突，已取消连接段"
+          }
+        ],
+        "connection_failure_count": 4,
+        "fixed_rdl_drc_checked": false,
+        "rule_groups": 0,
+        "scope": "当前实际铜；快速批量不计算全局DRC、概率或良率"
+      },
+      {
+        "cell": "Package_000002",
+        "connection_failures": [
+          {
+            "layer": "5/0",
+            "index": 5,
+            "reason": "分叉动区型变折叠，已取消连接段"
+          },
+          {
+            "layer": "5/0",
+            "index": 69,
+            "reason": "组合连接发生冲突，已取消连接段"
+          },
+          {
+            "layer": "5/0",
+            "index": 80,
+            "reason": "组合连接发生冲突，已取消连接段"
+          },
+          {
+            "layer": "5/0",
+            "index": 126,
+            "reason": "组合连接发生冲突，已取消连接段"
+          }
+        ],
+        "connection_failure_count": 4,
+        "fixed_rdl_drc_checked": false,
+        "rule_groups": 0,
+        "scope": "当前实际铜；快速批量不计算全局DRC、概率或良率"
+      },
+      {
+        "cell": "Package_000003",
+        "connection_failures": [
+          {
+            "layer": "5/0",
+            "index": 5,
+            "reason": "分叉动区型变折叠，已取消连接段"
+          },
+          {
+            "layer": "5/0",
+            "index": 69,
+            "reason": "组合连接发生冲突，已取消连接段"
+          },
+          {
+            "layer": "5/0",
+            "index": 78,
+            "reason": "分叉动区型变折叠，已取消连接段"
+          }
+        ],
+        "connection_failure_count": 3,
+        "fixed_rdl_drc_checked": false,
+        "rule_groups": 0,
+        "scope": "当前实际铜；快速批量不计算全局DRC、概率或良率"
+      },
+      {
+        "cell": "Package_000004",
+        "connection_failures": [
+          {
+            "layer": "5/0",
+            "index": 5,
+            "reason": "分叉动区型变折叠，已取消连接段"
+          },
+          {
+            "layer": "5/0",
+            "index": 78,
+            "reason": "组合连接发生冲突，已取消连接段"
+          },
+          {
+            "layer": "5/0",
+            "index": 126,
+            "reason": "组合连接发生冲突，已取消连接段"
+          }
+        ],
+        "connection_failure_count": 3,
+        "fixed_rdl_drc_checked": false,
+        "rule_groups": 0,
+        "scope": "当前实际铜；快速批量不计算全局DRC、概率或良率"
+      },
+      {
+        "cell": "Package_000005",
+        "connection_failures": [
+          {
+            "layer": "5/0",
+            "index": 5,
+            "reason": "分叉动区型变折叠，已取消连接段"
+          },
+          {
+            "layer": "5/0",
+            "index": 80,
+            "reason": "组合连接发生冲突，已取消连接段"
+          },
+          {
+            "layer": "5/0",
+            "index": 126,
+            "reason": "组合连接发生冲突，已取消连接段"
+          }
+        ],
+        "connection_failure_count": 3,
+        "fixed_rdl_drc_checked": false,
+        "rule_groups": 0,
+        "scope": "当前实际铜；快速批量不计算全局DRC、概率或良率"
+      },
+      {
+        "cell": "Package_000006",
+        "connection_failures": [
+          {
+            "layer": "5/0",
+            "index": 5,
+            "reason": "分叉动区型变折叠，已取消连接段"
+          },
+          {
+            "layer": "5/0",
+            "index": 69,
+            "reason": "组合连接发生冲突，已取消连接段"
+          },
+          {
+            "layer": "5/0",
+            "index": 126,
+            "reason": "组合连接发生冲突，已取消连接段"
+          }
+        ],
+        "connection_failure_count": 3,
+        "fixed_rdl_drc_checked": false,
+        "rule_groups": 0,
+        "scope": "当前实际铜；快速批量不计算全局DRC、概率或良率"
+      },
+      {
+        "cell": "Package_000007",
+        "connection_failures": [
+          {
+            "layer": "5/0",
+            "index": 5,
+            "reason": "分叉动区型变折叠，已取消连接段"
+          }
+        ],
+        "connection_failure_count": 1,
+        "fixed_rdl_drc_checked": false,
+        "rule_groups": 0,
+        "scope": "当前实际铜；快速批量不计算全局DRC、概率或良率"
+      }
+    ],
+    "oas": {
+      "cells": 8,
+      "unique_geometry_cells": 2123,
+      "bytes": 1149856,
+      "dbu_um": 0.001,
+      "top_cell": "TopCell"
+    },
+    "independent_readback": "gdstk passed",
+    "application_exit_code": 0
+  },
+  "nu17123_drag": {
+    "status": "PASS",
+    "source_sha256": "6bdd1614389450db9f57e80cbed109e42b3e374e8ad775da86f3da0a0e6df418",
+    "requested_xy": [
+      7379,
+      2933
+    ],
+    "picked_xy": [
+      7362.272,
+      2930.293490768288
+    ],
+    "source_ref": [
+      "2/0",
+      11
+    ],
+    "samples": [
+      {
+        "delta_y_um": -2.0,
+        "initial": 94.20371017349933,
+        "final": 96.20371016937776,
+        "change": 1.9999999958784258
+      },
+      {
+        "delta_y_um": -5.0,
+        "initial": 94.20371017349933,
+        "final": 99.20371016319535,
+        "change": 4.999999989696022
+      },
+      {
+        "delta_y_um": -10.0,
+        "initial": 94.20371017349933,
+        "final": 104.2037101528914,
+        "change": 9.999999979392072
+      }
+    ]
+  },
+  "oas_stress": {
+    "cells": 50000,
+    "unique_geometry_cells": 1,
+    "bytes": 4826118,
+    "dbu_um": 0.001,
+    "top_cell": "TopCell",
+    "status": "PASS",
+    "scope": "I/O and hierarchy only, not 50000 reconstructed GD55 poses",
+    "append_seconds": 40.774170138000045,
+    "finalize_seconds": 0.6397916860005353,
+    "readback_seconds": 0.13727063000078488,
+    "peak_increment_mb": 19.78515625
+  }
+}

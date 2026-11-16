@@ -90,6 +90,7 @@ class ViewSettings:
     reconstruction_style:str="c2"
     reconstruction_boundary_mode:str="wide"
     reconstruction_ignored:tuple=()
+    reconstruction_following:tuple=() # ignored whole-source rigid following; absent means static
     reconstruction_forced:tuple=()  # explicit edits override enclosure-based auto-ignore
     reconstruction_angles:tuple=() # layer,index,owner,refs,route,side,absolute nominal blade angle
     reconstruction_deleted:tuple=() # stable zone keys
@@ -168,9 +169,10 @@ class ViewSettings:
                     intervals.append((str(layer),int(index),int(owner),refs,str(fingerprint),a,b))
             except (TypeError,ValueError):continue
         values['reconstruction_intervals']=tuple(intervals)
-        refs=values.get('reconstruction_ignored',())
-        if not isinstance(refs,(list,tuple)) or any(not isinstance(r,(list,tuple)) or len(r)!=2 or not isinstance(r[0],str) or type(r[1]) is not int or r[1]<0 for r in refs):raise ValueError('忽略重构图形编号无效')
-        values['reconstruction_ignored']=tuple(sorted(set(tuple(r) for r in refs)))
+        for name in ('reconstruction_ignored','reconstruction_following'):
+            refs=values.get(name,())
+            if not isinstance(refs,(list,tuple)) or any(not isinstance(r,(list,tuple)) or len(r)!=2 or not isinstance(r[0],str) or type(r[1]) is not int or r[1]<0 for r in refs):raise ValueError('忽略重构图形编号无效')
+            values[name]=tuple(sorted(set(tuple(r) for r in refs)))
         from .reconstruction_edits import normalize_edits
         values.update(normalize_edits(values))
         if 'reconstruction_cuts' in values:
@@ -231,7 +233,7 @@ class ViewSettings:
 
     def reconstruction_key(self):
         """Everything the reconstruction result depends on besides the pose."""
-        return (True,'nominal-route-partition-v42',self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_pad_trigger_um,self.reconstruction_ignored,self.drc_tolerance_um,
+        return (True,'nominal-route-partition-v43',self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_pad_trigger_um,self.reconstruction_ignored,self.reconstruction_following,self.drc_tolerance_um,
                 self.reconstruction_corner_guard_um,tuple(self.reconstruction_intervals),
                 self.reconstruction_forced,self.reconstruction_angles,self.reconstruction_deleted,self.reconstruction_added,
                 tuple(self.reconstruction_regions),tuple(self.reconstruction_cuts),

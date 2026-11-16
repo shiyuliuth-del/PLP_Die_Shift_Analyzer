@@ -55,6 +55,15 @@ try:
  path=folder/'source.dshift.json';path.write_text(json.dumps(project));w.load_project(path);wait()
  if not w.reconstruction_toggle.isChecked():w.reconstruction_toggle.setChecked(True);wait()
  w.request_preview();wait();w.fit_plot();w.plot_layout(preserve=True);w.canvas.draw()
+ # V43 can correctly choose separate equal-width branch sections. This test
+ # exercises MERGED-handle editing, so explicitly overlap the two source-bound
+ # intervals across their common trunk before asserting that test precondition.
+ from dataclasses import replace
+ from die_shift_studio.reconstruction_edits import key
+ plans=[row['plan'] for row in w.engine.reconstructor._base_plans if row['plan'] is not None]
+ assert len(plans)==2
+ w.view_settings=replace(w.view_settings,reconstruction_intervals=tuple((*key(plan),plan.land_end+8,plan.fixed_start-8) for plan in plans))
+ w.invalidate_reconstruction_edit();w.request_preview();wait();w.canvas.draw()
  first=w.current_frame['reconstruction']['pieces'];assert len(first)>=1
  target=next(q for q in first if q.get('graph_members'));members=target['graph_members'];assert len(members)==2
  # Pick a true merged-domain outer boundary and drag across the branch junction.

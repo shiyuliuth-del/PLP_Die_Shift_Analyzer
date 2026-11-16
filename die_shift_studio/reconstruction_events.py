@@ -153,7 +153,11 @@ def scan(r,grid,progress=lambda *_:None,source_cache=None):
     progress(12,'复用共用路径，建立逐图形极端几何')
     refs=[ref for values in r.rules.nets.values() for ref in values];count=grid.count
     def build_uncached(ref):
-        local=by_ref.get(ref,());owners=tuple(sorted({q['owner'] for q in local if (q['plan'] is not None or q['orphan']) and grid.radices[q['owner']]>1}))
+        local=by_ref.get(ref,());owners=set()
+        for q in local:
+            affected=q.get('follow_owners',(q['owner'],)) if q.get('following') else (q['owner'],) if q['plan'] is not None or q['orphan'] else ()
+            owners.update(i for i in affected if grid.radices[i]>1)
+        owners=tuple(sorted(owners))
         values={};render_cache={}
         if not local:
             g=r.model.nodes[r.model.ids[ref]]['poly'];values[()]=dict(geometry=g,pieces=())

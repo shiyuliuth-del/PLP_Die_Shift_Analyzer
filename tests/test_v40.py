@@ -121,7 +121,7 @@ class Reconstruction40Tests(unittest.TestCase):
             e.configure_reconstruction(True,cfg);g=e.frame(np.array([[20.,20.,.01]]))
             self.assertTrue(all(q['ignored'] for q in g['reconstruction']['pieces']));self.assertTrue(g['reconstruction']['replacements'])
             from die_shift_studio.reconstruction import transform
-            expected=transform(e.contact.cache.layers['5/0']['geometry'][0],e.bound.centers[0],np.array([20.,20.,.01]))
+            expected=e.contact.cache.layers['5/0']['geometry'][0]  # V43 default ignored mode is stationary
             self.assertLess(expected.symmetric_difference(g['reconstruction']['replacements']['5/0'][0]['geometry']).area,.001)
             self.assertTrue(shapely.Polygon(g['layers']['5/0']['polygons'][0]).equals(e.contact.cache.layers['5/0']['geometry'][0]))
             e.configure_reconstruction(True,replace(cfg,reconstruction_ignored=()))

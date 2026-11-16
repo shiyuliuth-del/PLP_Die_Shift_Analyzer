@@ -54,6 +54,7 @@ def project_click(piece,point):
 
 
 def change_zone(window,action,piece=None,ref=None,point=None,side=None):
+    if getattr(window,"remote_locked",False):return
     """Apply one source-bound edit; all poses share the resulting settings key."""
     import uuid
     cfg=window.view_settings

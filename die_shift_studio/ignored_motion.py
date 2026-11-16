@@ -1,4 +1,4 @@
-"""Ignored reconstruction keeps copper rigid per connected DIE, not stationary."""
+"""Ignored reconstruction has explicit stationary and whole-source rigid modes."""
 import numpy as np
 import shapely
 from .statistics import mean_and_bounds
@@ -20,16 +20,14 @@ def fixed_enclosures_safe(r,ref,vias):
 def entries(r):
     out=[]
     for ref in sorted(set(r.settings.reconstruction_ignored)|set(r.auto_ignored)):
-        vias=r.vias_by_target.get(ref,());source=r.model.cache.layers[ref[0]]['geometry'][ref[1]]
+        vias=r.vias_by_target.get(ref,())
+        if not vias:continue
+        source=r.model.cache.layers[ref[0]]['geometry'][ref[1]]
         owners=sorted({v['owner'] for v in vias if v['owner']>=0})
-        allocation=divide(source.wkb,tuple((v['owner'],v['poly'].wkb) for v in vias),r._rule_width,r.tol)
-        if len(owners)>1 and not allocation:
-            # No arbitrary nearest-DIE rigid motion is allowed for an inseparable net.
-            out.append(dict(layer=ref[0],index=ref[1],owner=owners[0],refs=tuple((v['key'],v['index']) for v in vias),source=source,routing_source=source,land=source,net=vias[0]['net'],mine=list(vias),anchors=[],plan=None,orphan=False,ignored=True,warning='跨DIE忽略铜无法沿连接路径分离；保留源图并标记，需要恢复重构'))
-            continue
-        for owner in owners:
-            mine=[v for v in vias if v['owner']==owner];scope=allocation.get(owner,(source,None))[0]
-            out.append(dict(layer=ref[0],index=ref[1],owner=owner,refs=tuple((v['key'],v['index']) for v in mine),
-                            source=source,routing_source=scope,land=shapely.union_all([v['land'] for v in mine]),net=mine[0]['net'],
-                            mine=mine,anchors=[],plan=None,orphan=True,ignored=True,warning='忽略重构：按连接DIE刚体随动，固定过孔包围量仍检查'))
+        if not owners:continue
+        following=ref in r.settings.reconstruction_following
+        out.append(dict(layer=ref[0],index=ref[1],owner=owners[0],follow_owners=tuple(owners),following=following,
+                        refs=tuple((v['key'],v['index']) for v in vias),source=source,routing_source=source,
+                        land=source,net=vias[0]['net'],mine=list(vias),anchors=[],plan=None,orphan=False,
+                        ignored=True,warning='忽略重构：整块随动' if following else '忽略重构：整块静止'))
     return out

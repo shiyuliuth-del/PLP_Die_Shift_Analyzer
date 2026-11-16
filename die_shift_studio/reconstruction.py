@@ -201,7 +201,7 @@ class Reconstructor:
             self.safe_vias[ref]=safe
             from .ignored_motion import fixed_enclosures_safe
             if len(safe)==len(vias):
-                if fixed_enclosures_safe(self,ref,vias):self.auto_ignored[ref]=enclosure_certificate(self.model,self.p,source,vias)
+                if ref not in self.settings.reconstruction_following or fixed_enclosures_safe(self,ref,vias):self.auto_ignored[ref]=enclosure_certificate(self.model,self.p,source,vias)
                 else:self.safe_vias[ref]=[]
         for (layer,index),vias in sorted(self.vias_by_target.items()):
             if (layer,index) in self.auto_ignored:continue
@@ -298,9 +298,17 @@ class Reconstructor:
                 ranked=[];best_mass=float('inf')
                 trials=[]
                 for _,length,plan in candidates:
-                    for a,b in getattr(plan,'candidate_intervals',((plan.nominal_first,plan.nominal_second),))[:3]:
+                    for a,b in getattr(plan,'candidate_intervals',((plan.nominal_first,plan.nominal_second),)):
                         trials.append((b-a,plan,a,b))
-                for length,plan,a,b in sorted(trials,key=lambda q:q[0],reverse=True)[:3]:
+                trials=list({(id(plan),a,b):(length,plan,a,b) for length,plan,a,b in trials}.values())
+                def uniform_rank(q):
+                    variation=q[1].width_variation(q[2],q[3])
+                    return (variation>.05,variation if variation>.05 else 0.,-q[0])
+                # Preserve a long alternative as well as the best uniform runs;
+                # a uniformity heuristic must not prune away the lower-risk route.
+                chosen=sorted(trials,key=uniform_rank)[:2]+[max(trials,key=lambda q:q[0])]
+                unique={(id(plan),a,b):(length,plan,a,b) for length,plan,a,b in chosen}
+                for length,plan,a,b in unique.values():
                     part=plan.partition(a,b)
                     invalid=0
                     for pose in catalogue.locals[owner]:
@@ -312,10 +320,11 @@ class Reconstructor:
                     sweep=shapely.union_all([part['A'],part['C']]).buffer((travel+self.rule_space+2*self.tol)/np.cos(np.pi/48),quad_segs=12)
                     neighbours=tree.query(sweep,predicate='intersects')
                     certified=not any(nets[int(j)]!=net for j in neighbours)
-                    ranked.append((mass,invalid,-length,not certified,plan,a,b))
+                    variation=plan.width_variation(a,b)
+                    ranked.append((mass,invalid,variation if variation>.05 else 0.,-length,not certified,plan,a,b))
                     best_mass=min(best_mass,mass)
                     if mass==0 and not invalid:break  # first zero-risk candidate is already longest
-                mass,invalid,_,space_unproven,plan,a,b=min(ranked,key=lambda q:q[:4])
+                mass,invalid,_,_,space_unproven,plan,a,b=min(ranked,key=lambda q:q[:5])
                 plan.nominal_first=a;plan.nominal_second=b
                 warning=plan.warning
                 if space_unproven:warning=(warning+'；' if warning else '')+'全输入多DIE包络未证明线距充足，按当前几何复核'
@@ -374,7 +383,7 @@ class Reconstructor:
         # Route construction is pose-independent and reused after every handle edit.
         from .session_cache import logical_fingerprint
         key=logical_fingerprint((self.model.data.geometry_id,self.model.roles,self.model.connections.order,
-                                'v42-plane-branches-2',self.settings.reconstruction_forced,self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
+                                'v43-uniform-branches-1',self.settings.reconstruction_forced,self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
         if key not in self.plan_pool:
             from .resources import parallel_map,native_phase_profile
             self.plan_pool[key]=[entry for rows in parallel_map(build,groups,profile=native_phase_profile(),progress=lambda n,total:progress(round(65*n/max(1,total)),f'建立全姿态共用动区 {n}/{total}')) for entry in rows]
@@ -517,6 +526,20 @@ class Reconstructor:
                 if error:regions=dict(fallback);warning=error+'；已取消连接段';valid=False
                 near=part['near'];moved_cut=transform(near,self.model.bound.centers[owner],states[owner]*entry.get('serial_left',1.))
                 far=transform(part['far'],self.model.bound.centers[owner],states[owner]*entry.get('serial_right',0.));a,b=part['a'],part['b']
+            elif entry.get('ignored'):
+                following=entry.get('following',False)
+                owners=entry.get('follow_owners',(owner,))
+                matrices=[]
+                for who in owners:
+                    co,si=np.cos(states[who,2]),np.sin(states[who,2]);rot=np.array([[co,-si],[si,co]])
+                    center=self.model.bound.centers[who];matrices.append(np.r_[rot.ravel(),center-rot@center+states[who,:2]])
+                compatible=not following or all(np.allclose(matrices[0],m,rtol=0,atol=self.tol*.01) for m in matrices[1:])
+                if following and compatible:
+                    part=dict(A=EMPTY,B=EMPTY,C=source);regions=dict(A=EMPTY,B=EMPTY,C=transform(source,self.model.bound.centers[owner],states[owner]))
+                else:
+                    part=dict(A=EMPTY,B=source,C=EMPTY);regions=dict(part)
+                if not compatible:valid=False;warning='整块随动连接了不同刚体变换的DIE，无法同时跟随；保留源图'
+                near=far=moved_cut=None;a=b=0.
             elif entry['orphan']:
                 scope=entry.get('routing_source',source)
                 part=dict(A=EMPTY,B=EMPTY,C=scope)
@@ -527,7 +550,7 @@ class Reconstructor:
                 near=far=moved_cut=None;a=b=0.;valid=False
             shift=float(np.linalg.norm(self.model.moved(shapely.Point(entry['mine'][0]['center']),owner,states).coords[0]-entry['mine'][0]['center']))
             feature=features.setdefault((layer,index),dict(source=source,pieces=[],net=entry['net']))
-            piece=dict(graph_branch=entry.get('graph_branch',False),moving_nominal=entry.get('moving_nominal'),fixed_nominal=entry.get('fixed_nominal'),ignored=entry.get('ignored',False),die=owner,layer=layer,index=index,net=entry['net'],via_refs=entry['refs'],vias=[v[1] for v in entry['refs']],
+            piece=dict(graph_branch=entry.get('graph_branch',False),moving_nominal=entry.get('moving_nominal'),fixed_nominal=entry.get('fixed_nominal'),ignored=entry.get('ignored',False),ignored_following=entry.get('following',False),die=owner,layer=layer,index=index,net=entry['net'],via_refs=entry['refs'],vias=[v[1] for v in entry['refs']],
                        fallback_regions=fallback if part.get('near') is not None else None,connection_failed=bool(error) or not valid,
                        missing_region=part['A'] if getattr(plan,'plane_domain',False) else missing_area(part,plan,self.model.bound.centers[owner],states[owner]) if plan is not None and part.get('near') is not None else source,
                        moving_terminals=shapely.union_all([self.model.moved(v['poly'],owner,states) for v in entry['mine']]),
@@ -541,7 +564,7 @@ class Reconstructor:
                        shift_um=shift,cut_distance_um=a,chain_span_um=b-a,gap_um=None if regions['B'].is_empty or regions['C'].is_empty else float(regions['B'].distance(regions['C'])),
                        bridge_length_um=0 if near is None else near.length,bridge_area_um2=regions['A'].area,bridge_span_um=b-a,
                        clearance_um=None,conflict=False,conflict_net=None,conflict_link=None,manual=manual,manual_lost=False,
-                       cut_clamped=False,cut_window=None,orphan=entry['orphan'],follows=entry['orphan'],warning=warning,valid=valid,priority_failure_mass=self.manual_masses.get((plan.key,plan.identity,a,b),entry.get('priority_failure_mass')) if plan else None)
+                       cut_clamped=False,cut_window=None,orphan=entry['orphan'],follows=entry.get('following',entry['orphan']),warning=warning,valid=valid,priority_failure_mass=self.manual_masses.get((plan.key,plan.identity,a,b),entry.get('priority_failure_mass')) if plan else None)
             pieces.append(piece);feature['pieces'].append(piece)
         from .branch_regions import consolidate
         pieces=consolidate(self,pieces,states)
