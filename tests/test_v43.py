@@ -107,8 +107,9 @@ class V43Tests(unittest.TestCase):
   from die_shift_studio.measured_core import Session,write_gds
   e,d,c=fixture()
   try:
-   s=Session(d,c,e.roles,{},e.p,e.reconstructor.settings,e.contact.cache)
+   s=Session(d,c,e.roles,{},e.p,replace(e.reconstructor.settings,acceleration='cpu'),e.contact.cache)
    s.prepare(lambda *_:None)
+   self.assertEqual(s.model(s.p)[0].bound.acceleration,'cpu')
    from unittest.mock import patch
    from die_shift_studio.reconstruction_route import RoutePlan
    with patch.object(RoutePlan,'choose',side_effect=AssertionError('Prepared equivalent pivot rebuilt routes')):
@@ -152,6 +153,9 @@ class V43Tests(unittest.TestCase):
    path=Path(tmp)/'old.gds';path.write_bytes(b'keep-old')
    snapshot=Snapshot({'1/0':(box(3e6,0,3e6+10,10).wkb,)},'TOP',None,0)
    with self.assertRaisesRegex(ValueError,'32'):write_gds(snapshot,path,.001)
+   self.assertEqual(path.read_bytes(),b'keep-old')
+   snapshot=Snapshot({'65536/0':(box(0,0,10,10).wkb,)},'TOP',None,0)
+   with self.assertRaisesRegex(ValueError,'16'):write_gds(snapshot,path,.001)
    self.assertEqual(path.read_bytes(),b'keep-old')
 
 if __name__=='__main__':unittest.main()

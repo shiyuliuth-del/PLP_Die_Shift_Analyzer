@@ -63,6 +63,7 @@ class Session:
             saved[2].close()
             with self.lock:self.instances.remove(saved[2])
         model=ContactModel(self.data,self.case,self.roles,self.case['connections'],self.cache,self.motions,p)
+        model.bound.acceleration=self.settings.acceleration
         with self.lock:plans=clone_plan_pool(self.plan_pool)
         r=Reconstructor(model,p,self.settings,plan_pool=plans)
         self.local.model=(key,model,r)
@@ -78,6 +79,7 @@ class Session:
         # DRC marker scans. The same curve solver still rejects invalid geometry.
         result=r.frame(states,progress=progress,diagnostics=preview)
         bound=self.cache.bind(self.case,self.motions,list(self.cache.layers),p)
+        bound.acceleration=self.settings.acceleration
         layers=bound.transform(states)
         frame=dict(states=states,layers=layers,rotation_centers=model.bound.centers.copy(),reconstruction=result,
                    checks={i:dict(failures=[],problem_percent=0) for i in (1,2,3)},contact={'issues':[]},motion_issues=[])
@@ -113,6 +115,7 @@ def write_gds(snapshot,destination,dbu):
     lib=gdstk.Library(unit=1e-6,precision=dbu*1e-6);top=lib.new_cell('MeasuredPackage')
     for key,blobs in snapshot.layers.items():
         layer,datatype=map(int,key.split('/'))
+        if not (0<=layer<=65535 and 0<=datatype<=65535):raise ValueError('图层或Datatype超过GDS 16位范围，请使用OAS输出')
         for b in blobs:
             cancel_check()
             for g in shapely.get_parts(shapely.from_wkb(b)):

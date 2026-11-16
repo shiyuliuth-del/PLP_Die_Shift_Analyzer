@@ -255,6 +255,7 @@ class MeasuredOutput(QtCore.QObject):
                 model,reconstructor=session.model(p)
                 from .fast_preview import PreviewEngine
                 engine=PreviewEngine(session.cache,session.case,session.roles,session.motions,p,None,session.case['connections'],contact_model=model)
+                engine.bound.acceleration=session.settings.acceleration
                 engine.reconstructor=reconstructor;engine.signature='measured-'+uuid.uuid4().hex
                 return product,engine
             return self.submit(command,preview,'preview')
