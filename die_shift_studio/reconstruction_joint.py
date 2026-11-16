@@ -36,7 +36,7 @@ def prepare(r,grid,progress=lambda *_:None):
                 values[digits]=dict(geometry=row['geometry'],pieces=tuple(_compact(q) for q in f['pieces'] if (q['layer'],q['index'])==ref))
         bounds=np.array([v['geometry'].bounds for v in values.values()])
         return ref,dict(owners=owners,values=values,envelope=shapely.box(*bounds[:,:2].min(axis=0),*bounds[:,2:].max(axis=0)))
-    bank=dict(parallel_map(build,refs,profile=native_phase_profile(),progress=lambda n,total:progress(round(100*n/max(1,total)),f'复用局部重构几何 {n}/{total}')))
+    bank=dict(parallel_map(build,refs,progress=lambda n,total:progress(round(100*n/max(1,total)),f'复用局部重构几何 {n}/{total}')))
     r._joint_catalog=(signature,bank);return bank
 
 

@@ -583,7 +583,7 @@ class Reconstructor:
             if self._cover_lookup(self.dropped,None,layer,index,entry['refs']):continue
             part,manual,regions,error,warning=prepared;valid=True;fallback=None
             if part is not None:
-                fallback=dict(A=EMPTY,B=part['B'],C=transform(part['C'],self.model.bound.centers[owner],states[owner])) if getattr(plan,'plane_domain',False) else failed_connection(part,plan,self.model.bound.centers[owner],states[owner])
+                fallback=dict(A=EMPTY,B=part['B'],C=transform(part['C'],self.model.bound.centers[owner],states[owner])) if entry.get('graph_branch') or getattr(plan,'plane_domain',False) else failed_connection(part,plan,self.model.bound.centers[owner],states[owner])
                 if 'serial_left' in entry:
                     fallback=dict(A=EMPTY,B=entry['serial_fixed'],C=transform(entry['serial_block'],self.model.bound.centers[owner],states[owner]*entry['serial_left']))
                 if error:regions=dict(fallback);warning=error+'；已取消连接段';valid=False

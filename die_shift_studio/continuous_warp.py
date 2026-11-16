@@ -13,6 +13,13 @@ def domain(source,controls,fractions,center,pose,width,tolerance):
     from .reconstruction import transform
     from .preview import rigid_transform
     fractions=np.asarray(fractions,float);center=np.asarray(center,float);pose=np.asarray(pose,float)
+    # Overlapping rigid reservations demanding different motions cannot both
+    # be Dirichlet constraints. Reject them before trying 124 integration steps;
+    # the caller then uses the real, non-overlapping material interfaces.
+    clips=[g.intersection(source) for g in controls]
+    for i,a in enumerate(clips):
+        for j in range(i):
+            if abs(fractions[i]-fractions[j])>1e-12 and a.intersection(clips[j]).area>tolerance*tolerance:return None,0
     mesh=shapely.segmentize(source,max(tolerance*16,min(width/3,5.)))
     holes=sum(len(p.interiors) for p in shapely.get_parts(source) if p.geom_type=='Polygon')
     for steps in (4,8,16,32,64):
@@ -20,7 +27,8 @@ def domain(source,controls,fractions,center,pose,width,tolerance):
         for number in range(steps):
             cancel_check();time=number/steps
             placed=[transform(g,center,pose*(w*time)) for g,w in zip(controls,fractions)]
-            distances=np.asarray([shapely.distance(shapely.points(xy),g) for g in placed])
+            points=shapely.points(xy)
+            distances=np.asarray([shapely.distance(points,g) for g in placed])
             weights=np.maximum(distances,tolerance*1e-6)**-2
             weights/=weights.sum(axis=0)
             # Exact Dirichlet transport on a seam; don't blend in a nonzero

@@ -55,6 +55,18 @@ class ContinuityTests(unittest.TestCase):
    self.assertEqual(len(seen),m+n)
 
 class RoutingTests(unittest.TestCase):
+ def test_incremental_field_rejects_conflicting_rigid_material(self):
+  from die_shift_studio.continuous_warp import domain
+  source=box(0,0,200,20)
+  result,steps=domain(source,[box(0,0,130,20),box(80,0,200,20)],[1.,0.],[0,0],[0,30,0],15,.001)
+  self.assertIsNone(result);self.assertEqual(steps,0)
+ def test_incremental_field_keeps_real_end_interfaces_connected(self):
+  from die_shift_studio.continuous_warp import domain
+  source=box(-10,-10,210,10)
+  result,steps=domain(source,[box(-10,-10,10,10),box(190,-10,210,10)],[1.,0.],[0,0],[0,30,0],15,.001)
+  self.assertIsNotNone(result);self.assertTrue(result.is_valid)
+  self.assertEqual(result.geom_type,'Polygon');self.assertFalse(result.interiors)
+  self.assertTrue(result.covers(Point(0,30)));self.assertTrue(result.covers(Point(200,0)))
  def test_free_space_connector_keeps_ports_and_avoids_foreign_wall(self):
   from die_shift_studio.topology_routing import connected_candidate
   source=LineString([(0,0),(200,0)]).buffer(10)

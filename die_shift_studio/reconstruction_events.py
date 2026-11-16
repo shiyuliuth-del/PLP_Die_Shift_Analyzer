@@ -181,7 +181,7 @@ def scan(r,grid,progress=lambda *_:None,source_cache=None):
         token=('reconstruction-source-continuity',logical_fingerprint((r.rules.identity,ref,asdict(r.p),
             source_settings(r.settings,ref),tuple(v.tolist() for v in grid.locals))))
         return source_cache.get_or_compute(token,lambda:build_uncached(ref))
-    bundles=dict(parallel_map(build,refs,profile=native_phase_profile(),progress=lambda n,total:progress(12+round(28*n/max(1,total)),f'重构逐图形几何 {n}/{total}')))
+    bundles=dict(parallel_map(build,refs,progress=lambda n,total:progress(12+round(28*n/max(1,total)),f'重构逐图形几何 {n}/{total}')))
     from . import reconstruction_joint
     r._joint_catalog=(tuple(v.tobytes() for v in grid.locals),bundles)
     if reconstruction_joint.needed(r,bundles,grid):return reconstruction_joint.scan(r,grid,bundles,lambda n,t:progress(40+round(n*.6),t))
