@@ -8,7 +8,7 @@ from dataclasses import asdict, replace
 from pathlib import Path
 
 import numpy as np
-from .qt_compat import QtCore, QtGui, QtWidgets as W, Signal, HORIZONTAL, VERTICAL, Qt
+from .qt_compat import QtCore, QtGui, QtWidgets as W, Signal, HORIZONTAL, VERTICAL, Qt, TOOLTIP
 from .style import STYLE
 from .core import Parameters, ROLES, read_gds, build_case, evaluate, fmt
 from . import __version__
@@ -2556,6 +2556,9 @@ class MainWindow(W.QMainWindow):
         except OSError as exc:self.statusBar().showMessage('Jobs目录不可读：'+str(exc));return
         self.job_combo.blockSignals(True);self.job_combo.clear();self.job_combo.addItem('',None)
         for name,path in items:self.job_combo.addItem(name,str(path))
+        if self.project_path and self.job_combo.findData(str(self.project_path))<0:
+            self.job_combo.addItem(self.project_path.stem.removesuffix('.dshift')+'（外部工程）',str(self.project_path))
+            self.job_combo.setItemData(self.job_combo.count()-1,str(self.project_path),TOOLTIP)
         index=self.job_combo.findData(str(self.project_path)) if self.project_path else 0
         self.job_combo.setCurrentIndex(max(0,index));self.job_combo.blockSignals(False)
     def job_selected(self,index):

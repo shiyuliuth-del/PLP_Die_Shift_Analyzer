@@ -77,7 +77,7 @@ try:
  w.reconstruction_toggle.setChecked(False);until(lambda:not w._tasks and not w.preview_pending)
  w.requested_ipc_endpoint=folder/'endpoint.json';w.measured_output.toggle.setChecked(True)
  until(lambda:w.measured_output.ready)
- assert w.remote_locked and w.project_path==project and project.is_file()
+ assert w.remote_locked and w.project_path.samefile(project) and project.is_file()
  assert rpc('info')['result']['die_count']==1
  rpc('output.configure',{'output_directory':str(folder),'max_threads':2,'max_memory_mb':512})
  rows=[dict(die=1,dx_um=4,dy_um=2,angle_deg=.05,rotation_center_um=[17,-12])]

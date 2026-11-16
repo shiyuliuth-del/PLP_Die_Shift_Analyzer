@@ -145,5 +145,13 @@ class V43Tests(unittest.TestCase):
   self.assertEqual(p['settings']['reconstruction_following'],())
   self.assertEqual(p['measured_output']['max_threads'],0)
   with self.assertRaises(ValueError):normalize_project({'schema_version':5,'measured_output':{'max_memory_mb':0}})
+ def test_gds_overflow_rejected_before_replacing_old_file(self):
+  from die_shift_studio.measured_core import write_gds
+  from die_shift_studio.dxf_export import Snapshot
+  with tempfile.TemporaryDirectory() as tmp:
+   path=Path(tmp)/'old.gds';path.write_bytes(b'keep-old')
+   snapshot=Snapshot({'1/0':(box(3e6,0,3e6+10,10).wkb,)},'TOP',None,0)
+   with self.assertRaisesRegex(ValueError,'32'):write_gds(snapshot,path,.001)
+   self.assertEqual(path.read_bytes(),b'keep-old')
 
 if __name__=='__main__':unittest.main()

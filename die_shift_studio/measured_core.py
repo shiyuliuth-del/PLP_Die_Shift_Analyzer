@@ -116,7 +116,11 @@ def write_gds(snapshot,destination,dbu):
         for b in blobs:
             cancel_check()
             for g in shapely.get_parts(shapely.from_wkb(b)):
-                if not g.is_empty:top.add(gdstk.Polygon(winding_outline(g),layer=layer,datatype=datatype))
+                if not g.is_empty:
+                    points=winding_outline(g);scaled=points/dbu
+                    quantized=np.sign(scaled)*np.floor(np.abs(scaled)+.5)
+                    if np.any(quantized<-(2**31)) or np.any(quantized>2**31-1):raise ValueError('GDS坐标超过32位DBU范围，拒绝溢出输出；请减小坐标或使用OAS')
+                    top.add(gdstk.Polygon(points,layer=layer,datatype=datatype))
     fd,temp=tempfile.mkstemp(prefix='.dsa-measured-',suffix='.gds',dir=path.parent);os.close(fd)
     try:
         lib.write_gds(temp,max_points=8190);check=gdstk.read_gds(temp)
