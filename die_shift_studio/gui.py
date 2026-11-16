@@ -1578,7 +1578,7 @@ class MainWindow(W.QMainWindow):
         if self.current_frame is not None:
             for _,option,title,color,alpha in RANGES:
                 if getattr(self.view_settings,option):handles.append(Line2D([],[],color=color,alpha=alpha,ls='--',label=title))
-            if self.show_issues.isChecked():handles.append(Line2D([],[],color='#92979e',ls='--',label='当前 DRC 位置'))
+            if self.show_issues.isChecked():handles.append(Line2D([],[],color=self.view_settings.contact_marker_color,marker='o',markerfacecolor='none',markersize=4,alpha=.85,ls='none',label='当前 DRC 位置'))
         binary=bool(self.probability_data and self.probability_data.get('binary'))
         if self.probability_toggle.isChecked() and binary:
             handles.append(Patch(facecolor=self.probability_colormap()(1.),alpha=self.view_settings.probability_alpha,label='当前姿态过孔实体覆盖 100%'))

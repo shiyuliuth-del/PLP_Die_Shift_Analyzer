@@ -34,12 +34,29 @@ def frame(checker,states,replacements,settings,progress,owners=None,scopes=None)
             role=m.roles[node['key']]
             if role in ('运动RDL','固定RDL'):base[node['key'].split('/')[0],node['net']].append(dict(node=node,role=role))
         checker.templates={key:(rows,shapely.union_all([r['node']['poly'] for r in rows])) for key,rows in base.items()}
+    if not hasattr(checker,'rigid_candidates'):
+        candidates=defaultdict(set)
+        for link in getattr(m.connections,'links',()):
+            a=(link['upper'],link['upper_index']);b=(link['lower'],link['lower_index'])
+            for receiver,via in ((a,b),(b,a)):
+                if m.roles.get(receiver[0]) in ('运动RDL','固定RDL') and m.roles.get(via[0]) in ('运动过孔','固定过孔'):
+                    candidates[receiver].add(m.nodes[m.ids[via]]['owner'])
+        checker.rigid_candidates=candidates
+    proved={}
+    for ref,g in overrides.items():
+        node=m.nodes[m.ids[ref]];normalized=g.normalize()
+        for owner in dict.fromkeys([node['owner'],*sorted(checker.rigid_candidates.get(ref,()))]):
+            expected=m.moved(node['poly'],owner,states)
+            # Verify coordinates, not area or bounding boxes. A copper edit
+            # that merely resembles a translated source cannot reuse its DRC.
+            if expected.normalize().equals_exact(normalized,dbu*1.e-7):proved[ref]=owner;break
     for key,(template,original) in checker.templates.items():
-        groups[key]=[dict(r,changed=(r['node']['key'],r['node']['index']) in overrides) for r in template]
+        groups[key]=[dict(r,changed=(r['node']['key'],r['node']['index']) in overrides and (r['node']['key'],r['node']['index']) not in proved,
+                         motion_owner=proved.get((r['node']['key'],r['node']['index']),r['node']['owner'])) for r in template]
     nets=[]
     for count,(key,rows) in enumerate(groups.items()):
         cancel_check();progress(round(65*count/max(1,len(groups))),f'当前图形 DRC · 金属平面 {key[0]}')
-        layers=tuple(sorted({r['node']['key'] for r in rows}));who={r['node']['owner'] for r in rows}
+        layers=tuple(sorted({r['node']['key'] for r in rows}));who={r['motion_owner'] for r in rows}
         rigid=not any(r['changed'] for r in rows) and len(who)==1;owner=next(iter(who)) if rigid else -1
         original=checker.templates[key][1]
         if not rigid:
@@ -106,7 +123,7 @@ def frame(checker,states,replacements,settings,progress,owners=None,scopes=None)
         cancel_check();node=m.nodes[m.ids[ref]];owner=node['owner']
         deps=dependencies({owner,*[m.nodes[m.ids[target]]['owner'] for target in receivers]})
         if not wanted(deps):continue
-        same=all(target not in overrides and m.nodes[m.ids[target]]['owner']==owner for target in receivers)
+        same=all((target not in overrides or target in proved) and proved.get(target,m.nodes[m.ids[target]]['owner'])==owner for target in receivers)
         enclosure=p.moving_annulus_um if role=='运动RDL' else p.annulus_um
         # Buffer BEFORE the rigid transform: rotating the tessellation after
         # buffering preserves a common motion exactly, unlike re-buffering it.

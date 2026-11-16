@@ -53,6 +53,21 @@ class CurrentRulesTests(unittest.TestCase):
             self.assertTrue(any(r['kind']=='孔盘包围不足' for r in rows))
         finally:engine.close()
 
+    def test_proven_rigid_override_reuses_nominal_rules(self):
+        engine,_,_=self.fixture()
+        try:
+            cfg=ViewSettings(drc_tolerance_um=0);check=GlobalDRC(engine.contact,engine.p)
+            z=np.array([[12.,-7.,.39]])
+            baseline=check.frame(z,settings=cfg);misses=check.misses
+            node=engine.contact.nodes[engine.contact.ids['3/0',0]]
+            replacements={'3/0':[dict(indices=(0,),geometry=engine.contact.moved(node['poly'],0,z))]}
+            actual=check.frame(z,replacements,cfg)
+            self.assertEqual(check.misses,misses)
+            self.assertEqual([(q['kind'],q['geometry'].wkb) for q in actual],[(q['kind'],q['geometry'].wkb) for q in baseline])
+            replacements['3/0'][0]['geometry']=box(-100,-1,100,1)
+            self.assertTrue(any(q['kind']=='线宽不足' for q in check.frame(z,replacements,cfg)))
+        finally:engine.close()
+
     def test_location_rows_are_connected_and_deduplicated(self):
         from die_shift_studio.current_drc import locations
         a,b=box(0,0,1,1),box(4,0,5,1);g=a.union(b)
