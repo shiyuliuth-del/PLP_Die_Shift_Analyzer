@@ -119,4 +119,4 @@ def live_serial(window,settings,old,ref):
     data=old['reconstruction'];rows=[q for q in data['pieces'] if (q['layer'],q['index'])!=ref]+local['pieces']
     changed={k:[v for v in values if not (k==ref[0] and ref[1] in v['indices'])] for k,values in data['replacements'].items()}
     for k,values in local['replacements'].items():changed.setdefault(k,[]).extend(values)
-    return dict(old,reconstruction=dict(data,configuration=settings.reconstruction_key(),pieces=rows,replacements=changed,violations=[],constraints_complete=False))
+    return dict(old,_reconstruction_changed_refs=(ref,),reconstruction=dict(data,configuration=settings.reconstruction_key(),pieces=rows,replacements=changed,violations=[],constraints_complete=False))

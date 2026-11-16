@@ -113,6 +113,9 @@ class ConstraintFeedback:
         from .gui import Worker
         current=getattr(self.w.engine,'reconstructor',None)
         pool=clone_plan_pool(current.plan_pool) if current is not None else {}
+        changed=tuple(frame.get('_reconstruction_changed_refs',()))
+        base=getattr(current,'_base_plans',None)
+        local_pool=clone_plan_pool({'local':[q for q in base if (q['layer'],q['index']) in changed]}) if base is not None and changed else None
         def work(progress):
             key=logical_fingerprint((data.geometry_id,roles,order,asdict(p),cfg.drc_tolerance_um))
             if self.context is None or self.context[0]!=key:
@@ -126,7 +129,19 @@ class ConstraintFeedback:
             if cfg.reconstruction_boundary_mode!='perpendicular':
                 from .reconstruction import Reconstructor
                 rebuilt=Reconstructor(self.context[1].model,p,cfg,plan_pool=pool)
-                try:return rebuilt.frame(frame['states'],progress=progress)
+                try:
+                    if not changed:return rebuilt.frame(frame['states'],progress=progress)
+                    if local_pool is not None:
+                        from .reconstruction_zones import expand
+                        rebuilt.auto_ignored=dict(current.auto_ignored);rebuilt.safe_vias=dict(current.safe_vias)
+                        rebuilt._envelopes=current._envelopes;rebuilt._plans=expand(rebuilt,local_pool['local'])
+                    local=rebuilt.frame(frame['states'],targets=changed,diagnostics=False,progress=progress)
+                    data=frame['reconstruction'];refs=set(changed)
+                    copper={k:[v for v in rows if not any((k,i) in refs for i in v['indices'])] for k,rows in data['replacements'].items()}
+                    for k,rows in local['replacements'].items():copper.setdefault(k,[]).extend(rows)
+                    pieces=[dict(q) for q in data['pieces'] if (q['layer'],q['index']) not in refs]+local['pieces']
+                    return dict(data,pieces=pieces,replacements=copper,violations=self.context[1].check(copper,frame['states'],progress),
+                                original_violations=self.context[1].nominal_check(),constraints_complete=True)
                 finally:rebuilt.cache.close()
             return self.context[1].check(frame['reconstruction']['replacements'],frame['states'],progress)
         worker=Worker(work,self.w);self.worker=worker;self.w.watch_worker(worker,'拖动约束检查',quiet=True)

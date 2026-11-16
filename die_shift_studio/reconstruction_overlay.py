@@ -379,7 +379,7 @@ class CutDrag:
         copper,_=compose_feature(piece.get('source',plan.source),feature,plan.tolerance,feature_moves(feature,old['states'],self.w.view_settings.reconstruction_style))
         for q in replacements.get(piece['layer'],()):
             if piece['index'] in q['indices']:q['geometry']=copper
-        self.w.current_frame=dict(old,reconstruction=dict(data,configuration=state['updated'].reconstruction_key(),pieces=items,replacements=replacements,violations=[],constraints_complete=False))
+        self.w.current_frame=dict(old,_reconstruction_changed_refs=((piece['layer'],piece['index']),),reconstruction=dict(data,configuration=state['updated'].reconstruction_key(),pieces=items,replacements=replacements,violations=[],constraints_complete=False))
         from .reconstruction import decorate_problems
         decorate_problems(self.w.current_frame['reconstruction'])
         self.w.constraint_feedback.request(self.w.current_frame,state['updated'])
