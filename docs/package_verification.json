@@ -1,10 +1,10 @@
 {
   "version": "V45",
   "status": "PASS",
-  "tested_at_utc": "2026-11-16T12:09:56.332946+00:00",
+  "tested_at_utc": "2026-11-16T12:21:58.282604+00:00",
   "scope": "Clean source checkout, local platform. Windows executable verification is recorded separately.",
   "platform": "linux",
-  "verified_runtime_sha256": "f2cc071691f32c26a10ff94129e293e01c4a78d137d8434583eb89d8879969e6",
+  "verified_runtime_sha256": "c61276ed08ced8c088150acf20cddfd4fa809fc95f52357acbbd8076d7b107ac",
   "gui_suites": 29,
   "runs": [
     {
@@ -21,7 +21,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "Ran 407 tests in 46.779s",
+        "Ran 407 tests in 46.598s",
         "",
         "OK (skipped=2)"
       ]
@@ -687,5 +687,21 @@
       ],
       "discrete_states": 3
     }
-  ]
+  ],
+  "tested_commit": "ffb4d0665eaeb1f2144e35e76b3d770b780397a0",
+  "external_tests": {
+    "status": "PASS",
+    "count": 2,
+    "source": "GD55_9-21.gds",
+    "seconds": 11.721
+  },
+  "windows": {
+    "status": "PASS",
+    "workflow_run": 43864525551,
+    "environments": [
+      "clean",
+      "with-cupy"
+    ],
+    "physical_gpu_tested": false
+  }
 }

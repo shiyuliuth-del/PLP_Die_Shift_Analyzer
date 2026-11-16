@@ -22,9 +22,17 @@ GD55-1105本机抽查（保存的±15μm/±1°，固定/运动尺寸按工程，
 
 - 功能头1449b76：干净源包49条命令，退出码0，552.215秒。407核心测试（405常规通过、2外部图纸另测通过）、29组GUI/进程、两种原生后端、17工程。摘要见package_verification.json。
 - Windows最终功能头1449b76，工作流43861651960的clean/with-cupy均通过：实际源码ZIP、根BUILD.bat两个EXE、命名管道、桌面KLayout后端、GPU数值接口/CPU回退、真实GD55三份Excel→12封装OAS及独立回读。clean环境DSA EXE 116,646,621字节；不作为发布资产。未验证工厂离线镜像或物理RTX A5000。
-- 后续仅把手动偏移表中的DIE编号设为不可编辑，防止表面编号与实际DIE错配；GUI V45补测通过。该最终头须再通过同一Windows工作流后方可发布。
+- 后续仅把手动偏移表中的DIE编号设为不可编辑，防止表面编号与实际DIE错配；GUI V45补测通过。最终头ffb4d06已再次通过Windows双环境工作流43864525551。
 - 刚体替换证明后的GD55记录已更新V45_PERFORMANCE.json：方案评估5.101秒、首次重构/整层DRC27.205秒，两新姿态3.167/3.356秒，零位返回为数值缓存命中。该测量与源包GUI回归同时运行，不与空载初测计算加速比。选定三姿态均无漏接、拓扑变化或异网短接，但仍有真实尺寸违规。
 
 ## 交付资产
 
-联合源码候选156文件、2,035,886字节，SHA-256 `41b686a99f7fe777a48292bcd566418288c93afe110b728576b2ec411e3c5940`。包含两个程序与授权GD55案例；没有EXE或图片。发布入口为[GitHub V45](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/releases/tag/V45)。最终提交检查与Release回下载结果在发布完成后记录。
+已发布联合源码156文件、2,035,886字节，SHA-256 `41b686a99f7fe777a48292bcd566418288c93afe110b728576b2ec411e3c5940`。包含两个程序与授权GD55案例；没有EXE或图片。发布入口为[GitHub V45](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/releases/tag/V45)。最终提交检查与发布回下载均已完成，见下方记录。
+
+## 最终发布验收（2026-11-16）
+
+PR #32普通合并main为45b4f6d29b31955efefd95bb1fe77d7e0e48b9b3，标签V45。最终功能头ffb4d0665eaeb1f2144e35e76b3d770b780397a0完整源包49命令退出码0、545.420秒，运行代码摘要c61276ed08ced8c088150acf20cddfd4fa809fc95f52357acbbd8076d7b107ac逐字节匹配。407核心（405常规+2外部另测）、29 GUI/进程、2后端、17工程全部完成。Windows最终头43864525551的clean/with-cupy均成功，含实际两个EXE和真实GD55 Excel导入/独立OAS回读。
+
+Release发布于2026-11-16 12:30:44 UTC。实际Release ZIP、SHA、MD/PY资产和GitHub自动ZIP/tar均回下载，逐文件匹配V45标签；CRC/7-Zip通过。156文件、2,035,886字节，SHA-256 41b686a99f7fe777a48292bcd566418288c93afe110b728576b2ec411e3c5940。原V44标签保持不变，RealDataAnalyse与授权案例对比V44无文件丢失。
+
+此后提交仅补充文档与机器可读验收，不改变V45标签或发布源码。
