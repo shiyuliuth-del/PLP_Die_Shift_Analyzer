@@ -32,7 +32,7 @@ def cut_identity_matches(row_refs, piece_refs):
                 and row == tuple(sorted(v[1] for v in piece)))
 
 
-def compose_feature(source,ps,tolerance,moving):
+def _compose_feature(source,ps,tolerance,moving):
     """One assembly contract for full frames and live edits; modifies local pieces."""
     from .reconstruction_route import EMPTY
     # Shared nets: each source fragment has one owner. Overlap between
@@ -46,7 +46,7 @@ def compose_feature(source,ps,tolerance,moving):
     fixed=ps[0]['regions']['B'] if len(ps)==1 and ps[0].get('source_scope_complete',True) else (shapely.set_precision(source.difference(occupied),tolerance) if moving else source.difference(occupied))
     if ambiguous:
         reason='多个DIE动区归属重叠；无法确定分区，保留源图'
-        for q in ps:q.update(valid=False,warning=reason,regions=dict(A=EMPTY,B=source,C=EMPTY),bridge=EMPTY,moved=EMPTY,fixed=source)
+        for q in ps:q.update(valid=False,connection_failed=True,warning=reason,regions=dict(A=EMPTY,B=source,C=EMPTY),bridge=EMPTY,moved=EMPTY,fixed=source)
         geometry=source
     else:
         for q in ps:q['fixed']=fixed;q['regions']['B']=fixed;q['fixed_area_um2']=fixed.area
@@ -66,6 +66,17 @@ def compose_feature(source,ps,tolerance,moving):
             geometry=source
             for q in ps:q.update(valid=False,warning='无法生成有效分区，保留源图供核对',regions=dict(A=EMPTY,B=source,C=EMPTY),bridge=EMPTY,moved=EMPTY,fixed=source)
     return geometry,occupied
+
+
+def compose_feature(source,ps,tolerance,moving):
+    """A failed numerical overlay cannot erase copper or publish a success."""
+    try:return _compose_feature(source,ps,tolerance,moving)
+    except shapely.errors.GEOSException as exc:
+        from .reconstruction_route import EMPTY
+        for q in ps:
+            q.update(valid=False,connection_failed=True,warning='型变布尔运算未通过；保留原铜：'+str(exc),
+                     regions=dict(A=EMPTY,B=source,C=EMPTY),bridge=EMPTY,moved=EMPTY,fixed=source)
+        return source,EMPTY
 
 
 def feature_moves(pieces,states,style):
@@ -363,7 +374,8 @@ class Reconstructor:
             from .resources import parallel_map,native_phase_profile
             self.plan_pool[key]=[entry for rows in parallel_map(build,groups,profile=native_phase_profile(),progress=lambda n,total:progress(round(65*n/max(1,total)),f'建立全姿态共用动区 {n}/{total}')) for entry in rows]
         from .reconstruction_zones import expand
-        self._plans=expand(self,[e for e in self.plan_pool[key] if (e['layer'],e['index']) not in self.settings.reconstruction_ignored])
+        self._base_plans=self.plan_pool[key]
+        self._plans=expand(self,[e for e in self._base_plans if (e['layer'],e['index']) not in self.settings.reconstruction_ignored])
         from .ignored_motion import entries as ignored_entries
         self._plans.extend(ignored_entries(self))
         return self._plans
@@ -447,7 +459,7 @@ class Reconstructor:
     def frame(self,states,deformation=None,progress=lambda *_:None,quick=False,*,targets=None,diagnostics=True,render_cache=None):
         from .reconstruction_route import warp,EMPTY,failed_connection,missing_area
         states=np.asarray(states,float)
-        key=(states.tobytes(),'shared-route-v42',bool(diagnostics),None if targets is None else tuple(sorted(targets)))
+        key=(states.tobytes(),'shared-route-v42-quick' if quick else 'shared-route-v42',bool(diagnostics),None if targets is None else tuple(sorted(targets)))
         hit=self.cache.get(key) if diagnostics else None
         if hit is not None:return hit
         entries=self._plans_for_all_poses(progress);pieces=[];features={}
@@ -468,7 +480,7 @@ class Reconstructor:
             cancel_check();part,manual=self.interval(entry)
             if part is None:return part,manual,None,None,entry['warning']
             from .reconstruction_route import part_key
-            local_key=(entry['plan'].key,entry['plan'].identity,part_key(part),part.get('manual_angles'),bool(manual),bool(diagnostics),self.rules.identity,self.settings.reconstruction_style,self.settings.reconstruction_boundary_mode,token[1],entry.get('serial_left'),entry.get('serial_right'),entry.get('serial_block',shapely.Polygon()).wkb)
+            local_key=(entry['plan'].key,entry['plan'].identity,part_key(part),part.get('manual_angles'),bool(manual),bool(diagnostics),bool(quick),self.rules.identity,self.settings.reconstruction_style,self.settings.reconstruction_boundary_mode,token[1],entry.get('serial_left'),entry.get('serial_right'),entry.get('serial_block',shapely.Polygon()).wkb)
             cached=self.geometry_pool.get(local_key)
             if cached is not None:
                 saved_part,saved_manual,saved_regions,saved_error,saved_warning=cached
@@ -480,7 +492,7 @@ class Reconstructor:
             elif 'serial_left' in entry:
                 from .reconstruction_zones import serial_render
                 part,regions,error=serial_render(self,entry,part,self.model.bound.centers[entry['owner']],states[entry['owner']])
-            else:part,regions,error,quality=solve(self,entry['plan'],part,self.model.bound.centers[entry['owner']],states[entry['owner']])
+            else:part,regions,error,quality=solve(self,entry['plan'],part,self.model.bound.centers[entry['owner']],states[entry['owner']],quick=quick)
             warning=self._manual_warning(entry,part) if not getattr(entry['plan'],'plane_domain',False) and manual and diagnostics and 'serial_left' not in entry and self.settings.reconstruction_boundary_mode=='perpendicular' else entry['warning']
             self.geometry_pool.put(local_key,(part,manual,None if regions is None else dict(regions),error,warning))
             if render_cache is not None:render_cache[token]=(part,manual,None if regions is None else dict(regions),error,warning)

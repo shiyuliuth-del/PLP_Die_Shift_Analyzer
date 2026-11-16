@@ -105,8 +105,15 @@ def live_serial(window,settings,old,ref):
     from .reconstruction import Reconstructor
     from .reconstruction_status import clone_plan_pool
     original=window.engine.reconstructor
-    rebuilt=Reconstructor(original.model,original.p,settings,plan_pool=clone_plan_pool(original.plan_pool))
-    try:local=rebuilt.frame(old['states'],targets={ref},diagnostics=False)
+    # Only this source's nominal paths are needed during a pointer move. Reuse
+    # completed ownership/enclosure classification; do not rebuild all targets.
+    base=getattr(original,'_base_plans',None)
+    pool=clone_plan_pool({'local':[q for q in base if (q['layer'],q['index'])==ref]}) if base is not None else clone_plan_pool(original.plan_pool)
+    rebuilt=Reconstructor(original.model,original.p,settings,plan_pool=pool)
+    if base is not None:
+        rebuilt.auto_ignored=dict(original.auto_ignored);rebuilt.safe_vias=dict(original.safe_vias)
+        rebuilt._envelopes=original._envelopes;rebuilt._plans=expand(rebuilt,pool['local'])
+    try:local=rebuilt.frame(old['states'],targets={ref},diagnostics=False,quick=True)
     finally:
         rebuilt.cache.close();rebuilt.block_cache.clear()
     data=old['reconstruction'];rows=[q for q in data['pieces'] if (q['layer'],q['index'])!=ref]+local['pieces']

@@ -43,7 +43,7 @@ def assemble(r,source,rows,states):
         values.update((i,float(np.clip(v,0,1))) for i,v in zip(unknown,solved))
     mobile=[i for i in range(physical_count) if values[i]>1e-12];static=[i for i in range(physical_count) if i not in mobile]
     c=shapely.union_all([rigid[i] for i in mobile]);b=shapely.union_all([rigid[i] for i in static])
-    cposed=shapely.union_all([transform(rigid[i],center,pose*values[i]) for i in mobile]);style=r.settings.reconstruction_style
+    cposed=shapely.union_all([clean_overlay(transform(rigid[i],center,pose*values[i]),r.tol) for i in mobile]);style=r.settings.reconstruction_style
     def deform(g,ids):
         if not np.any(pose):return g
         dense=shapely.segmentize(g,max(r.tol*8,min(r._rule_width/3,5.)))
@@ -90,7 +90,21 @@ def consolidate(r,pieces,states):
     for q in pieces:
         if q.get('graph_branch'):groups.setdefault((q['layer'],q['index'],q['die']),[]).append(q)
         else:other.append(q)
-    for rows in groups.values():other.extend(assemble(r,rows[0]['route_plan'].source,rows,states))
+    for rows in groups.values():
+        source=rows[0]['route_plan'].source
+        try:other.extend(assemble(r,source,rows,states))
+        except shapely.errors.GEOSException as exc:
+            # A numerical failure is a failed connection with retained source,
+            # never an empty replacement or a silently repaired fabrication.
+            empty=shapely.Polygon()
+            for row in rows:
+                q=dict(row,valid=False,connection_failed=True,graph_branch=False,
+                    warning='分叉型变布尔运算未通过；保留原铜：'+str(exc),
+                    missing_region=row['nominal_regions']['A'],source_scope_complete=False,
+                    regions=dict(A=empty,B=source,C=empty),nominal_regions=dict(A=empty,B=source,C=empty),
+                    bridge=empty,movable=empty,moved=empty,fixed=source,immovable=source,
+                    bridge_area_um2=0.,movable_area_um2=0.,moved_area_um2=0.,fixed_area_um2=source.area)
+                other.append(q)
     return other
 
 

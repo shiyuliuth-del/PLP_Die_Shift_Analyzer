@@ -20,6 +20,19 @@ class V42Tests(unittest.TestCase):
    self.assertFalse(edge_violations(e.contact,z,replace(e.p,package_clearance_um=5),ViewSettings(),rep))
    self.assertFalse(edge_violations(e.contact,z,replace(e.p,package_clearance_um=0),ViewSettings(),rep))
   finally:e.close()
+ def test_candidate_ranking_uses_board_margin_not_wire_spacing(self):
+  e,_,_=fixture()
+  try:
+   r=e.reconstructor;r.model.case['board']=box(-200,-250,850,42)
+   from die_shift_studio.reconstruction_rules import FixedRules
+   r.rules=FixedRules(r.model,replace(e.p,package_clearance_um=10),r.settings)
+   q=r.frame(np.zeros((1,3)))['pieces'][0];plan=q['route_plan'];part=plan.partition(*q['interval'])
+   _,error,score=r.rules.best_regions(plan,part,e.bound.centers[0],np.zeros(3),'linear')
+   self.assertIsNone(error);self.assertEqual(score[0],0)
+   strict=FixedRules(r.model,replace(e.p,package_clearance_um=20),r.settings)
+   _,error,score=strict.best_regions(plan,part,e.bound.centers[0],np.zeros(3),'linear')
+   self.assertGreater(score[0],0)
+  finally:e.close()
  def test_ignored_copper_moves_and_fixed_via_enclosure_is_checked(self):
   e,_,_=fixture()
   try:
@@ -96,6 +109,61 @@ class V42Tests(unittest.TestCase):
    with patch.object(rules,'best_regions',counted):f=e.frame(z)['reconstruction']
    self.assertTrue(calls);self.assertEqual(set(calls),{0})
    self.assertEqual(next(v['geometry'].wkb for v in f['replacements']['5/0'] if v['indices']==(1,)),old)
+  finally:e.close()
+ def test_live_branch_edit_is_local_and_defers_native_search(self):
+  from unittest.mock import patch
+  from types import SimpleNamespace
+  from die_shift_studio.reconstruction_zones import live_serial
+  from die_shift_studio.reconstruction_edits import key
+  from die_shift_studio.reconstruction_rules import FixedRules
+  e,_,_=fixture()
+  try:
+   old=e.frame(np.array([[5.,3.,.002]]));q=old['reconstruction']['pieces'][0];plan=q['route_plan']
+   cfg=replace(e.reconstructor.settings,reconstruction_intervals=((*key(plan),q['interval'][0]+20,q['interval'][1]),))
+   with patch.object(FixedRules,'best_regions',side_effect=AssertionError('native search on pointer move')):
+    frame=live_serial(SimpleNamespace(engine=e),cfg,old,('5/0',0))
+   self.assertFalse(frame['reconstruction']['constraints_complete'])
+   self.assertEqual(frame['reconstruction']['pieces'][0]['interval'][0],q['interval'][0]+20)
+   self.assertTrue(frame['reconstruction']['replacements']['5/0'][0]['geometry'].is_valid)
+   self.assertIs(old['reconstruction']['pieces'][0],q)
+  finally:e.close()
+ def test_discrete_source_cache_reuses_unchanged_geometry(self):
+  from unittest.mock import patch
+  from die_shift_studio.session_cache import SessionCache
+  from die_shift_studio.statistics import ExtremeCatalog
+  from die_shift_studio.reconstruction_events import scan
+  from die_shift_studio.reconstruction_edits import key
+  e,_,_=fixture();cache=SessionCache()
+  try:
+   p=replace(e.p,single_bound_x_um=2,single_bound_y_um=0,bound_angle_deg=0)
+   e.p=p;e.configure_reconstruction(True,replace(e.reconstructor.settings,reconstruction_forced=(('5/0',0),)));e.reconstructor.p=p;grid=ExtremeCatalog(e.contact.case,p)
+   a=scan(e.reconstructor,grid,source_cache=cache)
+   with patch.object(e.reconstructor,'frame',side_effect=AssertionError('cached source recalculated')):
+    b=scan(e.reconstructor,grid,source_cache=cache)
+   self.assertEqual(a['red_factors'],b['red_factors']);self.assertEqual(a['zones'].keys(),b['zones'].keys())
+   q=e.reconstructor.frame(np.zeros((1,3)))['pieces'][0]
+   cfg=replace(e.reconstructor.settings,reconstruction_intervals=((*key(q['route_plan']),q['interval'][0]+10,q['interval'][1]),))
+   e.configure_reconstruction(True,cfg)
+   with patch.object(e.reconstructor,'frame',wraps=e.reconstructor.frame) as calls:
+    c=scan(e.reconstructor,grid,source_cache=cache)
+   self.assertGreater(calls.call_count,0)
+  finally:cache.close();e.close()
+ def test_numerical_overlay_failure_preserves_copper_and_marks_failure(self):
+  from unittest.mock import patch
+  from die_shift_studio.branch_regions import consolidate
+  from die_shift_studio.reconstruction import compose_feature
+  e,_,_=fixture()
+  try:
+   r=e.reconstructor;q=r.frame(np.zeros((1,3)))['pieces'][0]
+   q=dict(q,graph_branch=True)
+   with patch('die_shift_studio.branch_regions.assemble',side_effect=shapely.errors.GEOSException('synthetic overlay failure')):
+    pieces=consolidate(r,[q],np.zeros((1,3)))
+   self.assertTrue(all(v['connection_failed'] and not v['valid'] for v in pieces))
+   copper,_=compose_feature(q['source'],pieces,r.tol,False)
+   self.assertTrue(copper.equals(q['source']))
+   with patch('die_shift_studio.reconstruction._compose_feature',side_effect=shapely.errors.GEOSException('overlay failure')):
+    copper,_=compose_feature(q['source'],[dict(q)],r.tol,True)
+   self.assertTrue(copper.equals(q['source']))
   finally:e.close()
  def test_defaults_and_removed_patch_options(self):
   self.assertEqual(Parameters().package_clearance_um,10)

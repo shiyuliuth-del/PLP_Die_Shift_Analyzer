@@ -136,7 +136,7 @@ class FixedRules:
             for ref,owner,required in vias:
                 missing=self.model.moved(required,owner,states).difference(copper).area
                 if missing>self.dbu*self.dbu:kinds.add('enclosure');amount+=missing/max(self.width*self.space,1e-12)
-            if self.board is not None and (not self.board.covers(copper) or copper.distance(self.board.boundary)<self.space-self.dbu*.001):
+            if self.board is not None and (not self.board.covers(copper) or copper.distance(self.board.boundary)<self.border-self.dbu*.001):
                 kinds.add('board');amount+=copper.difference(self.inside).area/max(self.width*self.space,1e-12)
             if not self.keepout.is_empty and shapely.relate_pattern(copper,self.keepout,'T********'):
                 kinds.add('keepout');amount+=copper.intersection(self.keepout).area/max(self.width*self.space,1e-12)

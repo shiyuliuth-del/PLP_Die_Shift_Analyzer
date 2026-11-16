@@ -64,7 +64,7 @@ class ReconstructionYieldDisplay:
                     from .reconstruction_events import scan
                     from .reconstruction_probability import attach
                     evidence_key=('reconstruction-extreme-events-v40',logical_fingerprint((data.geometry_id,data.top_name,roles,order,asdict(p),cfg.reconstruction_key())))
-                    evidence=group.values.get_or_compute(evidence_key,lambda:attach(scan(engine,ExtremeCatalog(case,p),lambda n,t:progress(round(n*.8),t)),engine))
+                    evidence=group.values.get_or_compute(evidence_key,lambda:attach(scan(engine,ExtremeCatalog(case,p),lambda n,t:progress(round(n*.8),t),source_cache=group.values),engine))
                     worker.publish({'evidence':evidence})
                     bank=measure_reconstruction_yield(engine,p,cfg,lambda n,t:progress(80+round(n*.2),t),self.factor_pool,
                         lambda value:worker.publish({'yield':value,'evidence':evidence}))

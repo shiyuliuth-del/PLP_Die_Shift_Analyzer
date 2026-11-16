@@ -45,6 +45,18 @@ try:
   assert w.result is not None and w.extremes is not None and w.current_frame is not None
   assert w.current_frame['reconstruction']['replacements']['5/0'][0]['geometry'].wkb==expected
   assert w.width_yield.bank is not None and w.reconstruction_yield.evidence is not None
+ # A checksum-valid but incomplete data snapshot must roll back partial UI
+ # application, preserve settings, and chain a real assessment automatically.
+ import zlib,hashlib
+ from die_shift_studio.project_results import decode,encode
+ bad=json.loads(saved.read_text());cache_path=saved.parent/bad['saved_results']['path']
+ envelope=json.loads(zlib.decompress(cache_path.read_bytes()));payload=decode(envelope['payload']);del payload['frame']
+ envelope['payload']=encode(payload);raw=zlib.compress(json.dumps(envelope).encode());broken=folder/'incomplete.dsresults';broken.write_bytes(raw)
+ bad['saved_results']['path']=str(broken);bad['saved_results']['sha256']=hashlib.sha256(raw).hexdigest()
+ broken_job=folder/'incomplete.dshift.json';broken_job.write_text(json.dumps(bad));w.load_project(broken_job);wait()
+ assert w.result is not None and w.current_frame is not None
+ assert w.params().package_clearance_um==10
+ assert '未恢复结果缓存' in w.runtime_view.toPlainText()
  # Native dialog contract and real DXF output must be independent of pose.
  from die_shift_studio.export_ui import export_dxf
  from die_shift_studio.qt_compat import ACCEPTED

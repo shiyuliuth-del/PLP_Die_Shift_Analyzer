@@ -58,6 +58,9 @@ def measure(part,plan,center,pose,regions):
 
 def solve(r,plan,base,center,pose,quick=False):
     mode=r.settings.reconstruction_boundary_mode;style=r.settings.reconstruction_style
+    if mode=='perpendicular' and quick:
+        regions,error=warp(base,plan,center,pose,style)
+        return base,regions,error,None
     if mode=='perpendicular':
         regions,error,quality=r.rules.best_regions(plan,base,center,pose,style)
         return base,regions,error,quality
@@ -92,8 +95,9 @@ def solve(r,plan,base,center,pose,quick=False):
         except (ValueError,shapely.errors.GEOSException):continue
         rank=(-width,-least,-mean) if mode=='wide' else (-least,-mean,-width)
         ranked.append((rank,part))
-    if quick and ranked:
-        _,part=min(ranked,key=lambda q:q[0]);regions,error=warp(part,plan,center,pose,style)
+    if quick:
+        part=min(ranked,key=lambda q:q[0])[1] if ranked else base
+        regions,error=warp(part,plan,center,pose,style)
         return part,regions,error,None
     # Test the base plus the three best geometric angles against native rules.
     best=None

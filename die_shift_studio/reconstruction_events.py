@@ -145,14 +145,14 @@ def compatible_candidates(a,b,space):
             yield ia[x],ib[y]
 
 
-def scan(r,grid,progress=lambda *_:None):
+def scan(r,grid,progress=lambda *_:None,source_cache=None):
     entries=r._plans_for_all_poses(lambda n,t:progress(round(n*.12),t))
     original_rows=r.rules.nominal_check()
     by_ref=defaultdict(list)
     for e in entries:by_ref[e['layer'],e['index']].append(e)
     progress(12,'复用共用路径，建立逐图形极端几何')
     refs=[ref for values in r.rules.nets.values() for ref in values];count=grid.count
-    def build(ref):
+    def build_uncached(ref):
         local=by_ref.get(ref,());owners=tuple(sorted({q['owner'] for q in local if (q['plan'] is not None or q['orphan']) and grid.radices[q['owner']]>1}))
         values={};render_cache={}
         if not local:
@@ -167,6 +167,16 @@ def scan(r,grid,progress=lambda *_:None):
         bounds=np.array([v['geometry'].bounds for v in values.values()])
         envelope=shapely.box(*bounds[:,:2].min(axis=0),*bounds[:,2:].max(axis=0))
         return ref,dict(owners=owners,values=values,envelope=envelope)
+    def build(ref):
+        if source_cache is None:return build_uncached(ref)
+        from dataclasses import asdict
+        from .session_cache import logical_fingerprint
+        from .reconstruction_incremental import source_settings
+        # Independent copper is reused across handle edits. Actual net and pair
+        # checks below still see every updated neighbour and shared DIE digit.
+        token=('reconstruction-source-v42',logical_fingerprint((r.rules.identity,ref,asdict(r.p),
+            source_settings(r.settings,ref),tuple(v.tolist() for v in grid.locals))))
+        return source_cache.get_or_compute(token,lambda:build_uncached(ref))
     bundles=dict(parallel_map(build,refs,profile=native_phase_profile(),progress=lambda n,total:progress(12+round(28*n/max(1,total)),f'重构逐图形几何 {n}/{total}')))
     from .width_keepout import routing_violations
     from .width_witness import edge_witness
