@@ -36,7 +36,7 @@ class V42Tests(unittest.TestCase):
  def test_ignored_copper_moves_and_fixed_via_enclosure_is_checked(self):
   e,_,_=fixture()
   try:
-   e.configure_reconstruction(True,ViewSettings(reconstruction_ignored=(('5/0',0),)))
+   e.configure_reconstruction(True,ViewSettings(reconstruction_ignored=(('5/0',0),),reconstruction_following=(('5/0',0),)))
    z=np.array([[15.,12.,.01]]);f=e.frame(z)['reconstruction'];g=f['replacements']['5/0'][0]['geometry']
    original=e.contact.cache.layers['5/0']['geometry'][0]
    self.assertLess(g.symmetric_difference(transform(original,e.bound.centers[0],z[0])).area,.01)

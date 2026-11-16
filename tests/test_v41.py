@@ -108,7 +108,7 @@ class V41Tests(unittest.TestCase):
         e=PreviewEngine(GeometryCache(d),c,roles,{},p,None,c['connections'])
         try:
             e.configure_reconstruction(True,ViewSettings());f=e.frame(np.array([[20.,20.,.01]]))['reconstruction']
-            self.assertNotIn(('5/0',0),f['auto_ignored']);self.assertTrue(f['pieces'])  # V42: moving whole copper would lose fixed-via enclosure
+            self.assertIn(('5/0',0),f['auto_ignored']);self.assertTrue(all(q['ignored'] for q in f['pieces']))  # V43 static ignored copper retains both enclosures
             e.configure_reconstruction(True,ViewSettings(reconstruction_forced=(('5/0',0),)))
             self.assertTrue(e.frame(np.zeros((1,3)))['reconstruction']['pieces'])
         finally:e.close()
@@ -234,7 +234,14 @@ class V41Tests(unittest.TestCase):
         cfg=ViewSettings(reconstruction_style='linear',reconstruction_forced=(('5/0',0),))
         e,_,_=make_engine(shapes,replace(p,single_bound_x_um=.01,single_bound_y_um=.01,annulus_um=2),cfg)
         try:
-            r=e.reconstructor;entries=r._plans_for_all_poses(lambda *_:None);part,_=r.interval(entries[0])
+            r=e.reconstructor;entries=r._plans_for_all_poses(lambda *_:None)
+            # Force the diagonal end cuts: automatic V43 equal-width selection
+            # now avoids this changed-baseline counterexample on its own.
+            from die_shift_studio.reconstruction_route import RoutePlan
+            old=entries[0]['plan']
+            plan=RoutePlan(old.layer,old.index,old.owner,old.refs,old.source,shapely.LineString([(-80,-80),(80,80)]),Point(-80,-80).buffer(7),(Point(80,80).buffer(7),),old.tolerance,old.guard)
+            plan.nominal_first=10.;plan.nominal_second=plan.length-10.;entries[0]['plan']=plan
+            part,_=r.interval(entries[0])
             hull=shapely.MultiPoint(np.vstack([shapely.get_coordinates(part['near']),shapely.get_coordinates(part['far'])])).convex_hull
             self.assertGreater(hull.symmetric_difference(part['A']).area,10000)
             self.assertIsNone(central_certificate(r,entries[0],entries))

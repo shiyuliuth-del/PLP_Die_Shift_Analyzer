@@ -31,7 +31,7 @@ PARAMETER_DESCRIPTIONS = {
     'wafer_line_width_um':'运动线宽 / μm', 'wafer_line_space_um':'运动线距 / μm',
     'via_diameter_um':'连接孔直径 / μm', 'annulus_um':'固定RDL包围量 / μm', 'moving_annulus_um':'运动RDL包围量 / μm',
     'residual_budget_um':'套刻和形变确定性预留 / μm', 'transition_length_um':'动态过渡长度 / μm',
-    'package_clearance_um':'图形距边框 / μm', 'max_route_angle_deg':'通道允许斜角 / °', 'routing_edge_keepout_um':'边端禁布长度 / μm',
+    'package_clearance_um':'图形距边框 / μm', 'minimum_area_um2':'最小图形面积 / μm²', 'max_route_angle_deg':'通道允许斜角 / °', 'routing_edge_keepout_um':'边端禁布长度 / μm',
     'min_die_gap_um':'要求芯片间净距 / μm', 'min_package_clearance_um':'要求芯片到封装边净距 / μm',
     'single_bound_x_um':'单芯片X单边幅度 / μm', 'single_bound_y_um':'单芯片Y单边幅度 / μm',
     'multi_bound_x_um':'多芯片每颗X单边幅度 / μm', 'multi_bound_y_um':'多芯片每颗Y单边幅度 / μm',
@@ -60,6 +60,7 @@ class Parameters:
     transition_length_um: float = 200.0
     max_route_angle_deg: float = 30.0
     package_clearance_um: float = 10.0
+    minimum_area_um2: float = 0.0
     routing_edge_keepout_um: float = 40.0
     min_die_gap_um: float = 20.0
     min_package_clearance_um: float = 20.0
@@ -153,7 +154,7 @@ class Parameters:
         for key in positive:
             if getattr(self,key) <= 0:
                 raise ValueError(f"{key} 必须大于0")
-        for key in ("package_clearance_um", "moving_annulus_um", "annulus_um", "residual_budget_um", "routing_edge_keepout_um", "min_die_gap_um",
+        for key in ("minimum_area_um2", "package_clearance_um", "moving_annulus_um", "annulus_um", "residual_budget_um", "routing_edge_keepout_um", "min_die_gap_um",
                     "min_package_clearance_um", "single_bound_x_um", "single_bound_y_um",
                     "multi_bound_x_um", "multi_bound_y_um", "bound_angle_deg"):
             if getattr(self,key) < 0:
@@ -214,10 +215,14 @@ def read_gds(path, top_name=None, progress: Callable=lambda *_: None):
     path=Path(path).expanduser().resolve()
     if not path.is_file():
         raise ValueError("GDS文件不存在："+str(path))
-    progress(5,"读取GDS并换算为μm")
+    progress(5,"读取GDS/OAS并换算为μm")
     digest=hashlib.sha256(path.read_bytes()).hexdigest()
-    _,precision=gdstk.gds_units(path)
-    lib=gdstk.read_gds(path,unit=1e-6)
+    with path.open('rb') as stream:magic=stream.read(13)
+    if magic.startswith(b'%SEMI-OASIS'):
+        lib=gdstk.read_oas(path,unit=1e-6);precision=lib.precision
+    else:
+        _,precision=gdstk.gds_units(path)
+        lib=gdstk.read_gds(path,unit=1e-6)
     tops=lib.top_level()
     names=sorted(c.name for c in tops)
     if not names:

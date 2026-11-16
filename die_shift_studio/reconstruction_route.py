@@ -202,7 +202,7 @@ class RoutePlan:
         for i in range(1,len(self.xy)-1):
             u=(self.xy[i]-self.xy[i-1])/self.lengths[i-1];v=(self.xy[i+1]-self.xy[i])/self.lengths[i]
             if float(u@v)<math.cos(math.radians(8)):
-                radius=max(self.guard,float(shapely.Point(self.xy[i]).distance(self.source.boundary))*.65)
+                radius=min(max(self.guard,float(shapely.Point(self.xy[i]).distance(self.source.boundary))*.65),.3*min(self.lengths[i-1],self.lengths[i]))
                 self.corners.append((float(self.marks[i]),radius))
 
     def __getstate__(self):
@@ -306,6 +306,12 @@ class RoutePlan:
         if length<self.tolerance:return shapely.Point(origin)
         return shapely.Point(origin+toward/length*min(radius*.45,length*.2,20.))
 
+    def width_variation(self,a,b):
+        sections=[self.section(float(t)) for t in np.linspace(a,b,9)]
+        widths=[g.length for g in sections if g is not None]
+        if len(widths)!=9:return float('inf')
+        return (max(widths)-min(widths))/max(min(widths),self.tolerance)
+
     def choose(self,max_travel):
         """Longest straight candidate; motion envelope determines its margin.
 
@@ -334,11 +340,13 @@ class RoutePlan:
                 part=self.partition(0.,float(b))
                 if part is not None:candidates.append((float(b),0.,float(b),part));break
         if not candidates:return None
-        self.candidate_intervals=tuple((q[1],q[2]) for q in sorted(candidates,reverse=True,key=lambda q:q[0]))
+        rank=lambda q:(self.width_variation(q[1],q[2])>.05,self.width_variation(q[1],q[2]),-q[0])
+        candidates.sort(key=rank)
+        self.candidate_intervals=tuple((q[1],q[2]) for q in candidates)
         # Sufficient bound on smoothstep shear; an insufficient length remains
         # explicitly warned, never passed off as a guaranteed safe region.
         safe=[q for q in candidates if q[0]>2.5*max_travel]
-        best=max(safe or candidates,key=lambda q:q[0])
+        best=min(safe or candidates,key=rank)
         self.nominal_first,self.nominal_second=best[1:3]
         if not safe:self.warning='动区长度小于全输入位移的保守过渡余量；需检查当前重构'
         return best[3]

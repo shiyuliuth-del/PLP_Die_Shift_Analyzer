@@ -48,7 +48,7 @@ SPECS={
  'panel_layers':('固定RDL层数',0,32,0), 'wafer_layers':('运动RDL层数',0,32,0),
  'line_width_um':('固定线宽 / μm',.01,10000,3),'line_space_um':('固定线距 / μm',.01,10000,3),
  'wafer_line_width_um':('运动线宽 / μm',.01,10000,3),'wafer_line_space_um':('运动线距 / μm',.01,10000,3),
- 'package_clearance_um':('图形距边框 / μm',0,10000,3),'via_diameter_um':('连接孔直径 / μm',.01,10000,3),'annulus_um':('固定RDL包围量 / μm',0,10000,3),'moving_annulus_um':('运动RDL包围量 / μm',0,10000,3),
+ 'minimum_area_um2':('最小图形面积 / μm²',0,1e12,6),'package_clearance_um':('图形距边框 / μm',0,10000,3),'via_diameter_um':('连接孔直径 / μm',.01,10000,3),'annulus_um':('固定RDL包围量 / μm',0,10000,3),'moving_annulus_um':('运动RDL包围量 / μm',0,10000,3),
    'min_die_gap_um':('芯片间要求净距 / μm',0,10000,3),
  'min_package_clearance_um':('芯片到封装边要求净距 / μm',0,10000,3),
  'single_bound_x_um':('单芯片 X 边界 / μm',0,10000,3),'single_bound_y_um':('单芯片 Y 边界 / μm',0,10000,3),
@@ -186,7 +186,7 @@ class MainWindow(W.QMainWindow):
         self.jobs_dir.mkdir(parents=True,exist_ok=True)
         self.wheel_filter=NoWheelValues(self);W.QApplication.instance().installEventFilter(self.wheel_filter)
         self.resize(1540,1000);self.setMinimumSize(1120,740);self.setStyleSheet(STYLE)
-        self.data=None;self.result=None;self.case=None;self.worker=None;self.project_path=None
+        self.remote_locked=False;self.data=None;self.result=None;self.case=None;self.worker=None;self.project_path=None
         from .runtime_log import LogBus,RuntimeCapture
         self.log_bus=LogBus(self,self.jobs_dir.parent/'logs'/'runtime.log');self.runtime_capture=RuntimeCapture(self.log_bus);self._tasks={};self._closing=False
         self.per_die_values=[];self.per_die_pivots=[];self.reference_nsigma=6.;self._per_die_initialized=False;self.hardware_worker=None
@@ -242,7 +242,7 @@ class MainWindow(W.QMainWindow):
             spin=W.QSpinBox() if d==0 else W.QDoubleSpinBox();spin.setRange(low,high)
             if d:spin.setDecimals(d)
             spin.setValue(getattr(Parameters(),key));spin.setKeyboardTracking(False)
-            spin.setToolTip(name+'；输入、公式、输出见报告页。');spin.valueChanged.connect(self.invalidate)
+            spin.setToolTip(name+'；输入、公式、输出见报告页。');spin.valueChanged.connect(self.area_changed if key=="minimum_area_um2" else self.invalidate)
             form.addRow(name,spin);self.fields[key]=spin
         if collapsed:
             toggle=W.QToolButton();toggle.setText('▸ '+title);toggle.setCheckable(True);box.hide()
@@ -270,7 +270,7 @@ class MainWindow(W.QMainWindow):
         self.shortcut_label=label('快捷键（鼠标位于图中）：F 恢复视图，M 手动偏移，Shift＋点选/框选追加，Ctrl＋点选/框选扣除，Q 查看或编辑选中图形节点，ESC 退出/取消选择。\n普通模式：滚轮缩放，中键平移，右键单击查看选中图形、拖框缩放。\n手动偏移：右键拖动芯片，滚轮旋转，Ctrl＋滚轮缩放。');page.addWidget(self.shortcut_label)
         self.gds_label=label('尚未打开GDS');self.gds_label.setTextInteractionFlags(getattr(Qt,'TextInteractionFlag',Qt).TextSelectableByMouse);page.addWidget(self.gds_label)
         row=W.QHBoxLayout();row.addWidget(W.QLabel('顶层Cell'));self.top=W.QComboBox();self.top.currentTextChanged.connect(self.top_changed);row.addWidget(self.top,1);page.addLayout(row)
-        self.open_gds_button=W.QPushButton('打开GDS');self.open_gds_button.setObjectName('Primary');self.open_gds_button.clicked.connect(self.open_gds);page.addWidget(self.open_gds_button)
+        self.open_gds_button=W.QPushButton('打开GDS/OAS');self.open_gds_button.setObjectName('Primary');self.open_gds_button.clicked.connect(self.open_gds);page.addWidget(self.open_gds_button)
         self.layer_table=table(['显示','层 / 类型','数量','用途']);self.layer_table.setMinimumHeight(275);page.addWidget(self.layer_table)
         self.layer_table.verticalHeader().setSectionsMovable(True)
         self.layer_drag=LayerDrag(self.layer_table);self.layer_drag.styleRequested.connect(self.edit_layer_style)
@@ -292,6 +292,7 @@ class MainWindow(W.QMainWindow):
         self._group(page,'目标层数与线宽线距',['panel_layers','wafer_layers','line_width_um','line_space_um','wafer_line_width_um','wafer_line_space_um'])
         page.addWidget(label('运动层按下层连接追溯所属芯片。固定层保持名义位置，层数由GDS用途自动统计。'))
         self._group(page,'过孔包围量',['moving_annulus_um','annulus_um','package_clearance_um'])
+        self._group(page,'图形过滤',['minimum_area_um2'])
         self._group(page,'机械净距',['min_die_gap_um','min_package_clearance_um'])
         self.fixed_assignment='all'
         page.addStretch()
@@ -300,7 +301,9 @@ class MainWindow(W.QMainWindow):
         self.regions_dxf_button=W.QPushButton('动静区输出');output.addWidget(self.regions_dxf_button)
         output.setSpacing(4)
         from .dxf_controls import build as build_dxf_controls
-        build_dxf_controls(self,output);output.addStretch()
+        build_dxf_controls(self,output)
+        from .measured_ui import MeasuredOutput
+        self.measured_output=MeasuredOutput(self,output);output.addStretch()
         self.dxf_button.setToolTip('按下方参数展开顶层并输出当前完成的几何；默认合并全部图层，不输出风险标记或恢复圆弧。')
         from .export_ui import export_dxf
         self.dxf_button.clicked.connect(lambda:export_dxf(self))
@@ -912,6 +915,8 @@ class MainWindow(W.QMainWindow):
         self.safe_range_plot_data=draw_safe_ranges(self.safe_range_figure,{});self.safe_range_canvas.setMinimumHeight(240);self.safe_range_canvas.draw_idle()
         self.scheme_figure.clear();self.scheme_canvas.draw_idle();self.detail.clear();self.plot_layout(preserve=True);self.update_histograms()
     def error(self,text):
+        if getattr(self,'remote_locked',False):
+            self.log_bus.emit(str(text),'ERROR');self.measured_output.fail_transition(str(text));return
         self.log_bus.emit(text,'ERROR');W.QMessageBox.warning(self,'操作未完成',str(text))
     def start_worker(self,fn,success,interactive=False):
         if self.worker is not None:self.error('上一项操作尚未完成');return
@@ -930,15 +935,29 @@ class MainWindow(W.QMainWindow):
                 QtCore.QTimer.singleShot(0,lambda:self.apply_node_edits(pending[1]) if self.data is pending[0] else None)
             else:self.log_bus.emit('图纸已切换，旧图纸的排队节点编辑已取消。')
         if self._coverage_pending:self.coverage_timer.start()
+        if getattr(self,'remote_locked',False):self.measured_output.apply_lock()
+    def area_changed(self,*_):
+        if self.loading or self.data is None:return
+        if self.worker is not None:
+            if not getattr(self,'_area_reload_pending',False):
+                self._area_reload_pending=True
+                def retry():
+                    self._area_reload_pending=False
+                    if not self._closing:self.area_changed()
+                QtCore.QTimer.singleShot(100,retry)
+            return
+        from .area_filter import canonical_project
+        project=canonical_project(self.data,self.project_settings())
+        self.load_gds(self.data.path,self.data.top_name,project,self.project_path)
     def open_gds(self):
-        path,_=W.QFileDialog.getOpenFileName(self,'输入GDS','','GDSII (*.gds *.gdsii *.GDS)')
+        path,_=W.QFileDialog.getOpenFileName(self,'输入GDS/OAS','','GDS/OASIS (*.gds *.gdsii *.GDS *.oas *.oasis *.OAS)')
         if path:self.load_gds(path)
     def load_gds(self,path,top=None,project=None,project_path=None):
-        self.exit_region_mode()
+        self.exit_region_mode();current_area=self.fields['minimum_area_um2'].value()
         def read_and_prepare(progress):
             data=read_gds(path,top,progress)
             if isinstance(data,dict):return data
-            settings=project if project and (not project.get('sha256') or project['sha256']==data.sha256) else {}
+            settings=project if project and (not project.get('sha256') or project['sha256']==data.sha256) else {'schema_version':5,'parameters':{'minimum_area_um2':current_area}}
             from .gds_merge import restore_project_geometry
             data,settings=restore_project_geometry(data,settings);data.restored_project=settings
             roles=settings.get('roles',data.auto_roles)
@@ -955,9 +974,9 @@ class MainWindow(W.QMainWindow):
                 return
             if settings and settings.get('sha256') and settings['sha256']!=data.sha256:
                 self.error('GDS已改变，请重新设置图层。');settings=None
-            if settings is not None:settings=getattr(data,'restored_project',settings)
+            settings=getattr(data,'restored_project',settings)
             self.set_data(data,settings,project_path=project_path)
-            self.project_path=Path(project_path).resolve() if settings and project_path and Path(project_path).resolve().parent==self.jobs_dir.resolve() else None
+            self.project_path=Path(project_path).resolve() if settings and project_path and True else None
             self.refresh_jobs()
         self.start_worker(read_and_prepare,accepted)
     def set_data(self,data,project=None,project_path=None):
@@ -979,6 +998,7 @@ class MainWindow(W.QMainWindow):
         self.loading=True
         try:
             from .project import restored_width_ignores
+            self.measured_output.restore(project.get('measured_output'))
             self.ignored_width_lines=restored_width_ignores(project,data);self.dxf_directory=project.get('dxf_directory','')
             from .dxf_settings import DxfSettings
             from .dxf_controls import restore as restore_dxf_controls
@@ -2558,7 +2578,7 @@ class MainWindow(W.QMainWindow):
         return dict(schema_version=5,app_version=__version__,sha256=self.data.sha256,top_cell=self.data.top_name,
                     roles=self.roles(),parameters=asdict(self.params()),settings=asdict(self.view_settings),node_edits=list(self.data.node_edits),
                     geometry_indexing=getattr(self.data,'geometry_indexing','legacy'),legacy_node_edits=list(getattr(self.data,'legacy_node_edits',[])),
-                    dxf_directory=self.dxf_directory,dxf_options=asdict(self.dxf_settings),
+                    dxf_directory=self.dxf_directory,dxf_options=asdict(self.dxf_settings),measured_output=self.measured_output.configuration(),
                     ignored_reconstruction=dict(sha256=self.data.sha256,top_cell=self.data.top_name,refs=[list(r) for r in self.view_settings.reconstruction_ignored]),
                     ignored_width_lines=dict(sha256=self.data.sha256,top_cell=self.data.top_name,refs=[list(r) for r in sorted(self.ignored_width_lines)]),
                     extreme_view=dict(filter_problems=self.problem_filter.isChecked(),mode='focus' if self.grid_mode.currentIndex() else 'all',page_size=EXTREME_PAGE_SIZE,page=(self.preview_page if self.extremes is not None else self._initial_extreme_page)+1),
@@ -2570,7 +2590,14 @@ class MainWindow(W.QMainWindow):
         from .shape_menu import show_shape_menu
         show_shape_menu(self,event,point)
 
+    def change_reconstruction_mode(self,refs,following):
+        if getattr(self,'remote_locked',False):return
+        refs=set(refs);old=set(self.view_settings.reconstruction_following)
+        self.view_settings=replace(self.view_settings,reconstruction_following=tuple(sorted(old|refs if following else old-refs)))
+        self.change_reconstruction_ignores(refs,True)
+        self.invalidate_reconstruction_edit();self.request_preview()
     def change_reconstruction_ignores(self,refs,ignore):
+        if getattr(self,'remote_locked',False):return
         old=set(self.view_settings.reconstruction_ignored)
         refs={(k,int(i)) for k,i in refs if self.roles().get(k)=='固定RDL'}
         updated=old|refs if ignore else old-refs
@@ -2590,6 +2617,7 @@ class MainWindow(W.QMainWindow):
         self.width_yield.refresh()
 
     def show_properties(self):
+        if getattr(self,'remote_locked',False):return
         if not self.data:return
         if getattr(self,'_queued_node_edit',None):
             self.statusBar().showMessage('节点编辑已排队，将在当前计算结束后应用。');return
@@ -2635,7 +2663,8 @@ class MainWindow(W.QMainWindow):
         # Windows cannot express a relative path between different volumes or UNC shares.
         portable=gds.anchor.casefold()==path.anchor.casefold() and gds.is_relative_to(installation_root())
         source=os.path.relpath(gds,path.parent) if portable else str(gds)
-        project=dict(self.project_settings(),gds_path=source)
+        from .area_filter import canonical_project
+        project=dict(canonical_project(self.data,self.project_settings()),gds_path=source)
         from .core import clean_json
         from .project_results import save
         try:project['saved_results']=save(self,path)
@@ -2653,9 +2682,15 @@ class MainWindow(W.QMainWindow):
         try:
             path=Path(path).resolve();project=normalize_project(json.loads(path.read_text(encoding='utf-8')));gds=Path(project['gds_path'])
             if not gds.is_absolute():gds=path.parent/gds
+            if self.remote_locked:project['overlays']={key:False for key in OVERLAY_DEFAULTS}
             self.load_gds(gds,project.get('top_cell'),project,project_path=path)
         except Exception as exc:self.refresh_jobs();self.error(exc)
     def closeEvent(self,event):
+        measured=getattr(self,'measured_output',None)
+        if measured and (measured.active() or measured.running or measured.stopping):
+            if measured.active():measured.stop(disable=True)
+            if measured.running or measured.stopping:
+                event.ignore();QtCore.QTimer.singleShot(100,self.close);return
         self.stop_animation();self.width_yield.reset();self.reconstruction_yield.reset();self.constraint_feedback.cancel()
         if hasattr(self,'mouse_die'):self.mouse_die.pending=False;self.mouse_die.full_pending=False;self.mouse_die.timer.stop();self.mouse_die.idle.stop()
         running=[w for w in [self.worker,self.motion_worker,self.hardware_worker,self.cache_clear_worker,self.filter_job,self.width_yield.worker,self.reconstruction_yield.worker,self.constraint_feedback.worker,*self.preview_workers] if w is not None and w.isRunning()]
@@ -2676,9 +2711,15 @@ class MainWindow(W.QMainWindow):
         self.runtime_capture.close();event.accept()
 
 
-def launch(project=None):
+def launch(project=None,measured=False,ipc_endpoint=None):
     app=W.QApplication.instance() or W.QApplication([]);app.setApplicationName('Die Shift Analyze')
-    window=MainWindow();window.show()
+    window=MainWindow();window.requested_ipc_endpoint=ipc_endpoint;window.show()
+    if measured:
+        def activate():
+            if window.data is not None and window.worker is None and not window.preview_workers:
+                window.measured_output.toggle.setChecked(True)
+            else:QtCore.QTimer.singleShot(100,activate)
+        QtCore.QTimer.singleShot(150,activate)
     if project:QtCore.QTimer.singleShot(0,lambda:window.load_project(project))
     code=app.exec() if hasattr(app,'exec') else app.exec_()
     QtCore.QCoreApplication.sendPostedEvents(None,getattr(QtCore.QEvent,'Type',QtCore.QEvent).DeferredDelete)

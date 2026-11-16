@@ -125,7 +125,7 @@ class ReconstructionOverlay:
             for k,g in q['regions'].items():
                 if k=='A':g=gactive
                 if g.is_empty or not _in_view(g.bounds,w.view_bounds):continue
-                region_groups.setdefault((q['layer'],q['index'],k,status if k=='A' else ''),{})[id(g)]=g
+                region_groups.setdefault((q['layer'],q['index'],k,status if k=='A' else ('following' if q.get('ignored_following') else '')),{})[id(g)]=g
             if status=='red' and not gactive.is_empty and _in_view(gactive.bounds,w.view_bounds):red.append(patch(gactive))
             if status=='pending' and not gactive.is_empty and _in_view(gactive.bounds,w.view_bounds):warnings.append(patch(gactive))
             row=(bank or {}).get('zones',{}).get(zone_key(q))
@@ -144,7 +144,7 @@ class ReconstructionOverlay:
         for (layer,index,kind,status),values in sorted(region_groups.items(),key=lambda item:RANK.get(item[0][3],-1)):
             geos=tuple(values.values());cache_key=(layer,index,kind,status,tuple(values));previous=old_unions.get(cache_key)
             g=previous[1] if previous is not None and all(a is b for a,b in zip(previous[0],geos)) else (geos[0] if len(geos)==1 else shapely.union_all(geos))
-            self.union_cache[cache_key]=(geos,g);paths.setdefault((layer,kind),[]).append(patch(g));colors.setdefault((layer,kind),[]).append(PALETTE[status] if kind=='A' else w.style_for(layer)['color'])
+            self.union_cache[cache_key]=(geos,g);paths.setdefault((layer,kind),[]).append(patch(g));colors.setdefault((layer,kind),[]).append(PALETTE[status] if kind=='A' else '#b49ac9' if status=='following' else w.style_for(layer)['color'])
         for key in paths:
             if key not in self.artists:
                 artist=PatchCollection([],alpha=.66,linewidths=.5);w.ax.add_collection(artist);self.artists[key]=artist
@@ -276,6 +276,7 @@ class CutDrag:
     def _tolerance(self):
         t=self.w.ax.transData.inverted();return float(np.linalg.norm(t.transform((12,0))-t.transform((0,0))))
     def press(self,event):
+        if getattr(self.w,"remote_locked",False):return
         w=self.w
         if not w.reconstruction_toggle.isChecked() or event.inaxes is not w.ax or event.xdata is None or getattr(w.canvas,'die_move_active',False):return
         if getattr(w,'region_select',None) and w.region_select.mode is not None:return
@@ -296,6 +297,14 @@ class CutDrag:
         self.state=dict(piece=piece,kind=kind,start=np.array([event.x,event.y]),moved=False,settings=w.view_settings,
                         frame=w.current_frame,phase=0.,updated=w.view_settings,part=None,
                         handle_offset=(xy.mean(axis=0)-np.asarray(piece['extra_cut' if kind=='extra' else 'moved_cut'].coords[0]) if piece['extra_cut' if kind=='extra' else 'moved_cut'].geom_type=='Point' else np.zeros(2)))
+        # Drag from the actual press point, not the projection of a tilted or
+        # widened handle. Absolute projection made one direction stay clamped.
+        from .selection import inverse_geometry
+        side=1 if kind=='extra' else 0;frame=w.current_frame;owner=piece['die']
+        point=np.array([event.xdata,event.ydata])-self.state['handle_offset']
+        nominal=inverse_geometry(shapely.Point(point),frame['rotation_centers'][owner],frame['states'][owner]*piece.get('endpoint_weights',(1.,0.))[side])
+        self.state['press_projection']=float(piece['route_plan'].route.project(nominal))
+        self.state['press_interval']=piece['interval'][side]
         w.canvas.reconstruction_drag_active=True
         self.latest=None;self.timer.start();overlay.highlight(picked)
         w.statusBar().showMessage('拖动共用动区边界；另一端保持不动，松开后更新所有工况。')
@@ -318,7 +327,7 @@ class CutDrag:
             plan=piece.get('route_plan')
             if plan is not None:
                 which=1 if state['kind']=='extra' else 0
-                part,clamped=plan.edit_pose(*piece['interval'],which,float(plan.route.project(shapely.Point(cursor))),frame['rotation_centers'][owner],frame['states'][owner],self.w.view_settings.reconstruction_style,cursor=cursor)
+                part,clamped=plan.edit_pose(*piece['interval'],which,state['press_interval']+float(plan.route.project(shapely.Point(cursor)))-state['press_projection'],frame['rotation_centers'][owner],frame['states'][owner],self.w.view_settings.reconstruction_style,cursor=cursor)
                 if part is not None:
                     from .reconstruction_edits import apply_angles
                     part=apply_angles(state['updated'],plan,part)

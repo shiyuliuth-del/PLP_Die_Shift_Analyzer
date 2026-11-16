@@ -69,6 +69,8 @@ def normalize_project(project):
             '缓存管理':'硬件与计算资源','过孔实体覆盖概率':'极端足迹','视图与预演运动':'动画',
             '连续无异常接触范围':'安全范围','固定RDL重构预演':'重构预演','DRC检查':'DRC'}
     p['expanded_settings']=list(dict.fromkeys(titles.get(title,title) for title in sections if not title.startswith('预演分析')))
+    from .measured_core import Options
+    p['measured_output']=asdict(Options.from_dict(p.get('measured_output')))
     from .dxf_settings import DxfSettings
     p['dxf_options']=asdict(DxfSettings.from_dict(p.get('dxf_options')))
     if not isinstance(p.setdefault('dxf_directory',''),str):raise ValueError('DXF输出目录必须为文本')

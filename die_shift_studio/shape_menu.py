@@ -49,7 +49,7 @@ def show_shape_menu(window,event,point):
                 window.change_width_ignores(items,value)
         if add:menu.addAction('忽略选中的问题线路',lambda:change(add,True))
         if remove:menu.addAction('取消忽略选中的问题线路',lambda:change(remove,False))
-    if window.reconstruction_toggle.isChecked():
+    if window.reconstruction_toggle.isChecked() and not getattr(window,'remote_locked',False):
         from .reconstruction_edits import change_zone
         source_data=window.data;source_group=window.cache_group
         def edit_zone(action,**kwargs):
@@ -75,7 +75,10 @@ def show_shape_menu(window,event,point):
                 window.change_reconstruction_ignores(items,value)
         if add or remove:menu.addSeparator()
         if add:menu.addAction('忽略选中图形的重构',lambda:change_reconstruction(add,True))
-        if remove:menu.addAction('取消忽略选中图形的重构',lambda:change_reconstruction(remove,False))
+        if remove:
+            menu.addAction('取消忽略选中图形的重构',lambda:change_reconstruction(remove,False))
+            menu.addAction('忽略图形：整块静止',lambda:window.change_reconstruction_mode(remove,False))
+            menu.addAction('忽略图形：整块随动',lambda:window.change_reconstruction_mode(remove,True))
     ratio=window.canvas.devicePixelRatioF()
     pos=QtCore.QPoint(round(event.x/ratio),round(window.canvas.height()-event.y/ratio))
     menu.aboutToHide.connect(menu.deleteLater)
