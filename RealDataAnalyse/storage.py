@@ -26,11 +26,13 @@ class Lease:
     """OS lifetime lock, automatically released after process death."""
     def __init__(self, path):
         self.file = open(str(path) + '.lock', 'a+b')
-        self.file.seek(0)
-        self.file.write(b'0')
-        self.file.flush()
-        self.file.seek(0)
         try:
+            # Windows byte locks also prohibit a competing write before locking.
+            self.file.seek(0, 2)
+            if self.file.tell() == 0:
+                self.file.write(b'0')
+                self.file.flush()
+            self.file.seek(0)
             if os.name == 'nt':
                 import msvcrt
                 msvcrt.locking(self.file.fileno(), msvcrt.LK_NBLCK, 1)
