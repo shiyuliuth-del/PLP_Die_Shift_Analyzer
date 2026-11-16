@@ -45,7 +45,7 @@ def needed(r,bundles,grid=None):
     tables=[]
     for ref,b in bundles.items():
         if any(q.get('connection_failed') for v in b['values'].values() for q in v['pieces']):return True
-        if grid is not None and any(not q.get('ignored') for v in b['values'].values() for q in v['pieces']):
+        if grid is not None:
             source=r.model.nodes[r.model.ids[ref]]['poly']
             from .topology_routing import covers_ports
             for via,owner,_ in r.rules.vias[r.rules.refnet[ref]]:
@@ -86,7 +86,7 @@ def needed(r,bundles,grid=None):
     return False
 
 
-def scene(r,grid,bundles,digits):
+def scene(r,grid,bundles,digits,diagnostics=True):
     from .topology_routing import resolve
     from .reconstruction import decorate_problems
     states=np.array([poses[d] for poses,d in zip(grid.locals,digits)]);out={};pieces=[]
@@ -95,7 +95,12 @@ def scene(r,grid,bundles,digits):
         out.setdefault(ref[0],[]).append(dict(indices=(ref[1],),geometry=row['geometry'],net=r.rules.refnet[ref][1]))
         pieces.extend(dict(q,regions=dict(q['regions'])) for q in row['pieces'])
     out,pieces,repaired,blocked=resolve(r,out,pieces,states)
-    frame=dict(replacements=out,pieces=pieces,violations=r.rules.check(out,states),original_violations=r.rules.nominal_check(),dbu_um=r.tol,
+    if blocked:
+        # The interactive path can also try its bounded quick angle candidate.
+        # Statistics must use exactly the same completed copper in that case.
+        alternate=r.frame(states,diagnostics=diagnostics)
+        return states,alternate
+    frame=dict(replacements=out,pieces=pieces,violations=r.rules.check(out,states) if diagnostics else [],original_violations=r.rules.nominal_check() if diagnostics else (),dbu_um=r.tol,
                repair_refs=repaired,hard_failures=blocked,electrically_valid=not bool(blocked))
     decorate_problems(frame);return states,frame
 

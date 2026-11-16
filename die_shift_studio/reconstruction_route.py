@@ -62,6 +62,7 @@ def medial_graph(wkb,width):
 
 def trace(poly,start,end,width):
     """Shortest interior medial path, with exact source terminal endpoints."""
+    shapely.prepare(poly)
     start,end=np.asarray(start,float),np.asarray(end,float)
     if np.linalg.norm(end-start)<1e-8:return None
     direct=shapely.LineString([start,end])

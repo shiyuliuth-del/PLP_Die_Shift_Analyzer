@@ -160,8 +160,8 @@ class ReconstructionTests(unittest.TestCase):
         """The dimension must describe the reconstructed layout, not the nominal one.
 
         At the mixed pose the two pads travel toward each other, so the copper
-        that used to be 5 um away now overlaps. A nominal measurement would keep
-        reporting 5 um; the reconstruction has to report the overlap.
+        that used to be 5 um away would overlap. Connected compensation now
+        separates it; the dimension must measure that FINAL copper.
         """
         engine,_,_=example()
         try:
@@ -169,12 +169,17 @@ class ReconstructionTests(unittest.TestCase):
             recon=frame['reconstruction']
             self.assertTrue(recon['pieces'])
             toler=engine.reconstructor.tol*2
+            nets=engine.reconstructor.rules.geometries(recon['replacements'])
             for piece in recon['pieces']:
+                key=(piece['layer'].split('/')[0],piece['net'])
+                neighbours=[g for k,g in nets.items() if k[0]==key[0] and k!=key]
+                actual=min(nets[key].distance(g) for g in neighbours)
                 self.assertIsNotNone(piece['clearance_um'])
-                self.assertLessEqual(piece['clearance_um'],toler)
-                self.assertTrue(piece['conflict'])
+                self.assertAlmostEqual(piece['clearance_um'],actual,places=6)
+                self.assertFalse(any(nets[key].intersects(g) for g in neighbours))
+                self.assertEqual(piece['conflict'],actual<recon['summary']['rule_space_um']-engine.reconstructor.tol)
                 self.assertIsNotNone(piece['conflict_link'])
-            self.assertGreaterEqual(recon['summary']['conflicts'],1)
+            self.assertTrue(recon['electrically_valid']);self.assertTrue(recon['repair_refs'])
         finally:
             engine.close()
 

@@ -209,20 +209,22 @@ def resolve(r,replacements,pieces,states):
         progressed=False
         for left,right in pairs:
             if not objects[left].intersects(objects[right]):continue
+            # Most collisions are overlapping pad shoulders. Try one shared
+            # corridor before expensive whole-net visibility routing.
+            if left in mutable and right in mutable:
+                divided=None
+                for space in dict.fromkeys((r.rule_space,r.rule_space*.5,0.)):
+                    candidate=separate_pair(objects[left],objects[right],original[left],original[right],ports[left],ports[right],r.tol,space)
+                    if candidate is not None and all(not foreign_hits(ref,g) for ref,g in zip((left,right),candidate)):
+                        divided=candidate;break
+                if divided is not None:
+                    for ref,g in zip((left,right),divided):
+                        objects[ref]=g;changed.add(ref);_adopt(by_ref[ref],g,r.tol,'共同通道补偿：两侧轮廓同时收窄，工艺规则另检')
+                    progressed=True;continue
             candidates=[]
             for ref in (left,right):
                 candidate=attempt(ref,'异网避让补偿：局部收窄或绕接，工艺规则另检')
                 if candidate is not None:candidates.append((objects[ref].symmetric_difference(candidate[0]).area,ref,*candidate))
-            if not candidates and left in mutable and right in mutable:
-                divided=None
-                for space in dict.fromkeys((r.rule_space,r.rule_space*.5,0.)):
-                    divided=separate_pair(objects[left],objects[right],original[left],original[right],ports[left],ports[right],r.tol,space)
-                    if divided is not None:break
-                if divided is not None:
-                    for ref,g in zip((left,right),divided):
-                        objects[ref]=g;changed.add(ref);_adopt(by_ref[ref],g,r.tol,'共同通道补偿：两侧轮廓同时收窄，工艺规则另检')
-                    progressed=True
-                continue
             if not candidates:continue
             _,ref,g,reason=min(candidates,key=lambda item:(item[0],item[1]));objects[ref]=g;changed.add(ref);_adopt(by_ref[ref],g,r.tol,reason);progressed=True
         if not progressed:break

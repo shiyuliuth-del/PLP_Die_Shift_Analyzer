@@ -72,7 +72,7 @@ def current_failures(frame):
 
 
 def scene_failure(frame):
-    return bool(frame.get('violations')) or bool(current_failures(frame))
+    return bool(frame.get('violations')) or bool(frame.get('hard_failures')) or bool(current_failures(frame))
 
 
 def color_for(q,bank,nominal,level,inside=True):
