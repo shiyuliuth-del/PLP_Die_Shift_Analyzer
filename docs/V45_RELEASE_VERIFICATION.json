@@ -1,0 +1,15 @@
+{
+  "tag": "V45",
+  "commit": "45b4f6d29b31955efefd95bb1fe77d7e0e48b9b3",
+  "checked_at_utc": "2026-11-16T12:31:33.642189+00:00",
+  "status": "PASS",
+  "files": 156,
+  "bytes": 2035886,
+  "sha256": "41b686a99f7fe777a48292bcd566418288c93afe110b728576b2ec411e3c5940",
+  "release_exact": true,
+  "automatic_zip_exact": true,
+  "automatic_tar_exact": true,
+  "extra_assets_exact": true,
+  "crc": true,
+  "seven_zip": true
+}
