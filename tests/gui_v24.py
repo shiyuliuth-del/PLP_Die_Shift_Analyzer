@@ -27,7 +27,7 @@ def wait():
     end=time.monotonic()+180
     while time.monotonic()<end:
         app.processEvents()
-        if not any((w.worker,w.preview_workers,w.preview_pending,w.motion_worker,w.motion_pending,w.hardware_worker,w.coverage_timer.isActive(),
+        if not any((w.analysis.worker,w.worker,w.preview_workers,w.preview_pending,w.motion_worker,w.motion_pending,w.hardware_worker,w.coverage_timer.isActive(),
                     w._coverage_pending,w.viewport_timer.isActive(),w.transition.timer.isActive(),w.mouse_die.timer.isActive(),w.mouse_die.idle.isActive(),w.width_yield.worker,w.width_yield.timer.isActive())):break
         time.sleep(.005)
     else:raise AssertionError('V24 GUI timeout')
@@ -43,16 +43,18 @@ before=w.current_frame['width_analysis'];numeric=w.result['schemes']
 old_id=w.data.geometry_id;sig=w.engine.signature
 assert before['edge_violations'] and any(r['locked'] for r in before['rows'])
 w.manual_states=np.array([[3.,0,0]]);w.request_preview();wait()
-w.preview_tabs.setCurrentWidget(w.width_table.parentWidget());wait()
+w.tabs.setCurrentWidget(w.analysis_page);wait();numeric=w.result['schemes'];hist=w.histogram_data['magnitude_counts'].copy();w.tabs.setCurrentIndex(0);wait()
 old_counts=w.current_frame['width_analysis']['counts'].copy()
-old_rows=list(w.width_rows);hist=w.histogram_data['magnitude_counts'].copy()
+old_rows=list(w.current_frame['width_analysis']['rows'])
 assert w.layer_artists['5/0'].get_visible() and 0<w.layer_artists['5/0'].get_alpha()<w.style_for('5/0')['alpha']
 with patch.object(WidthAnalyzer,'_measure',side_effect=AssertionError('visibility solved geometry again')):
     w.visible_boxes['5/0'].setChecked(False);wait()
-    assert w.current_frame['width_analysis']['counts']==old_counts and w.width_rows==old_rows
+    assert w.current_frame['width_analysis']['counts']==old_counts and w.current_frame['width_analysis']['rows']==old_rows
     assert not w.layer_artists['5/0'].get_visible() and not w.width_overlay.boxes.get_visible()
     w.visible_boxes['4/0'].setChecked(False);wait()
+    w.tabs.setCurrentWidget(w.analysis_page);wait()
     np.testing.assert_array_equal(w.histogram_data['magnitude_counts'],hist)
+    w.tabs.setCurrentIndex(0);wait()
     assert len(w.connector_segments)==0 and w.result['schemes']==numeric
     w.visible_boxes['5/0'].setChecked(True);w.visible_boxes['4/0'].setChecked(True);wait()
     mode=w.setting_fields['width_display'].boxes
@@ -106,12 +108,12 @@ assert w._prepared_motion['cached'] and seen
 back=w.setting_fields['animation_return_zero'];back.setChecked(False);wait()
 w.extreme_table.setCurrentCell(1,0);wait();seen.clear();w.extreme_table.setCurrentCell(0,0);wait()
 assert not seen and not np.any(w.current_frame['states'])
-# Plain layout without overlays has the same replay contract, ending blank.
+# Plain layout without overlays has the same replay contract, ending at a checked zero pose.
 back.setChecked(True);w.width_toggle.setChecked(False);wait()
 for attempt in range(2):
     w.manual_states=np.array([[8.,0,0]]);w.request_preview();wait()
     seen.clear();w.manual_states=None;w.request_preview();wait()
-    assert seen and w.current_frame is None
+    assert seen and not np.any(w.current_frame['states']) and 'drc' in w.current_frame
     if attempt:assert w._prepared_motion['cached']
 # With adaptive copper enabled, intermediate frames stay binary and the
 # endpoint restores the nominal global probability decision.
@@ -171,7 +173,10 @@ assert w.current_frame['states'][0,0]==3.
 back.setChecked(False);wait()
 path=w.jobs_dir/'edited.dshift.json';w.write_project(path)
 job=json.loads(path.read_text());assert len(job['node_edits'])==1 and job['settings']['width_display']['标注']=='hide'
-w.load_project(path);wait();assert w.data.node_edits==job['node_edits']
+w.load_project(path);wait()
+from die_shift_studio.area_filter import canonical_project
+assert canonical_project(w.data,w.project_settings())['node_edits']==job['node_edits']
+assert shape_nodes(w.data,'4/0',0)[1].tolist()==[[-83.,0.]]
 assert w.view_settings.width_display['边距']=='hide' and not w.view_settings.animation_return_zero
 w.load_project(ROOT/'Jobs'/(name+'.dshift.json'));wait()
 assert not w.data.node_edits and shape_nodes(w.data,'4/0',0)[1].tolist()==[[-85.,0.]]

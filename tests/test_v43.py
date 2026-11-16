@@ -142,10 +142,10 @@ class V43Tests(unittest.TestCase):
  def test_new_client_limits_and_shared_filter_metadata_roundtrip(self):
   from die_shift_studio.project import normalize_project
   p=normalize_project({'schema_version':5,'parameters':{},'settings':{}})
-  self.assertEqual(p['parameters']['minimum_area_um2'],0)
+  self.assertEqual(p['parameters']['minimum_area_um2'],.5)
   self.assertEqual(p['settings']['reconstruction_following'],())
   self.assertEqual(p['measured_output']['max_threads'],0)
-  with self.assertRaises(ValueError):normalize_project({'schema_version':5,'measured_output':{'max_memory_mb':0}})
+  self.assertEqual(normalize_project({'schema_version':5,'measured_output':{'max_memory_mb':0}})['measured_output']['max_memory_mb'],0)
  def test_gds_overflow_rejected_before_replacing_old_file(self):
   from die_shift_studio.measured_core import write_gds
   from die_shift_studio.dxf_export import Snapshot

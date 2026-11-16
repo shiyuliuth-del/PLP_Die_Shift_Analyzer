@@ -83,7 +83,7 @@ np.testing.assert_array_equal(w.shown_states,target)
 seen.clear();first();assert seen and w._prepared_motion['cached']
 # Same M movement and return reuse the packet. Numeric input uses its own
 # exact target; repeat both directions with every geometry computation blocked.
-w.manual_die.setCurrentIndex(0);w.manual_fields['dx'].setValue(35);w.manual_fields['dy'].setValue(0);w.manual_fields['angle'].setValue(0)
+w.manual_preview.rebuild();w.manual_preview.rows[0][0].setValue(35);w.manual_preview.rows[0][1].setValue(0);w.manual_preview.rows[0][2].setValue(0)
 w.apply_manual();wait();assert w.extreme_table.currentRow()==-1
 assert w.current_frame['states'][0,0]==35 and any(0<x[0,0]<35 for x in seen)
 check_callouts();first()
@@ -99,7 +99,7 @@ with patch.object(PreviewEngine,'frame',side_effect=AssertionError('replayed cac
         else:
             # M reports the displayed pose back to the numeric boxes. Request
             # the exact same numeric triple again, not its rounded mouse pose.
-            for key,value in [('dx',35),('dy',0),('angle',0)]:w.manual_fields[key].setValue(value)
+            for key,value in [('dx',35),('dy',0),('angle',0)]:w.manual_preview.rows[0][{'dx':0,'dy':1,'angle':2}[key]].setValue(value)
             w.apply_manual()
         wait();assert w._prepared_motion['cached'] and seen
         seen.clear()
@@ -112,7 +112,7 @@ assert disk()==baseline and ordinary==len(group.recent) and replays==len(group.r
 # worker that finishes after the first row has taken ownership of the view.
 w.mouse_die.enter(0);w.mouse_die.submit(target*1.37);w.mouse_die.flush();first()
 # Changing the label font, camera position or viewport changes layout only.
-w.manual_fields['dx'].setValue(35);w.manual_fields['dy'].setValue(0);w.manual_fields['angle'].setValue(0)
+w.manual_preview.rows[0][0].setValue(35);w.manual_preview.rows[0][1].setValue(0);w.manual_preview.rows[0][2].setValue(0)
 w.apply_manual();wait()
 with patch.object(WidthAnalyzer,'_measure',side_effect=AssertionError('view solved geometry')):
     w.set_view((0,0),460,300);w.viewport_changed();wait();n=check_callouts()

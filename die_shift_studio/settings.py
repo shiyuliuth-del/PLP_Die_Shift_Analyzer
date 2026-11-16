@@ -37,7 +37,7 @@ class ViewSettings:
     cache_max_entries:int=2000
     acceleration:str='auto'
     drc_min_angle_deg:float=90.
-    drc_tolerance_um:float=0.
+    drc_tolerance_um:float=0.1
     probability_method:str='sobol'
     sample_exponent:int=12
     random_seed:int=510
@@ -87,7 +87,7 @@ class ViewSettings:
     reconstruction_dropped_cuts:tuple=()
     reconstruction_enabled:bool=False
     reconstruction_live:bool=True
-    reconstruction_style:str="c2"
+    reconstruction_style:str="linear"
     reconstruction_boundary_mode:str="wide"
     reconstruction_ignored:tuple=()
     reconstruction_following:tuple=() # ignored whole-source rigid following; absent means static

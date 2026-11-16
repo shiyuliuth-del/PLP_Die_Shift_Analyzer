@@ -29,7 +29,7 @@ class MouseDieMode:
         if w.preview_worker is not None:w.preview_worker.cancelled.set()
         w.canvas.die_move_active=True
         states=np.zeros((len(w.case['dies']),3)) if w.shown_states is None else w.shown_states.copy()
-        w.manual_states=states;w.active_preview=None;w.manual_die.setCurrentIndex(owner)
+        w.manual_states=states;w.active_preview=None
         w.leave_extreme_selection()
         self.update_text();w.render_scene();w.statusBar().showMessage(f'DIE {owner+1} 交互偏移：右键平移；滚轮上/下逆时针/顺时针旋转；Ctrl+滚轮缩放；ESC退出')
     def exit(self):
@@ -90,6 +90,5 @@ class MouseDieMode:
         if self.owner is not None:
             z=w.shown_states[self.owner] if w.shown_states is not None else np.zeros(3)
             self.text.setText(f'DIE {self.owner+1}   dx = {z[0]:.3f} μm   dy = {z[1]:.3f} μm   O = {math.degrees(z[2]):.4f}°')
-            for name,value in zip(('dx','dy','angle'),(z[0],z[1],math.degrees(z[2]))):
-                control=w.manual_fields[name];control.blockSignals(True);control.setValue(float(value));control.blockSignals(False)
+            if w.manual_preview.isVisible():w.manual_preview.sync(w.shown_states)
             self.text.adjustSize();self.text.move(12,max(0,w.canvas.height()-self.text.height()-2));self.text.raise_()

@@ -6,7 +6,6 @@ from matplotlib.colors import to_rgb
 from matplotlib.collections import PatchCollection
 from shapely.geometry import Point
 from shapely.strtree import STRtree
-from .qt_compat import QtWidgets as W, QtGui, QtCore, DISPLAY, TOOLTIP, BACKGROUND, HORIZONTAL
 from .width_analysis import COLORS, ADEQUATE, NARROW, BLOCKED, gate_rectangle
 from .viewport import overlaps
 from .width_display import tint,low_ink
@@ -14,7 +13,6 @@ from .width_labels import LabelLayout
 from .width_witness import pose_text
 from .width_risk_probability import lookup,lookup_union,probability_text,probability_color
 
-HEADERS = ['状态','固定 RDL','通道两侧','原可通','必须通过','现可通','原间距 / μm','现间距 / μm','保宽需 / μm','最小需 / μm','预期收窄 / μm','问题线路','位置 / μm']
 IGNORED='已忽略'
 IGNORED_COLOR='#95c8a5'
 
@@ -22,60 +20,10 @@ def ignored_row(row,ignored):
     return bool(row['refs']) and row['status']!=ADEQUATE and all(ref in ignored for ref in row['refs'])
 
 
-INTRO = '按固定 RDL 原始线路穿越数比较各姿态的孔盘通道容量。勾选后默认低亮显示原始线路，矩形标记相邻孔盘通道。'
 
 
 def low_risk(row):
     return bool((row.get('event_probability') or {}).get('low'))
-
-
-class ChannelRows(QtCore.QAbstractTableModel):
-    """Virtual cells keep a full-package 'show adequate' query responsive."""
-    def __init__(self,parent):
-        super().__init__(parent)
-        self.rows = []
-        self.ignored=frozenset()
-
-    def replace_rows(self,rows):
-        self.beginResetModel()
-        self.rows = rows
-        self.endResetModel()
-
-    def rowCount(self,parent=QtCore.QModelIndex()):
-        return 0 if parent.isValid() else len(self.rows)
-
-    def columnCount(self,parent=QtCore.QModelIndex()):
-        return 0 if parent.isValid() else len(HEADERS)
-
-    def headerData(self,section,orientation,role=DISPLAY):
-        if role==DISPLAY and orientation==HORIZONTAL:
-            return HEADERS[section]
-        return super().headerData(section,orientation,role)
-
-    def data(self,index,role=DISPLAY):
-        if not index.isValid():
-            return None
-        r = self.rows[index.row()]
-        if role==TOOLTIP:
-            return WidthOverlay.description(r)+(self.probability_formatter(r) if hasattr(self,'probability_formatter') else '')
-        if role==BACKGROUND:
-            color = QtGui.QColor(IGNORED_COLOR if ignored_row(r,self.ignored) else COLORS[r['status']])
-            color.setAlpha(15 if low_risk(r) else 48)
-            return color
-        if role==DISPLAY:
-            return (r['status']+(' · 已忽略' if ignored_row(r,self.ignored) else '')+(' · 低概率' if low_risk(r) else ''),r['plane'],' ↔ '.join(r['pair']),r['original'],r['required'],r['current'],
-                    f"{r['nominal_gap_um']:.2f}",f"{r['gap_um']:.2f}",f"{r['keep_um']:.2f}",f"{r['minimum_um']:.2f}",f"{r['narrowing_um']:.3f}",
-                    '、'.join(f'{k} #{j+1}' for k,j in r['refs']),f"{r['point'][0]:.1f}, {r['point'][1]:.1f}")[index.column()]
-        return None
-
-
-class ChannelTable(W.QTableView):
-    def __init__(self):
-        super().__init__()
-        self.setModel(ChannelRows(self))
-        self.setSelectionBehavior(getattr(W.QAbstractItemView,'SelectionBehavior',W.QAbstractItemView).SelectRows)
-        self.verticalHeader().hide()
-        self.setColumnWidth(2,265)
 
 
 def visible_keepout_walls(row,visible,cache,dbu):
@@ -113,7 +61,6 @@ class WidthOverlay:
         self.stamp = self.table_stamp = self.summary_stamp = None
         self.label_sides={};self.text_sizes={}
         window.canvas.mpl_connect('motion_notify_event',self.hover)
-        window.width_table.model().probability_formatter=self.probability_line
 
     def shown_summary(self):
         w=self.w;frame=w.current_frame or {}
@@ -263,7 +210,6 @@ class WidthOverlay:
             self.stamp = self.table_stamp = self.summary_stamp = None
         visible = frozenset(k for k,check in w.visible_boxes.items() if check.isChecked())
         flags = (id(data),w.width_sufficient_toggle.isChecked(),w.view_settings.show_low_width,w.ignored_width_lines)
-        w.width_table.model().ignored=w.ignored_width_lines
         modes=w.view_settings.width_display
         nominal=w.width_toggle.isChecked() and (w.current_frame or {}).get('nominal_global')
         selected=tuple(w.selection.selected)
@@ -275,7 +221,7 @@ class WidthOverlay:
             if self.table_stamp!=flags:
                 for a in (self.barriers,self.boxes,self.outlines,self.edges,*self.inset.values(),*self.labels):a.set_visible(False)
                 self.outlines.set_facecolors('none');self.summary_stamp=None;self.rows=[];self.tree=None
-                self.table_stamp=flags;self.fill_table([],None)
+                self.table_stamp=flags
             return
         rules = (data or {}).get('parameters',{})
         if getattr(self,'row_filter',None)!=(flags,visible):
@@ -294,7 +240,7 @@ class WidthOverlay:
         summary=self.shown_summary()
         if summary is not None:
             self.draw_summary(summary,visible,modes,selected)
-            if self.table_stamp!=flags:self.table_stamp=flags;self.fill_table(rows,data)
+            if self.table_stamp!=flags:self.table_stamp=flags
             return
         self.summary_stamp=None;self.outlines.set_facecolors('none');self.outlines.set_linestyles('solid')
         if hasattr(self.outlines,'_static_preview'):del self.outlines._static_preview
@@ -433,7 +379,6 @@ class WidthOverlay:
         for a in self.labels[count:]:a.set_visible(False)
         if not getattr(w,'_in_animation',False) and self.table_stamp!=flags:
             self.table_stamp = flags
-            self.fill_table(rows,data)
 
     @staticmethod
     def label_text(r,decimals=2):
@@ -457,24 +402,6 @@ class WidthOverlay:
                 f"现可通 {r['current']} 根。预期收窄 {r['narrowing_um']:.3f} μm。原线宽 {', '.join(f'{v:.2f}' for v in r['widths_um'])} μm。"
                 f"各空隙净宽 {', '.join(f'{v:.2f}' for v in r['slots_um']) or '0'} μm。{note}")
 
-    def fill_table(self,rows,data):
-        w = self.w
-        w.width_rows = rows
-        w.width_table.model().replace_rows(rows)
-        if not data:
-            w.width_summary.setText(INTRO)
-        elif not data['examined']:
-            w.width_summary.setText('原始布局中没有线路穿越可评估的相邻窄口。')
-        else:
-            q = data['counts']
-            w.width_summary.setText(f"检查 {data['examined']} 个相邻截面。宽度足够 {q[ADEQUATE]} 个，"
-                                    f"需局部收窄 {q[NARROW]} 个，宽度不足 {q[BLOCKED]} 个。表中 {len(rows)} 行。")
-
-        if data and any(r.get('event_probability') for r in data['rows']):
-            rare=sum(low_risk(r) for r in data['rows'])
-            w.width_summary.setText(w.width_summary.text()+f" 已确认低概率通道 {rare} 个。")
-        if data and data.get('edge_violations'):
-            w.width_summary.setText(w.width_summary.text()+f" 封装边缘或禁布区违规 {len(data['edge_violations'])} 个图形。")
     def hover(self,event):
         w = self.w
         if self.tree is None or event.inaxes is not w.ax or event.xdata is None:
@@ -485,12 +412,3 @@ class WidthOverlay:
         text = self.description(self.rows[int(hits[0])])+self.probability_line(self.rows[int(hits[0])]) if len(hits) and not ignored_row(self.rows[int(hits[0])],w.ignored_width_lines) else ''
         if text!=w.canvas.toolTip():
             w.canvas.setToolTip(text)
-
-    def locate(self,row):
-        if 0<=row<len(getattr(self.w,'width_rows',[])):
-            r = self.w.width_rows[row]
-            self.selected = self.identity(r)
-            rules=self.w.current_frame['width_analysis']['parameters']
-            x0,y0,x1,y1 = gate_rectangle(r,rules['width_um'],rules['space_um']).bounds
-            span = max(100.,(x1-x0)*2.5,(y1-y0)*2.5)
-            self.w.animate_view(r['point'],span,span)

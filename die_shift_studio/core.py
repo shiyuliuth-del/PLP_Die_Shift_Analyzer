@@ -60,7 +60,7 @@ class Parameters:
     transition_length_um: float = 200.0
     max_route_angle_deg: float = 30.0
     package_clearance_um: float = 10.0
-    minimum_area_um2: float = 0.0
+    minimum_area_um2: float = 0.5
     routing_edge_keepout_um: float = 40.0
     min_die_gap_um: float = 20.0
     min_package_clearance_um: float = 20.0
@@ -406,7 +406,7 @@ def spacing_violation(polys,space):
     return False
 
 
-def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order=None,connections=None,contact_model=None,motions=None,settings=None,safe_range_cache=None,validate_extremes=False):
+def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order=None,connections=None,contact_model=None,motions=None,settings=None,safe_range_cache=None,validate_extremes=False,include_analysis=True):
     notify=progress
     if validate_extremes:progress=lambda n,t:notify(round(.92*n),t)
     params.validate(); p=replace(params,residual_budget_um=0.,routing_edge_keepout_um=0.)
@@ -422,114 +422,116 @@ def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order
     from .contact import ContactModel
     contact_model=contact_model or ContactModel(data,original_case,roles,connections,motions=motions,parameters=p)
     p=replace(p,interdie='present' if contact_model.interdie_networks else 'none')
-    count=len(case['dies']); alpha=p.failure_threshold
-    rows=[]; common=[]; qcorners=[]
-    def compute_die(item):
-        i,(die,info,pins,outputs)=item;local_notes=[];p=params.for_die(i)
-        p=replace(p,residual_budget_um=0.,routing_edge_keepout_um=0.)
-        from .pivots import rotation_center
-        center=rotation_center(case,i,p)
-        corners=np.asarray(die.exterior.coords)[:-1]
-        qcorner=float(max(uncertainty_bound(corners,center,p,count)))
-        boundary_gap=die.distance(case['board'].boundary)-p.min_package_clearance_um
-        boundary_ratio=qcorner/boundary_gap if boundary_gap>0 else math.inf
-        if boundary_ratio>1:
-            local_notes.append(f"DIE {i+1}到封装边界的保守偏移包络不足（比值{boundary_ratio:.3g}）")
-        if not 500<=min(info['width'],info['height']) or max(info['width'],info['height'])>10000 or info['width']/info['height']>3.000001:
-            local_notes.append(f"DIE {i+1}尺寸超出常规500～10000 μm或长宽比1～3；按实际尺寸继续计算")
-        row=dict(die=i+1,input_bounds=[p.single_bound_x_um if count==1 else p.multi_bound_x_um,p.single_bound_y_um if count==1 else p.multi_bound_y_um,p.bound_angle_deg],**info,pin_count=len(pins),output_count=len(outputs),
-            all_pin_count=len(original_case['all_pins'][i]),all_output_count=len(original_case['outputs'][i]),
-            rotation_origin_um=list(map(float,center)),rotation_origin_mode=p.rotation_center,
-            corner_radius_um=float(np.linalg.norm(corners-np.asarray(center),axis=1).max()),
-            corner_bound_um=qcorner,package_clearance_ratio=boundary_ratio,
-            package_nominal_gap_um=float(die.distance(case['board'].boundary)))
-        return row,local_notes,qcorner
-    profile=resource_profile()
-    work=enumerate(zip(case['dies'],case['infos'],case['pins'],case['outputs']))
-    for i,(row,notes,corner) in enumerate(parallel_map(compute_die,work,profile)):
-        rows.append(row);common.extend(notes);qcorners.append(corner)
-        progress(int(70*(i+1)/count),f"评估 DIE {i+1}/{count}（最多{profile['workers']}线程）")
-    collision_ratio=0.
-    for i,d in enumerate(case['dies']):
-        for j in range(i):
-            margin=d.distance(case['dies'][j])-p.min_die_gap_um
-            collision_ratio=max(collision_ratio,(qcorners[i]+qcorners[j])/margin if margin>0 else math.inf)
-    if collision_ratio>1:
-        common.append("芯片间隙不足以容纳当前保守运动包络")
-    if case['obstacles']:
-        common.append("存在禁布区：容量估计未替代障碍感知自动布线，需进行详细验证")
-    from .screening import scheme_metrics
-    metrics=scheme_metrics(contact_model,p)
-    for row,m in zip(rows,metrics['rows']):row['screening']=m
-    schemes=[]
-    mechanical=max([collision_ratio]+[r['package_clearance_ratio'] for r in rows])
-    for number in (1,2,3):
-        u=max((r[f'u{number}'] for r in metrics['rows']),default=math.inf)
-        reasons={1:['芯片边界：所需布线带宽 / 可用边长'],
-                 2:['固定过孔端：整段随动所需位移 / 孔盘可扩展净空间'],
-                 3:['扇出边界带宽与运动RDL原始逃逸带宽两者取大']}[number]
-        status='初筛候选' if u<=1 else '空间条件不足'
-        if number==2 and contact_model.interdie_networks:status='结构不适用';reasons.append('跨DIE网络不能同时作多个独立刚体')
-        if number==3 and not metrics['moving_layers']:status='结构不适用';reasons.append('缺少运动RDL层')
-        if number==2 and not all(r['captures'] for r in metrics['rows']):status='资料待补充';reasons.append('缺少可沿连接追溯的固定过孔捕获端')
-        if any(r['pin_count']==0 for r in rows) or connections.ownership_notes:status='资料待补充';reasons.append('接口或运动归属不完整')
-        if mechanical>1 and status=='初筛候选':status='机械空间待处理';reasons.append('芯片/封装保守净距包络不足')
-        if number==3:reasons.append('运动RDL需确认可预制；分类本身不证明制造阶段')
-        schemes.append(dict(scheme=number,name=SCHEME_NAMES[number],status=status,gamma=u,engineering_gamma=u,
-                            reasons=reasons,mode='连续型变' if number!=2 else '扩展固定端孔盘',scope='几何空间初筛；不构成布线、DRC或良率签核'))
-    contact=contact_model.screen(p,settings=settings,progress=progress)
-    for s in schemes:
-        s['contact_gamma']=contact['ratios'][s['scheme']]
-        s['contact_status']='存在接触超限' if contact['issues'] else '概率待细化' if contact.get('unresolved') else '原接口检查通过'
-        s['reasons'].append(s['contact_status']+'；独立报告，不并入空间比值U')
-    candidates=[s for s in schemes if s['status']=='初筛候选']
-    if candidates:
-        minimum=min(s['gamma'] for s in candidates)
-        best=min((s for s in candidates if s['gamma']<=minimum+1e-9),key=lambda s:{2:0,1:1,3:2}[s['scheme']])
-        tied=[s['scheme'] for s in candidates if s['gamma']<=minimum+1e-9]
-        tie_note=('方案'+ '、'.join(map(str,tied))+'同分，按工序取舍。') if len(tied)>1 else ''
-        recommendation=dict(scheme=best['scheme'],name=best['name'],
-                            reason=f"空间比值U={fmt(best['gamma'])}最小，保守余量较大；{tie_note}U≤1仅为初筛，仍须型变/全层DRC验证。",provisional=True)
-    else:recommendation=dict(scheme=None,name="当前空间条件无初筛候选",reason="检查各方案U、接口归属和机械净距；原图概率结果单独列示。",provisional=True)
-    from .safe_ranges import safe_ranges
-    progress(96,'求取各DIE连续无异常接触的安全内盒')
-    if safe_range_cache is None:ranges=safe_ranges(contact_model,p,settings,progress)
-    else:
-        from .session_cache import logical_fingerprint as fingerprint
+    if include_analysis:
+        count=len(case['dies']); alpha=p.failure_threshold
+        rows=[]; common=[]; qcorners=[]
+        def compute_die(item):
+            i,(die,info,pins,outputs)=item;local_notes=[];p=params.for_die(i)
+            p=replace(p,residual_budget_um=0.,routing_edge_keepout_um=0.)
+            from .pivots import rotation_center
+            center=rotation_center(case,i,p)
+            corners=np.asarray(die.exterior.coords)[:-1]
+            qcorner=float(max(uncertainty_bound(corners,center,p,count)))
+            boundary_gap=die.distance(case['board'].boundary)-p.min_package_clearance_um
+            boundary_ratio=qcorner/boundary_gap if boundary_gap>0 else math.inf
+            if boundary_ratio>1:
+                local_notes.append(f"DIE {i+1}到封装边界的保守偏移包络不足（比值{boundary_ratio:.3g}）")
+            if not 500<=min(info['width'],info['height']) or max(info['width'],info['height'])>10000 or info['width']/info['height']>3.000001:
+                local_notes.append(f"DIE {i+1}尺寸超出常规500～10000 μm或长宽比1～3；按实际尺寸继续计算")
+            row=dict(die=i+1,input_bounds=[p.single_bound_x_um if count==1 else p.multi_bound_x_um,p.single_bound_y_um if count==1 else p.multi_bound_y_um,p.bound_angle_deg],**info,pin_count=len(pins),output_count=len(outputs),
+                all_pin_count=len(original_case['all_pins'][i]),all_output_count=len(original_case['outputs'][i]),
+                rotation_origin_um=list(map(float,center)),rotation_origin_mode=p.rotation_center,
+                corner_radius_um=float(np.linalg.norm(corners-np.asarray(center),axis=1).max()),
+                corner_bound_um=qcorner,package_clearance_ratio=boundary_ratio,
+                package_nominal_gap_um=float(die.distance(case['board'].boundary)))
+            return row,local_notes,qcorner
+        profile=resource_profile()
+        work=enumerate(zip(case['dies'],case['infos'],case['pins'],case['outputs']))
+        for i,(row,notes,corner) in enumerate(parallel_map(compute_die,work,profile)):
+            rows.append(row);common.extend(notes);qcorners.append(corner)
+            progress(int(70*(i+1)/count),f"评估 DIE {i+1}/{count}（最多{profile['workers']}线程）")
+        collision_ratio=0.
+        for i,d in enumerate(case['dies']):
+            for j in range(i):
+                margin=d.distance(case['dies'][j])-p.min_die_gap_um
+                collision_ratio=max(collision_ratio,(qcorners[i]+qcorners[j])/margin if margin>0 else math.inf)
+        if collision_ratio>1:
+            common.append("芯片间隙不足以容纳当前保守运动包络")
+        if case['obstacles']:
+            common.append("存在禁布区：容量估计未替代障碍感知自动布线，需进行详细验证")
+        from .screening import scheme_metrics
+        metrics=scheme_metrics(contact_model,p)
+        for row,m in zip(rows,metrics['rows']):row['screening']=m
+        schemes=[]
+        mechanical=max([collision_ratio]+[r['package_clearance_ratio'] for r in rows])
+        for number in (1,2,3):
+            u=max((r[f'u{number}'] for r in metrics['rows']),default=math.inf)
+            reasons={1:['芯片边界：所需布线带宽 / 可用边长'],
+                     2:['固定过孔端：整段随动所需位移 / 孔盘可扩展净空间'],
+                     3:['扇出边界带宽与运动RDL原始逃逸带宽两者取大']}[number]
+            status='初筛候选' if u<=1 else '空间条件不足'
+            if number==2 and contact_model.interdie_networks:status='结构不适用';reasons.append('跨DIE网络不能同时作多个独立刚体')
+            if number==3 and not metrics['moving_layers']:status='结构不适用';reasons.append('缺少运动RDL层')
+            if number==2 and not all(r['captures'] for r in metrics['rows']):status='资料待补充';reasons.append('缺少可沿连接追溯的固定过孔捕获端')
+            if any(r['pin_count']==0 for r in rows) or connections.ownership_notes:status='资料待补充';reasons.append('接口或运动归属不完整')
+            if mechanical>1 and status=='初筛候选':status='机械空间待处理';reasons.append('芯片/封装保守净距包络不足')
+            if number==3:reasons.append('运动RDL需确认可预制；分类本身不证明制造阶段')
+            schemes.append(dict(scheme=number,name=SCHEME_NAMES[number],status=status,gamma=u,engineering_gamma=u,
+                                reasons=reasons,mode='连续型变' if number!=2 else '扩展固定端孔盘',scope='几何空间初筛；不构成布线、DRC或良率签核'))
+        contact=(contact_model.screen(p,settings=settings,progress=progress) if include_analysis else
+                 dict(mode='pending',ratios={i:0. for i in (1,2,3)},issues=[],unresolved=[],locations=[],probabilities=[],
+                      network_count=contact_model.network_count,scope='进入结果分析后计算概率'))
+        for s in schemes:
+            s['contact_gamma']=contact['ratios'][s['scheme']]
+            s['contact_status']='进入结果分析后计算' if not include_analysis else '存在接触超限' if contact['issues'] else '概率待细化' if contact.get('unresolved') else '原接口检查通过'
+            s['reasons'].append(s['contact_status']+'；独立报告，不并入空间比值U')
+        candidates=[s for s in schemes if s['status']=='初筛候选']
+        if candidates:
+            minimum=min(s['gamma'] for s in candidates)
+            best=min((s for s in candidates if s['gamma']<=minimum+1e-9),key=lambda s:{2:0,1:1,3:2}[s['scheme']])
+            tied=[s['scheme'] for s in candidates if s['gamma']<=minimum+1e-9]
+            tie_note=('方案'+ '、'.join(map(str,tied))+'同分，按工序取舍。') if len(tied)>1 else ''
+            recommendation=dict(scheme=best['scheme'],name=best['name'],
+                                reason=f"空间比值U={fmt(best['gamma'])}最小，保守余量较大；{tie_note}U≤1仅为初筛，仍须型变/全层DRC验证。",provisional=True)
+        else:recommendation=dict(scheme=None,name="当前空间条件无初筛候选",reason="检查各方案U、接口归属和机械净距；原图概率结果单独列示。",provisional=True)
         from .settings import ViewSettings
-        cfg=settings or ViewSettings();geometric_parameters=asdict(p)
-        for key in ('input_nsigma','target_nsigma','reference_nsigma','rho_xy'):geometric_parameters.pop(key,None)
-        range_key=('continuous-safe-box',fingerprint((data.geometry_id,data.top_name,roles,connections.order,geometric_parameters,
-                    cfg.safe_box_precision,cfg.safe_box_budget,cfg.safe_box_starts,cfg.safe_box_passes)))
-        ranges=safe_range_cache.get_or_compute(range_key,lambda:safe_ranges(contact_model,p,settings,progress))
-    from .model_yield import model_yield
-    from .settings import ViewSettings
-    cfg=settings or ViewSettings()
-    progress(97,'计算整个输入范围内的无接触概率')
-    compute_yield=lambda:model_yield(contact_model,p,cfg,progress,contact=contact)
-    if safe_range_cache is None:whole_yield=compute_yield()
+        cfg=settings or ViewSettings()
+        if include_analysis:
+            from .result_analysis import calculate
+            analysis=calculate(contact_model,p,cfg,safe_range_cache,progress,contact)
+            ranges=analysis['safe_ranges'];whole_yield=analysis['model_yield']
+        else:ranges={};whole_yield={}
+        progress(99,"整理窗口不足位置、安全范围与无接触概率")
+        issues=contact['issues']
+        progress(100,"评估完成")
+        result=dict(version=__version__,units="μm",source_path=data.path,source_sha256=data.sha256,node_edit_count=len(data.node_edits),geometry_revision=data.edit_digest,import_warnings=data.import_warnings,
+            top_cell=data.top_name,dbu_um=data.dbu_um,parameters=asdict(p),roles=roles,
+            die_count=count,target_failure=alpha,input_ellipsoid_radius=statistical_state(p,count)[2],
+            distribution='binary' if math.isinf(p.target_nsigma) else 'normal',
+            interdie_networks=contact_model.interdie_networks,
+            connections=connections.summary(),contact_analysis=contact,screening=metrics,safe_ranges=ranges,model_yield=whole_yield,
+            analysis_complete=bool(include_analysis),analysis_settings=asdict(cfg),layer_order=list(connections.order),
+            repaired_geometry=getattr(data,'repaired_geometry',[]),
+            ignored_geometry=[{k:v for k,v in q.items() if k!='points'} for q in getattr(data,'ignored_geometry',[])],
+            resources=profile,collision_ratio=collision_ratio,dies=rows,schemes=schemes,recommendation=recommendation,notes=common,issues=issues,
+            assumptions=["图层仅分运动/固定；运动归属按向下连接追溯，不能据此确认晶圆段制造阶段",
+             "有限目标k时输入幅度为±kσ；∞或具体预演仅按当前几何二值判断",
+             "芯片间采用并集上界，不要求独立；同芯片所有接口共用一个状态",
+             "GDS几何不等于网表：每个几何网络一条轨道、最近边分配属于初筛假设",
+             "连续安全范围为原始固定RDL下经证明的较大体积内盒，不是有限极端点拼接或全局最优保证",
+             "接触概率为每个接口与其他网络的联合接触概率；未把各接口概率直接相加当作整包概率",
+             "源GDS只读；不会写入重构线路"],schema_version=3)
     else:
-        key=('whole-input-yield',fingerprint((data.geometry_id,data.top_name,roles,connections.order,asdict(p),cfg.yield_method,cfg.yield_sample_exponent,cfg.random_seed,cfg.yield_box_budget,cfg.yield_tolerance)))
-        whole_yield=safe_range_cache.get_or_compute(key,compute_yield)
-    progress(99,"整理窗口不足位置、安全范围与无接触概率")
-    issues=contact['issues']
-    progress(100,"评估完成")
-    result=dict(version=__version__,units="μm",source_path=data.path,source_sha256=data.sha256,node_edit_count=len(data.node_edits),geometry_revision=data.edit_digest,import_warnings=data.import_warnings,
-        top_cell=data.top_name,dbu_um=data.dbu_um,parameters=asdict(p),roles=roles,
-        die_count=count,target_failure=alpha,input_ellipsoid_radius=statistical_state(p,count)[2],
-        distribution='binary' if math.isinf(p.target_nsigma) else 'normal',
-        interdie_networks=contact_model.interdie_networks,
-        connections=connections.summary(),contact_analysis=contact,screening=metrics,safe_ranges=ranges,model_yield=whole_yield,
-        repaired_geometry=getattr(data,'repaired_geometry',[]),
-        ignored_geometry=[{k:v for k,v in q.items() if k!='points'} for q in getattr(data,'ignored_geometry',[])],
-        resources=profile,collision_ratio=collision_ratio,dies=rows,schemes=schemes,recommendation=recommendation,notes=common,issues=issues,
-        assumptions=["图层仅分运动/固定；运动归属按向下连接追溯，不能据此确认晶圆段制造阶段",
-         "有限目标k时输入幅度为±kσ；∞或具体预演仅按当前几何二值判断",
-         "芯片间采用并集上界，不要求独立；同芯片所有接口共用一个状态",
-         "GDS几何不等于网表：每个几何网络一条轨道、最近边分配属于初筛假设",
-         "连续安全范围为原始固定RDL下经证明的较大体积内盒，不是有限极端点拼接或全局最优保证",
-         "接触概率为每个接口与其他网络的联合接触概率；未把各接口概率直接相加当作整包概率",
-         "源GDS只读；不会写入重构线路"],schema_version=3)
+        from .settings import ViewSettings
+        cfg=settings or ViewSettings();count=len(case['dies']);profile=resource_profile()
+        result=dict(version=__version__,units='μm',source_path=data.path,source_sha256=data.sha256,
+                    node_edit_count=len(data.node_edits),geometry_revision=data.edit_digest,import_warnings=data.import_warnings,
+                    top_cell=data.top_name,dbu_um=data.dbu_um,parameters=asdict(p),roles=roles,die_count=count,
+                    target_failure=p.failure_threshold,interdie_networks=contact_model.interdie_networks,
+                    connections=connections.summary(),analysis_complete=False,analysis_settings=asdict(cfg),
+                    layer_order=list(connections.order),resources=profile,dies=[],schemes=[],notes=[],issues=[],
+                    screening={},safe_ranges={},model_yield={},contact_analysis=dict(mode='pending',issues=[]),
+                    recommendation=dict(scheme=None,name='进入结果分析后计算',reason='尚未请求方案比较'),schema_version=3)
     from .statistics import ExtremeCatalog
     grid=ExtremeCatalog(original_case,p)
     result.update(preview_count=grid.total,discrete_states=grid.total+1,die_state_counts=grid.radices)

@@ -69,6 +69,8 @@ def portable_path(target,base):
 
 def save(w,path):
     if not w.view_settings.save_project_results or w.result is None:return None
+    if getattr(w,'dirty',False):
+        w.log_bus.emit('参数已变化，本次保存当前设置；旧评估快照不作为新参数的完成结果。','WARNING');return None
     queued=any(controller.pending is not None or controller.timer.isActive() for controller in (w.width_yield,w.reconstruction_yield))
     if w._tasks or w.preview_pending or w.motion_pending or queued:
         w.log_bus.emit('计算尚未完成，本次仅保存设置，不保存不完整结果。','WARNING');return None
@@ -111,7 +113,7 @@ def restore(w,project,path):
         e=PreviewEngine(cache,w.case,w.roles(),w.motions(),p,value['result'],con,cache_group=w.cache_group,cache_identity=signature)
         e.configure_deformation(False,w.view_settings)
         e.signature=signature;e.reconstruction_plan_pool=value['plans'];e.configure_reconstruction(w.reconstruction_toggle.isChecked(),w.view_settings)
-        e.configure_width(w.width_toggle.isChecked(),w.view_settings);e.configure_drc(w.drc_toggle.isChecked(),w.view_settings)
+        e.configure_width(w.width_toggle.isChecked(),w.view_settings);e.configure_drc(True,w.view_settings)
         applied=True
         w.engine=e;w.geometry_cache=cache;w.connections=con;w.session_engines[(signature,id(e))]=e
         if value['result'] is not None:

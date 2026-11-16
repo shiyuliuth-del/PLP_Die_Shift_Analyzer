@@ -50,7 +50,16 @@ try:
  q=w.current_frame['reconstruction']['pieces'][0];point=q['moved_cut'].centroid.coords[0]
  limits=(w.ax.get_xlim(),w.ax.get_ylim());event('button_press_event',point)
  assert w.cut_drag.state is not None
- event('scroll_event',point,'down',-1);event('button_release_event',point);wait()
+ before=w.reconstruction_overlay.cuts.get_segments()
+ event('scroll_event',point,'down',-1)
+ # No mouse motion: the new geometry and frame buffer must already be present.
+ after=w.reconstruction_overlay.cuts.get_segments()
+ assert any(not np.allclose(a,b) for a,b in zip(before,after))
+ instant=np.asarray(w.canvas.buffer_rgba()).copy();w.canvas.draw();reference=np.asarray(w.canvas.buffer_rgba()).copy()
+ x0,y0,x1,y1=map(int,w.ax.bbox.extents);h=instant.shape[0]
+ delta=np.abs(instant[h-y1:h-y0,x0:x1,:3].astype(int)-reference[h-y1:h-y0,x0:x1,:3].astype(int))
+ assert np.mean(delta)<1.0,(np.mean(delta),np.max(delta))
+ event('button_release_event',point);wait()
  assert w.view_settings.reconstruction_angles and np.allclose(limits,(w.ax.get_xlim(),w.ax.get_ylim()))
  angle=w.view_settings.reconstruction_angles[0][-1];assert angle>np.pi/2
  q=w.current_frame['reconstruction']['pieces'][0];point=q['moved_cut'].centroid.coords[0]

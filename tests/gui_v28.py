@@ -8,7 +8,7 @@ import numpy as np
 from die_shift_studio.gui import MainWindow,W
 from qt_shutdown import close_window
 from die_shift_studio.qt_compat import Qt,QtCore,BINDING
-from die_shift_studio.extreme_filter import ProblemIndex,contact_factors
+from die_shift_studio.extreme_filter import ProblemIndex,current_drc_factors
 if BINDING=='PyQt6':from PyQt6.QtTest import QTest
 else:from PyQt5.QtTest import QTest
 
@@ -53,7 +53,7 @@ drag([45,1040],[-45,960],keys.ControlModifier);assert set(w.selection.selected)<
 click([110,1060]);assert not w.selection.selected
 click([0,1000]);QTest.keyClick(w.canvas,getattr(Qt,'Key',Qt).Key_Escape);assert not w.selection.selected
 w.grid_mode.setCurrentIndex(0);wait()
-idx=ProblemIndex(w.extremes,contact_factors(w.result['extreme_factors']))
+idx=ProblemIndex(w.extremes,current_drc_factors(w.result['extreme_factors']))
 assert [i for i,_ in w.page_items]==[idx.at(j) for j in range(min(256,idx.total))]
 w.problem_filter.setChecked(False);wait()
 table=w.extreme_table;assert table.rowCount()>35
@@ -66,8 +66,8 @@ w.target_sigma.setCurrentText('∞');wait()
 w.probability_toggle.setChecked(True);wait()
 assert w.probability_data['binary'] and w.probability_data['samples']==0
 assert not w.setting_fields['probability_show_ranges'].isEnabled() and w.setting_fields['probability_show_ranges'].isChecked()
-w.manual_die.setCurrentIndex(0);w.manual_fields['dx'].setValue(18);w.manual_fields['angle'].setValue(.8)
-QTest.mouseClick(w.manual_button,left);wait()
+w.manual_preview.rebuild();w.manual_preview.rows[0][0].setValue(18);w.manual_preview.rows[0][2].setValue(.8)
+QTest.mouseClick(w.manual_preview.preview_button,left);wait()
 a=next(a for a in w.probability_artists if a._owner==0)
 v=np.array(a._pivot)+[57.,-43.]
 from die_shift_studio.preview import rigid_transform

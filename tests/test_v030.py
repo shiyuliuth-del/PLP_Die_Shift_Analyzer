@@ -9,7 +9,6 @@ from die_shift_studio.core import Parameters,read_gds,build_case,evaluate,uncert
 from die_shift_studio.statistics import ExtremeCatalog,statistical_state
 from die_shift_studio.preview import default_motion,transformed_layers
 from die_shift_studio.state_check import check_state
-from die_shift_studio.formula_render import MathDocument
 
 ROOT=Path(__file__).resolve().parents[1]
 class RevisionTests(unittest.TestCase):
@@ -84,9 +83,4 @@ class RevisionTests(unittest.TestCase):
     def test_cost_fields_only_ignored_for_old_project_migration(self):
         p=Parameters.from_dict(dict(cost_s1=12,yield_s2=.9));self.assertFalse(hasattr(p,'cost_s1'))
         self.assertFalse(any('cost' in k or 'yield' in k for k in evaluate(self.data,self.roles,p)['schemes'][0]))
-    def test_distinct_fraction_images(self):
-        m=MathDocument();m.formula(r'\sigma_x=\frac{B_x}{k_{\mathrm{in}}}');m.formula(r'\Gamma_1=\frac{Q}{h}')
-        self.assertEqual(len(m.resources),2)
-        self.assertEqual(len(set(m.resources.values())),2)
-        self.assertTrue(all(k.startswith('math:///') for k in m.resources))
 if __name__=='__main__':unittest.main()

@@ -36,8 +36,6 @@ def smoke(output):
     from .gui import MainWindow,W,QtCore
     from .core import read_gds,evaluate,Parameters
     from .recognition import automatic_parameters
-    from .report import report_document
-    from .formula_render import set_document
     from .fast_preview import GeometryCache,PreviewEngine
     from .stack import Connections
     from .preview import default_motion
@@ -57,16 +55,20 @@ def smoke(output):
             path=fixtures/'示例C_多芯片晶圆接口.gds';data=read_gds(path);project=json.loads(path.with_suffix('.json').read_text(encoding='utf-8'));order=project['layer_order'];roles=project['roles'];window.set_data(data,project)
             p=Parameters.from_dict(dict(interdie='present',**automatic_parameters(data,roles)[0]))
             result=evaluate(data,roles,p,layer_order=order);window.display_result(result)
-            html,resources=report_document(result);set_document(window.detail,html,resources);app.processEvents();window.canvas.draw()
+            import time
+            deadline=time.monotonic()+60
+            while window._tasks and time.monotonic()<deadline:app.processEvents();time.sleep(.005)
+            if window._tasks:raise RuntimeError('Initial current-pose DRC did not complete')
+            window.tabs.setCurrentWidget(window.analysis_page);window.render_analysis_result(result);app.processEvents();window.tabs.setCurrentIndex(0);window.canvas.draw()
             cache=GeometryCache(data);con=Connections(data,roles,order);motions={k:default_motion(v) for k,v in roles.items()}
             engine=PreviewEngine(cache,window.case,roles,motions,p,result,con)
             frame=engine.frame(np.zeros((2,3)))
             from .space_map import space_maps
             from .probability_overlay import probability_maps
             window.engine=engine;window.geometry_cache=cache;window.current_frame=frame
-            window.space_data=space_maps(engine.contact,p);window.space_toggle.setChecked(True)
+            window.space_data=space_maps(engine.contact,p);window.loading=True;window.space_toggle.setChecked(True)
             window.probability_data=probability_maps(cache,engine.bound,roles,p,masks=engine.contact.interface_masks)
-            window.probability_toggle.setChecked(True);app.processEvents();window.canvas.draw()
+            window.probability_toggle.setChecked(True);window.loading=False;window.plot_layout(preserve=True);app.processEvents();window.canvas.draw()
             assert len(window.space_artists)==2 and len(frame['contact']['regions'])==64
             masses=[q['probability'] for q in window.probability_data['maps']]
             from .statistics import statistical_state
@@ -98,7 +100,7 @@ def smoke(output):
             assert te.frame(pose)['reconstruction']['complete']
             record.update(reconstruction_routes=len(tf['reconstruction']['pieces']),configuration_retry=True)
             te.close()
-            record.update(native_drc=backend().info,status='PASS',version=result['version'],jobs=str(window.jobs_dir),formulas=len(resources),regions=len(frame['contact']['regions']),space_maps=len(window.space_artists),probability_maps=len(masses),sample_standard_deviations=window.probability_data['sample_standard_deviations'],min_occupied_probability_cells=min(int(np.count_nonzero(a)) for a in masses))
+            record.update(native_drc=backend().info,status='PASS',version=result['version'],jobs=str(window.jobs_dir),analysis_checked=True,regions=len(frame['contact']['regions']),space_maps=len(window.space_artists),probability_maps=len(masses),sample_standard_deviations=window.probability_data['sample_standard_deviations'],min_occupied_probability_cells=min(int(np.count_nonzero(a)) for a in masses))
     except Exception:record['error']=traceback.format_exc()
     finally:
         import time

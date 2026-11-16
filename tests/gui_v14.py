@@ -11,7 +11,6 @@ from die_shift_studio.gui import MainWindow,W,QtCore,QtGui
 from die_shift_studio.qt_compat import Qt
 from die_shift_studio.preview import rigid_transform
 from die_shift_studio.statistics import statistical_state
-from die_shift_studio.report import report_document
 app=W.QApplication([]);tmp=tempfile.TemporaryDirectory();w=MainWindow(jobs_dir=Path(tmp.name)/'Jobs');w.show();errors=[];w.error=lambda e:errors.append(str(e))
 def busy():return any((w.width_yield.worker,w.width_yield.timer.isActive(),w.worker,w.preview_worker,w.preview_pending,w.motion_worker,w.motion_pending,w.hardware_worker,w.coverage_timer.isActive(),w._coverage_pending,w.transition.timer.isActive(),w.viewport_timer.isActive(),w.mouse_die.pending,w.mouse_die.full_pending,w.mouse_die.idle.isActive(),w.mouse_die.timer.isActive()))
 def wait():
@@ -73,7 +72,6 @@ w.visible_boxes['4/0'].setChecked(True);wait();shot('pivot_probability')
 w.target_sigma.setCurrentText('3');wait();sigma=statistical_state(w.params().for_die(0),2)[1]
 w.target_sigma.setCurrentText('0');wait();np.testing.assert_array_equal(statistical_state(w.params().for_die(0),2)[1],sigma)
 assert w.result['target_failure']==0 and w.result['parameters']['reference_nsigma']==3
-html,_=report_document(w.result);assert '旋转中心' in html and 'κ' in html
 with patch.object(W.QInputDialog,'getText',return_value=('V14界面验证',True)):w.project_path=None;w.save_project()
 path=w.project_path;saved=json.loads(path.read_text());assert saved['parameters']['reference_nsigma']==3 and saved['parameters']['die_pivots'][1]==['custom',150.,-100.]
 w.load_project(path);wait();assert w.params().target_nsigma==0 and w.params().reference_nsigma==3

@@ -67,8 +67,12 @@ def normalize_project(project):
     titles={'全输入无接触模型良率':'无接触良率','全输入良率计算':'无接触良率','无接触良率计算':'无接触良率',
             '宽度分析 · 良率计算':'宽度分析','宽度分析 · 元素显示':'宽度分析','DXF输出参数':'DXF',
             '缓存管理':'硬件与计算资源','过孔实体覆盖概率':'极端足迹','视图与预演运动':'动画',
-            '连续无异常接触范围':'安全范围','固定RDL重构预演':'重构预演','DRC检查':'DRC'}
+            '连续无异常接触范围':'安全范围','固定RDL重构预演':'重构预演','DRC检查':'DRC','Space Map':'避让空间','SpaceMap':'避让空间'}
     p['expanded_settings']=list(dict.fromkeys(titles.get(title,title) for title in sections if not title.startswith('预演分析')))
+    process=p.get('expanded_process',[title for title in p['expanded_settings'] if title=='DRC'])
+    if not isinstance(process,list) or any(not isinstance(v,str) for v in process):raise ValueError('工艺栏目列表必须由标题字符串组成')
+    p['expanded_process']=list(dict.fromkeys(process))
+    p['expanded_settings']=[v for v in p['expanded_settings'] if v!='DRC']
     from .measured_core import Options
     p['measured_output']=asdict(Options.from_dict(p.get('measured_output')))
     from .dxf_settings import DxfSettings
@@ -85,5 +89,7 @@ def normalize_project(project):
     p['extreme_view']=dict(filter_problems=filtered,mode=view['mode'],page=1+(view['page']-1)*view['page_size']//EXTREME_PAGE_SIZE,page_size=EXTREME_PAGE_SIZE)
     p['overlays']=project_overlays(p)
     p['settings']=asdict(ViewSettings.from_dict(p.get('settings')))
+    p['settings']['show_contact_markers']=bool(p['settings']['show_contact_markers'] or p['overlays'].get('drc',False))
+    p['overlays']['drc']=p['settings']['show_contact_markers']
     p['schema_version']=5;p.pop('geometry',None)
     return p

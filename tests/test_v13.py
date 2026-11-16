@@ -47,9 +47,12 @@ class V13Tests(unittest.TestCase):
             cache=SimpleNamespace(layers={'5/0':dict(geometry=shapes),'3/0':dict(geometry=[box(0,0,100,1)])}),
             case={'board':box(-100,-100,250,250)},nodes=nodes,ids={**{('5/0',i):i for i in range(4)},('3/0',0):4},records=[])
         *_,p,_=fixture();p=replace(p,line_width_um=10,line_space_um=10)
+        m.connections=SimpleNamespace(links=[])
+        m.moved=lambda g,owner,z:g
+        for (key,i),j in m.ids.items():m.nodes[j].update(key=key,index=i,poly=m.cache.layers[key]['geometry'][i],owner=-1)
         drc=GlobalDRC(m,p);out=drc.frame(np.zeros((2,3)))
         self.assertEqual(sum(q['kind']=='异网短接 / 线距不足' for q in out),3)
-        self.assertFalse(any(q['layer']=='3/0' for q in out))
+        self.assertTrue(any(q['layer']=='3/0' and q['kind']=='线宽不足' for q in out))
         # Move the second conductor over its neighbour; check replacement, not source.
         replacements={'5/0':[dict(indices=(1,),net=1,geometry=box(20,10,120,30))]}
         new=drc.frame(np.zeros((2,3)),replacements)

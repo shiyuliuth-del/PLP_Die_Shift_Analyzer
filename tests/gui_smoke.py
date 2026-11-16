@@ -11,7 +11,6 @@ from die_shift_studio.gui import MainWindow,W,QtCore,QtGui
 from die_shift_studio.qt_compat import Qt
 from PyQt5.QtTest import QTest
 from die_shift_studio.core import read_gds
-from die_shift_studio.report import report_document
 from die_shift_studio.jobs import atomic_save
 app=W.QApplication([])
 with tempfile.TemporaryDirectory() as tmp:
@@ -20,16 +19,16 @@ with tempfile.TemporaryDirectory() as tmp:
         end=time.monotonic()+240
         while time.monotonic()<end:
             app.processEvents()
-            if window.width_yield.worker is None and not window.width_yield.timer.isActive() and window.worker is None and window.preview_worker is None and window.preview_pending is None and not window.coverage_timer.isActive() and not window._coverage_pending and not window.viewport_timer.isActive() and not window.transition.timer.isActive() and not window.issue_navigation.isActive():break
+            if window.width_yield.worker is None and not window.width_yield.timer.isActive() and window.worker is None and window.preview_worker is None and window.analysis.worker is None and window.preview_pending is None and not window.coverage_timer.isActive() and not window._coverage_pending and not window.viewport_timer.isActive() and not window.transition.timer.isActive() and not window.issue_navigation.isActive():break
             time.sleep(.003)
-        assert window.worker is None and window.preview_worker is None and window.preview_pending is None
+        assert window.worker is None and window.preview_worker is None and window.analysis.worker is None and window.preview_pending is None
         assert not errors,errors
         app.processEvents()
     window.load_gds(ROOT/'examples/示例C_多芯片晶圆接口.gds');wait_idle()
     assert window.job_combo.itemText(0)=='' and window.project_path is None
     assert window.windowTitle().startswith('Die Shift Analyze')
     assert all(b.text()!='打开工程' for b in window.findChildren(W.QPushButton))
-    assert not hasattr(window,'stage_boxes') and window.layer_table.columnCount()==4
+    assert not hasattr(window,'stage_boxes') and window.layer_table.columnCount()==3
     assert all(role=='不参与' for role in window.roles().values())
     for key,role in json.loads((ROOT/'examples/示例C_多芯片晶圆接口.json').read_text())['roles'].items():window.role_boxes[key].setCurrentText(role)
     wait_idle()
@@ -42,14 +41,14 @@ with tempfile.TemporaryDirectory() as tmp:
     assert not window.visible_boxes['90/0'].isChecked()
     assert [window.controls.tabText(i) for i in range(window.controls.count())]==['偏移','工艺','设置','输出']
     assert any('方案1' in w.text() and w.text().count('\n')==2 for w in window.findChildren(W.QLabel))
-    assert [window.tabs.tabText(i) for i in range(window.tabs.count())]==['结果图形','结果分析','报告']
+    assert [window.tabs.tabText(i) for i in range(window.tabs.count())]==['结果图形','结果分析']
     assert [window.preview_tabs.tabText(i) for i in range(2)]==['极端情况','信息']
     assert all('型变校验' not in window.preview_tabs.tabText(i) for i in range(window.preview_tabs.count()))
     assert not hasattr(window,'preview_status') and window.layer_table.verticalHeader().isHidden()
     assert window.gds_label.text().endswith('示例C_多芯片晶圆接口.gds')
-    # Drag starts in the count cell, not a row-number header. Preview reorders before release.
+    # Drag starts in the layer cell, not a row-number header. Preview reorders before release.
     header=window.layer_table.verticalHeader();before=window.ordered_layers();viewport=window.layer_table.viewport()
-    x=window.layer_table.columnViewportPosition(2)+15
+    x=window.layer_table.columnViewportPosition(1)+15
     row0=window._layer_keys.index('30/0');row1=window._layer_keys.index('31/0')
     y0=header.sectionViewportPosition(row0)+header.sectionSize(row0)//2;y1=header.sectionViewportPosition(row1)+header.sectionSize(row1)-3
     QTest.mousePress(viewport,Qt.LeftButton,pos=QtCore.QPoint(x,y0))
@@ -73,7 +72,10 @@ with tempfile.TemporaryDirectory() as tmp:
     assert window.job_combo.count()==3
     assert not hasattr(window,'interdie') and 'transition_length_um' not in window.fields
     window.run_evaluation();wait_idle()
-    assert window.result['issues'] and window.result['schemes'][2]['contact_status']=='存在接触超限'
+    assert not window.result['analysis_complete']
+    window.tabs.setCurrentWidget(window.analysis_page);wait_idle()
+    assert window.result['analysis_complete'] and window.result['issues']
+    window.tabs.setCurrentIndex(0);wait_idle()
     candidates=[s for s in window.result['schemes'] if s['status']=='初筛候选']
     if candidates:
         chosen=window.result['schemes'][window.result['recommendation']['scheme']-1]
@@ -83,7 +85,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert window.extreme_table.rowCount()==window.focus_extremes.total+1 and window.extremes.total==728
     window.grid_mode.setCurrentIndex(0);wait_idle();assert window.extreme_table.rowCount()==257
     assert all(window.extreme_table.item(0,j).text()=='' for j in range(window.extreme_table.columnCount()))
-    assert not window.detail.toPlainText() # report is lazy
+    assert not hasattr(window,'detail')
     # Rapid requests must show only the newest selection.
     for row in (1,2,3,7):window.extreme_table.setCurrentCell(row,0)
     wait_idle();assert window.active_preview==6
@@ -95,6 +97,7 @@ with tempfile.TemporaryDirectory() as tmp:
         info=window.case['infos'][i];np.testing.assert_allclose(label.get_position(),np.array([info['cx'],info['cy']])+window.shown_states[i,:2])
     assert window.layer_artists['20/0'].get_facecolors().size and window.layer_artists['20/0'].get_alpha()==1
     assert window.layer_artists['40/0'].get_alpha()==.70
+    window.tabs.setCurrentWidget(window.analysis_page);wait_idle();window.tabs.setCurrentIndex(0);wait_idle()
     assert sum(window.histogram_data['magnitude_counts'])==len(window.connector_segments)==64
     assert sum(window.histogram_data['direction_counts'])+window.histogram_data['zero_count']==64
     for key in ('10/0','30/0'):
@@ -114,11 +117,11 @@ with tempfile.TemporaryDirectory() as tmp:
     assert not np.allclose(window.ax.get_xlim(),before)
     # A single click, including a repeated click on an already-selected row, locates the point.
     window.extreme_table.setCurrentCell(0,0);wait_idle()
-    window.preview_tabs.setCurrentIndex(0);window.issue_scheme.setCurrentIndex(2);app.processEvents()
-    assert window.filtered_issues and all(q['source_net']!=q['foreign_net'] for q in window.filtered_issues)
+    window.preview_tabs.setCurrentIndex(0);app.processEvents()
+    assert window.filtered_issues and all('geometry' in q for q in window.filtered_issues)
     target=window.issue_table.visualItemRect(window.issue_table.item(0,0)).center()
     QTest.mouseClick(window.issue_table.viewport(),Qt.LeftButton,pos=target);wait_idle()
-    expected=np.mean([window.anchor_position(a) for a in window.filtered_issues[0]['anchors']],axis=0)
+    expected=window.filtered_issues[0]['point']
     np.testing.assert_allclose([np.mean(window.ax.get_xlim()),np.mean(window.ax.get_ylim())],expected)
     window.ax.set_xlim(0,100);QTest.mouseClick(window.issue_table.viewport(),Qt.LeftButton,pos=target);wait_idle()
     assert abs(np.mean(window.ax.get_xlim())-expected[0])<1e-7
@@ -129,8 +132,9 @@ with tempfile.TemporaryDirectory() as tmp:
     window.grab().save(str(ROOT/'figures/software_V14_window.png'))
     # Manual state, probability overlay, control zones and layer order.
     snapshot=window.result
-    window.manual_fields['dx'].setValue(120);window.manual_fields['dy'].setValue(10);window.manual_fields['angle'].setValue(1)
-    window.manual_die.setCurrentIndex(0);window.apply_manual();wait_idle()
+    window.manual_preview.rebuild()
+    window.manual_preview.rows[0][0].setValue(120);window.manual_preview.rows[0][1].setValue(10);window.manual_preview.rows[0][2].setValue(1)
+    window.manual_preview.rebuild();window.apply_manual();wait_idle()
     np.testing.assert_allclose(window.shown_states[0],[120,10,np.deg2rad(1)])
     assert len(window.zone_artists)==2 and window.current_frame['contact']['regions']
     assert window.layer_artists['20/0'].get_zorder()<window.layer_artists['31/0'].get_zorder()<window.layer_artists['10/0'].get_zorder()
@@ -144,10 +148,10 @@ with tempfile.TemporaryDirectory() as tmp:
     window.grab().save(str(ROOT/'figures/software_V14_contact_detail.png'))
     window.figure.savefig(ROOT/'figures/V14_contact_detail.png',dpi=240,bbox_inches='tight')
     assert window.current_frame['contact']['intrusions']
-    assert any(a.get_alpha()==window.view_settings.intrusion_alpha for a in window.issue_artists)
+    assert window.drc_overlay.area.get_visible()
     assert all(0<a.get_alpha()<=.5 for a in window.probability_artists)
     # Space Map is independent of probability and follows its source layer.
-    assert not window.space_toggle.isChecked() and window.space_toggle.text()=='Space Map'
+    assert not window.space_toggle.isChecked() and window.space_toggle.text()=='避让空间'
     window.space_toggle.setChecked(True);wait_idle();assert len(window.space_artists)==2
     assert all(q['layers']==['30/0'] for q in window.space_data['maps'])
     viewport_visibility=[a.get_visible() for a in window.space_artists]
@@ -187,7 +191,7 @@ with tempfile.TemporaryDirectory() as tmp:
     window.write_project(saved);assert json.loads(saved.read_text())['parameters']['target_nsigma']=='Infinity'
     window.target_sigma.setCurrentText('6');wait_idle()
     # Wheel events do not change parameter controls or project selection.
-    for widget in (window.fields['annulus_um'],window.target_sigma,window.job_combo,window.manual_die):
+    for widget in (window.fields['annulus_um'],window.target_sigma,window.job_combo,window.pivot_editor.combo):
         before_value=widget.value() if hasattr(widget,'value') else widget.currentText()
         widget.setFocus();event=QtGui.QWheelEvent(QtCore.QPointF(10,10),QtCore.QPointF(widget.mapToGlobal(QtCore.QPoint(10,10))),QtCore.QPoint(),QtCore.QPoint(0,120),Qt.NoButton,Qt.NoModifier,Qt.NoScrollPhase,False)
         app.sendEvent(widget,event);app.processEvents()
@@ -201,11 +205,8 @@ with tempfile.TemporaryDirectory() as tmp:
     window.visible_boxes['90/0'].setChecked(True);assert len(window.invalid_artists)==1
     window.plot_layout();window.preview_tabs.setCurrentIndex(0);app.processEvents();window.grab().save(str(ROOT/'figures/software_V14_preview.png'))
     window.tabs.setCurrentWidget(window.analysis_page);app.processEvents();window.grab().save(str(ROOT/'figures/software_V14_histograms.png'))
-    window.tabs.setCurrentWidget(window.detail);app.processEvents();assert not errors,errors;assert '输入' in window.detail.toPlainText() and '相邻' in window.detail.toPlainText()
-    html,resources=report_document(window.result,window.evaluation_motions)
-    for uri,png in resources.items():assert window.detail.document().resource(QtGui.QTextDocument.ImageResource,QtCore.QUrl(uri))==QtGui.QImage.fromData(png,'PNG')
-    window.grab().save(str(ROOT/'figures/software_V14_report.png'))
-    window.target_sigma.setCurrentText('5.5');wait_idle();assert window.result['parameters']['target_nsigma']==6 and window.detail.toPlainText()
+    wait_idle();assert window.result['analysis_complete']
+    window.target_sigma.setCurrentText('5.5');wait_idle();assert window.result['parameters']['target_nsigma']==6
     assert not any(b.text()=='检查GDS图层与边框' for b in window.findChildren(W.QPushButton))
     assert not hasattr(window,'log_label') and 'via_diameter_um' not in window.fields
     window.close();app.processEvents()
@@ -228,4 +229,4 @@ for widget,source,target in [(embedded[0][0],0,1),(embedded[2][1],2,0)]:
 assert probe.verticalHeader().visualIndex(0)!=0 and probe.verticalHeader().visualIndex(2)!=2
 assert all(checkbox.isChecked() and combo.currentIndex()==0 for checkbox,combo in embedded)
 probe.close();app.processEvents()
-print('GUI_SMOKE_PASS: Jobs and stack drag; latest-state preview; manual DIE offsets; control boundaries; foreign-network contacts/location; layer z-order; default-view legend; via-area occupancy; preserved results; infinity serialization; wheel protection; ignored-geometry layer markers; typeset report; full-DIE Space Map; source visibility; window aspect ratio')
+print('GUI_SMOKE_PASS: Jobs and stack drag; latest-state preview; manual DIE offsets; control boundaries; foreign-network contacts/location; layer z-order; default-view legend; via-area occupancy; preserved results; infinity serialization; wheel protection; ignored-geometry layer markers; lazy analysis; full-DIE Space Map; source visibility; window aspect ratio')

@@ -84,13 +84,10 @@ def main():
     assert w.view_settings.width_display['禁布区']=='show'
     w.run_evaluation();settle()
     assert len(w.result['width_policy_yield']['values'])==2
-    from die_shift_studio.report import report_document
-    html,resources=report_document(w.result)
-    assert '整包两种宽度策略良率' in html and '禁布区' in html and resources
     if os.environ.get('DSA_GUI_CAPTURE'):
         w.resize(1550,960);w.controls.setCurrentIndex(0);pose(46);w.grab().save(os.environ['DSA_GUI_CAPTURE'])
     w.close();settle();tmp.cleanup()
-    print('GUI_V34_PASS fixed centred two yields, bias settings/old Jobs, keepout intrusion, hide/display independence, report')
+    print('GUI_V34_PASS fixed centred two yields, bias settings/old Jobs, keepout intrusion, hide/display independence, current geometry')
 
 
 if __name__=='__main__':

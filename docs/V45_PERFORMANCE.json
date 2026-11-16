@@ -1,0 +1,246 @@
+{
+  "source_sha256": "a4bccbb65058dc4023bc53d5a6916c4185b81f6d1710e365c8b21c9c6feb1b29",
+  "parameters": {
+    "panel_layers": 1,
+    "wafer_layers": 1,
+    "line_width_um": 15.0,
+    "line_space_um": 15.0,
+    "wafer_line_width_um": 15.0,
+    "wafer_line_space_um": 15.0,
+    "via_diameter_um": 40.00100998725171,
+    "annulus_um": 15.0,
+    "moving_annulus_um": 15.0,
+    "residual_budget_um": 5.0,
+    "transition_length_um": 200.0,
+    "max_route_angle_deg": 30.0,
+    "package_clearance_um": 10.0,
+    "minimum_area_um2": 0.0,
+    "routing_edge_keepout_um": 40.0,
+    "min_die_gap_um": 20.0,
+    "min_package_clearance_um": 20.0,
+    "single_bound_x_um": 25.0,
+    "single_bound_y_um": 25.0,
+    "multi_bound_x_um": 15.0,
+    "multi_bound_y_um": 15.0,
+    "bound_angle_deg": 1.0,
+    "per_die_enabled": false,
+    "die_bounds": [],
+    "rotation_center": "center",
+    "rotation_x_um": 0.0,
+    "rotation_y_um": 0.0,
+    "die_pivots": [
+      [
+        "center",
+        0.0,
+        0.0
+      ],
+      [
+        "center",
+        0.0,
+        0.0
+      ],
+      [
+        "center",
+        0.0,
+        0.0
+      ]
+    ],
+    "input_nsigma": 6.0,
+    "target_nsigma": 6.0,
+    "reference_nsigma": 6.0,
+    "mean_x_um": 0.0,
+    "mean_y_um": 0.0,
+    "mean_angle_deg": 0.0,
+    "rho_xy": 0.0,
+    "interdie": "unknown",
+    "fixed_via_assignment": "all"
+  },
+  "connection_style": "linear",
+  "tolerance_um": 0.1,
+  "hardware": {
+    "cpu": 8,
+    "total_memory_mb": 15708,
+    "available_memory_mb": 8876,
+    "workers": 6,
+    "worker_capacity": 6,
+    "process_workers": 4,
+    "policy": "预留至少2个逻辑CPU（大机器约10%）与65%可用内存；原生几何/FFT使用线程；大型独立原图DRC与RDL候选搜索使用spawn进程；小任务串行"
+  },
+  "runtime_sha256": "4dc4b86ee858591be5fe75d8e5e80f3f7a60d7c9e6a19451ece88518c2d33af5",
+  "scope": "Local CPU, saved project, zero and two joint XYZ corners. Geometry timings are not GUI FPS or continuous-space proof.",
+  "assessment_seconds": 5.101406369998585,
+  "status": "PASS",
+  "rows": [
+    {
+      "state": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "seconds": 27.205070240001078,
+      "drc_groups": 123,
+      "locations": 208,
+      "pieces": 151,
+      "native_cache_hits": 0,
+      "native_cache_misses": 298,
+      "electrical": {
+        "missed_vias": [],
+        "topology": [],
+        "shorts": [],
+        "hard_failures": [],
+        "repairs": []
+      }
+    },
+    {
+      "state": [
+        [
+          -15.0,
+          -15.0,
+          -0.017453292519943295
+        ],
+        [
+          -15.0,
+          -15.0,
+          -0.017453292519943295
+        ],
+        [
+          -15.0,
+          -15.0,
+          -0.017453292519943295
+        ]
+      ],
+      "seconds": 3.1667799570059287,
+      "drc_groups": 137,
+      "locations": 223,
+      "pieces": 152,
+      "native_cache_hits": 237,
+      "native_cache_misses": 359,
+      "electrical": {
+        "missed_vias": [],
+        "topology": [],
+        "shorts": [],
+        "hard_failures": [],
+        "repairs": [
+          [
+            "5/0",
+            3
+          ],
+          [
+            "5/0",
+            5
+          ],
+          [
+            "5/0",
+            80
+          ],
+          [
+            "5/0",
+            81
+          ],
+          [
+            "5/0",
+            85
+          ]
+        ]
+      }
+    },
+    {
+      "state": [
+        [
+          15.0,
+          15.0,
+          0.017453292519943295
+        ],
+        [
+          15.0,
+          15.0,
+          0.017453292519943295
+        ],
+        [
+          15.0,
+          15.0,
+          0.017453292519943295
+        ]
+      ],
+      "seconds": 3.3559901830012677,
+      "drc_groups": 144,
+      "locations": 240,
+      "pieces": 151,
+      "native_cache_hits": 474,
+      "native_cache_misses": 420,
+      "electrical": {
+        "missed_vias": [],
+        "topology": [],
+        "shorts": [],
+        "hard_failures": [],
+        "repairs": [
+          [
+            "5/0",
+            5
+          ],
+          [
+            "5/0",
+            80
+          ],
+          [
+            "5/0",
+            82
+          ],
+          [
+            "5/0",
+            85
+          ],
+          [
+            "5/0",
+            98
+          ]
+        ]
+      }
+    },
+    {
+      "state": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "seconds": 5.469100142363459e-05,
+      "drc_groups": 123,
+      "locations": 208,
+      "pieces": 151,
+      "native_cache_hits": 474,
+      "native_cache_misses": 420,
+      "electrical": {
+        "missed_vias": [],
+        "topology": [],
+        "shorts": [],
+        "hard_failures": [],
+        "repairs": []
+      }
+    }
+  ],
+  "measurement_load": "同时运行本地源包GUI回归；不能与空载初测直接计算加速比"
+}

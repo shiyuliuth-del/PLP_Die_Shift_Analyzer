@@ -5,6 +5,8 @@ on:
       - 'die_shift_studio/**'
       - 'RealDataAnalyse/**'
       - 'cases/GD55/**'
+      - 'tests/test_v45.py'
+      - 'tests/gui_v45.py'
       - 'tests/test_v44.py'
       - 'tests/gui_v44*.py'
       - 'tools/package_release.py'
@@ -105,6 +107,13 @@ jobs:
         run: |
           call "%DSA_VCVARS%" >nul
           "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_v32.py -v
+      - name: Verify V45 current copper DRC and lazy compact GUI
+        shell: cmd
+        run: |
+          set PYTHONPATH=.;tests
+          "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_v45.py -v
+          if errorlevel 1 exit /b 1
+          "%DIE_SHIFT_PYTHON%" tests/gui_v45.py
       - name: Verify hardware preference and pending Qt worker shutdown
         shell: cmd
         run: '"%DIE_SHIFT_PYTHON%" tests/gui_v32.py'

@@ -116,12 +116,10 @@ def main():
         assert record['dxf_directory']==str(folder) and record['settings']['width_yield_method']=='grid'
         assert record['settings']['width_yield_seed']==912
         saved=folder/'current.dshift.json';w.write_project(saved);w.load_project(saved);settle()
-        assert w.dxf_directory==str(folder) and w.view_settings.width_yield_seed==912 and w.data.node_edits
-        from die_shift_studio.report import report_document
+        assert w.dxf_directory==str(folder) and w.view_settings.width_yield_seed==912
+        np.testing.assert_allclose(shape_nodes(w.data,'4/0',0)[1],xy+[2.,0])
         if w.result is None:w.run_evaluation();settle()
-        html,resources=report_document(w.result);assert '全情况分析' in html and resources
         w.setting_fields['width_yield_method'].setCurrentIndex(w.setting_fields['width_yield_method'].findData('importance'));settle()
-        html,resources=report_document(w.result);assert '尾部增强' in html and resources
         if os.environ.get('DSA_GUI_CAPTURE'):
             w.resize(1550,950);w.grab().save(os.environ['DSA_GUI_CAPTURE'])
         print('GUI_V35_PASS on-row fixed centre/no canvas loss, independent saved width integration, pinned labels, native picker, edited shifted DXF/all layers')

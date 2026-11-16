@@ -75,7 +75,7 @@ class WidthYieldDisplay:
         if self.worker:self.worker.cancelled.set()
         self.label.clear();self.label.setToolTip('');self.refresh_overlay()
         if self.w.result is not None and 'width_policy_yield' in self.w.result:
-            self.w.result.pop('width_policy_yield');self.w.report_dirty=True
+            self.w.result.pop('width_policy_yield')
 
     def refresh(self):
         w=self.w
@@ -188,4 +188,3 @@ class WidthYieldDisplay:
                 gain_probability=q.get('gain_probability',0.),grid_nodes=q.get('grid_nodes'),local_checks=q.get('local_checks'),steps=q.get('steps'),
                 risk_lines=[dict(layer=k,index=i,**v) for (k,i),v in self.bank.get('probability_lines',{}).items()],
                 probability_sites=len(self.bank.get('probability_sites',{})))
-            self.w.report_dirty=True

@@ -36,7 +36,7 @@ def fixture(extra_copper=False,extra_keepouts=()):
 
 class KeepoutTests(unittest.TestCase):
     def test_one_or_two_zero_margin_walls_and_original_thickness(self):
-        e=fixture();a=WidthAnalyzer(e.contact,e.p,ViewSettings())
+        e=fixture();a=WidthAnalyzer(e.contact,e.p,ViewSettings(drc_tolerance_um=0))
         try:
             metal=Wall('pad','运动过孔孔盘',box(0,0,1,1),())
             keep=Wall('keep','禁布区',box(0,0,1,1),())
@@ -53,7 +53,7 @@ class KeepoutTests(unittest.TestCase):
         finally:a.close();e.close()
 
     def test_actual_pad_to_keepout_channel_three_classes_and_fixed_obstacle(self):
-        e=fixture();e.configure_width(True,ViewSettings())
+        e=fixture();e.configure_width(True,ViewSettings(drc_tolerance_um=0))
         try:
             before=None
             for dx,status in ((0,ADEQUATE),(40,ADEQUATE),(41,NARROW),(45,NARROW),(46,BLOCKED)):
@@ -90,7 +90,7 @@ class KeepoutTests(unittest.TestCase):
             self.assertFalse(violations(e.contact,np.zeros((1,3)),change))
             # DRC tolerance must never expand/shrink a keepout.
             for tol in (-2,0,2):
-                q=routing_violations(e.contact,z,e.p,replace(ViewSettings(),drc_tolerance_um=tol))
+                q=routing_violations(e.contact,z,e.p,replace(ViewSettings(drc_tolerance_um=0),drc_tolerance_um=tol))
                 self.assertEqual(next(v for v in q if v['kind']=='禁布区侵入')['intrusion_area_um2'],80.)
         finally:e.close()
 
@@ -155,7 +155,7 @@ class KeepoutTests(unittest.TestCase):
         self.assertTrue(visible_keepout_walls(gate,{'11/0'},cache,.001))
 
     def test_continuous_events_and_all_extreme_summaries_match_preview(self):
-        e=fixture(True);cfg=ViewSettings();e.configure_width(True,cfg)
+        e=fixture(True);cfg=ViewSettings(drc_tolerance_um=0);e.configure_width(True,cfg)
         a=e.width_analyzer;a.probability=None
         try:
             events=WidthEvents(a,e.p,lambda *_:None)
@@ -188,7 +188,7 @@ class KeepoutTests(unittest.TestCase):
         np.testing.assert_allclose(policy_yields(bank,[r,y])['values'],[.1,.1])
         e=fixture(True)
         try:
-            cfg=replace(ViewSettings(),width_yield_method='importance',yield_method='partition',yield_box_budget=1024)
+            cfg=replace(ViewSettings(drc_tolerance_um=0),width_yield_method='importance',yield_method='partition',yield_box_budget=1024)
             bank=measure_width_yield(e.contact,e.p,cfg,None,lambda *_:None)
             ignored={('3/0',0)}
             q=policy_yields(bank,ignored)

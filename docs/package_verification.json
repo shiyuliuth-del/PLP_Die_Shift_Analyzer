@@ -1,11 +1,11 @@
 {
-  "version": "V44",
+  "version": "V45",
   "status": "PASS",
-  "tested_at_utc": "2026-11-16T10:31:13.984105+00:00",
+  "tested_at_utc": "2026-11-16T12:09:56.332946+00:00",
   "scope": "Clean source checkout, local platform. Windows executable verification is recorded separately.",
   "platform": "linux",
-  "verified_runtime_sha256": "b8b9c7563471e73c9427a580379b2100f30fee7b47eb390de1e168192afa7a9e",
-  "gui_suites": 28,
+  "verified_runtime_sha256": "f2cc071691f32c26a10ff94129e293e01c4a78d137d8434583eb89d8879969e6",
+  "gui_suites": 29,
   "runs": [
     {
       "args": [
@@ -21,7 +21,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "Ran 404 tests in 51.197s",
+        "Ran 407 tests in 46.779s",
         "",
         "OK (skipped=2)"
       ]
@@ -35,7 +35,7 @@
       "summary": [
         "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
         "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
-        "GUI_SMOKE_PASS: Jobs and stack drag; latest-state preview; manual DIE offsets; control boundaries; foreign-network contacts/location; layer z-order; default-view legend; via-area occupancy; preserved results; infinity serialization; wheel protection; ignored-geometry layer markers; typeset report; full-DIE Space Map; source visibility; window aspect ratio"
+        "GUI_SMOKE_PASS: Jobs and stack drag; latest-state preview; manual DIE offsets; control boundaries; foreign-network contacts/location; layer z-order; default-view legend; via-area occupancy; preserved results; infinity serialization; wheel protection; ignored-geometry layer markers; lazy analysis; full-DIE Space Map; source visibility; window aspect ratio"
       ]
     },
     {
@@ -107,7 +107,7 @@
       "summary": [
         "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
         "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
-        "GUI_V27_PASS focused pages, compact controls, manual/M restore, Job migration, 2/6 sigma independent contact/width styles and retained binary outcomes"
+        "GUI_V27_PASS focused pages, manual/M restore, width probability styles, current DRC unaffected by probability level/display"
       ]
     },
     {
@@ -179,7 +179,7 @@
       "summary": [
         "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
         "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
-        "GUI_V34_PASS fixed centred two yields, bias settings/old Jobs, keepout intrusion, hide/display independence, report"
+        "GUI_V34_PASS fixed centred two yields, bias settings/old Jobs, keepout intrusion, hide/display independence, current geometry"
       ]
     },
     {
@@ -359,6 +359,18 @@
     },
     {
       "args": [
+        "tests/gui_v45.py"
+      ],
+      "env": {},
+      "status": "PASS",
+      "summary": [
+        "This plugin does not support raise()",
+        "This plugin does not support raise()",
+        "GUI_V45_PASS compact layout, lazy analysis, manual pose/pivot Jobs, current copper DRC parity, style restore, auto IPC budgets"
+      ]
+    },
+    {
+      "args": [
         "main.py",
         "--smoke-test",
         "results/default.json"
@@ -397,6 +409,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "警告 · 最小面积 0.5 μm²：移除 0 个图形，填去 0 个小孔洞。源文件未改动。",
         "初筛建议：动静区局部重构"
       ],
       "discrete_states": 27
@@ -413,6 +426,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "警告 · 最小面积 0.5 μm²：移除 0 个图形，填去 0 个小孔洞。源文件未改动。",
         "初筛建议：动静区局部重构"
       ],
       "discrete_states": 27
@@ -429,6 +443,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "警告 · 最小面积 0.5 μm²：移除 0 个图形，填去 0 个小孔洞。源文件未改动。",
         "初筛建议：动静区局部重构"
       ],
       "discrete_states": 729
@@ -445,6 +460,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "警告 · 最小面积 0.5 μm²：移除 0 个图形，填去 0 个小孔洞。源文件未改动。",
         "初筛建议：运动RDL预制＋接口适配"
       ],
       "discrete_states": 729
@@ -461,6 +477,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "警告 · 最小面积 0.5 μm²：移除 0 个图形，填去 0 个小孔洞。源文件未改动。",
         "初筛建议：当前空间条件无初筛候选"
       ],
       "discrete_states": 19683
@@ -477,6 +494,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "警告 · 最小面积 0.5 μm²：移除 0 个图形，填去 0 个小孔洞。源文件未改动。",
         "初筛建议：整体随动＋固定RDL捕获"
       ],
       "discrete_states": 81
@@ -493,6 +511,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "警告 · 最小面积 0.5 μm²：移除 0 个图形，填去 0 个小孔洞。源文件未改动。",
         "初筛建议：整体随动＋固定RDL捕获"
       ],
       "discrete_states": 729
@@ -509,6 +528,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "警告 · 最小面积 0.5 μm²：移除 0 个图形，填去 0 个小孔洞。源文件未改动。",
         "初筛建议：整体随动＋固定RDL捕获"
       ],
       "discrete_states": 729
@@ -525,6 +545,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "警告 · 最小面积 0.5 μm²：移除 0 个图形，填去 0 个小孔洞。源文件未改动。",
         "初筛建议：运动RDL预制＋接口适配"
       ],
       "discrete_states": 729
@@ -541,6 +562,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "警告 · 最小面积 0.5 μm²：移除 0 个图形，填去 0 个小孔洞。源文件未改动。",
         "初筛建议：动静区局部重构"
       ],
       "discrete_states": 27
@@ -557,6 +579,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "警告 · 最小面积 0.5 μm²：移除 0 个图形，填去 0 个小孔洞。源文件未改动。",
         "初筛建议：运动RDL预制＋接口适配"
       ],
       "discrete_states": 27
@@ -573,6 +596,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "警告 · 最小面积 0.5 μm²：移除 0 个图形，填去 0 个小孔洞。源文件未改动。",
         "初筛建议：运动RDL预制＋接口适配"
       ],
       "discrete_states": 81
@@ -589,6 +613,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "警告 · 最小面积 0.5 μm²：移除 0 个图形，填去 0 个小孔洞。源文件未改动。",
         "初筛建议：整体随动＋固定RDL捕获"
       ],
       "discrete_states": 729
@@ -605,6 +630,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "警告 · 最小面积 0.5 μm²：移除 0 个图形，填去 0 个小孔洞。源文件未改动。",
         "初筛建议：动静区局部重构"
       ],
       "discrete_states": 729
@@ -621,6 +647,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "警告 · 最小面积 0.5 μm²：移除 0 个图形，填去 0 个小孔洞。源文件未改动。",
         "初筛建议：运动RDL预制＋接口适配"
       ],
       "discrete_states": 729
@@ -638,6 +665,7 @@
       "status": "PASS",
       "summary": [
         "警告 · 图层 77/0 · 已忽略 1 个零宽 PATH（含实例展开）。",
+        "警告 · 最小面积 0.5 μm²：移除 0 个图形，填去 0 个小孔洞。源文件未改动。",
         "初筛建议：当前空间条件无初筛候选"
       ],
       "discrete_states": 27
@@ -654,6 +682,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
+        "警告 · 最小面积 0.5 μm²：移除 0 个图形，填去 0 个小孔洞。源文件未改动。",
         "初筛建议：动静区局部重构"
       ],
       "discrete_states": 3

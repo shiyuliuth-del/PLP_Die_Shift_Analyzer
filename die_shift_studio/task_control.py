@@ -5,7 +5,7 @@ from .qt_compat import QtCore,QtWidgets as W
 
 class TaskControl(QtCore.QObject):
     def __init__(self,w,header):
-        super().__init__(w);self.w=w;self.snapshot=None;self.report_cancelled=False
+        super().__init__(w);self.w=w;self.snapshot=None
         self.button=W.QPushButton('取消');self.button.setMaximumHeight(23)
         policy=self.button.sizePolicy();policy.setRetainSizeWhenHidden(True);self.button.setSizePolicy(policy)
         header.addWidget(self.button);self.button.hide();self.button.clicked.connect(self.cancel)
@@ -23,10 +23,10 @@ class TaskControl(QtCore.QObject):
         self.snapshot=(w.data,w.current_frame,w.result,
                        None if w.shown_states is None else w.shown_states.copy(),
                        w.probability_data,w.space_data,w.footprint_data,w.engine,w.case,w.connections)
-        self.report_cancelled=False
 
     def cancel(self):
-        w=self.w;self.report_cancelled=True
+        w=self.w
+        w.analysis.cancel()
         w.stop_animation();w.preview_ticket+=1;w.motion_generation+=1
         w.preview_pending=None;w.motion_pending=None;w._prepared_motion=None;w._prepared_package=None
         w._coverage_pending=False;w.coverage_timer.stop();w._queued_node_edit=None

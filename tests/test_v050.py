@@ -11,7 +11,6 @@ from die_shift_studio.fast_preview import GeometryCache,PreviewEngine
 from die_shift_studio.preview import default_motion
 from die_shift_studio.probability_overlay import probability_maps
 from die_shift_studio.geometry_errors import sanitize_data
-from die_shift_studio.report import report_document
 
 
 def fixture(via_role='固定RDL'):
@@ -111,11 +110,8 @@ class Revision050Tests(unittest.TestCase):
         maps=probability_maps(cache,b,r,replace(p,single_bound_x_um=25,single_bound_y_um=25,bound_angle_deg=1),masks=m.interface_masks)
         self.assertAlmostEqual(maps['maps'][0]['integrated_area_um2'],100,delta=2)
         self.assertGreater(np.count_nonzero(maps['maps'][0]['probability']),20)
-    def test_report_formula_resources_and_inf_round_trip(self):
+    def test_inf_round_trip(self):
         d,r,c,cache,con,m,p=fixture();p=replace(p,target_nsigma=math.inf,single_bound_x_um=1)
-        result=evaluate(d,r,p);html,res=report_document(result)
-        self.assertIn('其他网络',html);self.assertIn('无穷大',html);self.assertGreater(len(res),25)
-        self.assertTrue(all(v.startswith(b'\x89PNG') for v in res.values()))
         self.assertEqual(Parameters.from_dict({'target_nsigma':'Infinity'}).target_nsigma,math.inf)
 
 if __name__=='__main__':unittest.main()

@@ -11,15 +11,20 @@ from .resources import cancel_check,resource_profile
 @dataclass(frozen=True)
 class Options:
     output_directory:str=''
-    max_memory_mb:int=1024
+    max_memory_mb:int=0
     max_threads:int=0
     @classmethod
     def from_dict(cls,data):
         data=data or {};out=cls(**{k:v for k,v in data.items() if k in cls.__dataclass_fields__})
         if not isinstance(out.output_directory,str):raise ValueError('输出目录必须是文本')
-        if type(out.max_memory_mb) is not int or not 128<=out.max_memory_mb<=1048576:raise ValueError('最大内存须为128～1048576 MB')
+        if type(out.max_memory_mb) is not int or (out.max_memory_mb!=0 and not 128<=out.max_memory_mb<=1048576):raise ValueError('最大内存须为0（自动）或128～1048576 MB')
         if type(out.max_threads) is not int or not 0<=out.max_threads<=256:raise ValueError('最大线程须为0～256，0为自动')
         return out
+
+    def memory_budget_mb(self,profile=None):
+        profile=profile or resource_profile()
+        available=max(128,int(profile['available_memory_mb']*.35))
+        return min(self.max_memory_mb or available,available)
 
 
 def pose_parameters(case,parameters,rows):
@@ -92,6 +97,11 @@ class Session:
         if preview:
             from .fast_preview import check_frame
             frame['contact']=model.current(states,p,result['replacements'])
+            from .drc import GlobalDRC
+            from .current_drc import locations
+            if not hasattr(r,'display_drc'):r.display_drc=GlobalDRC(model,p)
+            frame['drc']=r.display_drc.frame(states,result['replacements'],self.settings,progress)
+            frame['drc_locations']=locations(frame['drc'])
             mechanical=check_frame(bound,self.roles,p,None,states,layers,1,self.case['connections'],False)
             frame['checks']={i:dict(mechanical,failures=list(mechanical['failures'])+[dict(kind=q['kind'],point=q['point']) for q in frame['contact']['issues'] if q['scheme']==i]) for i in (1,2,3)}
         failures=[dict(layer=q['layer'],index=q['index'],reason=q.get('warning','无法连接')) for q in result['pieces'] if q.get('connection_failed')]
@@ -106,7 +116,7 @@ class Session:
             r.cache.clear();r.geometry_pool.clear();r.block_cache.clear()
         return frame,frozen,dict(connection_failures=failures,connection_failure_count=len(failures),
                                 fixed_rdl_drc_checked=bool(preview),rule_groups=len(result.get('violations',())),
-                                scope='当前实际铜；已检查重构固定RDL规则，不代表全图签核' if preview else '当前实际铜；快速批量不计算全局DRC、概率或良率')
+                                scope='当前实际铜；已检查当前金属线宽、线距、孔盘包围与封装边距，不代表工艺签核' if preview else '当前实际铜；快速批量不计算全局DRC、概率或良率')
     def close(self):
         for r in self.instances:r.close()
         self.instances.clear();self.local=threading.local()
