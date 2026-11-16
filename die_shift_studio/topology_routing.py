@@ -124,18 +124,25 @@ def connected_candidate(source,current,ports,obstacles,board,width,tol,space=0.)
 
 def _adopt(rows,geometry,tol,reason):
     """Keep material regions disjoint and attach compensation to its real A area."""
+    def material(g):return shapely.union_all(parts(g))
+    def overlay(a,b,op):
+        try:return material(getattr(shapely,op)(a,b))
+        except shapely.errors.GEOSException:
+            # Display partition only: shared DBU overlay, never a repaired
+            # substitute for the already electrically-validated copper.
+            return material(getattr(shapely,op)(a,b,grid_size=tol))
     before=shapely.union_all([g for q in rows for g in q['regions'].values()])
     if before.symmetric_difference(geometry).area<=tol*tol:reason='原铜已包含当前全部连接端，保留原图；未伪装成型变'
-    fixed=shapely.union_all([q['regions']['B'] for q in rows]).intersection(geometry)
-    moving=shapely.union_all([q['regions']['C'] for q in rows]).intersection(geometry).difference(fixed)
-    remaining=geometry.difference(shapely.union_all([fixed,moving]));assigned=shapely.Polygon()
+    fixed=overlay(shapely.union_all([q['regions']['B'] for q in rows]),geometry,'intersection')
+    moving=overlay(overlay(shapely.union_all([q['regions']['C'] for q in rows]),geometry,'intersection'),fixed,'difference')
+    remaining=overlay(geometry,shapely.union_all([fixed,moving]),'difference');assigned=shapely.Polygon()
     regions=[]
     for q in rows:
-        a=remaining.intersection(q['regions']['A'].buffer(tol*4)).difference(assigned)
-        regions.append(a);assigned=assigned.union(a)
-    for g in parts(remaining.difference(assigned)):
+        a=overlay(overlay(remaining,q['regions']['A'].buffer(tol*4),'intersection'),assigned,'difference')
+        regions.append(a);assigned=overlay(assigned,a,'union')
+    for g in parts(overlay(remaining,assigned,'difference')):
         index=min(range(len(rows)),key=lambda i:rows[i]['regions']['A'].distance(g) if not rows[i]['regions']['A'].is_empty else rows[i].get('missing_region',g).distance(g))
-        regions[index]=regions[index].union(g)
+        regions[index]=overlay(regions[index],g,'union')
     for q,a in zip(rows,regions):
         q.update(regions=dict(A=a,B=fixed,C=moving),bridge=a,fixed=fixed,moved=moving,
                  bridge_area_um2=a.area,fixed_area_um2=fixed.area,moved_area_um2=moving.area,

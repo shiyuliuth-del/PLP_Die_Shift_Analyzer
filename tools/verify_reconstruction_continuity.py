@@ -56,8 +56,13 @@ def main():
             bundles=reconstruction_joint.prepare(r,grid,lambda n,t:print(t,flush=True) if n%10==0 else None)
             poses=list(product(*(range(n) for n in grid.radices)))
             def check(ds):
-                t=time.perf_counter();states,frame=reconstruction_joint.scene(r,grid,bundles,ds,diagnostics=False)
-                return dict(digits=ds,seconds=time.perf_counter()-t,**audit(r,states,frame))
+                try:
+                    t=time.perf_counter();states,frame=reconstruction_joint.scene(r,grid,bundles,ds,diagnostics=False)
+                    value=dict(digits=ds,seconds=time.perf_counter()-t,**audit(r,states,frame))
+                    if any(value[k] for k in ('missed_vias','topology','shorts','hard_failures')):print('FAILED_POSE',json.dumps(value),flush=True)
+                    return value
+                except Exception:
+                    print('EXCEPTION_POSE',ds,flush=True);raise
             profile=resource_profile()
             if args.threads:profile=dict(profile,workers=min(profile['workers'],max(1,args.threads)))
             rows=parallel_map(check,poses,profile=profile,progress=lambda n,total:print(f'CONTINUITY {n}/{total}',flush=True))
