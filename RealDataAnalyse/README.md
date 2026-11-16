@@ -45,6 +45,6 @@ Excel只读流式解析，最多16个文件并行，各自临时SQLite后磁盘�
 
 第二页提供15个命令：ping、info、app.start、project.open、project.close、session.prepare、output.configure、preview.submit、export.gds、batch.begin、batch.submit、batch.end、task.get、compute.cancel、app.shutdown。JSON参数可编辑，批次ID/任务ID从最近回执自动填入模板。可选等待异步完成；取消等待不等于取消服务任务，需发送compute.cancel。app.start使用界面工程和入口，并固定查找同目录软件。
 
-正常批量不启用allow_failed。手动调试中可以显式发诊断命令，但不能将诊断文件称为合格产品。批量OAS跳过完整DRC/概率/良率；几何与连接成功不等于工艺签核。
+正常批量不启用allow_failed。手动调试中可以显式发诊断命令，但不能将诊断文件称为合格产品；allow_failed不能绕过电连接、拓扑或异网接触的硬失败。批量OAS跳过完整DRC/概率/良率；几何与连接成功不等于工艺签核。
 
 无界面重复执行可用 `python RealDataAnalyse/main.py --run config.json --result result.json`（EXE接受相同参数）。config字段为database、endpoint、project、output的绝对路径，以及workers、memory_mb、retries、timeout；任务先在GUI导入。此入口也用于Windows两EXE实际验收。
