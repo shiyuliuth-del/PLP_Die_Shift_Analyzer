@@ -48,3 +48,5 @@ Excel只读流式解析，最多16个文件并行，各自临时SQLite后磁盘�
 正常批量不启用allow_failed。手动调试中可以显式发诊断命令，但不能将诊断文件称为合格产品；allow_failed不能绕过电连接、拓扑或异网接触的硬失败。批量OAS跳过完整DRC/概率/良率；几何与连接成功不等于工艺签核。
 
 无界面重复执行可用 `python RealDataAnalyse/main.py --run config.json --result result.json`（EXE接受相同参数）。config字段为database、endpoint、project、output的绝对路径，以及workers、memory_mb、retries、timeout；任务先在GUI导入。此入口也用于Windows两EXE实际验收。
+
+也可先用 `--import-data import.json --result imported.json` 执行同一Excel适配器；导入JSON字段为paths（各Excel绝对路径列表）、database（新任务数据库绝对路径）、die_count、workers，以及可选profile。随后用上述--run继续。--import-data与--run互斥。Windows验收使用真实客户端EXE读取随包三份GD55 Excel，再由同目录服务EXE生成12封装OAS，核对CRC、实例坐标和源GDS未改动。

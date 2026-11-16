@@ -14,14 +14,21 @@ def main():
     from RealDataAnalyse.storage import configure_logging
     configure_logging(installation())
     parser = argparse.ArgumentParser(description='RealDataAnalyse')
-    parser.add_argument('--run', help='恢复运行配置JSON（database/endpoint/project/output/workers等）')
+    operation = parser.add_mutually_exclusive_group()
+    operation.add_argument('--run', help='恢复运行配置JSON（database/endpoint/project/output/workers等）')
+    operation.add_argument('--import-data', help='Excel导入配置JSON（paths/database/die_count/workers/profile）')
     parser.add_argument('--result', help='无界面运行结果JSON')
     args = parser.parse_args()
-    if args.run:
-        from RealDataAnalyse.runner import Runner
+    if args.run or args.import_data:
         try:
-            config = json.loads(Path(args.run).read_text(encoding='utf8'))
-            result = Runner(**config).run()
+            config = json.loads(Path(args.run or args.import_data).read_text(encoding='utf8'))
+            if args.import_data:
+                import threading
+                from RealDataAnalyse.excel import import_files
+                result = import_files(**config, stop=threading.Event())
+            else:
+                from RealDataAnalyse.runner import Runner
+                result = Runner(**config).run()
             code = 0
         except Exception as exc:
             result, code = dict(state='error', message=str(exc)), 1
