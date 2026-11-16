@@ -97,8 +97,8 @@ class Session:
         if not preview:
             r.cache.clear();r.geometry_pool.clear();r.block_cache.clear()
         return frame,frozen,dict(connection_failures=failures,connection_failure_count=len(failures),
-                                full_drc_checked=bool(preview),rule_groups=len(result.get('violations',())),
-                                scope='当前实际铜；快速批量不计算全局DRC、概率或良率')
+                                fixed_rdl_drc_checked=bool(preview),rule_groups=len(result.get('violations',())),
+                                scope='当前实际铜；已检查重构固定RDL规则，不代表全图签核' if preview else '当前实际铜；快速批量不计算全局DRC、概率或良率')
     def close(self):
         for r in self.instances:r.close()
         self.instances.clear();self.local=threading.local()

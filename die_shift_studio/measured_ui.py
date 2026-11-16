@@ -14,7 +14,7 @@ class MeasuredOutput(QtCore.QObject):
     incoming=Signal(object,object,object);finished=Signal(str,object,object);progressed=Signal(str,int,str)
     def __init__(self,w,layout):
         super().__init__(w);self.w=w;self.server=None;self.session=None;self.options=Options();self.jobs=OrderedDict()
-        self.pool=None;self.generation=0;self.batch=None;self.current=None;self.ready=False;self.transition=None;self.running={};self.stopping=False;self.requests=OrderedDict()
+        self.pool=None;self.generation=0;self.batch=None;self.current=None;self.render_engine=None;self.ready=False;self.transition=None;self.running={};self.stopping=False;self.requests=OrderedDict()
         self.incoming.connect(self.dispatch);self.finished.connect(self.complete);self.progressed.connect(self.progress)
         box=W.QGroupBox('实测输出');form=W.QFormLayout(box);layout.addWidget(box)
         self.toggle=W.QCheckBox('实测输出');form.addRow(self.toggle);self.toggle.toggled.connect(self.toggled)
@@ -79,6 +79,7 @@ class MeasuredOutput(QtCore.QObject):
             del self.jobs[old]
         return key
     def submit(self,command,fn,kind='',job=None):
+        if not self.running and not self.w._tasks:self.w.task_control.checkpoint()
         key=job or self.new_job(command);event=threading.Event();gen=self.generation
         self.running[key]=(event,gen,kind);self.jobs[key]['status']='running'
         def work():
@@ -102,6 +103,7 @@ class MeasuredOutput(QtCore.QObject):
         if job is None:return
         if gen!=self.generation or (event and event.is_set()):
             if kind=='prepare' and result is not None:result.close()
+            if kind=='preview' and result is not None:result[1].close()
             job.update(status='cancelled',error={'type':'Cancelled','message':'已取消，未应用过期结果'})
         elif error:
             job.update(status='error',error=dict(type=error[0],message=error[1]));self.w.log_bus.emit('实测输出 '+key+'：'+error[1],'ERROR')
@@ -111,9 +113,12 @@ class MeasuredOutput(QtCore.QObject):
                 if self.session and self.session is not result:self.session.close()
                 self.session=result;self.ready=True;result={'ready':True,'project':str(self.w.project_path)}
             elif kind=='preview':
-                frame,snapshot,details=result;self.current=(frame,snapshot,details);w=self.w
+                (frame,snapshot,details),engine=result;self.current=(frame,snapshot,details);w=self.w
+                if self.render_engine:self.render_engine.close()
+                self.render_engine=engine;w.engine=engine
                 w.current_frame=frame;w.shown_states=frame['states'];w.manual_states=frame['states'];w.active_preview=None
                 w.reconstruction_toggle.blockSignals(True);w.reconstruction_toggle.setChecked(True);w.reconstruction_toggle.blockSignals(False)
+                w.statusBar().showMessage('实测预览完成；按指令的实际旋转中心计算，工程参数保持原值。')
                 w.reconstruction_yield.evidence=None;w.update_state_table(frame['states']);w.plot_layout(preserve=True);w.fill_issues();result=details
             job.update(status='completed',progress=100,result=result,finished=time.time())
         if kind=='batch.pose' and self.batch:
@@ -131,11 +136,14 @@ class MeasuredOutput(QtCore.QObject):
     def tick(self):
         w=self.w
         if self.stopping and not self.running and not w._tasks:
-            if self.batch:self.batch['executor'].shutdown(wait=False);self.batch['store'].close();self.batch=None
+            if self.batch:
+                self.batch['executor'].shutdown(wait=False);self.batch['store'].close();self.batch=None
+                if self.session:self.session.close()
             if self.session and not self.active():self.session.close();self.session=None
             self.stopping=False
             self.ready=self.session is not None
             if not self.active():
+                if self.render_engine:self.render_engine.close();self.render_engine=None
                 w.remote_locked=False
                 w.current_frame=None;w.shown_states=None;w.manual_states=None;w.active_preview=None;w.engine=None
                 for name,enabled in getattr(self,'saved_overlays',{}).items():
@@ -196,6 +204,7 @@ class MeasuredOutput(QtCore.QObject):
             return dict(status='completed',result=dict(ready=self.ready,project=str(w.project_path) if w.project_path else None,
                 source=w.data.path if w.data else None,top_cell=w.data.top_name if w.data else None,
                 die_count=len(w.case['dies']) if w.case else 0,parameters=__import__('die_shift_studio.core',fromlist=['clean_json']).clean_json(asdict(w.params())) if w.data else {},
+                current_pose=[dict(die=i+1,dx_um=float(z[0]),dy_um=float(z[1]),angle_deg=float(np.rad2deg(z[2])),rotation_center_um=list(self.current[0]['rotation_centers'][i])) for i,z in enumerate(self.current[0]['states'])] if self.current else None,
                 roles=w.roles() if w.data else {},board_bounds_um=list(w.case['board'].bounds) if w.case else None,
                 dies=[dict(die=i+1,center_um=list(d.centroid.coords[0]),bounds_um=list(d.bounds)) for i,d in enumerate(w.case['dies'])] if w.case else [],
                 options=asdict(self.options),running=list(self.running),batch=self.batch['id'] if self.batch else None))
@@ -208,9 +217,13 @@ class MeasuredOutput(QtCore.QObject):
             if self.running or self.batch or self.transition:raise RuntimeError('请先取消或结束当前任务')
             if w.data:w.write_project(w.project_path)
             self.ready=False;self.current=None
+            if self.render_engine:self.render_engine.close();self.render_engine=None
             if self.session:self.session.close();self.session=None
             if command=='project.close':
-                w.drop_result();w.data=None;w.case=None;w.project_path=None;w.layer_table.setRowCount(0);w.ax.clear();w.canvas.draw_idle();return dict(status='completed',result={'closed':True})
+                w.drop_result();w.data=None;w.case=None;w.project_path=None;w.geometry_cache=None;w.connections=None
+                w.layer_table.setRowCount(0);w.role_boxes={};w.visible_boxes={};w._layer_keys=[];w.gds_label.clear()
+                w.top.blockSignals(True);w.top.clear();w.top.blockSignals(False)
+                w.ax.clear();w.canvas.draw_idle();w.refresh_jobs();return dict(status='completed',result={'closed':True})
             path=Path(args['path']).expanduser().resolve()
             if not path.is_file():raise ValueError('工程文件不存在')
             from .project import normalize_project
@@ -235,7 +248,14 @@ class MeasuredOutput(QtCore.QObject):
             rows=args['dies'];session=self.session
             from .measured_core import pose_parameters
             pose_parameters(session.case,session.p,rows)
-            return self.submit(command,lambda progress:session.run(rows,progress),'preview')
+            def preview(progress):
+                product=session.run(rows,progress);_,p=pose_parameters(session.case,session.p,rows)
+                model,reconstructor=session.model(p)
+                from .fast_preview import PreviewEngine
+                engine=PreviewEngine(session.cache,session.case,session.roles,session.motions,p,None,session.case['connections'],contact_model=model)
+                engine.reconstructor=reconstructor;engine.signature='measured-'+uuid.uuid4().hex
+                return product,engine
+            return self.submit(command,preview,'preview')
         if command=='export.gds':
             if self.running or self.current is None:raise RuntimeError('没有完成的实测预览，或任务尚未完成')
             _,snapshot,details=self.current

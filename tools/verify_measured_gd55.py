@@ -97,7 +97,12 @@ def main():
         if not args.keep_open:
             try:checked(endpoint,'app.shutdown')
             except (OSError,EOFError,RuntimeError):pass
-            if process:process.wait(timeout=120)
+            if process:
+                code=process.wait(timeout=120)
+                if code:
+                    report.update(status='ERROR',error=dict(type='ApplicationExit',message=f'Application exited with {code}'))
+                    (output/'verification.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf8')
+                    raise RuntimeError(report['error']['message'])
     print(json.dumps(dict(status=report['status'],report=str(output/'verification.json'),seconds=report['seconds']),ensure_ascii=False))
 
 if __name__=='__main__':main()

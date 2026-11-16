@@ -163,14 +163,18 @@ class V39Tests(unittest.TestCase):
         e,_,_=fixture(bent=True)
         try:
             scored=[]
+            # V43 limits over-wide corner guards: this fixture now has ~204
+            # and ~254 um straight runs. Keep both sides of an independent risk
+            # threshold, rather than assuming the old shortened <200 um run.
+            threshold=230
             def risk(plan,part,*args):
                 length=part['b']-part['a'];scored.append(length)
-                return (0.8 if length>200 else 0.1),1
+                return (0.8 if length>threshold else 0.1),1
             e.reconstructor.rules.candidate_mass=risk
             f=e.reconstructor.frame(np.zeros((1,3)))
             q=f['pieces'][0]
-            self.assertTrue(any(s>200 for s in scored) and any(s<200 for s in scored))
-            self.assertLess(q['interval'][1]-q['interval'][0],200)
+            self.assertTrue(any(s>threshold for s in scored) and any(s<threshold for s in scored))
+            self.assertLess(q['interval'][1]-q['interval'][0],threshold)
         finally:e.close()
 
     def test_shared_source_paints_union_of_all_fixed_regions(self):

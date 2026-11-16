@@ -1246,7 +1246,7 @@ class MainWindow(W.QMainWindow):
         finally:self._in_animation=False
     def update_state_table(self,states):
         if self.state_table.rowCount()!=len(states):self.state_table.setRowCount(len(states))
-        kind='手动输入' if self.manual_states is not None else '代表极端' if self.active_preview is not None else '名义位置'
+        kind='实测指令' if self.remote_locked else '手动输入' if self.manual_states is not None else '代表极端' if self.active_preview is not None else '名义位置'
         for i,z in enumerate(states):
             for j,value in enumerate([i+1,fmt(z[0],6),fmt(z[1],6),fmt(math.degrees(z[2]),6),kind]):
                 text=str(value);item=self.state_table.item(i,j)
@@ -2665,10 +2665,23 @@ class MainWindow(W.QMainWindow):
         source=os.path.relpath(gds,path.parent) if portable else str(gds)
         from .area_filter import canonical_project
         project=dict(canonical_project(self.data,self.project_settings()),gds_path=source)
+        if self.remote_locked:
+            for name,value in self.measured_output.saved_overlays.items():
+                project['overlays']['footprint' if name=='probability' else name]=value
         from .core import clean_json
         from .project_results import save
-        try:project['saved_results']=save(self,path)
-        except (ValueError,TypeError,OSError) as exc:self.log_bus.emit('结果未保存：'+str(exc),'WARNING')
+        if self.remote_locked:
+            # Measured poses can override the rotation centres without editing
+            # engineering parameters. Never save that frame as a matching normal
+            # project result. Keep a valid existing engineering sidecar instead.
+            try:
+                old=json.loads(path.read_text(encoding='utf8'));clean=clean_json(project)
+                keys=('sha256','top_cell','roles','parameters','settings','node_edits','layer_order')
+                if all(old.get(k)==clean.get(k) for k in keys) and old.get('saved_results'):project['saved_results']=old['saved_results']
+            except (OSError,ValueError):pass
+        else:
+            try:project['saved_results']=save(self,path)
+            except (ValueError,TypeError,OSError) as exc:self.log_bus.emit('结果未保存：'+str(exc),'WARNING')
         atomic_save(path,clean_json(project));self.project_path=path
         from .session_cache import logical_fingerprint
         cache_id=logical_fingerprint((str(path),self.data.sha256,self.data.top_name))
@@ -2682,7 +2695,10 @@ class MainWindow(W.QMainWindow):
         try:
             path=Path(path).resolve();project=normalize_project(json.loads(path.read_text(encoding='utf-8')));gds=Path(project['gds_path'])
             if not gds.is_absolute():gds=path.parent/gds
-            if self.remote_locked:project['overlays']={key:False for key in OVERLAY_DEFAULTS}
+            if self.remote_locked:
+                saved=project['overlays']
+                self.measured_output.saved_overlays={name:saved.get('footprint' if name=='probability' else name,False) for name in self.measured_output.saved_overlays}
+                project['overlays']={key:False for key in OVERLAY_DEFAULTS}
             self.load_gds(gds,project.get('top_cell'),project,project_path=path)
         except Exception as exc:self.refresh_jobs();self.error(exc)
     def closeEvent(self,event):
@@ -2714,10 +2730,11 @@ class MainWindow(W.QMainWindow):
 
 def launch(project=None,measured=False,ipc_endpoint=None):
     app=W.QApplication.instance() or W.QApplication([]);app.setApplicationName('Die Shift Analyze')
+    startup_status={'failed':False}
     window=MainWindow();window.requested_ipc_endpoint=ipc_endpoint;window.show()
     if measured:
         def startup_error(message):
-            window.log_bus.emit(str(message),'ERROR');window._closing=True;window._startup_failed=True
+            window.log_bus.emit(str(message),'ERROR');window._closing=True;startup_status['failed']=True
             window.close()
         window.error=startup_error
         def activate():
@@ -2730,4 +2747,4 @@ def launch(project=None,measured=False,ipc_endpoint=None):
     if project:QtCore.QTimer.singleShot(0,lambda:window.load_project(project))
     code=app.exec() if hasattr(app,'exec') else app.exec_()
     QtCore.QCoreApplication.sendPostedEvents(None,getattr(QtCore.QEvent,'Type',QtCore.QEvent).DeferredDelete)
-    return 1 if getattr(window,'_startup_failed',False) else code
+    return 1 if startup_status['failed'] else code

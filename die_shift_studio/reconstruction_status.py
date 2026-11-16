@@ -19,7 +19,7 @@ class ReconstructionYieldDisplay:
         if self.w.result is not None:self.w.result.pop('reconstruction_yield',None)
     def refresh(self,settings=None):
         w=self.w
-        if w.loading or w._closing:return
+        if w.loading or w._closing or getattr(w,'remote_locked',False):return
         if w.result is None or getattr(w,'_restoring_project',False):self.reset();return
         if not w.reconstruction_toggle.isChecked() or w.data is None:self.reset();return
         try:p=replace(w.params(),target_nsigma=0)

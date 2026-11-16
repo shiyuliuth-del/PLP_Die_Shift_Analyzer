@@ -80,9 +80,10 @@ try:
  assert w.remote_locked and w.project_path==project and project.is_file()
  assert rpc('info')['result']['die_count']==1
  rpc('output.configure',{'output_directory':str(folder),'max_threads':2,'max_memory_mb':512})
- rows=[dict(die=1,dx_um=4,dy_um=2,angle_deg=0,rotation_center_um=[0,0])]
+ rows=[dict(die=1,dx_um=4,dy_um=2,angle_deg=.05,rotation_center_um=[17,-12])]
  result=task(rpc('preview.submit',{'dies':rows}));assert not result['connection_failure_count']
- np.testing.assert_allclose(w.current_frame['states'],[[4,2,0]])
+ np.testing.assert_allclose(w.current_frame['states'],[[4,2,np.deg2rad(.05)]])
+ np.testing.assert_allclose(w.engine.contact.bound.centers,[[17,-12]])
  assert not w.run_button.isEnabled() and not w.preview_tabs.isEnabled()
  result=task(rpc('export.gds',{'filename':'measured.gds'}));assert Path(result['path']).is_file()
  rpc('batch.begin',{'filename':'batch.oas'})
@@ -92,6 +93,31 @@ try:
  result=task(rpc('batch.end'));assert result['cells']==6
  lib=gdstk.read_oas(folder/'batch.oas');top=lib.top_level()[0];assert top.name=='TopCell' and len(top.references)==6
  assert len(lib.cells)<6*7+1,'unchanged layer cells not reused'
+ # Backend failure and cancellation must have explicit terminal statuses and
+ # cannot replace an older output. Queue rejection is retryable, not silence.
+ from unittest.mock import patch
+ old=folder/'protected.oas';old.write_bytes(b'keep-old');shown=w.current_frame['states'].copy()
+ rpc('batch.begin',{'filename':old.name})
+ with patch.object(w.measured_output.session,'run',side_effect=ValueError('injected geometry failure')):
+  failed=rpc('batch.submit',{'cell':'failed','position_um':[0,0],'dies':rows})['task_id']
+  until(lambda:w.measured_output.jobs[failed]['status']=='error')
+ end=rpc('batch.end')['task_id'];until(lambda:w.measured_output.jobs[end]['status']=='error')
+ assert old.read_bytes()==b'keep-old'
+ rpc('output.configure',{'max_threads':1});rpc('batch.begin',{'filename':old.name})
+ saved=json.loads(project.read_text())
+ assert not saved['overlays']['reconstruction'] and saved['parameters']['rotation_center']=='center'
+ def slow(*_,**kwargs):
+  # progress is the second positional argument; cancellation checks live in it.
+  progress=_[1]
+  while True:progress(25,'cancel regression');time.sleep(.01)
+ with patch.object(w.measured_output.session,'run',side_effect=slow):
+  queued=[rpc('batch.submit',{'cell':'cancel'+str(i),'position_um':[i*10,0],'dies':rows})['task_id'] for i in range(4)]
+  busy=pool.submit(call,folder/'endpoint.json','batch.submit',{'cell':'overflow','position_um':[0,0],'dies':rows})
+  until(busy.done);assert busy.result()['error']['type']=='Busy'
+  rpc('compute.cancel');until(lambda:not w.measured_output.stopping)
+ assert all(w.measured_output.jobs[key]['status']=='cancelled' for key in queued)
+ assert old.read_bytes()==b'keep-old' and not list(folder.glob('.dsa-batch-*'))
+ np.testing.assert_array_equal(w.current_frame['states'],shown)
  rpc('compute.cancel');until(lambda:not w.measured_output.stopping)
  task(rpc('session.prepare'));assert rpc('info')['result']['ready']
  rpc('project.close');assert rpc('info')['result']['project'] is None

@@ -298,9 +298,17 @@ class Reconstructor:
                 ranked=[];best_mass=float('inf')
                 trials=[]
                 for _,length,plan in candidates:
-                    for a,b in getattr(plan,'candidate_intervals',((plan.nominal_first,plan.nominal_second),))[:3]:
+                    for a,b in getattr(plan,'candidate_intervals',((plan.nominal_first,plan.nominal_second),)):
                         trials.append((b-a,plan,a,b))
-                for length,plan,a,b in sorted(trials,key=lambda q:(q[1].width_variation(q[2],q[3])>.05,q[1].width_variation(q[2],q[3]),-q[0]))[:3]:
+                trials=list({(id(plan),a,b):(length,plan,a,b) for length,plan,a,b in trials}.values())
+                def uniform_rank(q):
+                    variation=q[1].width_variation(q[2],q[3])
+                    return (variation>.05,variation if variation>.05 else 0.,-q[0])
+                # Preserve a long alternative as well as the best uniform runs;
+                # a uniformity heuristic must not prune away the lower-risk route.
+                chosen=sorted(trials,key=uniform_rank)[:2]+[max(trials,key=lambda q:q[0])]
+                unique={(id(plan),a,b):(length,plan,a,b) for length,plan,a,b in chosen}
+                for length,plan,a,b in unique.values():
                     part=plan.partition(a,b)
                     invalid=0
                     for pose in catalogue.locals[owner]:
@@ -312,7 +320,8 @@ class Reconstructor:
                     sweep=shapely.union_all([part['A'],part['C']]).buffer((travel+self.rule_space+2*self.tol)/np.cos(np.pi/48),quad_segs=12)
                     neighbours=tree.query(sweep,predicate='intersects')
                     certified=not any(nets[int(j)]!=net for j in neighbours)
-                    ranked.append((mass,invalid,plan.width_variation(a,b),-length,not certified,plan,a,b))
+                    variation=plan.width_variation(a,b)
+                    ranked.append((mass,invalid,variation if variation>.05 else 0.,-length,not certified,plan,a,b))
                     best_mass=min(best_mass,mass)
                     if mass==0 and not invalid:break  # first zero-risk candidate is already longest
                 mass,invalid,_,_,space_unproven,plan,a,b=min(ranked,key=lambda q:q[:5])

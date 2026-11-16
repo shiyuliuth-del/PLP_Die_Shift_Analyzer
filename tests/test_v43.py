@@ -112,7 +112,7 @@ class V43Tests(unittest.TestCase):
     f,out,details=s.run([dict(die=1,dx_um=5,dy_um=2,angle_deg=0,rotation_center_um=list(c['dies'][0].centroid.coords[0]))],preview=False)
    before=shapely.Polygon(d.layers['128/0'][0]);after=shapely.from_wkb(out.layers['128/0'][0])
    self.assertAlmostEqual(after.centroid.x-before.centroid.x,5)
-   self.assertFalse(details['full_drc_checked'])
+   self.assertFalse(details['fixed_rdl_drc_checked'])
    with tempfile.TemporaryDirectory() as tmp:
     result=write_gds(out,Path(tmp)/'m.gds',d.dbu_um);self.assertTrue(Path(result['path']).is_file())
    s.close()
