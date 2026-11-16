@@ -1,0 +1,28 @@
+{
+  "status": "PASS",
+  "packages": 12,
+  "readers": [
+    "gdstk",
+    "KLayout"
+  ],
+  "exact_expanded_xor_against_independent_preview_gds": true,
+  "checked_package_numbers": [
+    1,
+    3,
+    5,
+    7,
+    9,
+    11,
+    2,
+    4,
+    6,
+    8,
+    10,
+    12
+  ],
+  "seconds": 41.10982405200048,
+  "full_drc_acceptance": false,
+  "drawing_sha256": "a4bccbb65058dc4023bc53d5a6916c4185b81f6d1710e365c8b21c9c6feb1b29",
+  "batch_oas_bytes": 553378,
+  "geometric_reference": "V43-derived solver before reconstruction-continuity integration"
+}
