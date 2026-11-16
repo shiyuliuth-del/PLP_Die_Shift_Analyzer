@@ -14,7 +14,7 @@ class MeasuredOutput(QtCore.QObject):
     incoming=Signal(object,object,object);finished=Signal(str,object,object);progressed=Signal(str,int,str)
     def __init__(self,w,layout):
         super().__init__(w);self.w=w;self.server=None;self.session=None;self.options=Options();self.jobs=OrderedDict()
-        self.pool=None;self.generation=0;self.batch=None;self.current=None;self.render_engine=None;self.ready=False;self.transition=None;self.running={};self.stopping=False;self.requests=OrderedDict()
+        self.pool=None;self.generation=0;self.batch=None;self.current=None;self.render_engine=None;self.ready=False;self.last_error=None;self.transition=None;self.running={};self.stopping=False;self.requests=OrderedDict()
         self.incoming.connect(self.dispatch);self.finished.connect(self.complete);self.progressed.connect(self.progress)
         box=W.QGroupBox('实测输出');form=W.QFormLayout(box);layout.addWidget(box)
         self.toggle=W.QCheckBox('实测输出');form.addRow(self.toggle);self.toggle.toggled.connect(self.toggled)
@@ -66,7 +66,7 @@ class MeasuredOutput(QtCore.QObject):
         home=Path(os.environ.get('LOCALAPPDATA',Path.home()/'.local'/'state'))/'DieShiftAnalyze'/'ipc'
         endpoint=endpoint or getattr(w,'requested_ipc_endpoint',None) or home/'endpoint.json'
         self.server=Server(endpoint,lambda request,event,reply:self.incoming.emit(request,event,reply))
-        self.endpoint.setText(str(self.server.endpoint));w.remote_locked=True;self.ready=False;self.current=None
+        self.endpoint.setText(str(self.server.endpoint));w.remote_locked=True;self.ready=False;self.last_error=None;self.current=None
         self.pool=ThreadPoolExecutor(max_workers=max(1,min(32,self.options.max_threads or resource_profile()['workers'])),thread_name_prefix='dsa-measured')
         self.transition={'job':self.new_job('session.prepare'),'phase':'assess'};self.apply_lock()
         w.log_bus.emit('实测输出已开启，工程已自动保存；IPC：'+str(self.server.endpoint))
@@ -107,11 +107,11 @@ class MeasuredOutput(QtCore.QObject):
             job.update(status='cancelled',error={'type':'Cancelled','message':'已取消，未应用过期结果'})
         elif error:
             job.update(status='error',error=dict(type=error[0],message=error[1]));self.w.log_bus.emit('实测输出 '+key+'：'+error[1],'ERROR')
-            if kind=='prepare':self.ready=False
+            if kind=='prepare':self.ready=False;self.last_error=job['error']
         else:
             if kind=='prepare':
                 if self.session and self.session is not result:self.session.close()
-                self.session=result;self.ready=True;result={'ready':True,'project':str(self.w.project_path)}
+                self.session=result;self.ready=True;self.last_error=None;result={'ready':True,'project':str(self.w.project_path)}
             elif kind=='preview':
                 (frame,snapshot,details),engine=result;self.current=(frame,snapshot,details);w=self.w
                 if self.render_engine:self.render_engine.close()
@@ -132,7 +132,9 @@ class MeasuredOutput(QtCore.QObject):
         self.apply_lock()
     def fail_transition(self,message):
         if self.transition:
-            self.jobs[self.transition['job']].update(status='error',error=dict(type='ProjectError',message=str(message)));self.transition=None;self.ready=False
+            self.last_error=dict(type='ProjectError',message=str(message))
+            self.jobs[self.transition['job']].update(status='error',error=self.last_error);self.transition=None;self.ready=False
+            self.w.statusBar().showMessage('实测准备失败：'+str(message).splitlines()[0]+'；关闭实测输出后可调整工程。')
     def tick(self):
         w=self.w
         if self.stopping and not self.running and not w._tasks:
@@ -201,7 +203,7 @@ class MeasuredOutput(QtCore.QObject):
             if key not in self.jobs:raise ValueError('任务不存在或历史已过期')
             return dict(status='completed',result=dict(self.jobs[key]))
         if command=='info':
-            return dict(status='completed',result=dict(ready=self.ready,project=str(w.project_path) if w.project_path else None,
+            return dict(status='completed',result=dict(ready=self.ready,last_error=self.last_error,preparing_task=self.transition['job'] if self.transition else next((key for key,v in self.running.items() if v[2]=='prepare'),None),project=str(w.project_path) if w.project_path else None,
                 source=w.data.path if w.data else None,top_cell=w.data.top_name if w.data else None,
                 die_count=len(w.case['dies']) if w.case else 0,parameters=__import__('die_shift_studio.core',fromlist=['clean_json']).clean_json(asdict(w.params())) if w.data else {},
                 current_pose=[dict(die=i+1,dx_um=float(z[0]),dy_um=float(z[1]),angle_deg=float(np.rad2deg(z[2])),rotation_center_um=list(self.current[0]['rotation_centers'][i])) for i,z in enumerate(self.current[0]['states'])] if self.current else None,
@@ -216,7 +218,7 @@ class MeasuredOutput(QtCore.QObject):
         if command in ('project.open','project.close'):
             if self.running or self.batch or self.transition:raise RuntimeError('请先取消或结束当前任务')
             if w.data:w.write_project(w.project_path)
-            self.ready=False;self.current=None
+            self.ready=False;self.last_error=None;self.current=None
             if self.render_engine:self.render_engine.close();self.render_engine=None
             if self.session:self.session.close();self.session=None
             if command=='project.close':
@@ -241,7 +243,7 @@ class MeasuredOutput(QtCore.QObject):
             return dict(status='completed',result=asdict(self.options))
         if command=='session.prepare':
             if self.running or self.transition:raise RuntimeError('已有任务正在运行')
-            key=self.new_job(command);self.transition=dict(job=key,phase='assess');return dict(status='accepted',task_id=key)
+            self.last_error=None;key=self.new_job(command);self.transition=dict(job=key,phase='assess');return dict(status='accepted',task_id=key)
         if not self.ready or self.session is None:raise RuntimeError('工程尚未完成评估和共用动区准备，查询info或调用session.prepare')
         if command=='preview.submit':
             if self.running or self.batch:raise RuntimeError('已有任务正在执行')
@@ -279,6 +281,7 @@ class MeasuredOutput(QtCore.QObject):
         if command=='batch.submit':
             batch=self.batch
             if batch is None or batch['ending']:raise RuntimeError('批次未开始或已结束接收')
+            if args.get('batch_id')!=batch['id']:raise ValueError('批次标识不匹配，拒绝旧批次或其他控制端的请求')
             unfinished=batch['inflight']
             if len(unfinished)>=batch['lanes']*4:return dict(status='error',error=dict(type='Busy',message='批次队列已满',retry_after_ms=200))
             name=args['cell'];position=args['position_um'];rows=args['dies'];session=self.session
@@ -310,6 +313,7 @@ class MeasuredOutput(QtCore.QObject):
         if command=='batch.end':
             batch=self.batch
             if batch is None or batch['ending']:raise RuntimeError('没有可结束的批次')
+            if args.get('batch_id')!=batch['id']:raise ValueError('批次标识不匹配')
             batch['ending']=True
             def finish(progress):
                 while batch['inflight']:cancel_check();time.sleep(.05)
@@ -321,6 +325,8 @@ class MeasuredOutput(QtCore.QObject):
         directory=Path(self.options.output_directory).expanduser()
         if not self.options.output_directory or not directory.is_dir():raise ValueError('请先用output.configure设置已有输出目录')
         if not isinstance(name,str) or Path(name).name!=name or not name.lower().endswith(extension):raise ValueError('filename须为单个文件名，后缀'+extension)
-        path=(directory/name).resolve()
+        candidate=directory.resolve()/name
+        if candidate.is_symlink():raise ValueError('输出文件是符号链接，请使用普通文件名')
+        path=candidate.resolve()
         if self.w.data and path==Path(self.w.data.path).resolve():raise ValueError('不得覆盖输入源图纸')
         return path

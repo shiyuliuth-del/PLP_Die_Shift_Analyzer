@@ -56,7 +56,7 @@ class Server:
             self.socket_directory=__import__('tempfile').TemporaryDirectory(prefix='dsa-ipc-')
             self.address=str(Path(self.socket_directory.name)/'socket')
         self.token=secrets.token_bytes(32);self.dispatch=dispatch;self.closed=threading.Event()
-        self.listener=Listener(self.address,family=self.family,authkey=self.token)
+        self.listener=Listener(self.address,family=self.family,backlog=64,authkey=self.token)
         if os.name!='nt':os.chmod(self.address,0o600)
         self.pool=ThreadPoolExecutor(max_workers=16,thread_name_prefix='dsa-ipc');self.slots=threading.BoundedSemaphore(16)
         content=dict(protocol=1,pid=os.getpid(),family=self.family,address=self.address,token=self.token.hex())

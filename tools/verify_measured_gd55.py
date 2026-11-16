@@ -52,7 +52,11 @@ def main():
                 time.sleep(.2)
             if not endpoint.exists():raise TimeoutError('No endpoint; inspect application runtime log')
             end=time.monotonic()+3600
-            while not checked(endpoint,'info')['result']['ready'] and time.monotonic()<end:time.sleep(.3)
+            while time.monotonic()<end:
+                state=checked(endpoint,'info')['result']
+                if state['ready']:break
+                if state.get('last_error'):raise RuntimeError(json.dumps(state['last_error'],ensure_ascii=False))
+                time.sleep(.3)
         else:wait(endpoint,checked(endpoint,'project.open',{'path':str(args.project.resolve())}))
         info=checked(endpoint,'info')['result'];assert info['ready'] and info['die_count']>0
         report['source']=info['source'];report['die_count']=info['die_count']
@@ -70,14 +74,14 @@ def main():
         columns=math.ceil(math.sqrt(args.count))
         def send(i):
             rows=[dict(d,dx_um=(-1 if i&1 else 1)*min(i,.5),dy_um=(-1 if i&2 else 1)*min(i,.5),angle_deg=(-1 if i&4 else 1)*min(i*.001,.005)) for d in zeros]
-            params=dict(cell=f'Package_{i:06d}',position_um=[(i%columns)*pitch[0],(i//columns)*pitch[1]],dies=rows)
+            params=dict(batch_id=batch['batch_id'],cell=f'Package_{i:06d}',position_um=[(i%columns)*pitch[0],(i//columns)*pitch[1]],dies=rows)
             while True:
                 response=rpc(endpoint,'batch.submit',params)
                 if response['status']!='error':return wait(endpoint,response)
                 if response['error']['type']!='Busy':raise RuntimeError(str(response))
                 time.sleep(response['error'].get('retry_after_ms',200)/1000)
         with ThreadPoolExecutor(max_workers=min(8,args.count)) as executor:report['poses']=list(executor.map(send,range(args.count)))
-        report['oas']=wait(endpoint,checked(endpoint,'batch.end'));assert report['oas']['cells']==args.count
+        report['oas']=wait(endpoint,checked(endpoint,'batch.end',{'batch_id':batch['batch_id']}));assert report['oas']['cells']==args.count
         try:
             import gdstk
             lib=gdstk.read_oas(report['oas']['path']);top=lib.top_level()

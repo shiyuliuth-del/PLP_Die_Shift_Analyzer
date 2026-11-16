@@ -44,7 +44,7 @@ def main(argv=None):
     args=parser.parse_args(argv)
     try:
         params=json.loads(Path(args.args_file).read_text(encoding='utf8') if args.args_file else args.args)
-        reply=start(params['app'],params['project'],args.endpoint) if args.command=='app.start' else call(args.endpoint,args.command,params)
+        reply=start(params['app'],params['project'],args.endpoint,args.timeout) if args.command=='app.start' else call(args.endpoint,args.command,params)
         if args.wait and reply.get('task_id'):reply=wait(args.endpoint,reply['task_id'],args.timeout)
         print(json.dumps(reply,ensure_ascii=False,allow_nan=False))
         return 0 if reply.get('status') in ('accepted','completed') else 1

@@ -10,7 +10,7 @@
 4. 界面显示本地入口 JSON 的路径。默认在用户私有配置目录；Linux 使用 Unix domain socket，Windows 使用命名管道，均以随机 HMAC 密钥认证。此 JSON 含密钥，**不要提交 Git、分享或放到多人可读目录**。不对外监听 TCP。
 5. 开启期间图层用途、工艺、偏移、动区拖动/Q 编辑等受锁定。滚动画布查看不改变冻结参数。关闭后等待安全取消完成，恢复工程参数和零位预览，重新允许人工编辑。开关状态不会随工程自动开启。
 
-`info.result.ready=true` 后才可提交姿态。命令都在同一 GUI 所属上下文执行；Qt/Matplotlib 仅在主线程更新。工程切换需要先结束/取消批次。
+`info.result.ready=true` 后才可提交姿态；preparing_task给出准备任务，last_error说明准备失败原因。命令都在同一 GUI 所属上下文执行；Qt/Matplotlib 仅在主线程更新。工程切换需要先结束/取消批次。保存输出配置时保留普通工程的叠加开关和有效历史结果，不把临时实测旋转中心/姿态写成普通评估缓存。
 
 ## Python 与命令行
 
@@ -53,11 +53,11 @@ python -m die_shift_studio.ipc_client --endpoint C:\work\endpoint.json output.co
 | 命令 | args | 完成含义 |
 |---|---|---|
 | `ping` | `{}` | 协议、开启状态、ready |
-| `info` | `{}` | 当前工程、源图纸、TopCell、DIE 数量/中心/边框、封装边框、用途、工艺、输出配置及正在运行任务 |
+| `info` | `{}` | 当前工程、源图纸、TopCell、DIE数量/中心/边框、封装边框、用途、工艺、当前实测姿态/中心、输出配置及正在运行任务 |
 | `project.open` | `{"path":"工程绝对路径.dshift.json"}` | 自动保存当前工程，打开/切换目标，完成评估和准备；异步任务 |
 | `project.close` | `{}` | 保存并关闭工程，保留 IPC；无工程不能提交姿态 |
 | `session.prepare` | `{}` | 重新确认/准备当前工程；异步任务 |
-| `output.configure` | `{"output_directory":"已有目录","max_threads":4,"max_memory_mb":1024}` | 修改/记住输出配置并保存工程；任务/批次运行时禁止更改 |
+| `output.configure` | `{"output_directory":"已有目录","max_threads":4,"max_memory_mb":1024}` | 修改/记住输出配置并保存工程；同一开启会话内跨工程保持目录/限额，任务/批次运行时禁止更改 |
 | `preview.submit` | `{"dies":[...]}` | 单姿态重构完成并在窗口显示；返回连接失败明细与规则检查范围 |
 | `export.gds` | `{"filename":"sample.gds"}` | 输出最近完成的实测姿态；目录沿用配置，无需重复输入 |
 | `compute.cancel` | `{}` | 确认收到全计算取消请求；原生调用在安全返回点退出，查询 info.running 直到清空 |
@@ -91,22 +91,23 @@ call(endpoint, "output.configure", {"output_directory": "C:/work/out",
                                    "max_threads": 8, "max_memory_mb": 2048})
 begin = call(endpoint, "batch.begin", {"filename": "lot.oas"})
 # 必须先检查 completed，再提交。
+batch_id = begin["result"]["batch_id"]
 def submit(i, dies, xy):
-    r = call(endpoint, "batch.submit", {"cell": f"Package_{i:06d}",
+    r = call(endpoint, "batch.submit", {"batch_id": batch_id, "cell": f"Package_{i:06d}",
                                        "position_um": xy, "dies": dies})
     # Busy 可按 error.retry_after_ms 延时重试；不要无限无间隔重发。
     return wait(endpoint, r["task_id"])
 # 通过 ThreadPoolExecutor 并发调用 submit；核对每项结果。
-end = call(endpoint, "batch.end")
+end = call(endpoint, "batch.end", {"batch_id": batch_id})
 result = wait(endpoint, end["task_id"])
 ```
 
 - batch.begin 返回 batch_id、实际线程、内存预算、队列容量。并发接收不等于无限启动计算；活动任务受硬件、用户上限及每任务内存估计共同限制，内层不再套线程池。
-- batch.submit 必须有唯一 cell、封装 position_um=[x,y]、全部 dies。Cell 名为1～120个ASCII字母/数字/下划线/短横线；TopCell 与 G_ 前缀保留。坐标以**名义封装边框左下角**为放置基准。TopCell 将每个封装 Cell 放到给定位置；芯片自己的偏移相对封装独立计算。
+- batch.submit 和 batch.end 必须带 begin 返回的 batch_id，防止取消后旧请求混入下一批次。batch.submit 还必须有唯一 cell、封装 position_um=[x,y]、全部 dies。Cell 名为1～120个ASCII字母/数字/下划线/短横线；TopCell 与 G_ 前缀保留。坐标以**名义封装边框外接矩形的左下角**为放置基准：从info.board_bounds_um取xmin、ymin，实例平移为(position_x−xmin, position_y−ymin)。TopCell 将每个封装 Cell 放到给定位置；芯片自己的偏移相对封装独立计算。
 - 每个封装不刷新窗口，不计算整包概率、宽度分析或完整 DRC 标记。使用同一连接样式/边界设置的几何求解器，仍验证几何与连接；返回 `fixed_rdl_drc_checked=false`。不能把快速结果当成完整 DRC 验收。
 - 默认任何未连接姿态失败。诊断批次可在 begin 显式设置 allow_failed:true，逐项返回原因。无效多边形始终拒绝，不能用这个开关放过。
 - batch.end 停止接收新任务，等已接收任务结束。若任何项失败/取消，最终文件不替换；先查错误，修正后新开批次。不要重复使用已经占用的 Cell 名试图覆盖失败项。
-- 最大内存是**批量计算的增量预算**，不含程序/原工程的基础占用。估算控制并发；进度安全点检查 RSS，超预算先暂存并报错。原生函数单次调用可能短暂超过预算，Python 不能安全强杀它；不是操作系统硬内存隔离。
+- 内存MB按2²⁰字节计。最大内存是**批量计算的增量预算**，不含程序/原工程的基础占用。估算控制并发；进度安全点检查 RSS，超预算先暂存并报错。原生函数单次调用可能短暂超过预算，Python 不能安全强杀它；不是操作系统硬内存隔离。
 - 几何结果按块流式写入同一个临时 OAS，达到预算时刷盘；私有 SQLite 仅保存去重索引与封装位置。结束时补齐 TopCell 和校验尾记录，而非逐姿态重复写整个图纸。相同的量化图形（含平移等价图形）复用内容寻址 Cell，避免重复不动铜/孔盘。这里复用的是物理几何，不保留原设计的 Cell 名称、文本、属性或历史层级。
 - 最终只有配置目录下的一个 OAS；临时 OAS 与索引库安全取消/正常结束后清理。进程崩溃可能留下 `.dsa-batch-*` 临时目录，确认实例退出后可删除。CRC通过后原子替换，旧目标在取消和失败时保留。
 - 一个批次冻结一个工程与工艺。不能同时切换工程、变更输出参数、交互预览或导出单姿态；先end或cancel。相同网络/状态必须由同一快照解释。

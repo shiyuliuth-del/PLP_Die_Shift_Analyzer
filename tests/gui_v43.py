@@ -86,24 +86,24 @@ try:
  np.testing.assert_allclose(w.engine.contact.bound.centers,[[17,-12]])
  assert not w.run_button.isEnabled() and not w.preview_tabs.isEnabled()
  result=task(rpc('export.gds',{'filename':'measured.gds'}));assert Path(result['path']).is_file()
- rpc('batch.begin',{'filename':'batch.oas'})
+ batch=rpc('batch.begin',{'filename':'batch.oas'})['result']
  tasks=[]
- for i in range(6):tasks.append(rpc('batch.submit',{'cell':'P'+str(i),'position_um':[i*1100,0],'dies':rows}))
+ for i in range(6):tasks.append(rpc('batch.submit',{'batch_id':batch['batch_id'],'cell':'P'+str(i),'position_um':[i*1100,0],'dies':rows}))
  for response in tasks:task(response)
- result=task(rpc('batch.end'));assert result['cells']==6
+ result=task(rpc('batch.end',{'batch_id':batch['batch_id']}));assert result['cells']==6
  lib=gdstk.read_oas(folder/'batch.oas');top=lib.top_level()[0];assert top.name=='TopCell' and len(top.references)==6
  assert len(lib.cells)<6*7+1,'unchanged layer cells not reused'
  # Backend failure and cancellation must have explicit terminal statuses and
  # cannot replace an older output. Queue rejection is retryable, not silence.
  from unittest.mock import patch
  old=folder/'protected.oas';old.write_bytes(b'keep-old');shown=w.current_frame['states'].copy()
- rpc('batch.begin',{'filename':old.name})
+ batch=rpc('batch.begin',{'filename':old.name})['result']
  with patch.object(w.measured_output.session,'run',side_effect=ValueError('injected geometry failure')):
-  failed=rpc('batch.submit',{'cell':'failed','position_um':[0,0],'dies':rows})['task_id']
+  failed=rpc('batch.submit',{'batch_id':batch['batch_id'],'cell':'failed','position_um':[0,0],'dies':rows})['task_id']
   until(lambda:w.measured_output.jobs[failed]['status']=='error')
- end=rpc('batch.end')['task_id'];until(lambda:w.measured_output.jobs[end]['status']=='error')
+ end=rpc('batch.end',{'batch_id':batch['batch_id']})['task_id'];until(lambda:w.measured_output.jobs[end]['status']=='error')
  assert old.read_bytes()==b'keep-old'
- rpc('output.configure',{'max_threads':1});rpc('batch.begin',{'filename':old.name})
+ rpc('output.configure',{'max_threads':1});batch=rpc('batch.begin',{'filename':old.name})['result']
  saved=json.loads(project.read_text())
  assert not saved['overlays']['reconstruction'] and saved['parameters']['rotation_center']=='center'
  def slow(*_,**kwargs):
@@ -111,8 +111,8 @@ try:
   progress=_[1]
   while True:progress(25,'cancel regression');time.sleep(.01)
  with patch.object(w.measured_output.session,'run',side_effect=slow):
-  queued=[rpc('batch.submit',{'cell':'cancel'+str(i),'position_um':[i*10,0],'dies':rows})['task_id'] for i in range(4)]
-  busy=pool.submit(call,folder/'endpoint.json','batch.submit',{'cell':'overflow','position_um':[0,0],'dies':rows})
+  queued=[rpc('batch.submit',{'batch_id':batch['batch_id'],'cell':'cancel'+str(i),'position_um':[i*10,0],'dies':rows})['task_id'] for i in range(4)]
+  busy=pool.submit(call,folder/'endpoint.json','batch.submit',{'batch_id':batch['batch_id'],'cell':'overflow','position_um':[0,0],'dies':rows})
   until(busy.done);assert busy.result()['error']['type']=='Busy'
   rpc('compute.cancel');until(lambda:not w.measured_output.stopping)
  assert all(w.measured_output.jobs[key]['status']=='cancelled' for key in queued)
