@@ -59,13 +59,14 @@ class MeasuredOutput(QtCore.QObject):
         path=w.project_path or w.jobs_dir/('实测自动保存_'+time.strftime('%Y%m%d_%H%M%S')+'_'+uuid.uuid4().hex[:6]+'.dshift.json')
         w.write_project(path);w.refresh_jobs();w.stop_animation();w.cancel_previews();w.mouse_die.exit();w.exit_region_mode()
         self.saved_overlays={name:getattr(w,name+'_toggle').isChecked() for name in ('reconstruction','width','drc','space','probability')}
-        for name in self.saved_overlays:
-            widget=getattr(w,name+'_toggle');widget.blockSignals(True);widget.setChecked(False);widget.blockSignals(False)
-        w.width_yield.reset();w.reconstruction_yield.reset();w.constraint_feedback.cancel()
         from .local_ipc import Server
         home=Path(os.environ.get('LOCALAPPDATA',Path.home()/'.local'/'state'))/'DieShiftAnalyze'/'ipc'
         endpoint=endpoint or getattr(w,'requested_ipc_endpoint',None) or home/'endpoint.json'
         self.server=Server(endpoint,lambda request,event,reply:self.incoming.emit(request,event,reply))
+        w.requested_measured=False # startup-only guard; ordinary editing resumes after disabling IPC
+        for name in self.saved_overlays:
+            widget=getattr(w,name+'_toggle');widget.blockSignals(True);widget.setChecked(False);widget.blockSignals(False)
+        w.width_yield.reset();w.reconstruction_yield.reset();w.constraint_feedback.cancel()
         self.endpoint.setText(str(self.server.endpoint));w.remote_locked=True;self.ready=False;self.last_error=None;self.current=None
         self.pool=ThreadPoolExecutor(max_workers=max(1,min(32,self.options.max_threads or resource_profile()['workers'])),thread_name_prefix='dsa-measured')
         self.transition={'job':self.new_job('session.prepare'),'phase':'assess'};self.apply_lock()

@@ -12,6 +12,8 @@
 
 `info.result.ready=true` 后才可提交姿态；preparing_task给出准备任务，last_error说明准备失败原因。命令都在同一 GUI 所属上下文执行；Qt/Matplotlib 仅在主线程更新。工程切换需要先结束/取消批次。保存输出配置时保留普通工程的叠加开关和有效历史结果，不把临时实测旋转中心/姿态写成普通评估缓存。
 
+自动启动或切换工程时必须明确TopCell，多个顶层且工程未保存选择会返回错误，不弹出等待人工操作的选择框。读取失败可查询last_error，再project.close或project.open恢复；不要继续对ready=false的工程发送姿态。关闭实测输出后恢复普通手动TopCell选择。
+
 ## Python 与命令行
 
 源码包内有仅依赖标准库的客户端：

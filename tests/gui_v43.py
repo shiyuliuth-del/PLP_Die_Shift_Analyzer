@@ -75,7 +75,8 @@ try:
  assert abs(w.cut_drag.state['part']['a']-before-4)<.05,w.cut_drag.state['part']
  w.cut_drag.cancel();until(lambda:not w._tasks)
  w.reconstruction_toggle.setChecked(False);until(lambda:not w._tasks and not w.preview_pending)
- w.requested_ipc_endpoint=folder/'endpoint.json';w.measured_output.toggle.setChecked(True)
+ w.requested_measured=True;w.requested_ipc_endpoint=folder/'endpoint.json';w.measured_output.toggle.setChecked(True)
+ assert not w.requested_measured
  until(lambda:w.measured_output.ready)
  assert w.remote_locked and w.project_path.samefile(project) and project.is_file()
  assert rpc('info')['result']['die_count']==1
