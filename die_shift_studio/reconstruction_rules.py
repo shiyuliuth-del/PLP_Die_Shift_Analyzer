@@ -113,6 +113,28 @@ class FixedRules:
         others=[g for k,g in self.original.items() if k[0]==key[0] and k!=key]
         value=(key,rest,vias,others,shapely.STRtree(others));self.contexts[tag]=value;return value
 
+    def quality(self,plan,candidate,pose):
+        """Actual rule score of one candidate, without recursively optimizing it."""
+        from .native_backend import any_violation
+        key,rest,vias,others,tree=self.context(plan)
+        states=np.zeros((len(self.model.bound.centers),3));states[plan.owner]=pose
+        copper=shapely.union_all([rest,*candidate.values()]);kinds=set();amount=0.
+        for op,value in (('width',self.width),('space',self.space)):
+            if any_violation(op,copper.wkb,self.dbu,value):kinds.add(op)
+        for ref,owner,required in vias:
+            missing=self.model.moved(required,owner,states).difference(copper).area
+            if missing>self.dbu*self.dbu:kinds.add('enclosure');amount+=missing/max(self.width*self.space,1e-12)
+        if self.board is not None and (not self.board.covers(copper) or copper.distance(self.board.boundary)<self.border-self.dbu*.001):
+            kinds.add('board');amount+=copper.difference(self.inside).area/max(self.width*self.space,1e-12)
+        if not self.keepout.is_empty and shapely.relate_pattern(copper,self.keepout,'T********'):
+            kinds.add('keepout');amount+=copper.intersection(self.keepout).area/max(self.width*self.space,1e-12)
+        for j in tree.query(copper,predicate='dwithin',distance=self.space):
+            other=others[int(j)]
+            if self.pair_fails(copper,other):
+                kinds.add('foreign');gap=copper.distance(other)
+                amount+=(self.space-gap)/max(self.space,1e-12)+(copper.intersection(other).area/max(self.width*self.space,1e-12) if gap==0 else 0)
+        return len(kinds),amount
+
     def best_regions(self,plan,part,center,pose,style):
         """Keep endpoints fixed; compare finite style-preserving curve candidates.
 
@@ -127,25 +149,7 @@ class FixedRules:
             geos,error,score=value;return None if geos is None else dict(geos),error,score
         cancel_check();regions,error=warp(part,plan,center,pose,style)
         if error:return None,error,(float('inf'),float('inf'))
-        key,rest,vias,others,tree=self.context(plan);states=np.zeros((len(self.model.bound.centers),3));states[plan.owner]=pose
-        def quality(candidate):
-            from .native_backend import any_violation
-            copper=shapely.union_all([rest,*candidate.values()]);kinds=set();amount=0.
-            for op,value in (('width',self.width),('space',self.space)):
-                if any_violation(op,copper.wkb,self.dbu,value):kinds.add(op)
-            for ref,owner,required in vias:
-                missing=self.model.moved(required,owner,states).difference(copper).area
-                if missing>self.dbu*self.dbu:kinds.add('enclosure');amount+=missing/max(self.width*self.space,1e-12)
-            if self.board is not None and (not self.board.covers(copper) or copper.distance(self.board.boundary)<self.border-self.dbu*.001):
-                kinds.add('board');amount+=copper.difference(self.inside).area/max(self.width*self.space,1e-12)
-            if not self.keepout.is_empty and shapely.relate_pattern(copper,self.keepout,'T********'):
-                kinds.add('keepout');amount+=copper.intersection(self.keepout).area/max(self.width*self.space,1e-12)
-            for j in tree.query(copper,predicate='dwithin',distance=self.space):
-                other=others[int(j)]
-                if self.pair_fails(copper,other):
-                    kinds.add('foreign');gap=copper.distance(other)
-                    amount+=(self.space-gap)/self.space+(copper.intersection(other).area/max(self.width*self.space,1e-12) if gap==0 else 0)
-            return (len(kinds),amount)
+        def quality(candidate):return self.quality(plan,candidate,pose)
         score=quality(regions);best=regions;best_score=score
         hard_key=(plan.key,plan.identity,part_key(part))
         if hard_key not in self.hard_memo:
@@ -200,7 +204,12 @@ class FixedRules:
         for i in np.argsort(-weights):
             cancel_check()
             if weights[i]<=0:continue
-            regions,error,score=self.best_regions(plan,part,self.model.bound.centers[plan.owner],grid.locals[plan.owner][i],style)
+            # Rank the baseline curve once per pose. Previously each candidate
+            # recursively searched every alternate curve at every grid node,
+            # then repeated that optimization for the actual preview frame.
+            pose=grid.locals[plan.owner][i]
+            regions,error=warp(part,plan,self.model.bound.centers[plan.owner],pose,style,0)
+            score=(math.inf,math.inf) if error else self.quality(plan,regions,pose)
             if self.hard_memo.get((plan.key,plan.identity,part_key(part)),False):
                 # A strict violation in rigid copper, far from every seam,
                 # cannot be cured by any transition shape or sampled pose.

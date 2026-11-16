@@ -43,18 +43,37 @@ def _compose_feature(source,ps,tolerance,moving):
         if any(owner!=q['die'] and other.intersection(support).area>max(tolerance**2,source.area*1e-8) for owner,other in by_owner.items()):ambiguous=True
         by_owner[q['die']]=by_owner.get(q['die'],EMPTY).union(support)
         occupied=occupied.union(support)
-    fixed=ps[0]['regions']['B'] if len(ps)==1 and ps[0].get('source_scope_complete',True) else (shapely.set_precision(source.difference(occupied),tolerance) if moving else source.difference(occupied))
+    # Never round one side of a seam independently. That creates artificial
+    # disconnections when its matching transition retains source coordinates.
+    fixed=ps[0]['regions']['B'] if len(ps)==1 and ps[0].get('source_scope_complete',True) else source.difference(occupied)
     if ambiguous:
         reason='多个DIE动区归属重叠；无法确定分区，保留源图'
         for q in ps:q.update(valid=False,connection_failed=True,warning=reason,regions=dict(A=EMPTY,B=source,C=EMPTY),bridge=EMPTY,moved=EMPTY,fixed=source)
         geometry=source
     else:
         for q in ps:q['fixed']=fixed;q['regions']['B']=fixed;q['fixed_area_um2']=fixed.area
-        geometry=shapely.union_all([fixed,*[q['regions'][k] for q in ps for k in 'AC']])
+        geometry=shapely.union_all([fixed,*[q['regions'][k] for q in ps for k in 'AC']],grid_size=tolerance if moving else None)
     # With no material motion and a source-preserving style, partition overlay
     # round-off must neither create holes nor invent a failed connector.
     if not moving:return source,occupied
     from .reconstruction_route import parts
+    # A formerly solid source has no legitimate hole to preserve here. Joint
+    # DBU rounding can leave sub-grid closed seam slivers; fill ONLY those thin
+    # derived slivers, not real channels, imported holes or disconnected gaps.
+    if all(not p.interiors for p in parts(source)):
+        repairs=[]
+        for p in parts(geometry):
+            for ring in p.interiors:
+                hole=shapely.Polygon(ring)
+                if hole.area>tolerance*hole.length:continue
+                rect=shapely.get_coordinates(shapely.minimum_rotated_rectangle(hole))
+                if len(rect)<4 or min(np.linalg.norm(np.diff(rect,axis=0),axis=1))>tolerance*2:continue
+                repairs.append(hole)
+                owner=min(ps,key=lambda q:q['regions']['A'].distance(hole) if not q['regions']['A'].is_empty else float('inf'))
+                owner['regions']['A']=owner['regions']['A'].union(hole);owner['bridge']=owner['regions']['A']
+                owner['seam_repair_area_um2']=owner.get('seam_repair_area_um2',0.)+hole.area
+                owner['bridge_area_um2']=owner['bridge'].area
+        if repairs:geometry=shapely.union_all([geometry,*repairs])
     mismatch=(len(parts(geometry))!=len(parts(source)) or sum(len(q.interiors) for q in parts(geometry))!=sum(len(q.interiors) for q in parts(source)))
     if not geometry.is_valid or (mismatch and not any(q.get('connection_failed') for q in ps)):
         for q in ps:
@@ -290,6 +309,18 @@ class Reconstructor:
                     alternative=candidate(local_base,traced,self)
                     if alternative is not None:return alternative
                     return dict(local_base,plan=None,orphan=False,warning='拓扑无法分出相连的动/静/平移区；保留原图')
+                if pair_route:
+                    # Individual pair copper is discarded by branch assembly.
+                    # Native DRC on every pair checked a fictitious full net and
+                    # repeated it for all poses. Select a nominal section here;
+                    # the assembled physical domain is checked once afterwards.
+                    def branch_rank(row):
+                        plan=row[2];a,b=plan.nominal_first,plan.nominal_second
+                        variation=plan.width_variation(a,b)
+                        return (not row[0],variation>.05,variation if variation>.05 else 0.,-(b-a))
+                    plan=min(candidates,key=branch_rank)[2]
+                    return dict(local_base,plan=plan,orphan=False,warning=plan.warning,
+                                extreme_checks=0,extreme_invalid=0,all_die_space_certified=False,priority_failure_mass=None)
                 # The search is performed once over every local discrete extreme,
                 # never against the currently selected pose. Other-DIE windows use
                 # the full-input displacement envelope above; final per-pose spacing
@@ -332,13 +363,10 @@ class Reconstructor:
                 return dict(local_base,plan=plan,orphan=False,warning=warning,extreme_checks=len(catalogue.locals[owner]),extreme_invalid=invalid,all_die_space_certified=not space_unproven,priority_failure_mass=mass)
             if len(mine)>1 or len(fixed)>1:
                 rows=[]
-                pairs=[(i,j) for i in range(len(mine)) for j in range(len(fixed))]
-                if len(pairs)>64:
-                    # All terminals remain represented. The connected-component
-                    # classification promotes ANY mixed-terminal remainder to A,
-                    # so no moving-to-fixed path can bypass a transition domain.
-                    pairs=sorted({(i,min(range(len(fixed)),key=lambda j:mine[i]['poly'].distance(fixed[j]))) for i in range(len(mine))} |
-                                 {(min(range(len(mine)),key=lambda i:mine[i]['poly'].distance(fixed[j])),j) for j in range(len(fixed))})
+                from .branch_regions import terminal_tree
+                pairs=terminal_tree([v['poly'] for v in mine],fixed)
+                edited=any(row[:2]==(layer,index) for name in ('reconstruction_intervals','reconstruction_angles','reconstruction_added','reconstruction_deleted','reconstruction_cuts','reconstruction_extra_cuts','reconstruction_second_cuts') for row in getattr(self.settings,name,()))
+                if edited:pairs=[(i,j) for i in range(len(mine)) for j in range(len(fixed))]
                 for number,(i,j) in enumerate(pairs):
                     cancel_check();via,anchor=mine[i],fixed[j]
                     row=build_source(source,landing(via),[anchor],[via],pair_route=True)
@@ -383,7 +411,7 @@ class Reconstructor:
         # Route construction is pose-independent and reused after every handle edit.
         from .session_cache import logical_fingerprint
         key=logical_fingerprint((self.model.data.geometry_id,self.model.roles,self.model.connections.order,
-                                'v43-uniform-branches-1',self.settings.reconstruction_forced,self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
+                                'continuity-branches-2',self.settings.reconstruction_forced,self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
         if key not in self.plan_pool:
             from .resources import parallel_map,native_phase_profile
             self.plan_pool[key]=[entry for rows in parallel_map(build,groups,profile=native_phase_profile(),progress=lambda n,total:progress(round(65*n/max(1,total)),f'建立全姿态共用动区 {n}/{total}')) for entry in rows]
@@ -500,7 +528,7 @@ class Reconstructor:
                 saved_part,saved_manual,saved_regions,saved_error,saved_warning=cached
                 return saved_part,saved_manual,None if saved_regions is None else dict(saved_regions),saved_error,saved_warning
             from .reconstruction_angles import solve
-            if getattr(entry['plan'],'plane_domain',False):
+            if entry.get('graph_branch') or getattr(entry['plan'],'plane_domain',False):
                 from .plane_route import live_part
                 part=live_part(self,entry['plan'],part,self.model.bound.centers[entry['owner']],states[entry['owner']]);regions={k:part[k] for k in 'ABC'};error=None
             elif 'serial_left' in entry:
