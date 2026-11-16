@@ -15,3 +15,5 @@ V43当前验收见[V43验证](V43_VALIDATION.md)。上一版实图基线见[V42�
 
 - V44 RealDataAnalyse的产线Excel模板尚未提供；当前.xlsx列映射和GD55合成例不代表任意Excel自动识别。旧.xls需转换。未提交OAS崩溃后整批重放，尚无跨进程几何检查点。仍存活但无响应的服务不能安全强杀，任务持久保留等待人工处理。用户修改冻结工程须新建任务，不能混用旧记录。
 - 新增用户明确授权随包公开的GD55图纸/工程/合成Excel；小偏移链路案例不代表原工艺输入范围全部适配。最终发布验收见V44_VALIDATION。
+
+- V44本地5bab2c7干净回归中，gui_v42_saved_process在保存完成后的子进程关闭阶段出现一次无Python栈的Linux原生Segmentation fault；聚合正确判失败。同用例独立重跑未复现。Windows实际EXE重复启动/退出通过，不据此宣称Linux问题已修复。
