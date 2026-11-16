@@ -8,7 +8,7 @@ import numpy as np
 from die_shift_studio.gui import MainWindow,W
 from qt_shutdown import close_window
 from die_shift_studio.qt_compat import Qt,QtCore,BINDING
-from die_shift_studio.extreme_filter import ProblemIndex,contact_factors
+from die_shift_studio.extreme_filter import ProblemIndex,current_drc_factors
 if BINDING=='PyQt6':from PyQt6.QtTest import QTest
 else:from PyQt5.QtTest import QTest
 
@@ -53,7 +53,7 @@ drag([45,1040],[-45,960],keys.ControlModifier);assert set(w.selection.selected)<
 click([110,1060]);assert not w.selection.selected
 click([0,1000]);QTest.keyClick(w.canvas,getattr(Qt,'Key',Qt).Key_Escape);assert not w.selection.selected
 w.grid_mode.setCurrentIndex(0);wait()
-idx=ProblemIndex(w.extremes,contact_factors(w.result['extreme_factors']))
+idx=ProblemIndex(w.extremes,current_drc_factors(w.result['extreme_factors']))
 assert [i for i,_ in w.page_items]==[idx.at(j) for j in range(min(256,idx.total))]
 w.problem_filter.setChecked(False);wait()
 table=w.extreme_table;assert table.rowCount()>35

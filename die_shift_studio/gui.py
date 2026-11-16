@@ -337,10 +337,14 @@ class MainWindow(W.QMainWindow):
         self.probability_toggle.toggled.connect(self.footprint_changed);self.space_toggle.toggled.connect(self.space_changed)
         extreme_page=W.QWidget();ep=W.QVBoxLayout(extreme_page);ep.setContentsMargins(0,0,0,0)
         self.page_summary=W.QLabel('尚未评估')
+        policy=getattr(W.QSizePolicy,'Policy',W.QSizePolicy);self.page_summary.setSizePolicy(policy.Ignored,policy.Preferred);self.page_summary.setMinimumWidth(0)
         nav=W.QHBoxLayout();self.grid_mode=W.QComboBox();self.grid_mode.addItems(['全部组合','重点组合']);self.grid_mode.setCurrentIndex(1)
         self.page_prev=W.QPushButton('上一页');self.page_next=W.QPushButton('下一页');self.page_prev.setEnabled(False);self.page_next.setEnabled(False)
         self.page_edit=W.QLineEdit('1');self.page_edit.setMaximumWidth(54);self.page_edit.setToolTip('输入页码并按回车')
         for widget in (self.grid_mode,self.page_prev,self.page_edit,self.page_next,self.page_summary):nav.addWidget(widget)
+        nav.setSpacing(2);nav.setStretch(nav.indexOf(self.page_summary),1)
+        self.grid_mode.setMaximumWidth(72);self.page_edit.setMaximumWidth(38)
+        for button in (self.page_prev,self.page_next):button.setMaximumWidth(42);button.setStyleSheet('padding:1px;')
         self.problem_filter=W.QCheckBox('过滤无问题情况');self.problem_filter.setChecked(True)
         self.problem_filter.setToolTip('重构开启时按重构后的线宽、线距与连接等规则筛选；否则按宽度红色风险或当前整层DRC筛选。空白首行始终保留。')
         nav.addWidget(self.problem_filter);self.manual_button=W.QPushButton('手动偏移');nav.addWidget(self.manual_button);self.manual_button.clicked.connect(lambda:self.manual_preview.open_editor());nav.addStretch();ep.addLayout(nav)
@@ -2211,7 +2215,7 @@ class MainWindow(W.QMainWindow):
         if waiting:count='筛选待重新评估' if self.dirty else '筛选未完成' if self._coupled_error else '筛选待计算'
         if catalogue is not self.extremes:count+=f' / 整包 {self.extremes.total+1:,}'
         self.page_summary.setText(f'{count} · 第 {page+1:,}/{pages:,} 页')
-        self.page_summary.setToolTip('种数均含全包零位；每页最多 256 个非零姿态。绿色为通过，其他已缓存行为蓝色。')
+        self.page_summary.setToolTip(self.page_summary.text()+'\n种数均含全包零位；每页最多 256 个非零姿态。绿色为通过，其他已缓存行为蓝色。')
         self.extreme_table.blockSignals(True);self.extreme_table.clearContents();self.extreme_table.setRowCount(len(self.page_items)+1)
         for col in range(self.extreme_table.columnCount()):self.extreme_table.setItem(0,col,W.QTableWidgetItem(''))
         for i,(index,e) in enumerate(self.page_items,1):

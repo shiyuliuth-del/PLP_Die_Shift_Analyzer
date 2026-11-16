@@ -38,7 +38,7 @@ try:
  for key,rows in data.layers.items():
   layer,dt=map(int,key.split('/'));cell.add(*(gdstk.Polygon(xy,layer=layer,datatype=dt) for xy in rows))
  source=folder/'case.gds';lib.write_gds(source)
- p=Parameters(line_width_um=15,line_space_um=15,annulus_um=10,moving_annulus_um=5,single_bound_x_um=25,single_bound_y_um=25)
+ p=Parameters(line_width_um=40,line_space_um=15,annulus_um=10,moving_annulus_um=5,single_bound_x_um=25,single_bound_y_um=25)
  job=folder/'initial.dshift.json';job.write_text(json.dumps(dict(schema_version=5,gds_path=str(source),top_cell='TOP',roles=roles,layer_order=['6/0','5/0','4/0','3/0','128/0','127/0'],parameters=asdict(p),settings={'animation_enabled':False},overlays={'reconstruction':False})))
  with patch('die_shift_studio.result_analysis.calculate',side_effect=AssertionError('eager analysis')):
   w.load_project(job);wait();w.run_evaluation();wait()
@@ -54,8 +54,16 @@ try:
   assert w.style_for('3/0')['color']=='#aaffff' and w.style_for('3/0')['alpha']==.3
   assert w.current_frame['drc']==w.current_frame['drc']
   w.show_issues.setChecked(True);wait();w.fit_plot();w.plot_layout(preserve=True);w.canvas.draw()
+  assert len(w.filtered_issues)>0
   assert len(w.filtered_issues)==w.issue_table.rowCount()==len(locations(w.current_frame['drc']))
   assert len(w.rendered_issues)==len(w.filtered_issues)
+  count=w.issue_table.rowCount();before=w.current_frame
+  w.visible_boxes['5/0'].setChecked(False);wait()
+  assert w.issue_table.rowCount()==count and w.current_frame is before
+  assert all('5/0' not in r.get('layers',()) for r in w.rendered_issues)
+  w.visible_boxes['5/0'].setChecked(True);wait()
+  w.show_issues.setChecked(False);wait();assert not w.drc_overlay.points.get_visible() and w.issue_table.rowCount()==count
+  w.show_issues.setChecked(True);wait();assert w.drc_overlay.points.get_visible()
   if os.environ.get('DSA_QA_SCREENSHOT'):w.grab().save(os.environ['DSA_QA_SCREENSHOT'])
   w.reconstruction_toggle.setChecked(False);wait();assert w.style_for('3/0')==original
   w.setting_fields['drc_tolerance_um'].setValue(.15);wait()
@@ -68,7 +76,9 @@ try:
  w.tabs.setCurrentIndex(0);w.manual_button.click();app.processEvents()
  w.manual_preview.rows[0][3].setValue(['custom',4,5]);w.manual_preview.rows[0][0].setValue(3);w.manual_preview.preview_button.click();wait()
  assert w.params().for_die(0).rotation_x_um==4
- saved=folder/'saved.dshift.json';w.write_project(saved);w.manual_preview.hide();w.load_project(saved);wait()
+ saved=folder/'saved.dshift.json';w.write_project(saved)
+ assert json.loads(saved.read_text())['saved_results'] is None, 'Changed pivots must not relabel an old assessment as current'
+ w.manual_preview.hide();w.load_project(saved);wait()
  assert w.params().for_die(0).rotation_y_um==5
  assert w.params().minimum_area_um2==.5
  print('GUI_V45_PASS compact layout, lazy analysis, manual pose/pivot Jobs, current copper DRC parity, style restore, auto IPC budgets',flush=True)

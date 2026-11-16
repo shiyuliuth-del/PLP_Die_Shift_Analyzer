@@ -69,6 +69,8 @@ def portable_path(target,base):
 
 def save(w,path):
     if not w.view_settings.save_project_results or w.result is None:return None
+    if getattr(w,'dirty',False):
+        w.log_bus.emit('参数已变化，本次保存当前设置；旧评估快照不作为新参数的完成结果。','WARNING');return None
     queued=any(controller.pending is not None or controller.timer.isActive() for controller in (w.width_yield,w.reconstruction_yield))
     if w._tasks or w.preview_pending or w.motion_pending or queued:
         w.log_bus.emit('计算尚未完成，本次仅保存设置，不保存不完整结果。','WARNING');return None
