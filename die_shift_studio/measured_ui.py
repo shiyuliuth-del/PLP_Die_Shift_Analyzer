@@ -194,7 +194,8 @@ class MeasuredOutput(QtCore.QObject):
             else:reply.update(self.command(request['command'],request.get('args',{})))
         except Exception as exc:reply.update(status='error',error=dict(type=type(exc).__name__,message=str(exc)))
         finally:
-            self.requests[request['id']]=dict(reply)
+            # Busy did not accept work. The same operation ID may retry later.
+            if reply.get('error',{}).get('type')!='Busy':self.requests[request['id']]=dict(reply)
             while len(self.requests)>10000:self.requests.popitem(last=False)
             event.set()
     def command(self,command,args):
@@ -211,7 +212,10 @@ class MeasuredOutput(QtCore.QObject):
                 current_pose=[dict(die=i+1,dx_um=float(z[0]),dy_um=float(z[1]),angle_deg=float(np.rad2deg(z[2])),rotation_center_um=list(self.current[0]['rotation_centers'][i])) for i,z in enumerate(self.current[0]['states'])] if self.current else None,
                 roles=w.roles() if w.data else {},board_bounds_um=list(w.case['board'].bounds) if w.case else None,
                 dies=[dict(die=i+1,center_um=list(d.centroid.coords[0]),bounds_um=list(d.bounds)) for i,d in enumerate(w.case['dies'])] if w.case else [],
-                options=asdict(self.options),running=list(self.running),batch=self.batch['id'] if self.batch else None))
+                options=asdict(self.options),running=list(self.running),batch=self.batch['id'] if self.batch else None,
+                batch_owner=self.batch.get('client_id') if self.batch else None,
+                instance_id=self.server.instance_id if self.server else None,
+                session_identity=self.session.identity if self.ready and self.session else None))
         if not self.active():raise RuntimeError('实测输出已关闭，不接受新的遥控命令')
         if command=='compute.cancel':self.stop();return dict(status='completed',result={'cancellation_requested':True,'running':list(self.running)})
         if command=='app.shutdown':
@@ -244,7 +248,7 @@ class MeasuredOutput(QtCore.QObject):
             if w.data and w.project_path:w.write_project(w.project_path)
             return dict(status='completed',result=asdict(self.options))
         if command=='session.prepare':
-            if self.running or self.transition:raise RuntimeError('已有任务正在运行')
+            if self.running or self.batch or self.transition:raise RuntimeError('已有任务正在运行')
             self.last_error=None;key=self.new_job(command);self.transition=dict(job=key,phase='assess');return dict(status='accepted',task_id=key)
         if not self.ready or self.session is None:raise RuntimeError('工程尚未完成评估和共用动区准备，查询info或调用session.prepare')
         if command=='preview.submit':
@@ -269,6 +273,8 @@ class MeasuredOutput(QtCore.QObject):
             return self.submit(command,lambda progress:dict(write_gds(snapshot,destination,self.session.data.dbu_um),**details),'export')
         if command=='batch.begin':
             if self.running or self.batch:raise RuntimeError('已有任务或批次')
+            client_id=args.get('client_id')
+            if client_id is not None and (not isinstance(client_id,str) or len(client_id)!=32 or any(c not in '0123456789abcdef' for c in client_id)):raise ValueError('client_id须为32位小写十六进制')
             from .oas_stream import Store
             profile=resource_profile();memory=min(self.options.max_memory_mb,max(128,int(profile['available_memory_mb']*.65)))
             per_lane=max(96,int(self.session.cache.bytes*24/1024**2));lanes=max(1,min(self.options.max_threads or profile['workers'],profile['workers'],int(memory*.7)//per_lane))
@@ -278,7 +284,7 @@ class MeasuredOutput(QtCore.QObject):
                 import psutil
                 baseline=psutil.Process().memory_info().rss
             except (ImportError,OSError):baseline=0
-            self.batch=dict(id=uuid.uuid4().hex,store=Store(destination.parent,self.session.data.dbu_um,max(1024**2,memory*1024**2//5)),lock=threading.Lock(),path=destination,baseline=baseline,
+            self.batch=dict(id=uuid.uuid4().hex,client_id=client_id,store=Store(destination.parent,self.session.data.dbu_um,max(1024**2,memory*1024**2//5)),lock=threading.Lock(),path=destination,baseline=baseline,
                             executor=ThreadPoolExecutor(max_workers=lanes,thread_name_prefix='dsa-batch'),pending=set(),inflight=set(),completed=0,failed=0,failures=[],ending=False,lanes=lanes,memory_mb=memory,semaphore=threading.Semaphore(lanes),allow_failed=bool(args.get('allow_failed',False)))
             return dict(status='completed',result=dict(batch_id=self.batch['id'],threads=lanes,max_memory_mb=memory,queue_limit=lanes*4))
         if command=='batch.submit':

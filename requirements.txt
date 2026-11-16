@@ -8,3 +8,4 @@ psutil
 Pillow
 PyInstaller
 klayout
+openpyxl

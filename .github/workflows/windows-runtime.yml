@@ -3,6 +3,10 @@ on:
   pull_request:
     paths:
       - 'die_shift_studio/**'
+      - 'RealDataAnalyse/**'
+      - 'cases/GD55/**'
+      - 'tests/test_v44.py'
+      - 'tests/gui_v44*.py'
       - 'tools/package_release.py'
       - 'tools/windows_acceptance.py'
       - 'tests/gui_v30.py'
@@ -178,6 +182,15 @@ jobs:
           "%DIE_SHIFT_PYTHON%" tests/gui_v40.py
           if errorlevel 1 exit /b %errorlevel%
           "%DIE_SHIFT_PYTHON%" tests/gui_v39.py
+      - name: Verify V44 Excel client and durable recovery
+        shell: cmd
+        run: |
+          set PYTHONPATH=.;tests
+          "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_v44.py -v
+          if errorlevel 1 exit /b 1
+          "%DIE_SHIFT_PYTHON%" tests/gui_v44.py
+          if errorlevel 1 exit /b 1
+          "%DIE_SHIFT_PYTHON%" tests/gui_v44_process.py
       - name: Exercise the one-click BUILD.bat from the extracted source
         shell: cmd
         run: call "%DSA_TEST_SOURCE%\BUILD.bat"

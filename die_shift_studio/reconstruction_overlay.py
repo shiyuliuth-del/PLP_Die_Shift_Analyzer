@@ -284,7 +284,7 @@ class CutDrag:
         if picked is None:return
         piece,xy,kind=picked
         from .branch_regions import editable_piece
-        piece=editable_piece(piece,(event.xdata,event.ydata))
+        piece=editable_piece(piece,(event.xdata,event.ydata),kind)
         overlay=w.reconstruction_overlay;overlay.selected=overlay._key(piece);overlay.selected_kind=kind
         if kind in ('bridge','problem'):return
         if event.button!=1:return
@@ -303,8 +303,17 @@ class CutDrag:
         side=1 if kind=='extra' else 0;frame=w.current_frame;owner=piece['die']
         point=np.array([event.xdata,event.ydata])-self.state['handle_offset']
         nominal=inverse_geometry(shapely.Point(point),frame['rotation_centers'][owner],frame['states'][owner]*piece.get('endpoint_weights',(1.,0.))[side])
-        self.state['press_projection']=float(piece['route_plan'].route.project(nominal))
+        plan=piece['route_plan'];origin=np.asarray(plan.route.interpolate(piece['interval'][side]).coords[0])
+        self.state['press_projection']=float(np.clip(piece['interval'][side]+(np.asarray(nominal.coords[0])-origin)@plan.tangent(piece['interval'][side]),0.,plan.length))
+        self.state['projection_cursor']=np.asarray(nominal.coords[0]);self.state['projection']=self.state['press_projection']
         self.state['press_interval']=piece['interval'][side]
+        self.state['companions']=[]
+        for member in piece.get('drag_members',()):
+            other=member['route_plan']
+            if other is plan:continue
+            origin=np.asarray(other.route.interpolate(member['interval'][side]).coords[0])
+            mark=float(np.clip(member['interval'][side]+(np.asarray(nominal.coords[0])-origin)@other.tangent(member['interval'][side]),0.,other.length))
+            self.state['companions'].append(dict(piece=member,press=mark,projection=mark,cursor=np.asarray(nominal.coords[0])))
         w.canvas.reconstruction_drag_active=True
         self.latest=None;self.timer.start();overlay.highlight(picked)
         w.statusBar().showMessage('拖动共用动区边界；另一端保持不动，松开后更新所有工况。')
@@ -327,13 +336,24 @@ class CutDrag:
             plan=piece.get('route_plan')
             if plan is not None:
                 which=1 if state['kind']=='extra' else 0
-                part,clamped=plan.edit_pose(*piece['interval'],which,state['press_interval']+float(plan.route.project(shapely.Point(cursor)))-state['press_projection'],frame['rotation_centers'][owner],frame['states'][owner],self.w.view_settings.reconstruction_style,cursor=cursor)
+                projection=plan.drag_projection(cursor,state['projection'],state['projection_cursor'])
+                state['projection']=projection;state['projection_cursor']=cursor.copy()
+                part,clamped=plan.edit_pose(*piece['interval'],which,state['press_interval']+projection-state['press_projection'],frame['rotation_centers'][owner],frame['states'][owner],self.w.view_settings.reconstruction_style,cursor=cursor)
                 if part is not None:
                     from .reconstruction_edits import apply_angles
                     part=apply_angles(state['updated'],plan,part)
                 if part is not None:
                     rows=[r for r in self.w.view_settings.reconstruction_intervals if (r[0],r[1],r[2],normalize_via_refs(r[3]),r[4])!=(*plan.key,plan.identity)]
                     rows.append((*plan.key,plan.identity,part['a'],part['b']))
+                    for companion in state['companions']:
+                        member=companion['piece'];other=member['route_plan']
+                        mark=other.drag_projection(cursor,companion['projection'],companion['cursor'])
+                        companion.update(projection=mark,cursor=cursor.copy())
+                        target=member['interval'][which]+mark-companion['press']
+                        extra,_=other.edit_pose(*member['interval'],which,target,frame['rotation_centers'][owner],frame['states'][owner],self.w.view_settings.reconstruction_style,cursor=cursor)
+                        if extra is not None:
+                            rows=[row for row in rows if row[:5]!=(*other.key,other.identity)]
+                            rows.append((*other.key,other.identity,extra['a'],extra['b']))
                     state['updated']=replace(state['updated'],reconstruction_intervals=tuple(rows));state['part']=part
                     weights=piece.get('endpoint_weights',(1.,0.))
                     near=transform(part['near'],frame['rotation_centers'][owner],frame['states'][owner]*weights[0])

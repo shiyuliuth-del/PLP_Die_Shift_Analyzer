@@ -1,0 +1,15 @@
+{
+  "packages": 10000,
+  "measurements": 20000,
+  "generate_seconds": 11.352922789999866,
+  "import_seconds": 3.275463853002293,
+  "scheduler_and_streaming_seconds": 157.97785136099992,
+  "peak_process_rss_kib": 130360,
+  "output_bytes": 1146716,
+  "scope": "Synthetic transport and simple polygon streaming, not GD55 reconstruction throughput",
+  "local_environment": {
+    "python": "3.12.3",
+    "platform": "Linux",
+    "client_workers": 16
+  }
+}

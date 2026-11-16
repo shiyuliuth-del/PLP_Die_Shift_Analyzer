@@ -99,3 +99,9 @@ A颜色仅由A自身型变前/后的见证决定。两侧铜默认图层颜色�
 - 接口合同/限额/错误见[MEASURED_OUTPUT_API](MEASURED_OUTPUT_API.md)，独立[GD55脚本](../tools/verify_measured_gd55.py)只用标准库调用。
 
 资源上限是增量工作预算，原生调用只能安全点取消，不能宣传操作系统硬隔离；记录队列Busy、错误项不替换旧文件、整个批次失败后重开。批次期间其他工程变更禁止。后续优先用相同图纸/状态测量准备与稳态吞吐，区分首次规划、每姿态几何、流式I/O，而非只报总时长。既有分析/普通DXF不因为IPC开关而改变算法。
+
+## V44 RealDataAnalyse
+
+独立客户端目录：excel.py只读解析/磁盘join及可替换列映射；storage.py SQLite WAL/FULL日志与OS文件锁；transport.py有界认证/响应截止、同目录进程启动与PID出生时间检查；runner.py批次回执、冻结身份、整批重放与write-ahead发布；gui.py后台QThread和200行分页；main.py图形/自动化入口。新本地接口字段为info.session_identity、instance_id、batch_owner及batch.begin.client_id，协议1向后兼容，可靠客户端要求这些字段。Busy不缓存为最终回执，同request_id通信重试不重复接受命令。
+
+发布白名单增RealDataAnalyse全部运行必需文件与cases/GD55六文件；GD55公开授权来自本轮用户后续明确指令，其余私人数据仍禁止发布。新回归test_v44/gui_v44/gui_v44_process；Windows验收实际两个相邻EXE及从非安装cwd启动。未提交批次必须整批重放，单项computed不是成品。日志不写IPC密钥。真实Excel模板尚待提供；在excel适配层扩展而不是更改姿态/几何内核。

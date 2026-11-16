@@ -17,9 +17,10 @@ def decode(data):
     return value
 
 
-def call(endpoint,command,args=None,timeout=60):
+def call(endpoint,command,args=None,timeout=60,request_id=None):
     info=json.loads(Path(endpoint).read_text(encoding='utf8'))
-    request=dict(id=uuid.uuid4().hex,command=command,args=args or {})
+    if info.get('family') not in ('AF_UNIX','AF_PIPE'):raise ValueError('Only local IPC is supported')
+    request=dict(id=request_id or uuid.uuid4().hex,command=command,args=args or {})
     payload=json.dumps(request,allow_nan=False,separators=(',',':')).encode()
     if len(payload)>MAX_MESSAGE:raise ValueError('IPC request too large')
     with Client(info['address'],family=info['family'],authkey=bytes.fromhex(info['token'])) as connection:
@@ -66,7 +67,9 @@ class Server:
         self.listener=Listener(self.address,family=self.family,backlog=64,authkey=self.token)
         if os.name!='nt':os.chmod(self.address,0o600)
         self.pool=ThreadPoolExecutor(max_workers=16,thread_name_prefix='dsa-ipc');self.slots=threading.BoundedSemaphore(16)
-        content=dict(protocol=1,pid=os.getpid(),family=self.family,address=self.address,token=self.token.hex())
+        import psutil
+        self.instance_id=uuid.uuid4().hex
+        content=dict(protocol=1,pid=os.getpid(),process_created=psutil.Process().create_time(),instance_id=self.instance_id,family=self.family,address=self.address,token=self.token.hex())
         fd=os.open(str(self.endpoint),os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
         with os.fdopen(fd,'w',encoding='utf8') as stream:json.dump(content,stream)
         self.thread=threading.Thread(target=self._accept,name='dsa-ipc-listener',daemon=True);self.thread.start()
