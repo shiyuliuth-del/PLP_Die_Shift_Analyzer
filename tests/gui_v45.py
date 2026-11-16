@@ -46,6 +46,7 @@ try:
   w.problem_filter.setChecked(False);wait()
   w.manual_button.click();app.processEvents();d=w.manual_preview
   assert d.isVisible() and len(d.rows)==1
+  assert d.table.editTriggers()==getattr(W.QAbstractItemView,'EditTrigger',W.QAbstractItemView).NoEditTriggers
   d.rows[0][0].setValue(12);d.rows[0][1].setValue(7);d.rows[0][2].setValue(.5);d.preview_button.click();wait()
   np.testing.assert_allclose(w.shown_states,[[12,7,np.deg2rad(.5)]])
   d.restore_button.click();wait();np.testing.assert_allclose(w.shown_states,np.zeros((1,3)))

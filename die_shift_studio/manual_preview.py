@@ -10,6 +10,7 @@ class ManualPreview(W.QDialog):
         super().__init__(w);self.w=w;self.setWindowTitle('手动偏移');self.resize(800,340)
         self.rows=[];self.source=None;layout=W.QVBoxLayout(self)
         self.table=W.QTableWidget(0,5);self.table.setHorizontalHeaderLabels(['芯片','DX / μm','DY / μm','O / °','旋转中心'])
+        self.table.setEditTriggers(getattr(W.QAbstractItemView,'EditTrigger',W.QAbstractItemView).NoEditTriggers)
         self.table.verticalHeader().hide();layout.addWidget(self.table)
         line=W.QHBoxLayout();line.addStretch()
         self.preview_button=W.QPushButton('预览');self.restore_button=W.QPushButton('复原');close=W.QPushButton('关闭')
