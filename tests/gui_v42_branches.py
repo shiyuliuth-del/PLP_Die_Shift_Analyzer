@@ -24,6 +24,7 @@ def wait(timeout=100):
   time.sleep(.003)
  else:raise AssertionError(('timeout',w.runtime_view.toPlainText()[-5000:]))
  assert not errors,errors
+ assert '[ERROR]' not in w.runtime_view.toPlainText(),w.runtime_view.toPlainText()[-5000:]
 
 def event(name,point,button=1,step=0):
  x,y=w.ax.transData.transform(point);e=MouseEvent(name,w.canvas,x,y,button=button,step=step)

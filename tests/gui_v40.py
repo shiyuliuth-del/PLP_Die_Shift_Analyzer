@@ -58,7 +58,9 @@ try:
  w.escape_action();assert not any(a.get_visible() for a in w.reconstruction_overlay.labels)
  click(point);menu_action('忽略选中图形的重构',point)
  assert w.view_settings.reconstruction_ignored==( ('5/0',0), )
- assert not w.current_frame['reconstruction']['pieces']
+ assert w.current_frame['reconstruction']['pieces']
+ assert all(q.get('ignored') and q['regions']['A'].is_empty for q in w.current_frame['reconstruction']['pieces'])
+ assert w.current_frame['reconstruction']['replacements']['5/0'][0]['geometry'].equals(w.geometry_cache.layers['5/0']['geometry'][0])
  assert w.extreme_table.rowCount()>1,'ignoring reconstruction must not hide original fixed-copper DRC'
  saved=folder/'saved.dshift.json';w.write_project(saved)
  assert json.loads(saved.read_text())['ignored_reconstruction']['refs']==[['5/0',0]]

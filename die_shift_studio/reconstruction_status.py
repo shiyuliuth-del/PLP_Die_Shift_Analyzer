@@ -136,11 +136,11 @@ class ConstraintFeedback:
                         rebuilt.auto_ignored=dict(current.auto_ignored);rebuilt.safe_vias=dict(current.safe_vias)
                         rebuilt._envelopes=current._envelopes;rebuilt._plans=expand(rebuilt,local_pool['local'])
                     local=rebuilt.frame(frame['states'],targets=changed,diagnostics=False,progress=progress)
-                    data=frame['reconstruction'];refs=set(changed)
-                    copper={k:[v for v in rows if not any((k,i) in refs for i in v['indices'])] for k,rows in data['replacements'].items()}
+                    frame_data=frame['reconstruction'];refs=set(changed)
+                    copper={k:[v for v in rows if not any((k,i) in refs for i in v['indices'])] for k,rows in frame_data['replacements'].items()}
                     for k,rows in local['replacements'].items():copper.setdefault(k,[]).extend(rows)
-                    pieces=[dict(q) for q in data['pieces'] if (q['layer'],q['index']) not in refs]+local['pieces']
-                    return dict(data,pieces=pieces,replacements=copper,violations=self.context[1].check(copper,frame['states'],progress),
+                    pieces=[dict(q) for q in frame_data['pieces'] if (q['layer'],q['index']) not in refs]+local['pieces']
+                    return dict(frame_data,pieces=pieces,replacements=copper,violations=self.context[1].check(copper,frame['states'],progress),
                                 original_violations=self.context[1].nominal_check(),constraints_complete=True)
                 finally:rebuilt.cache.close()
             return self.context[1].check(frame['reconstruction']['replacements'],frame['states'],progress)

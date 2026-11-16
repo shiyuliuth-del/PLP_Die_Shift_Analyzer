@@ -81,9 +81,11 @@ try:
  point=np.array(w.reconstruction_overlay.handle_geometries([qpoint])[w.reconstruction_overlay._key(qpoint),'moved'].coords[0]);event('motion_notify_event',point)
  app.processEvents();assert w.reconstruction_overlay.pulse_timer.isActive()
  values=[]
- for _ in range(12):
+ # V42 reduces the pulse to 0.6 px. Observe a complete cycle instead of
+ # relying on the arbitrary phase of a 0.24-second fragment.
+ for _ in range(55):
   app.processEvents();time.sleep(.02);values.append(w.reconstruction_overlay.hover.get_markersize())
- assert max(values)-min(values)>.4
+ assert .4<max(values)-min(values)<=.65
  qboth=drag(qpoint,1,qpoint['route_plan'].length)
  assert qboth['extra_cut'].geom_type=='Point'
  point=np.array(w.reconstruction_overlay.handle_geometries([qboth])[w.reconstruction_overlay._key(qboth),'extra'].coords[0]);event('motion_notify_event',point)

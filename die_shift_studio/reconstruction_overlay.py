@@ -258,7 +258,7 @@ class ReconstructionOverlay:
                     '—' if q['clearance_um'] is None else f"{q['clearance_um']:.2f}",status]
             for j,value in enumerate(values):w.reconstruction_table.setItem(i,j,W.QTableWidgetItem(str(value)))
         w.reconstruction_table.blockSignals(False)
-        w.reconstruction_summary.setText(f'共用动区 {len(rows)} 处。蓝色为运动侧边界，黄色为固定侧边界；分别沿原图追溯路径拖动，跨拐角自动吸附。圆点表示整孔盘；红色填充提示规则或连接问题，可单击查看。')
+        w.reconstruction_summary.setText(f'共用动区 {len(rows)} 处。两端蓝色控制柄分别对应运动侧和固定侧；分别沿原图追溯路径拖动，跨拐角自动吸附。圆点表示整孔盘；红色填充提示规则或连接问题，可单击查看。')
     def locate(self,row,*_):
         data=self.data()
         if not data or not 0<=row<len(data['pieces']):return
