@@ -1,5 +1,6 @@
 """Qt GUI; all IO/Excel/IPC work stays outside the GUI thread."""
 import json
+import copy
 from contextlib import closing
 from pathlib import Path
 import threading
@@ -92,6 +93,11 @@ class Window(W.QMainWindow):
         self.project_root = None
         self.operation = ''
         self.last_log_update = 0
+        self.shared_profile = copy.deepcopy(DEFAULT_PROFILE)
+        self.file_profiles = {}
+        self.mapping_file = None
+        self.mapping_mode = True
+        self.mapping_guard = False
         self.settings = QtCore.QSettings('DieShiftAnalyze', 'RealDataAnalyse')
         self.logger = configure_logging(installation())
         self.logger.info('RealDataAnalyse %s started', __version__)
@@ -120,6 +126,13 @@ class Window(W.QMainWindow):
         buttons.addWidget(self.connect_button)
         buttons.addWidget(self.start_button)
         form.addRow(buttons)
+        controls = W.QHBoxLayout()
+        self.dies = self.spin(controls, 'DIE数量', 1, 10000, 3)
+        self.workers = self.spin(controls, '并发线程', 1, 64, 4)
+        self.memory = self.spin(controls, '内存MB', 128, 1048576, 2048)
+        self.retries = self.spin(controls, '自动重试', 0, 10, 3)
+        self.timeout = self.spin(controls, '任务超时秒', 10, 86400, 900)
+        form.addRow(controls)
         layout.addWidget(connection)
         tabs = W.QTabWidget()
         layout.addWidget(tabs, 1)
@@ -144,17 +157,12 @@ class Window(W.QMainWindow):
         self.file_view.setMinimumHeight(100)
         self.file_view.setMaximumHeight(160)
         batch_layout.addWidget(self.file_view)
-        settings_form = W.QFormLayout()
-        batch_layout.addLayout(settings_form)
-        controls = W.QHBoxLayout()
-        self.dies = self.spin(controls, 'DIE数量', 1, 10000, 3)
-        self.workers = self.spin(controls, '并发线程', 1, 64, 4)
-        self.memory = self.spin(controls, '内存MB', 128, 1048576, 2048)
-        self.retries = self.spin(controls, '自动重试', 0, 10, 3)
-        self.timeout = self.spin(controls, '任务超时秒', 10, 86400, 900)
-        settings_form.addRow(controls)
-        profile_box = W.QGroupBox('Excel列映射（长度μm，角度°；中心留空沿用工程）')
+        profile_box = W.QGroupBox()
         profile_layout = W.QVBoxLayout(profile_box)
+        self.mapping_shared = W.QCheckBox('Excel列映射（长度μm，角度°；中心留空沿用工程）')
+        self.mapping_shared.setChecked(True)
+        self.mapping_shared.setToolTip('勾选：所有Excel共用列映射；取消：点击上方Excel行编辑该文件的独立映射')
+        profile_layout.addWidget(self.mapping_shared)
         sheet_row = W.QHBoxLayout()
         sheet_row.addWidget(W.QLabel('工作表'))
         self.sheet = W.QLineEdit(DEFAULT_PROFILE['sheet'])
@@ -224,15 +232,21 @@ class Window(W.QMainWindow):
         self.log_view.setReadOnly(True)
         self.log_view.setMaximumBlockCount(600)
         self.log_view.setMaximumHeight(115)
-        self.log_check = W.QCheckBox('显示信息输出')
+        self.log_check = W.QCheckBox()
+        self.log_check.setToolTip('显示 / 隐藏信息输出')
+        self.log_check.setAccessibleName('显示信息输出')
         self.log_view.hide()
         self.log_check.toggled.connect(self.log_view.setVisible)
-        layout.addWidget(self.log_check)
         layout.addWidget(self.log_view)
         self.progress = ProgressBar()
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
-        layout.addWidget(self.progress)
+        progress_row = W.QHBoxLayout()
+        progress_row.addWidget(self.log_check)
+        progress_row.addWidget(self.progress, 1)
+        layout.addLayout(progress_row)
+        self.mapping_shared.toggled.connect(self.toggle_mapping)
+        self.file_view.currentCellChanged.connect(self.select_mapping)
         self.folder_button.clicked.connect(self.select_folder)
         self.connect_button.clicked.connect(self.connect_server)
         self.start_button.clicked.connect(self.start_server)
@@ -298,7 +312,7 @@ class Window(W.QMainWindow):
         for widget in (self.connect_button, self.start_button, self.add_files, self.remove_files,
                        self.folder_button, self.import_button, self.run_button, self.send_button,
                        self.endpoint, self.project, self.database, self.output, self.dies, self.profile,
-                       self.workers, self.memory, self.retries, self.timeout, self.file_view, self.sheet, self.header_row,
+                       self.workers, self.memory, self.retries, self.timeout, self.file_view, self.sheet, self.header_row, self.mapping_shared,
                        *self.path_buttons):
             widget.setEnabled(not on)
         self.stop_button.setEnabled(on)
@@ -440,8 +454,15 @@ class Window(W.QMainWindow):
             self.project.setText(config['project'])
             self.database.setText(config['database'])
             self.output.setText(config['output'])
+            self.shared_profile = copy.deepcopy(config['profile'])
+            self.file_profiles = {entry['path']: copy.deepcopy(entry['profile']) for entry in config['files'] if 'profile' in entry}
+            self.mapping_file = None
+            self.mapping_mode = config.get('shared_mapping', True)
+            self.mapping_shared.blockSignals(True)
+            self.mapping_shared.setChecked(self.mapping_mode)
+            self.mapping_shared.blockSignals(False)
+            self.set_profile(self.shared_profile)
             self.set_files(config['files'])
-            self.set_profile(config['profile'])
             for name, value in config['controls'].items():
                 if name in ('dies', 'workers', 'memory', 'retries', 'timeout'):
                     getattr(self, name).setValue(int(value))
@@ -459,6 +480,8 @@ class Window(W.QMainWindow):
         self.execute(load, done, operation='载入项目文件夹')
 
     def set_files(self, files):
+        self.capture_mapping()
+        self.file_view.blockSignals(True)
         self.file_view.setRowCount(len(files))
         for row, entry in enumerate(files):
             check = W.QTableWidgetItem()
@@ -471,31 +494,77 @@ class Window(W.QMainWindow):
             item.setToolTip(str(path))
             item.setFlags(item.flags() & ~getattr(QtCore.Qt, 'ItemFlag', QtCore.Qt).ItemIsEditable)
             self.file_view.setItem(row, 1, item)
+        self.file_view.blockSignals(False)
+        if files:
+            selected = next((i for i, entry in enumerate(files) if entry['path'] == self.mapping_file), 0)
+            self.file_view.setCurrentCell(selected, 1)
+        self.select_mapping()
 
     def file_entries(self):
-        return [dict(path=self.file_view.item(row, 1).data(getattr(QtCore.Qt, 'ItemDataRole', QtCore.Qt).UserRole),
-                     enabled=self.file_view.item(row, 0).checkState() == getattr(QtCore.Qt, 'CheckState', QtCore.Qt).Checked)
-                for row in range(self.file_view.rowCount())]
+        self.capture_mapping()
+        entries = []
+        for row in range(self.file_view.rowCount()):
+            path = self.file_view.item(row, 1).data(getattr(QtCore.Qt, 'ItemDataRole', QtCore.Qt).UserRole)
+            entry = dict(path=path, enabled=self.file_view.item(row, 0).checkState() == getattr(QtCore.Qt, 'CheckState', QtCore.Qt).Checked)
+            if path in self.file_profiles:
+                entry['profile'] = copy.deepcopy(self.file_profiles[path])
+            entries.append(entry)
+        return entries
+
+    def capture_mapping(self):
+        if self.mapping_guard:
+            return
+        value = self.profile_value()
+        if self.mapping_mode:
+            self.shared_profile = value
+        elif self.mapping_file:
+            self.file_profiles[self.mapping_file] = value
+
+    def select_mapping(self, *unused):
+        if self.mapping_guard:
+            return
+        self.capture_mapping()
+        row = self.file_view.currentRow()
+        self.mapping_file = self.file_view.item(row, 1).data(getattr(QtCore.Qt, 'ItemDataRole', QtCore.Qt).UserRole) if row >= 0 and self.file_view.item(row, 1) else None
+        value = self.shared_profile if self.mapping_mode else self.file_profiles.get(self.mapping_file, self.shared_profile)
+        self.set_profile(value)
+        self.sheet.setToolTip('所有Excel共用' if self.mapping_mode else f'当前Excel：{self.mapping_file or "请先选择Excel行"}')
+
+    def toggle_mapping(self, shared):
+        self.capture_mapping()
+        self.mapping_mode = shared
+        if not shared:
+            for row in range(self.file_view.rowCount()):
+                path = self.file_view.item(row, 1).data(getattr(QtCore.Qt, 'ItemDataRole', QtCore.Qt).UserRole)
+                self.file_profiles.setdefault(path, copy.deepcopy(self.shared_profile))
+        self.set_profile(self.shared_profile if shared else self.file_profiles.get(self.mapping_file, self.shared_profile))
+        self.sheet.setToolTip('所有Excel共用' if shared else f'当前Excel：{self.mapping_file or "请先选择Excel行"}')
+
+    def import_profiles(self, entries):
+        self.capture_mapping()
+        if self.mapping_mode:
+            return None
+        return {entry['path']: copy.deepcopy(self.file_profiles.get(entry['path'], self.shared_profile)) for entry in entries if entry['enabled']}
 
     def set_profile(self, profile):
+        self.mapping_guard = True
         self.sheet.setText(profile['sheet'])
         self.header_row.setValue(profile['header_row'])
         for row, field in enumerate(HEADERS):
             self.profile.item(row, 1).setText(profile.get('columns', {}).get(field, field))
+        self.mapping_guard = False
 
     def profile_value(self):
         columns = {field: self.profile.item(row, 1).text().strip() for row, field in enumerate(HEADERS)}
-        if not self.sheet.text().strip() or any(not columns[x] for x in HEADERS[:7]):
-            raise ValueError('请填写工作表与必填字段的Excel列名')
         return dict(sheet=self.sheet.text().strip(), header_row=self.header_row.value(), columns=columns)
 
     def persist(self):
         if self.project_root is None:
             raise ValueError('请先选择项目文件夹')
         files = self.file_entries()
-        profile = self.profile_value()
+        profile = copy.deepcopy(self.shared_profile)
         save_folder(self.project_root, self.project.text(), files, self.database.text(), self.output.text(), profile,
-                    {key: getattr(self, key).value() for key in ('dies', 'workers', 'memory', 'retries', 'timeout')})
+                    {key: getattr(self, key).value() for key in ('dies', 'workers', 'memory', 'retries', 'timeout')}, shared_mapping=self.mapping_mode)
         return files, profile
 
     def select_files(self):
@@ -537,13 +606,14 @@ class Window(W.QMainWindow):
         except (OSError, ValueError) as exc:
             self.log(exc)
             return
+        profiles = self.import_profiles(files)
         files = [entry['path'] for entry in files if entry['enabled']]
         dies, workers = self.dies.value(), self.workers.value()
         def done(value):
             self.database.setText(value['database'])
             self.page = 0
             self.persist()
-        self.execute(lambda stop, progress: import_files(files, target, dies, workers, stop, progress, profile), done, operation='校验Excel并创建任务')
+        self.execute(lambda stop, progress: import_files(files, target, dies, workers, stop, progress, profile, profiles), done, operation='校验Excel并创建任务')
 
     def do_run(self):
         try:
@@ -553,13 +623,15 @@ class Window(W.QMainWindow):
             return
         kwargs = dict(database=self.database.text(), endpoint=self.endpoint.text(), project=self.project.text(), output=self.output.text(),
                       workers=self.workers.value(), memory_mb=self.memory.value(), retries=self.retries.value(), timeout=self.timeout.value())
-        selected = sorted(p['path'] for p in self.file_entries() if p['enabled'])
-        profile = self.profile_value()
+        entries = self.file_entries()
+        selected = sorted(p['path'] for p in entries if p['enabled'])
+        profile = copy.deepcopy(self.shared_profile)
+        profiles = self.import_profiles(entries) or {}
         def run(stop, progress):
             import sqlite3
             with closing(sqlite3.connect(Path(kwargs['database']).resolve().as_uri() + '?mode=ro', uri=True)) as db:
                 meta = {k: json.loads(v) for k, v in db.execute('select key,value from meta')}
-            if selected != sorted(p['path'] for p in meta.get('sources', [])) or profile != meta.get('profile') or self_die != meta.get('die_count'):
+            if selected != sorted(p['path'] for p in meta.get('sources', [])) or profile != meta.get('profile') or profiles != meta.get('profiles', {}) or self_die != meta.get('die_count'):
                 raise ValueError('Excel勾选、列映射或DIE数量与任务记录不符，请先校验并创建新任务')
             from .storage import sha256
             for index, source in enumerate(meta.get('sources', []), 1):

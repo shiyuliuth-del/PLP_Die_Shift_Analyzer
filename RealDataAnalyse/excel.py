@@ -97,12 +97,22 @@ def _read_file(path, profile, scratch, stop, progress):
         db.close()
 
 
-def import_files(paths, database, die_count, workers, stop, progress=lambda _: None, profile=None):
+def import_files(paths, database, die_count, workers, stop, progress=lambda _: None, profile=None, profiles=None):
     """Build a new journal atomically; errors never create a runnable partial run."""
     profile = profile or DEFAULT_PROFILE
-    if type(profile.get('header_row')) is not int or profile['header_row'] < 1:
-        raise ValueError('表头行号须为正整数')
     paths = [Path(p).resolve() for p in paths]
+    profiles = {str(Path(path).resolve()): value for path, value in (profiles or {}).items()}
+    if set(profiles) - {str(p) for p in paths}:
+        raise ValueError('独立列映射包含未选择的Excel')
+    if not isinstance(profile, dict):
+        raise ValueError('共用列映射须为对象')
+    for current in [profiles.get(str(path), profile) for path in paths]:
+        if not isinstance(current, dict) or type(current.get('header_row')) is not int or current['header_row'] < 1:
+            raise ValueError('表头行号须为正整数')
+        if not isinstance(current.get('sheet'), str) or not current['sheet'].strip() or not isinstance(current.get('columns'), dict):
+            raise ValueError('请填写工作表与列映射')
+        if any(not isinstance(value, str) for value in current['columns'].values()):
+            raise ValueError('Excel列名须为文本')
     if len(set(paths)) != len(paths) or len(paths) != die_count or not 1 <= die_count <= 10000:
         raise ValueError('应选择每颗DIE各一个Excel；文件不得重复，数量须与工程一致')
     database = Path(database).resolve()
@@ -114,7 +124,7 @@ def import_files(paths, database, die_count, workers, stop, progress=lambda _: N
         ledger = Ledger(stage)
         try:
             with ThreadPoolExecutor(max_workers=max(1, min(workers, len(paths), 16)), thread_name_prefix='excel') as pool:
-                futures = [pool.submit(_read_file, p, profile, Path(temp) / f'{i}.sqlite', stop, progress) for i, p in enumerate(paths)]
+                futures = [pool.submit(_read_file, p, profiles.get(str(p), profile), Path(temp) / f'{i}.sqlite', stop, progress) for i, p in enumerate(paths)]
                 sources = []
                 for future in as_completed(futures):
                     info = future.result()
@@ -160,6 +170,7 @@ def import_files(paths, database, die_count, workers, stop, progress=lambda _: N
             ledger.db.commit()
             ledger.set('sources', sorted(sources, key=lambda x: x['die']))
             ledger.set('profile', profile)
+            ledger.set('profiles', profiles)
             ledger.set('die_count', die_count)
             ledger.set('count', seq)
             ledger.set('state', 'imported')
