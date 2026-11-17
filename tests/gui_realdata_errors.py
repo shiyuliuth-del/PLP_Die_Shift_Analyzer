@@ -21,8 +21,8 @@ with tempfile.TemporaryDirectory(prefix='rda-error-output-') as temp:
  subprocess.run(command+['--import-data',str(config),'--result',str(result)],check=True,timeout=120)
  config=root/'run.json';config.write_text(json.dumps(dict(database=str(database),endpoint=str(endpoint),project=str(folder/'GD55.dshift.json'),output=str(output),workers=3,memory_mb=2048,retries=1,timeout=0)),encoding='utf8')
  try:
-  subprocess.run(command+['--run',str(config),'--result',str(result)],check=True,timeout=2400)
-  outcome=json.loads(result.read_text());assert outcome['state']=='completed',outcome
+  completed=subprocess.run(command+['--run',str(config),'--result',str(result)],timeout=2400)
+  outcome=json.loads(result.read_text());assert completed.returncode==0 and outcome['state']=='completed',outcome
   assert verify_crc(output) and list(output.parent.iterdir())==[output]
   with closing(sqlite3.connect(database)) as db:
    rows=[(seq,package,json.loads(payload),json.loads(receipt),state) for seq,package,payload,receipt,state in db.execute('select seq,package,payload,result,state from packages order by seq')]
@@ -38,6 +38,15 @@ with tempfile.TemporaryDirectory(prefix='rda-error-output-') as temp:
    with closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True)) as db:
     issues=[json.loads(row[0]) for row in db.execute('select payload from issues where task_id=? order by ordinal',(catalog['task_id'],))]
    assert len(issues)==receipt['drc_count']==catalog['total']
+   paged=[];offset=0
+   while True:
+    reply=call(endpoint,'task.issues',dict(task_id=catalog['task_id'],offset=offset,limit=128))
+    assert reply['status']=='completed',reply
+    page=reply['result'];paged.extend(page['items'])
+    if page['next_offset'] is None:break
+    assert page['next_offset']>offset;offset=page['next_offset']
+   assert paged==issues,'IPC pagination omitted or changed diagnostic positions'
+
    expected={};unique={}
    for issue in issues:
     x0,y0,x1,y1=issue['bounds_um'];dbu=layout.dbu
