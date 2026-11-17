@@ -43,6 +43,18 @@ class Projects(unittest.TestCase):
         (self.folder/'GD55_1105.gds').unlink()
         with self.assertRaisesRegex(ValueError, '不存在'): load_folder(self.folder)
 
+    def test_project_symlinks_cannot_escape_folder(self):
+        external = self.root/'outside.json'
+        external.write_bytes((self.folder/'GD55.dshift.json').read_bytes())
+        target = self.folder/'GD55.dshift.json'
+        target.unlink()
+        try:
+            target.symlink_to(external)
+        except OSError:
+            self.skipTest('This Windows account cannot create symbolic links')
+        with self.assertRaisesRegex(ValueError, '文件必须位于'):
+            load_folder(self.folder)
+
     def test_external_copy_collision_and_cancel(self):
         external = self.root/'measurements.xlsx'
         external.write_bytes(b'first')
