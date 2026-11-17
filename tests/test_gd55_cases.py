@@ -29,6 +29,13 @@ class GD55Cases(unittest.TestCase):
   recovery=recovery_cases();self.assertEqual(len(recovery),6)
   self.assertEqual(recovery[0]['poses'],recovery[-1]['poses']);self.assertTrue(all(v==0 for p in recovery[-1]['poses'] for v in p))
 
+ def test_project_defaults_to_ordinary_positions_without_absolute_paths(self):
+  from RealDataAnalyse.projects import load_folder
+  root=Path(__file__).resolve().parents[1]/'Jobs/GD55'
+  config=load_folder(root);self.assertEqual(config['profile']['sheet'],'Ordinary')
+  raw=json.loads((root/'RealDataAnalyse.project.json').read_text())
+  self.assertNotIn('project',raw);self.assertNotIn('output',raw);self.assertNotIn('database',raw)
+
  def test_every_ordinary_position_and_die_has_independent_xyz(self):
   rows=ordinary_cases();self.assertEqual(len(rows),60)
   self.assertEqual(len({tuple(r['position_um']) for r in rows}),60)

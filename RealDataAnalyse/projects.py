@@ -131,9 +131,9 @@ def install_case(destination):
     with tempfile.TemporaryDirectory(prefix='.case-', dir=jobs) as temp:
         stage = Path(temp) / 'GD55'
         stage.mkdir()
-        # Only the six reviewed case inputs, never copy a developer's task outputs.
+        # Only the reviewed case inputs, never copy a developer's task outputs.
         for name in ('GD55_1105.gds', 'GD55.dshift.json', 'GD55_SYNTHETIC_DIE1.xlsx',
-                     'GD55_SYNTHETIC_DIE2.xlsx', 'GD55_SYNTHETIC_DIE3.xlsx', 'README.md'):
+                     'GD55_SYNTHETIC_DIE2.xlsx', 'GD55_SYNTHETIC_DIE3.xlsx', 'README.md', 'RealDataAnalyse.project.json'):
             shutil.copyfile(source / name, stage / name)
         if not target.exists():
             os.rename(stage, target)
