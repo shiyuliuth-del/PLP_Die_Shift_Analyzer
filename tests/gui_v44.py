@@ -40,4 +40,4 @@ with tempfile.TemporaryDirectory() as temp:
     w.grab().save(str(Path(tempfile.gettempdir()) / 'RealDataAnalyse-v44.png'))
     w.close()
     app.processEvents()
-print('GUI_V44_PASS: all 15 commands, 403 rows/3 pages, worker gating and clean close')
+print('GUI_V44_PASS: all IPC command templates, 403 rows/3 pages, worker gating and clean close')

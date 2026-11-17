@@ -28,6 +28,7 @@ COMMANDS = {
     'batch.begin': {'filename': 'measured.oas'},
     'batch.submit': {'batch_id': '', 'cell': 'Package_000001', 'position_um': [0, 0], 'dies': []},
     'batch.end': {'batch_id': ''}, 'task.get': {'task_id': ''},
+    'task.issues': {'task_id': '', 'offset': 0, 'limit': 128},
     'compute.cancel': {}, 'app.shutdown': {},
 }
 
