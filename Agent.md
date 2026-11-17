@@ -36,7 +36,7 @@
 
 版本每轮递增，当前看 `die_shift_studio/__init__.py`。更新README、使用说明、现行合同、已知问题、轮次记录和本地研究工作区AGENTS入口。
 
-V44联合发布：根目录RUN.bat运行主程序，BUILD.bat一键构建两个EXE到同一dist目录；RealDataAnalyse子目录另有RUN.bat与独立BUILD.bat。正式Release为联合源码ZIP＋SHA-256，不单独发布客户端。按用户本轮明确要求，cases/GD55中的图纸、工程、三份合成Excel及说明随包公开；此为历史不附GDS规则的特定例外。其他图纸、图片、EXE、Jobs缓存不得上传。临时Windows EXE仅用于验收。
+V44联合发布：根目录RUN.bat运行主程序，BUILD.bat一键构建两个EXE到同一dist目录；RealDataAnalyse子目录另有RUN.bat与独立BUILD.bat。正式Release为联合源码ZIP＋SHA-256，不单独发布客户端。按用户本轮明确要求，Jobs/GD55中的图纸、工程、三份合成Excel及说明随包公开；此为历史不附GDS规则的特定例外。其他图纸、图片、EXE、Jobs缓存不得上传。临时Windows EXE仅用于验收。
 
 使用 `python3 tools/package_release.py make-source`，正式包与GitHub自动源码归档均只含运行必需文件。发布前核对最新头Windows clean/with-cupy检查；发布后回下载Release、自动ZIP/tar，逐文件匹配tag、CRC/SHA/7-Zip验证。失败不得覆盖旧交付物，不重写tag来补文档。发布后证据可补在Release说明。
 
