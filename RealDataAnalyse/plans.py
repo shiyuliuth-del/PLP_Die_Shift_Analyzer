@@ -247,13 +247,15 @@ class PlanRunner:
         owned_pid = row.get('owned_pid'); owned_birth = row.get('owned_birth')
         batch_owner = None
         last_update = [0.]
+        last_number = [0.]
         def report(value, base=25, span=60):
             if isinstance(value, dict):
                 text = value.get('text','')
                 fraction = value.get('current',0)/max(1,value.get('total',1))
-            else: text, fraction = str(value), 0
+            else: text, fraction = str(value), None
             if text.startswith(('OAS', '最终提交')): base, span = 85, 14
-            number = min(99., base + span*max(0., min(1.,fraction)))
+            number = last_number[0] if fraction is None else min(99., base + span*max(0., min(1.,fraction)))
+            last_number[0] = number
             now = time.monotonic()
             if now-last_update[0] >= .2:
                 last_update[0] = now

@@ -48,4 +48,29 @@ class ErrorContracts(unittest.TestCase):
  def test_drc_only_keeps_copper_without_requiring_partial_deletion(self):
   Runner.validate_pose(dict(cell='P',fixed_rdl_drc_checked=True,drc_count=3,error_rectangles=2),'P')
 
+ def test_plan_warning_message_preserves_numeric_progress(self):
+  from unittest.mock import Mock,patch
+  from RealDataAnalyse.plans import Plans,PlanRunner,capture
+  from RealDataAnalyse.excel import DEFAULT_PROFILE
+  with tempfile.TemporaryDirectory() as name:
+   root=Path(name).resolve();files=generate_example(root,count=1,die_count=2)
+   (root/'source.gds').write_bytes(b'fixture');(root/'case.json').write_text(json.dumps(dict(gds_path='source.gds')))
+   config=dict(folder=str(root),project=str(root/'case.json'),files=[dict(path=p,enabled=True) for p in files],profile=DEFAULT_PROFILE,controls=dict(dies=2,workers=1,memory=512,retries=0,timeout=0))
+   plans=Plans(root/'plans.sqlite');pid=plans.add(capture(config,threading.Event()));values=[]
+   transport=Mock();transport.owns_descriptor.return_value=False
+   class ReportingRunner:
+    def __init__(self,*args,**kwargs):self.report=args[9]
+    def run(self):
+     self.report(dict(text='批次1 · 完成5/10',current=5,total=10))
+     self.report('封装含问题，正常部分已保留')
+     return dict(state='completed')
+   try:
+    with patch('RealDataAnalyse.plans.connect',return_value=(transport,{},False)),patch('RealDataAnalyse.plans.Runner',ReportingRunner):
+     PlanRunner(plans,progress=values.append).run_one(plans.get(pid))
+    self.assertEqual(values[-1]['current'],values[-2]['current'])
+    self.assertEqual(values[-1]['current'],55)
+   finally:
+    from RealDataAnalyse.storage import configure_logging
+    configure_logging(Path(__file__).resolve().parents[1])
+
 if __name__=='__main__':unittest.main()
