@@ -375,7 +375,7 @@ class PlanRunner:
                     self.progress(str(exc))
                     if '队列停止' in str(exc): break
                 else:
-                    self.plans.update(plan_id, status='completed', severity='', progress=100, ended=time.time(), message=f'OAS已校验并提交；含问题{summary.get("issue_packages",0)}封装，ERROR矩形{summary.get("error_rectangles",0)}个')
+                    self.plans.update(plan_id, status='completed', severity='', progress=100, ended=time.time(), message=f'OAS已校验并提交；含问题{summary.get("issue_packages",0)}封装，ERROR矩形{summary.get("error_rectangles",0)}个，FAIL {summary.get("failed_packages",0)}封装')
                     totals['completed'] += 1
         state = 'paused' if self.stop.is_set() else ('completed_with_errors' if totals['failed'] or totals['skipped'] else 'completed')
         return dict(state=state, **totals)

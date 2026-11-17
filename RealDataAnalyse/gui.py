@@ -774,7 +774,7 @@ class Window(W.QMainWindow):
                 try:
                     receipt=json.loads(result)
                     if isinstance(receipt,dict) and ('drc_count' in receipt or receipt.get('connection_failure_count')):
-                        result=f'DRC {receipt.get("drc_count",0)}项；连接失败 {receipt.get("connection_failure_count",0)}项；ERROR矩形 {receipt.get("error_rectangles",0)}个。'+ ('问题位置已移除，正常部分已保留。' if receipt.get('partial_output') else '')
+                        result=f'DRC {receipt.get("drc_count",0)}项；连接失败 {receipt.get("connection_failure_count",0)}项；ERROR矩形 {receipt.get("error_rectangles",0)}个；FAIL封装 {receipt.get("failed_packages",0)}个。'+ ('问题位置已移除，正常部分已保留。' if receipt.get('partial_output') else '')
                 except (ValueError,TypeError):pass
                 for j, value in enumerate((package, cell, preview, state, result)):
                     item = W.QTableWidgetItem(str(value)[:4000])
