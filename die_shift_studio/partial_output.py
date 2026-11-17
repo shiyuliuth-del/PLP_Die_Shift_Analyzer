@@ -32,9 +32,35 @@ def omit(model,frame):
         if not remaining.is_valid or not np.isfinite(shapely.get_coordinates(remaining)).all():raise ValueError('局部删除后仍有无效几何，未输出')
         if remaining.difference(g).area>tol*tol or g.symmetric_difference(remaining).difference(cut).area>tol*tol:raise ValueError('局部删除越出问题范围，未输出')
         actual[ref]=remaining;removed[ref]=g.difference(remaining);cutouts[ref]=cut
+    # OAS encodes global nearest-grid vertices. Validate that exact lattice,
+    # not floating slivers left by local subtraction. Only explicitly failed
+    # sources may lose collapsed area; unaffected source copper is untouched.
+    quantization=[]
+    def grid_polygon(g):
+        snapped=shapely.transform(g,lambda xy:np.rint(xy/tol)*tol)
+        pending=[shapely.make_valid(snapped)];polys=[]
+        while pending:
+            part=pending.pop()
+            if part.is_empty:continue
+            if part.geom_type=='Polygon':polys.append(part)
+            elif part.geom_type.startswith('Multi') or part.geom_type=='GeometryCollection':pending.extend(part.geoms)
+        return shapely.union_all(polys)
+    lattice={ref:grid_polygon(g) for ref,g in actual.items()}
+    for ref in failed:
+        before=actual[ref];snapped=lattice[ref]
+        delta=before.symmetric_difference(snapped)
+        if delta.difference(before.boundary.buffer(tol*2)).area>tol*tol*1.e-6:
+            raise ValueError('局部输出量化变化超过2 DBU，拒绝删除正常铜')
+        # Long sub-DBU remnants may collapse inside a larger connected polygon.
+        # Their disappeared portions are reported too, not just whole components.
+        erased=before.difference(snapped.buffer(tol))
+        for part in shapely.get_parts(erased):
+            if not part.is_empty and part.area>0:
+                quantization.append(dict(layer=ref[0],index=ref[1],removed_area_um2=float(part.area),bounds_um=list(part.bounds),reason='局部裁剪残片小于输出DBU',quantization=True))
+        actual[ref]=snapped
     # Independently recheck all actual same-plane foreign nets, including
     # unmoved/ignored copper and physical via bodies. No short is waived.
-    refs=list(actual);values=[actual[r] for r in refs];tree=shapely.STRtree(values)
+    refs=list(lattice);values=[lattice[r] for r in refs];tree=shapely.STRtree(values)
     for i,g in enumerate(values):
         cancel_check()
         if not g.is_valid:raise ValueError('输出包含无效铜图形')
@@ -49,4 +75,4 @@ def omit(model,frame):
         rows.append(dict(indices=[index],geometry=actual[ref]))
     out=dict(frame,diagnostic_only=False,partial_output=True,partial_output_validated=True,
              reconstruction=dict(result,replacements=replacements,partial_output=True,omitted_refs=tuple(sorted(failed))))
-    return out,[dict(layer=k,index=i,removed_area_um2=float(g.area),bounds_um=list(g.bounds) if not g.is_empty else None) for (k,i),g in sorted(removed.items())]
+    return out,[dict(layer=k,index=i,removed_area_um2=float(g.area),bounds_um=list(g.bounds) if not g.is_empty else list(cutouts[k,i].bounds) if not cutouts[k,i].is_empty else list(original[k,i].bounds),already_absent=g.is_empty) for (k,i),g in sorted(removed.items())]+quantization

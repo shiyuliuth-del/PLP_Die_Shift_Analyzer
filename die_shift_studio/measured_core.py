@@ -115,6 +115,8 @@ class Session:
             from .partial_output import omit
             frame,omissions=omit(model,frame)
             frame['drc'].extend(r.display_drc.frame(states,frame['reconstruction']['replacements'],self.settings,progress))
+            for q in omissions:
+                if q.get('quantization'):frame['drc'].append(dict(layer=q['layer'],layers=(q['layer'],),refs=((q['layer'],q['index']),),kind=q['reason'],geometry=shapely.box(*q['bounds_um']),connection_failure=True))
             frame['drc_locations']=locations(frame['drc']);issues=catalogue(frame,self.case,model)
         if result.get('hard_failures') and output_policy=='strict':
             from .reconstruction_diagnostic import display,DiagnosticFailure
