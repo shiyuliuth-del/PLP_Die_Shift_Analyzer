@@ -49,7 +49,7 @@ def local_source(project,source):
         fd,name=tempfile.mkstemp(dir=project.parent,prefix='.source-');os.close(fd)
         try:
             shutil.copyfile(source,name)
-            with open(name,'r+b') as f:os.fsync(f.fileno())
+            with open(name,'rb+') as f:os.fsync(f.fileno())
             os.replace(name,target)
         finally:
             if os.path.exists(name):os.unlink(name)
@@ -59,7 +59,11 @@ def local_source(project,source):
 def resolve_project_path(path):
     path=Path(path).expanduser().resolve()
     if path.is_dir():
-        candidates=list(path.glob('*.dshift.json')) or list(path.glob('*.json'))
+        candidates=[]
+        for candidate in path.glob('*.json'):
+            try:value=json.loads(candidate.read_text(encoding='utf8'))
+            except (ValueError,OSError):continue
+            if isinstance(value,dict) and 'gds_path' in value and 'parameters' in value:candidates.append(candidate)
         if len(candidates)!=1:raise ValueError('项目文件夹须包含唯一工程JSON')
         return candidates[0]
     return path

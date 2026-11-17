@@ -9,7 +9,8 @@ from .recognition import automatic_parameters
 from .stack import stack_order,resolve_stages
 parser=argparse.ArgumentParser(description='Die Shift Analyze：GDS工程评估')
 parser.add_argument('--project',required=True);parser.add_argument('--json')
-args=parser.parse_args();path=Path(args.project).resolve();project=normalize_project(json.loads(path.read_text(encoding='utf-8')))
+from .jobs import resolve_project_path
+args=parser.parse_args();path=resolve_project_path(args.project);project=normalize_project(json.loads(path.read_text(encoding='utf-8')))
 source=Path(project['gds_path'])
 if not source.is_absolute():source=path.parent/source
 data=read_gds(source,project.get('top_cell'))
