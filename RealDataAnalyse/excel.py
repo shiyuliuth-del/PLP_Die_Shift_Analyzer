@@ -119,7 +119,10 @@ def import_files(paths, database, die_count, workers, stop, progress=lambda _: N
     if database.exists():
         raise ValueError('新任务数据库已存在，请选择新名称或使用继续任务')
     database.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix='.rda-import-', dir=database.parent) as temp:
+    task_root = next((parent.parent for parent in database.parents if parent.name == 'Tasks'), database.parent)
+    cache = task_root / 'Cache' / 'Imports'
+    cache.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='.rda-import-', dir=cache) as temp:
         stage = Path(temp) / 'run.sqlite'
         ledger = Ledger(stage)
         try:

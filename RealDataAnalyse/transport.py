@@ -36,11 +36,14 @@ class RemoteError(RuntimeError):
 
 
 class Transport:
-    def __init__(self, endpoint, timeout=15, capacity=128):
+    def __init__(self, endpoint, timeout=15, capacity=128, trace=None, expected_instance=None):
+        self.trace = trace
+        self.expected_instance = expected_instance
         self.endpoint = Path(endpoint).resolve()
         self.timeout = timeout
         self.slots = threading.BoundedSemaphore(capacity)
         self.process = None
+        self.starting = None
         self.descriptor = None
 
     def rpc(self, command, args=None, request_id=None):
@@ -48,13 +51,23 @@ class Transport:
         # daemon workers are capped and never keep GUI shutdown alive.
         if not self.slots.acquire(timeout=self.timeout):
             raise TimeoutError('IPC连接槽已耗尽；服务可能无响应')
+        request_id = request_id or uuid.uuid4().hex
         result = queue.Queue(maxsize=1)
         def invoke():
             try:
                 descriptor = json.loads(self.endpoint.read_text(encoding='utf8'))
+                if self.expected_instance and descriptor.get('instance_id') != self.expected_instance:
+                    raise RuntimeError('IPC实例已更换，请重新连接；未向新实例发送指令')
                 self.descriptor = descriptor
-                result.put((True, call(self.endpoint, command, args, self.timeout, request_id)))
+                if self.trace:
+                    self.trace.record('send', self.endpoint, dict(id=request_id, command=command, args=args or {}, instance=descriptor.get('instance_id')))
+                response = call(self.endpoint, command, args, self.timeout, request_id, descriptor)
+                if self.trace:
+                    self.trace.record('receive', self.endpoint, response)
+                result.put((True, response))
             except Exception as exc:
+                if self.trace:
+                    self.trace.record('error', self.endpoint, dict(id=request_id, command=command, error=str(exc)))
                 result.put((False, exc))
             finally:
                 self.slots.release()
@@ -90,8 +103,50 @@ class Transport:
                 time.sleep(delay)
         raise AssertionError('unreachable')
 
+    def find_starting(self, project):
+        """Inspect only argv for this exact sibling program/endpoint, not disk paths."""
+        import psutil
+        app = sibling_app()
+        for process in psutil.process_iter(['pid','cmdline','create_time']):
+            args = process.info['cmdline'] or []
+            try:
+                if '--ipc-endpoint' not in args or '--project' not in args:
+                    continue
+                if Path(args[args.index('--ipc-endpoint')+1]).resolve() != self.endpoint:
+                    continue
+                if Path(args[args.index('--project')+1]).resolve() != Path(project).resolve():
+                    raise RuntimeError('同一IPC入口已有其他工程正在启动')
+                program_matches = any(Path(arg).resolve() == app for arg in args[:2])
+                if program_matches and process.is_running() and process.status() != psutil.STATUS_ZOMBIE:
+                    self.starting = (process.pid, process.info['create_time'])
+                    return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied, IndexError, OSError):
+                continue
+        return False
+
+    def starting_alive(self):
+        if not self.starting:return False
+        import psutil
+        try:
+            process = psutil.Process(self.starting[0])
+            return process.is_running() and process.status() != psutil.STATUS_ZOMBIE and abs(process.create_time()-self.starting[1]) < .01
+        except psutil.NoSuchProcess:return False
+        except psutil.AccessDenied:return True
+
+    def owns_descriptor(self, pid=None, birth=None):
+        import psutil
+        pid = pid or (self.process.pid if self.process is not None else None)
+        if not pid or not self.descriptor:return False
+        try:
+            process = psutil.Process(self.descriptor['pid'])
+            owner = process if process.pid == pid else process.parent()
+            return bool(owner and owner.pid == pid and (birth is None or abs(owner.create_time()-birth)<.01))
+        except (psutil.Error, KeyError):return False
+
     def alive(self):
         import psutil
+        if (self.process is not None and self.process.poll() is None) or self.starting_alive():
+            return True
         descriptor = self.descriptor
         if self.endpoint.exists():
             try:
@@ -108,11 +163,13 @@ class Transport:
                 return False
             except (psutil.AccessDenied, KeyError):
                 return True
-        return self.process is not None and self.process.poll() is None
+        return (self.process is not None and self.process.poll() is None) or self.starting_alive()
 
     def launch(self, project):
         if self.alive():
             raise RuntimeError('Die Shift Analyze进程仍在；等待安全恢复，不重复启动或强杀')
+        self.expected_instance = None
+        self.starting = None
         app = sibling_app()
         project = Path(project).resolve()
         if not project.is_file():
@@ -125,10 +182,12 @@ class Transport:
         with (logs / 'RealDataAnalyse-child.log').open('ab') as stream:
             self.process = subprocess.Popen(command, cwd=app.parent, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+        if self.trace:
+            self.trace.record('lifecycle', self.endpoint, dict(action='launch', pid=self.process.pid, project=str(project), program=str(app)))
         return self.process.pid
 
-    def wait_ready(self, stop, timeout=900, progress=None):
-        until = time.monotonic() + timeout
+    def wait_ready(self, stop, timeout=0, progress=None):
+        until = time.monotonic() + timeout if timeout else float('inf')
         last = None
         while time.monotonic() < until:
             if stop.is_set():
@@ -152,8 +211,8 @@ class Transport:
             stop.wait(.3)
         raise TimeoutError(f'等待工程ready超时：{last}')
 
-    def wait_task(self, task_id, stop, timeout=900, progress=None):
-        until = time.monotonic() + timeout
+    def wait_task(self, task_id, stop, timeout=0, progress=None):
+        until = time.monotonic() + timeout if timeout else float('inf')
         while time.monotonic() < until:
             task = self.request('task.get', {'task_id': task_id}, stop=stop)['result']
             if progress:

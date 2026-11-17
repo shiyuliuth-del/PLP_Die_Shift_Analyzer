@@ -24,9 +24,9 @@ with tempfile.TemporaryDirectory() as temp:
     w.refresh()
     assert w.table.rowCount() == 200
     w.change_page(1)
-    assert w.table.item(0, 0).text() == '201'
+    assert w.table.verticalHeaderItem(0).text() == '201'
     w.change_page(1)
-    assert w.table.rowCount() == 3 and w.table.item(0, 0).text() == '401'
+    assert w.table.rowCount() == 3 and w.table.verticalHeaderItem(0).text() == '401'
     for command in COMMANDS:
         w.command.setCurrentText(command)
         assert isinstance(__import__('json').loads(w.args.toPlainText()), dict)

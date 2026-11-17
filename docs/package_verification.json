@@ -1,11 +1,11 @@
 {
-  "version": "V47",
+  "version": "V48",
   "status": "PASS",
-  "tested_at_utc": "2026-11-17T03:48:45.521307+00:00",
+  "tested_at_utc": "2026-11-17T04:19:14.329441+00:00",
   "scope": "Clean source checkout, local platform. Windows executable verification is recorded separately.",
   "platform": "linux",
-  "verified_runtime_sha256": "7b86407a7f327d32177b57622ee3b88063d8dfaa858d5d209e888c18ed052c6e",
-  "gui_suites": 32,
+  "verified_runtime_sha256": "0f7029b52165ea81b6fef1532725b195368e36753fab03bd69dc0e5fc126691f",
+  "gui_suites": 35,
   "runs": [
     {
       "args": [
@@ -21,7 +21,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "Ran 437 tests in 72.633s",
+        "Ran 451 tests in 54.173s",
         "",
         "OK (skipped=2)"
       ]
@@ -403,6 +403,38 @@
         "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
         "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
         "GUI_V47_PASS: pending/empty IPC, lazy commands, no assessment/yield, saved overlays, splitter and collapse"
+      ]
+    },
+    {
+      "args": [
+        "tests/gui_realdata_plans.py"
+      ],
+      "env": {},
+      "status": "PASS",
+      "summary": [
+        "This plugin does not support raise()",
+        "This plugin does not support raise()",
+        "GUI_REALDATA_PLANS_PASS: captured per-row settings, colors, real mouse height drags, headers, timeout zero, bounded conversation"
+      ]
+    },
+    {
+      "args": [
+        "tests/gui_realdata_plans_process.py"
+      ],
+      "env": {},
+      "status": "PASS",
+      "summary": [
+        "GUI_REALDATA_PLANS_PROCESS_PASS: actual client sequential two projects, 24 packages, independent OAS read/CRC, no extra Output files, no repeat, source unchanged"
+      ]
+    },
+    {
+      "args": [
+        "tests/gui_realdata_instances.py"
+      ],
+      "env": {},
+      "status": "PASS",
+      "summary": [
+        "REALDATA_INSTANCES_PASS: three simultaneous servers, unique default endpoints, exact binding, ambiguous selection rejected, no retarget/duplicate jobs, clean exits"
       ]
     },
     {

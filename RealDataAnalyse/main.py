@@ -17,12 +17,20 @@ def main():
     operation = parser.add_mutually_exclusive_group()
     operation.add_argument('--run', help='恢复运行配置JSON（database/endpoint/project/output/workers等）')
     operation.add_argument('--import-data', help='Excel导入配置JSON（paths/database/die_count/workers/profile）')
+    operation.add_argument('--run-plans', help='按顺序执行计划任务数据库')
     parser.add_argument('--result', help='无界面运行结果JSON')
     args = parser.parse_args()
-    if args.run or args.import_data:
+    if args.run or args.import_data or args.run_plans:
         try:
-            config = json.loads(Path(args.run or args.import_data).read_text(encoding='utf8'))
-            if args.import_data:
+            config = json.loads(Path(args.run or args.import_data).read_text(encoding='utf8')) if not args.run_plans else None
+            if args.run_plans:
+                from RealDataAnalyse.plans import Plans, PlanRunner
+                from RealDataAnalyse.conversation import Conversation
+                trace = Conversation()
+                try:
+                    result = PlanRunner(Plans(args.run_plans), trace=trace).run()
+                finally: trace.close()
+            elif args.import_data:
                 log_root = Path(config['database']).resolve().parent
                 if log_root.name == 'Tasks':
                     log_root = log_root.parent
@@ -34,7 +42,7 @@ def main():
                 configure_logging(Path(config['project']).resolve().parent)
                 from RealDataAnalyse.runner import Runner
                 result = Runner(**config).run()
-            code = 0
+            code = 0 if result.get('state', 'completed') == 'completed' else 1
         except Exception as exc:
             import logging
             logging.getLogger('RealDataAnalyse').exception('自动化任务失败')

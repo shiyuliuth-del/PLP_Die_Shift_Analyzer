@@ -13,6 +13,11 @@ from .projects import load_folder, save_folder, inside, copy_excel
 from .runner import Runner
 from .storage import Ledger, configure_logging
 from .transport import Transport, default_endpoint, installation
+from .conversation import Conversation
+from .instances import connect as connect_instance, project_matches
+from .widgets import table_frame, ConversationColors
+from .plans import Plans, PlanRunner, capture as capture_plan
+from .plan_ui import PlanPanel
 
 COMMANDS = {
     'ping': {}, 'info': {}, 'app.start': {}, 'project.open': {'path': ''},
@@ -83,7 +88,7 @@ class ProgressBar(W.QProgressBar):
 
 
 class Window(W.QMainWindow):
-    def __init__(self):
+    def __init__(self, plan_path=None):
         super().__init__()
         self.setWindowTitle('RealDataAnalyse ' + __version__)
         self.resize(1120, 860)
@@ -101,6 +106,11 @@ class Window(W.QMainWindow):
         self.settings = QtCore.QSettings('DieShiftAnalyze', 'RealDataAnalyse')
         self.logger = configure_logging(installation())
         self.logger.info('RealDataAnalyse %s started', __version__)
+        self.conversation = Conversation(message_limit=4000)
+        self.conversation.set_root(installation())
+        self.bindings = {}
+        self.plan_store = Plans(plan_path or installation()/'Jobs'/'.RealDataAnalyse'/'plans.sqlite')
+        self.plan_panel = None
         base = W.QWidget()
         self.setCentralWidget(base)
         layout = W.QVBoxLayout(base)
@@ -123,18 +133,22 @@ class Window(W.QMainWindow):
         buttons = W.QHBoxLayout()
         self.connect_button = W.QPushButton('连接状态')
         self.start_button = W.QPushButton('启动预演软件')
+        self.plans_button = W.QPushButton('计划任务')
         buttons.addWidget(self.connect_button)
         buttons.addWidget(self.start_button)
+        buttons.addWidget(self.plans_button)
         form.addRow(buttons)
         controls = W.QHBoxLayout()
         self.dies = self.spin(controls, 'DIE数量', 1, 10000, 3)
         self.workers = self.spin(controls, '并发线程', 1, 64, 4)
         self.memory = self.spin(controls, '内存MB', 128, 1048576, 2048)
         self.retries = self.spin(controls, '自动重试', 0, 10, 3)
-        self.timeout = self.spin(controls, '任务超时秒', 10, 86400, 900)
+        self.timeout = self.spin(controls, '任务超时秒', 0, 86400, 0)
+        self.timeout.setSpecialValueText('0（无超时）')
         form.addRow(controls)
         layout.addWidget(connection)
         tabs = W.QTabWidget()
+        self.tabs = tabs
         layout.addWidget(tabs, 1)
         batch = W.QWidget()
         batch_scroll = W.QScrollArea()
@@ -156,7 +170,8 @@ class Window(W.QMainWindow):
         self.file_view.setSelectionBehavior(getattr(W.QAbstractItemView, 'SelectionBehavior', W.QAbstractItemView).SelectRows)
         self.file_view.setMinimumHeight(100)
         self.file_view.setMaximumHeight(160)
-        batch_layout.addWidget(self.file_view)
+        self.file_frame = table_frame(self.file_view, 135, self.settings, 'excel')
+        batch_layout.addWidget(self.file_frame)
         profile_box = W.QGroupBox()
         profile_layout = W.QVBoxLayout(profile_box)
         self.mapping_shared = W.QCheckBox('Excel列映射（长度μm，角度°；中心留空沿用工程）')
@@ -171,7 +186,7 @@ class Window(W.QMainWindow):
         profile_layout.addLayout(sheet_row)
         self.profile = W.QTableWidget(len(HEADERS), 3)
         self.profile.setHorizontalHeaderLabels(['数据字段', 'Excel列名', '要求 / 单位'])
-        self.profile.verticalHeader().hide()
+        self.profile.verticalHeader().show()
         self.profile.horizontalHeader().setStretchLastSection(True)
         self.profile.setColumnWidth(0, 220)
         self.profile.setColumnWidth(1, 250)
@@ -184,25 +199,28 @@ class Window(W.QMainWindow):
                 self.profile.setItem(i, j, item)
         self.profile.setMinimumHeight(150)
         self.profile.setMaximumHeight(220)
-        profile_layout.addWidget(self.profile)
+        self.profile_frame = table_frame(self.profile, 230, self.settings, 'mapping')
+        profile_layout.addWidget(self.profile_frame)
         batch_layout.addWidget(profile_box)
         controls = W.QHBoxLayout()
-        self.import_button = W.QPushButton('校验并创建任务')
+        self.import_button = W.QPushButton('创建任务')
+        self.create_plan_button = W.QPushButton('创建计划任务')
         self.run_button = W.QPushButton('运行 / 继续补算')
         self.stop_button = W.QPushButton('安全停止')
         self.stop_button.setEnabled(False)
-        self.refresh_button = W.QPushButton('刷新记录')
-        for widget in (self.import_button, self.run_button, self.stop_button, self.refresh_button):
+        for widget in (self.import_button, self.create_plan_button, self.run_button, self.stop_button):
             controls.addWidget(widget)
         batch_layout.addLayout(controls)
         self.table = W.QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(['序号', '封装ID', 'Cell', '状态', '任务/错误'])
+        self.table.setHorizontalHeaderLabels(['封装ID', 'Cell', '各DIE偏移（μm / °）', '状态', '任务/错误'])
         self.table.setEditTriggers(W.QAbstractItemView.EditTrigger.NoEditTriggers if hasattr(W.QAbstractItemView, 'EditTrigger') else W.QAbstractItemView.NoEditTriggers)
         self.table.horizontalHeader().setStretchLastSection(True)
-        for col, width in enumerate((60, 180, 210, 100)):
+        for col, width in enumerate((170, 200, 320, 100)):
             self.table.setColumnWidth(col, width)
         self.table.setMinimumHeight(150)
-        batch_layout.addWidget(self.table, 1)
+        self.result_frame = table_frame(self.table, 240, self.settings, 'results')
+        batch_layout.addWidget(self.result_frame, 1)
+        self.table.cellDoubleClicked.connect(self.show_dies)
         paging = W.QHBoxLayout()
         prev = W.QPushButton('上一页')
         nxt = W.QPushButton('下一页')
@@ -228,6 +246,27 @@ class Window(W.QMainWindow):
         self.response = W.QPlainTextEdit()
         self.response.setReadOnly(True)
         debug_layout.addWidget(self.response, 2)
+        conversation_tab = W.QWidget()
+        tabs.addTab(conversation_tab, '实时命令信息')
+        conversation_layout = W.QVBoxLayout(conversation_tab)
+        conversation_controls = W.QHBoxLayout()
+        self.conversation_limit = self.spin(conversation_controls, '保留行数', 100, 10000, 2000)
+        self.clear_conversation = W.QPushButton('清空显示')
+        conversation_controls.addWidget(self.clear_conversation)
+        conversation_layout.addLayout(conversation_controls)
+        self.conversation_view = W.QPlainTextEdit()
+        self.conversation_view.setReadOnly(True)
+        self.conversation_view.setMaximumBlockCount(2000)
+        self.conversation_view.setLineWrapMode(getattr(W.QPlainTextEdit,'LineWrapMode',W.QPlainTextEdit).NoWrap)
+        self.conversation_colors = ConversationColors(self.conversation_view.document())
+        conversation_layout.addWidget(self.conversation_view, 1)
+        self.conversation_limit.valueChanged.connect(self.conversation_view.setMaximumBlockCount)
+        self.clear_conversation.clicked.connect(self.conversation_view.clear)
+        self.conversation_timer = QtCore.QTimer(self)
+        self.conversation_timer.setInterval(100)
+        self.conversation_timer.timeout.connect(self.flush_conversation)
+        self.conversation_timer.start()
+
         self.log_view = W.QPlainTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setMaximumBlockCount(600)
@@ -256,12 +295,13 @@ class Window(W.QMainWindow):
         self.run_button.clicked.connect(self.do_run)
         self.stop_button.clicked.connect(self.stop_work)
         self.send_button.clicked.connect(self.send)
-        self.refresh_button.clicked.connect(self.refresh)
+        self.plans_button.clicked.connect(self.show_plans)
+        self.create_plan_button.clicked.connect(self.create_plan)
         self.command.currentTextChanged.connect(self.command_changed)
         prev.clicked.connect(lambda: self.change_page(-1))
         nxt.clicked.connect(lambda: self.change_page(1))
         self.timer = QtCore.QTimer(self)
-        self.timer.setInterval(1000)
+        self.timer.setInterval(500)
         self.timer.timeout.connect(self.refresh)
         self.timer.timeout.connect(self.progress.update)
         self.timer.start()
@@ -310,7 +350,7 @@ class Window(W.QMainWindow):
 
     def busy(self, on):
         for widget in (self.connect_button, self.start_button, self.add_files, self.remove_files,
-                       self.folder_button, self.import_button, self.run_button, self.send_button,
+                       self.folder_button, self.import_button, self.create_plan_button, self.run_button, self.send_button,
                        self.endpoint, self.project, self.database, self.output, self.dies, self.profile,
                        self.workers, self.memory, self.retries, self.timeout, self.file_view, self.sheet, self.header_row, self.mapping_shared,
                        *self.path_buttons):
@@ -337,7 +377,13 @@ class Window(W.QMainWindow):
                 self.response.setPlainText(json.dumps(value, ensure_ascii=False, indent=2))
                 self.log_view.appendPlainText(time.strftime('%H:%M:%S ') + operation + '完成')
                 detail = self.progress.detail if self.progress.detail.startswith(('完成 ·', '导入完成 ·')) else operation + '完成'
-                self.progress.status(detail, 100, 100)
+                if isinstance(value, dict) and value.get('state') == 'paused':
+                    self.progress.status('计划任务已暂停')
+                elif isinstance(value, dict) and value.get('state') == 'completed_with_errors':
+                    self.progress.failed = True
+                    self.progress.status(f'计划处理结束 · 完成{value["completed"]} · 失败{value["failed"]} · 跳过{value["skipped"]}', 100, 100)
+                else:
+                    self.progress.status(detail, 100, 100)
             except Exception as exc:
                 self.log(str(exc))
                 self.logger.error('%s', exc)
@@ -366,7 +412,12 @@ class Window(W.QMainWindow):
         button.setProperty('connected', good)
 
     def accept_info(self, info):
+        if self.project_root and not project_matches(info, self.project.text()):
+            raise ValueError('所选IPC入口属于其他工程，未接管该窗口')
         self.info = info
+        endpoint = info.get('endpoint') or self.endpoint.text()
+        self.endpoint.setText(endpoint)
+        self.bindings[str(Path(endpoint).resolve())] = info.get('instance_id')
         self.button_status(self.connect_button, True)
         self.connect_button.setToolTip(f'连接正常 · ready={info.get("ready")} · 工程={info.get("project")}')
         if info.get('die_count'):
@@ -374,39 +425,17 @@ class Window(W.QMainWindow):
 
     def connect_server(self):
         endpoint = self.endpoint.text()
-        self.execute(lambda stop, progress: Transport(endpoint).request('info', stop=stop),
+        self.execute(lambda stop, progress: Transport(endpoint, trace=self.conversation).request('info', stop=stop),
                      lambda reply: self.accept_info(reply['result']),
                      lambda error: self.button_status(self.connect_button, False), '查询连接状态')
 
-    @staticmethod
-    def linked_project(endpoint, project, stop, progress, timeout, output=None):
-        transport = Transport(endpoint)
-        progress(dict(text='连接预演软件 · 查询当前工程', current=0, total=1))
-        try:
-            info = transport.request('info', stop=stop, retries=1)['result']
-        except (OSError, EOFError, TimeoutError, json.JSONDecodeError):
-            if transport.alive():
-                raise RuntimeError('预演软件仍存活但未响应，请检查窗口；不会重复启动')
-            transport.launch(project)
-            progress(dict(text='预演软件已启动 · 等待图纸加载、评估和实测准备', current=0, total=1))
-            info = transport.wait_ready(stop, timeout, progress=progress)
-        if Path(info.get('project') or '').resolve() != Path(project).resolve():
-            if info.get('running') or info.get('batch'):
-                raise ValueError('预演软件有活动任务，不能切换工程；请完成后重试启动预演软件')
-            progress(dict(text='联动打开所选工程 · 等待加载和评估', current=0, total=1))
-            reply = transport.request('project.open', {'path': project}, stop=stop)
-            if reply.get('task_id'):
-                transport.wait_task(reply['task_id'], stop, timeout, progress=progress)
-            info = transport.wait_ready(stop, timeout, progress=progress)
-        elif not info.get('ready'):
-            info = transport.wait_ready(stop, timeout, progress=progress)
-        if output is not None:
-            directory = Path(output).parent
+    def linked_project(self, endpoint, project, stop, progress, timeout, output=None):
+        transport, info, launched = connect_instance(project, endpoint, stop, progress, timeout, self.conversation)
+        if output is not None and not info.get('batch') and not info.get('running'):
+            directory = Path(output).parent.parent / "Cache" / "Manual"
             directory.mkdir(parents=True, exist_ok=True)
-            if info.get('batch') or info.get('running'):
-                raise ValueError('预演软件仍有活动任务，不能修改项目输出目录')
             transport.request('output.configure', {'output_directory': str(directory)}, stop=stop)
-        return info
+        return dict(info, endpoint=str(transport.endpoint))
 
     def start_server(self):
         try:
@@ -442,6 +471,7 @@ class Window(W.QMainWindow):
         def load(stop, progress):
             config = load_folder(folder)
             configure_logging(Path(config['folder']))
+            self.conversation.set_root(config['folder'])
             if link:
                 try:
                     config['info'] = self.linked_project(endpoint, config['project'], stop, progress, timeout, config['output'])
@@ -469,6 +499,8 @@ class Window(W.QMainWindow):
             self.logger = configure_logging(self.project_root)
             self.page = 0
             self.table.setRowCount(0)
+            if not config.get('controls', {}).get('timeout'):
+                self.timeout.setValue(0)
             if config.get('info'):
                 self.accept_info(config['info'])
                 self.button_status(self.start_button, True)
@@ -636,7 +668,7 @@ class Window(W.QMainWindow):
                 progress(dict(text=f'核对Excel输入 · {index}/{len(selected)} · {Path(source["path"]).name}', current=index - 1, total=len(selected)))
                 if sha256(source['path'], stop) != source['sha256']:
                     raise ValueError('Excel内容已修改，请先校验并创建新任务')
-            return Runner(**kwargs, stop=stop, progress=progress).run()
+            return Runner(**kwargs, stop=stop, progress=progress, trace=self.conversation).run()
         self_die = self.dies.value()
         self.execute(run, operation='批量计算与OAS输出')
 
@@ -645,7 +677,7 @@ class Window(W.QMainWindow):
         if command == 'project.open':
             args['path'] = self.project.text()
         if command == 'output.configure':
-            args.update(output_directory=str(Path(self.output.text()).parent), max_threads=self.workers.value(), max_memory_mb=self.memory.value())
+            args.update(output_directory=str(Path(self.output.text()).parent.parent / 'Cache' / 'Manual'), max_threads=self.workers.value(), max_memory_mb=self.memory.value())
         if command in ('preview.submit', 'batch.submit'):
             args['dies'] = [dict(die=i + 1, dx_um=0, dy_um=0, angle_deg=0) for i in range(self.dies.value())]
         if command in ('batch.submit', 'batch.end'):
@@ -681,13 +713,27 @@ class Window(W.QMainWindow):
             self.log(exc)
             return
         endpoint, should_wait, timeout = self.endpoint.text(), self.wait_check.isChecked(), self.timeout.value()
+        bound_instance = self.bindings.get(str(Path(endpoint).resolve()))
+        expected_project = self.project.text()
         def send(stop, progress):
-            t = Transport(endpoint)
+            t = Transport(endpoint, trace=self.conversation, expected_instance=bound_instance)
+            if command not in ('ping', 'info', 'task.get'):
+                if not expected_project:
+                    raise ValueError('请先选择项目文件夹')
+                info = t.request('info', stop=stop)['result']
+                if not project_matches(info, expected_project) and not (command == 'project.open' and not info.get('project')):
+                    raise ValueError('实例工程已变化，未发送命令')
+                t.expected_instance = info.get('instance_id')
             response = t.request(command, args, stop=stop)
             if should_wait and response.get('task_id'):
                 response = dict(response, completed_result=t.wait_task(response['task_id'], stop, timeout, progress=progress))
             return response
         def done(response):
+            if command == 'project.open':
+                self.project.setText(args['path'])
+            if command == 'app.shutdown':
+                self.button_status(self.connect_button, False)
+                self.button_status(self.start_button, False)
             if response.get('task_id'):
                 self.manual_task = response['task_id']
             if response.get('result', {}).get('batch_id'):
@@ -714,18 +760,65 @@ class Window(W.QMainWindow):
                 meta = {k: json.loads(v) for k, v in db.execute('select key,value from meta')}
                 count = meta.get('count', 0)
                 self.page = min(self.page, max(0, (count - 1) // 200))
-                counts = dict(db.execute('select state,count(*) from packages group by state'))
-                rows = db.execute('select seq,package,cell,state,coalesce(result,task,\'\') from packages order by seq limit 200 offset ?', (self.page * 200,)).fetchall()
+                rows = db.execute('select seq,package,cell,state,coalesce(result,task,\'\'),payload from packages where seq>? order by seq limit 200', (self.page * 200,)).fetchall()
             self.table.setRowCount(len(rows))
+            self.table.setVerticalHeaderLabels([str(row[0]) for row in rows])
+            role = getattr(QtCore.Qt,'ItemDataRole',QtCore.Qt).UserRole
             for i, row in enumerate(rows):
-                for j, value in enumerate(row):
+                seq, package, cell, state, result, payload = row
+                poses = json.loads(payload).get('dies', [])
+                lines = [self.die_text(pose) for pose in poses]
+                preview = '; '.join(lines[:20]) + (f' … 共{len(lines)}颗DIE，双击展开' if len(lines)>20 else '')
+                for j, value in enumerate((package, cell, preview, state, result)):
                     item = W.QTableWidgetItem(str(value)[:4000])
-                    item.setToolTip(str(value)[:16000])
-                    self.table.setItem(i, j, item)
-            done = counts.get('computed', 0) + counts.get('committed', 0)
-            self.page_label.setText(f'第{self.page + 1}页 · 共{count}封装 · 完成{done} · 失败{counts.get("error", 0)}')
-        except (OSError, ValueError, sqlite3.Error):
+                    item.setToolTip(('\n'.join(lines) if j==2 else str(value))[:16000])
+                    if j==2:item.setData(role, payload)
+                    self.table.setItem(i,j,item)
+            state = {'imported': '已导入', 'running': '运行中', 'paused': '已暂停', 'blocked': '需处理', 'completed': '已完成'}.get(meta.get('state'), meta.get('state', ''))
+            self.page_label.setText(f'{state} · 第{self.page + 1}/{max(1, (count + 199) // 200)}页 · 共{count}封装')
+        except (OSError, ValueError, TypeError, sqlite3.Error):
             pass
+
+    @staticmethod
+    def die_text(pose):
+        text = f'DIE{pose["die"]}: ΔX={pose["dx_um"]:g} μm, ΔY={pose["dy_um"]:g} μm, θ={pose["angle_deg"]:g}°'
+        if 'rotation_center_um' in pose:
+            text += f', 中心={pose["rotation_center_um"]} μm'
+        return text
+
+    def show_dies(self, row, column):
+        if column != 2 or not self.table.item(row,column):return
+        role = getattr(QtCore.Qt,'ItemDataRole',QtCore.Qt).UserRole
+        payload = json.loads(self.table.item(row,column).data(role))
+        dialog = W.QDialog(self); dialog.setWindowTitle('各DIE偏移设置'); dialog.resize(720,450)
+        layout = W.QVBoxLayout(dialog); text = W.QPlainTextEdit(); text.setReadOnly(True)
+        text.setPlainText('\n'.join(self.die_text(pose) for pose in payload['dies']))
+        layout.addWidget(text)
+        dialog.exec() if hasattr(dialog,'exec') else dialog.exec_()
+
+    def flush_conversation(self):
+        lines = self.conversation.drain(80)
+        if lines:self.conversation_view.appendPlainText('\n'.join(lines))
+
+    def show_plans(self):
+        if self.plan_panel is None:self.plan_panel = PlanPanel(self,self.plan_store)
+        self.plan_panel.show(); self.plan_panel.raise_(); self.plan_panel.refresh()
+
+    def create_plan(self):
+        entries = self.file_entries()
+        config = dict(folder=str(self.project_root) if self.project_root else '', project=self.project.text(),
+                      files=entries, profile=copy.deepcopy(self.shared_profile), shared_mapping=self.mapping_mode,
+                      controls={key:getattr(self,key).value() for key in ('dies','workers','memory','retries','timeout')})
+        def create(stop,progress):
+            progress(dict(text='保存计划快照 · 校验输入摘要',current=0,total=1))
+            snapshot = capture_plan(config,stop)
+            plan_id = self.plan_store.add(snapshot)
+            return dict(plan_id=plan_id)
+        self.execute(create, lambda value:self.show_plans(), operation='创建计划任务')
+
+    def start_plans(self):
+        self.show_plans()
+        self.execute(lambda stop,progress:PlanRunner(self.plan_store,stop,progress,self.conversation).run(), operation='顺序执行计划任务')
 
     def closeEvent(self, event):
         if self.worker:
@@ -738,6 +831,7 @@ class Window(W.QMainWindow):
                     self.persist()
                 except (OSError, ValueError) as exc:
                     self.logger.error('关闭时项目设置未保存：%s', exc)
+            self.conversation.close()
             self.logger.info('GUI closed')
             event.accept()
 
