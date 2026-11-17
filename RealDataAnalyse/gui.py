@@ -107,9 +107,12 @@ class Window(W.QMainWindow):
         folder_row.addWidget(self.folder, 1)
         folder_row.addWidget(self.folder_button)
         form.addRow('项目文件夹', folder_row)
-        self.project = self.path_row(form, 'Die Shift Analyze工程', '', '*.json', 'project', readonly=True)
-        self.database = self.path_row(form, '任务记录', '', '*.sqlite', 'database', save=True)
-        self.output = self.path_row(form, '最终OAS', '', '*.oas', 'output', save=True)
+        # Paths are project-owned state, never independent user input rows.
+        self.project = W.QLineEdit(self)
+        self.database = W.QLineEdit(self)
+        self.output = W.QLineEdit(self)
+        for state in (self.project, self.database, self.output):
+            state.hide()
         self.endpoint = self.path_row(form, 'IPC入口', str(default_endpoint()), '*.json', 'endpoint')
         buttons = W.QHBoxLayout()
         self.connect_button = W.QPushButton('连接状态')

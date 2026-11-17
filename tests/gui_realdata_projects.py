@@ -34,6 +34,8 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
     w = Window(); w.endpoint.setText(str(endpoint)); w.show(); app.processEvents()
     try:
         assert not w.log_check.isChecked() and w.log_view.isHidden()
+        assert all(field.isHidden() for field in (w.project, w.database, w.output))
+        assert not any(label.text() in ('Die Shift Analyze工程', '任务记录', '最终OAS') for label in w.findChildren(W.QLabel))
         w.log_check.click(); assert not w.log_view.isHidden()
         w.log_check.click(); assert w.log_view.isHidden()
         assert not any('生成GD55' in x.text() for x in w.findChildren(W.QPushButton))
