@@ -37,4 +37,10 @@ V46统一工艺折叠、恢复框选/边界编辑，工程迁为Jobs下独立目
 
 ## 源码交付
 
-联合源码158文件、2,092,436字节，SHA-256 `eabb59883a0c7155ac6b7d5e67be41eb95fadce6edfc1da2fec69483ecadfbc8`。包含两个程序、RUN/BUILD入口及明确授权的Jobs/GD55案例；不含图片或EXE。候选ZIP已通过CRC/7-Zip，正式Release及自动ZIP/tar还须在发布后回下载逐文件匹配标签。
+联合源码158文件、2,092,436字节，SHA-256 `eabb59883a0c7155ac6b7d5e67be41eb95fadce6edfc1da2fec69483ecadfbc8`。包含两个程序、RUN/BUILD入口及明确授权的Jobs/GD55案例；不含图片或EXE。正式Release及GitHub自动ZIP/tar均已回下载，逐文件匹配V46标签，CRC/7-Zip通过。
+
+## 发布完成
+
+PR #35普通合并main为`d693a7d83d36d3232308a997da1d153e9e7b5f45`，V46标签指向此提交；发布于2026-11-17 02:46:14 UTC。Release源码、SHA、IPC MD/PY，以及GitHub自动ZIP/tar均逐文件匹配标签。最后c133de1仅整理说明，构建输入与已通过Windows验收的5d22a7b逐文件相同；源码SHA保持上述值。
+
+另一窗口在验收冻结后新增的台账分页优化7529ff4保留于PR #34，未包含在V46资产中；后续版本再集成，不覆盖已发布V46。该未合并分支不得误删。
