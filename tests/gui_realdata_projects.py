@@ -47,14 +47,22 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         assert Path(w.info['project']).samefile(folder/'GD55.dshift.json')
         assert Path(w.database.text()).is_relative_to(folder)
         assert Path(w.output.text()).is_relative_to(folder)
-        w.file_view.item(1, 0).setCheckState(QtCore.Qt.CheckState.Unchecked)
+        w.file_view.item(1, 0).setCheckState(getattr(QtCore.Qt, 'CheckState', QtCore.Qt).Unchecked)
         w.sheet.setText('Diagnostic'); w.workers.setValue(2); w.persist()
         w.open_folder(folder, link=False); wait(w)
         assert not w.file_entries()[1]['enabled'] and w.sheet.text() == 'Diagnostic' and w.workers.value() == 2
-        w.file_view.item(1, 0).setCheckState(QtCore.Qt.CheckState.Checked)
+        w.file_view.item(1, 0).setCheckState(getattr(QtCore.Qt, 'CheckState', QtCore.Qt).Checked)
         w.sheet.setText('Measurements')
         w.import_button.click(); wait(w)
         assert w.table.rowCount() == 12
+        w.file_view.item(1, 0).setCheckState(getattr(QtCore.Qt, 'CheckState', QtCore.Qt).Unchecked)
+        w.run_button.click()
+        until = time.monotonic() + 10
+        while w.worker and time.monotonic() < until: app.processEvents(); time.sleep(.02)
+        assert w.worker is None and w.progress.failed
+        assert '与任务记录不符' in w.response.toPlainText()
+        assert not Path(w.output.text()).exists()
+        w.file_view.item(1, 0).setCheckState(getattr(QtCore.Qt, 'CheckState', QtCore.Qt).Checked)
         w.run_button.click(); wait(w, 900)
         assert Path(w.output.text()).is_file()
         assert 'OAS' in w.progress.detail

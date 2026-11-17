@@ -5,7 +5,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
-from RealDataAnalyse.projects import load_folder, save_folder, inside, copy_excel
+from RealDataAnalyse.projects import load_folder, save_folder, inside, copy_excel, install_case
 from RealDataAnalyse.excel import DEFAULT_PROFILE, import_files
 from RealDataAnalyse.storage import sha256
 
@@ -55,6 +55,15 @@ class Projects(unittest.TestCase):
         self.assertEqual(two.read_bytes(), b'second')
         stop = threading.Event(); stop.set()
         with self.assertRaises(InterruptedError): copy_excel(self.folder, [external], stop)
+
+    def test_build_installs_case_without_overwriting_user_project(self):
+        destination = self.root/'dist'
+        install_case(destination)
+        project = destination/'Jobs/GD55/GD55.dshift.json'
+        self.assertEqual(project.read_bytes(), (ROOT/'Jobs/GD55/GD55.dshift.json').read_bytes())
+        project.write_text('user changes')
+        install_case(destination)
+        self.assertEqual(project.read_text(), 'user changes')
 
     def test_real_case_import_progress_counts(self):
         config = load_folder(self.folder)
