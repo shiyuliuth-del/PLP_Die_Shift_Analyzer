@@ -10,7 +10,7 @@ ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 from die_shift_studio.gui import MainWindow,W
 from qt_shutdown import close_window
 app=W.QApplication([]);tmp=tempfile.TemporaryDirectory();w=MainWindow(jobs_dir=Path(tmp.name)/'Jobs');w.resize(1450,950);w.show();errors=[];w.error=lambda s:errors.append(str(s))
-def wait():
+def wait(expect_diagnostic=False):
  end=time.monotonic()+180
  while time.monotonic()<end:
   app.processEvents()
@@ -18,7 +18,10 @@ def wait():
   time.sleep(.005)
  else:raise AssertionError('timeout')
  assert not errors,errors
- assert '[ERROR]' not in w.runtime_view.toPlainText(),w.runtime_view.toPlainText()[-6000:]
+ if expect_diagnostic and (w.current_frame or {}).get('diagnostic_only'):
+  assert '当前姿态无法生成保持电连接' in w.runtime_view.toPlainText()
+  assert 'Traceback' not in w.runtime_view.toPlainText()
+ else:assert '[ERROR]' not in w.runtime_view.toPlainText(),w.runtime_view.toPlainText()[-6000:]
 
 def event(name,xy):
  px,py=w.ax.transData.transform(xy);ev=MouseEvent(name,w.canvas,px,py,button=1)
@@ -112,7 +115,7 @@ try:
  w.show_issues.setChecked(False);app.processEvents();assert not w.view_settings.show_contact_markers
  # V40 explicitly replaces the old QMenu by the same on-canvas selected callout as width.
  combo=w.setting_fields['reconstruction_style'];combo.setCurrentIndex(combo.findData('linear'));wait()
- w.manual_states=np.array([[8000.,8000.,0.],[0,0,0]]);w.request_preview();wait()
+ w.manual_states=np.array([[8000.,8000.,0.],[0,0,0]]);w.request_preview();wait(expect_diagnostic=True)
  bad=next(p for p in w.current_frame['reconstruction']['pieces'] if p.get('problem_reasons'))
  center=bad['problem_region'].representative_point().coords[0]
  w.ax.set_xlim(center[0]-60,center[0]+60);w.ax.set_ylim(center[1]-60,center[1]+60);w.plot_layout(preserve=True);w.canvas.draw()

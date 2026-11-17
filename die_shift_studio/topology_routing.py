@@ -212,9 +212,12 @@ def resolve(r,replacements,pieces,states):
         values,tree=table
         return [values[int(i)][1] for i in tree.query(g,predicate='intersects') if values[int(i)][0]!=nets[ref]]
     def obstacles(ref):
-        b=shapely.union_all([original[ref],objects[ref]]).bounds;pad=r._rule_width*8+r.tol*32
+        b=shapely.union_all([original[ref],objects[ref]]).bounds;pad=r._rule_width*8+r.rule_space+r.tol*32
         box=shapely.box(b[0]-pad,b[1]-pad,b[2]+pad,b[3]+pad)
-        return shapely.union_all([g for other,g in objects.items() if nets[other][0]==nets[ref][0] and nets[other]!=nets[ref] and g.intersects(box)]+[r.rules.keepout.intersection(box),*foreign_hits(ref,box)])
+        # The search cannot leave its width*8 window; retain an extra
+        # spacing+DBU halo before clipping. Remote parts of a long neighbour
+        # then cannot invalidate an otherwise identical local repair cache.
+        return shapely.union_all([g.intersection(box) for other,g in objects.items() if nets[other][0]==nets[ref][0] and nets[other]!=nets[ref] and g.intersects(box)]+[r.rules.keepout.intersection(box),*[g.intersection(box) for g in foreign_hits(ref,box)]])
     def enters_keepout(g):return not r.rules.keepout.is_empty and shapely.relate_pattern(g,r.rules.keepout,'T********')
     def valid(ref,g):return g.is_valid and signature(g)==signature(original[ref]) and covers_ports(g,ports[ref],r.tol) and preserves_box(ref,g)
     def attempt(ref,reason):
