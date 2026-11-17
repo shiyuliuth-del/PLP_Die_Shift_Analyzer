@@ -93,7 +93,7 @@ try:
  for response in tasks:task(response)
  result=task(rpc('batch.end',{'batch_id':batch['batch_id']}));assert result['cells']==6
  lib=gdstk.read_oas(folder/'batch.oas');top=lib.top_level()[0];assert top.name=='TopCell' and len(top.references)==6
- assert len(lib.cells)<6*7+1,'unchanged layer cells not reused'
+ assert len([c for c in lib.cells if not c.name.startswith('G_ERROR_')])<6*7+1,'unchanged geometry cells not reused'
  # Backend failure and cancellation must have explicit terminal statuses and
  # cannot replace an older output. Queue rejection is retryable, not silence.
  from unittest.mock import patch

@@ -1,4 +1,8 @@
-# V48 软件交接
+# V49 软件交接（验证中）
+
+新增入口：`ruler.py/measurement_data.py`测量和纯数据持久化；`manual_regions.py`严格旋转框；`parallel_zones.py`自动方向与相邻截面；`drc_rules.py`有效规则/生成余量/冲突严重度；`reconstruction_diagnostic.py`失败局部及双侧虚线；`measured_issues.py`完整SQLite问题目录；`partial_output.py`明确局部删铜及量化核验；`oas_errors.py`逐DIE ERROR矩形。`current_drc.locations`是画布、表格和IPC的统一问题组件目录。
+
+最新规范见[V49说明](V49_使用说明.md)。本轮不再适用旧版“实测不检查尺寸DRC”和“缓存次数决定行颜色”；测量与框选字段缺省兼容旧工程。安全范围是仍存活的懒计算功能，不应删除。
 
 V48客户端调度/输出与最终验收见[V48验证](V48_VALIDATION.md)和[V48说明](V48_使用说明.md)。以下V47预演合同完整保留；本轮没有重写其几何算法。
 

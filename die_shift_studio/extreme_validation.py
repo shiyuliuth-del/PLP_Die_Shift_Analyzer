@@ -113,5 +113,12 @@ def status_for(factors,digits):
         count=factor['counts']
         for owner in factor['owners']:count=count[digits[owner]]
         drc+=int(count)
+    moving=int(factors.get('moving_drc_base',0))
+    for i,rows in enumerate(factors.get('moving_drc_local',())):moving+=int(rows[digits[i]])
+    for factor in factors.get('drc_factors',()):
+        count=factor.get('moving_counts')
+        if count is not None:
+            for owner in factor['owners']:count=count[digits[owner]]
+            moving+=int(count)
     if any(digits):failures+=3*factors['unknown']
-    return dict(safe=not (failures or drc or contact),checked=True,contact=contact,failures=failures,drc=drc,unadapted=0,width_failures=0)
+    return dict(safe=not (failures or drc or contact),checked=True,moving_drc=moving,contact=contact,failures=failures,drc=drc,unadapted=0,width_failures=0)

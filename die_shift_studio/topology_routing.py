@@ -176,6 +176,10 @@ def resolve(r,replacements,pieces,states):
             for i in row['indices']:objects[layer,i]=private(row['geometry'])
     mutable={ref for ref,rows in by_ref.items() if any(not q.get('ignored') for q in rows)}
     for ref in objects:ports[ref]=[private(r.model.moved(physical,owner,states)) for owner,physical in terminals[ref]]
+    manual_masks={ref:shapely.union_all([q['regions']['A'] for q in rows]) for ref,rows in by_ref.items() if any(q.get('strict_box') is not None for q in rows)}
+    manual_before={ref:objects[ref] for ref in manual_masks}
+    def preserves_box(ref,g):
+        return ref not in manual_masks or g.symmetric_difference(manual_before[ref]).difference(manual_masks[ref].buffer(r.tol*2)).area<=r.tol*r.tol
     changed=set();blocked=[];external={};immutable={}
     for ref,values in ports.items():
         external.setdefault(nets[ref][0],[]).extend((nets[ref],g) for g in values)
@@ -194,13 +198,23 @@ def resolve(r,replacements,pieces,states):
         box=shapely.box(b[0]-pad,b[1]-pad,b[2]+pad,b[3]+pad)
         return shapely.union_all([g for other,g in objects.items() if nets[other][0]==nets[ref][0] and nets[other]!=nets[ref] and g.intersects(box)]+[r.rules.keepout.intersection(box),*foreign_hits(ref,box)])
     def enters_keepout(g):return not r.rules.keepout.is_empty and shapely.relate_pattern(g,r.rules.keepout,'T********')
-    def valid(ref,g):return g.is_valid and signature(g)==signature(original[ref]) and covers_ports(g,ports[ref],r.tol)
+    def valid(ref,g):return g.is_valid and signature(g)==signature(original[ref]) and covers_ports(g,ports[ref],r.tol) and preserves_box(ref,g)
     def attempt(ref,reason):
         if ref not in mutable or any(q.get('box_invalid') for q in by_ref.get(ref,())):return None
         foreign=obstacles(ref)
+        # Keep the spacing corridor first. Within that corridor try to retain
+        # enclosure before relaxing to electrical contact; width may narrow
+        # inside connected_candidate, while foreign copper remains forbidden.
+        enclosed=[p.buffer(r.rules.p.annulus_um/math.cos(math.pi/128),quad_segs=32) for p in ports[ref]]
         for space in dict.fromkeys((r.rule_space,r.rule_space*.5,0.)):
-            candidate=connected_candidate(original[ref],objects[ref],ports[ref],foreign,r.rules.board,r._rule_width,r.tol,space)
-            if candidate is not None:return candidate,reason
+            for targets in (enclosed,ports[ref]):
+                candidate=connected_candidate(original[ref],objects[ref],targets,foreign,r.rules.board,r._rule_width,r.tol,space)
+                if candidate is None:continue
+                if targets is enclosed and not all(candidate.buffer(r.tol*.1).covers(g) for g in enclosed):continue
+                if any(q.get('strict_box') is not None for q in by_ref.get(ref,())):
+                    allowed=shapely.union_all([q['regions']['A'] for q in by_ref[ref]])
+                    if candidate.symmetric_difference(objects[ref]).difference(allowed.buffer(r.tol*2)).area>r.tol*r.tol:continue
+                return candidate,reason
         return None
     # Recover electrical discontinuities first; the actual posed foreign copper
     # is an obstacle even when full native DRC artwork was not requested.
@@ -228,7 +242,7 @@ def resolve(r,replacements,pieces,states):
                 divided=None
                 for space in dict.fromkeys((r.rule_space,r.rule_space*.5,0.)):
                     candidate=separate_pair(objects[left],objects[right],original[left],original[right],ports[left],ports[right],r.tol,space)
-                    if candidate is not None and all(not foreign_hits(ref,g) for ref,g in zip((left,right),candidate)):
+                    if candidate is not None and all(not foreign_hits(ref,g) and preserves_box(ref,g) for ref,g in zip((left,right),candidate)):
                         divided=candidate;break
                 if divided is not None:
                     for ref,g in zip((left,right),divided):

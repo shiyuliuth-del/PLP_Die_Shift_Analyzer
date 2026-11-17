@@ -17,11 +17,15 @@ def display(result,centers,states):
         q.update(connection_failed=True,valid=False,diagnostic=True)
         active=q['regions'].get('A',shapely.Polygon())
         holes.setdefault((q['layer'],q['index']),[]).append(active)
+        q['missing_region']=active if not active.is_empty else q.get('missing_region',active)
         q['regions']['A']=shapely.Polygon();q['bridge']=shapely.Polygon();q['bridge_area_um2']=0.
         for member in q.get('graph_members',(q,)):
             plan=member.get('route_plan')
             if plan is None:continue
-            part=plan.partition(*member['interval'],member.get('boundary_angles',(0.,0.)))
+            if member.get('strict_box') is not None:
+                from .manual_regions import partition
+                part=partition(plan,member['strict_box'])
+            else:part=plan.partition(*member['interval'],member.get('boundary_angles',(0.,0.)))
             if part is None:continue
             try:
                 from .connection_curves import connection_data

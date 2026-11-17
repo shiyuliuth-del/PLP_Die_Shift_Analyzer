@@ -61,6 +61,8 @@ class Session:
         from . import __version__
         self.identity=logical_fingerprint((__version__,data.geometry_id,data.top_name,self.roles,list(cache.layers),self.motions,asdict(self.p),asdict(self.settings)))
         self.lock=threading.Lock();self.plan_lock=threading.Lock();self.local=threading.local();self.instances=[]
+        from .session_cache import EphemeralCache
+        self.geometry_pool=EphemeralCache(budget=64*1024**2,max_entries=4096)
     def model(self,p):
         from .contact import ContactModel
         from .reconstruction import Reconstructor
@@ -73,7 +75,7 @@ class Session:
         model=ContactModel(self.data,self.case,self.roles,self.case['connections'],self.cache,self.motions,p)
         model.bound.acceleration=self.settings.acceleration
         with self.lock:plans=clone_plan_pool(self.plan_pool)
-        r=Reconstructor(model,p,self.settings,plan_pool=plans);r.measured_only=True
+        r=Reconstructor(model,p,self.settings,plan_pool=plans,geometry_pool=self.geometry_pool);r.measured_only=True
         self.local.model=(key,model,r)
         with self.lock:self.instances.append(r)
         return model,r
@@ -135,13 +137,13 @@ class Session:
                 if not g.is_valid or not np.isfinite(shapely.get_coordinates(g)).all():raise ValueError('重构结果无效，拒绝输出')
         # Keep the last interactive pose only; batch cannot fill the GUI LRU.
         if not preview:
-            r.cache.clear();r.geometry_pool.clear();r.block_cache.clear()
+            r.cache.clear()  # retain bounded, immutable per-source and nominal DRC caches
         return frame,frozen,dict(output_policy=output_policy,partial_output=bool(original_failures),omitted_regions=omissions,omitted_region_count=len(omissions),connection_failures=failures,connection_failure_count=max(len(failures),len(original_failures)),
                                 fixed_rdl_drc_checked=True,drc_issues=issues,drc_count=len(issues),drc_passed=not issues,coordinate_frame='GDS顶层坐标，单位μm；package_relative_bounds_um以名义封装左下角为原点',rule_groups=len(result.get('violations',())),
                                 scope='当前实测姿态的实际铜DRC及连接检查；不计算其他姿态、概率或良率，不代表工艺签核')
     def close(self):
         for r in self.instances:r.close()
-        self.instances.clear();self.local=threading.local()
+        self.instances.clear();self.geometry_pool.clear();self.local=threading.local()
 
 
 def write_gds(snapshot,destination,dbu):

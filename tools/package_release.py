@@ -12,6 +12,7 @@ def check_source():
     """Stage a clean test checkout. Test helpers and projects do not enter the release."""
     gui=['gui_smoke','gui_v14','gui_scheduler_v20',
          'gui_v24','gui_v25','gui_v26','gui_v27','gui_v28','gui_v29','gui_v30','gui_v32','gui_v33','gui_v34','gui_v35','gui_v36','gui_v38','gui_v39','gui_v40','gui_v41','gui_v42','gui_v42_branches','gui_v42_saved_process','gui_v43','gui_v43_process','gui_v44','gui_v44_process','gui_v44_gd55','gui_branch_integration','gui_v45','gui_realdata_projects','gui_evaluation_scope','gui_v47']
+    gui.extend(['gui_v49','gui_v49_gd55'])
     gui.extend(['gui_realdata_plans','gui_realdata_plans_process','gui_realdata_instances','gui_realdata_errors'])
     env=dict(os.environ,QT_QPA_PLATFORM='offscreen',OPENBLAS_NUM_THREADS='1',PYTHONUTF8='1',PYTHONFAULTHANDLER='1')
     subprocess.run([sys.executable,'tools/check_contribution.py'],cwd=ROOT,env=env,check=True)

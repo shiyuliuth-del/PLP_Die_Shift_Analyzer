@@ -80,7 +80,7 @@ class V47Tests(unittest.TestCase):
     with patch('die_shift_studio.reconstruction_route.trace',side_effect=AssertionError('repeated route tracing')):
      with ThreadPoolExecutor(2) as pool:
       results=list(pool.map(lambda x:s.run([dict(die=1,dx_um=x,dy_um=2.,angle_deg=0.)],preview=False),(1.,2.)))
-   self.assertTrue(all(not q[2]['fixed_rdl_drc_checked'] for q in results))
+   self.assertTrue(all(q[2]['fixed_rdl_drc_checked'] for q in results))
    self.assertTrue(all(not q[0]['contact']['regions'] for q in results))
   finally:s.close();e.close()
  def test_measured_preserves_saved_alternative_route_identity(self):

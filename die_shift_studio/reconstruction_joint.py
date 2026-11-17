@@ -98,7 +98,10 @@ def scene(r,grid,bundles,digits,diagnostics=True):
     if blocked:
         # The interactive path can also try its bounded quick angle candidate.
         # Statistics must use exactly the same completed copper in that case.
-        alternate=r.frame(states,diagnostics=diagnostics)
+        alternate=r.frame(states,diagnostics=False)
+        if diagnostics:
+            alternate=dict(alternate,violations=r.rules.check(alternate['replacements'],states),original_violations=r.rules.nominal_check(),constraints_complete=True)
+            decorate_problems(alternate)
         return states,alternate
     frame=dict(replacements=out,pieces=pieces,violations=r.rules.check(out,states) if diagnostics else [],original_violations=r.rules.nominal_check() if diagnostics else (),dbu_um=r.tol,
                repair_refs=repaired,hard_failures=blocked,electrically_valid=not bool(blocked))
@@ -130,12 +133,21 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
     from .evaluation_scope import digits_for
     visits=(digits_for(grid,i) for i in indices) if indices is not None else product(*(range(n) for n in grid.radices))
     total=len(indices) if indices is not None else grid.total+1
-    for number,digits in enumerate(visits):
+    def evaluate(digits):
         cancel_check()
         if indices is None:states,frame=scene(r,grid,bundles,digits)
         else:
             states=np.asarray([v[d] for v,d in zip(grid.locals,digits)])
             frame=r.frame(states)
+        return digits,states,frame
+    # Prime immutable topology/native templates once. Stream at most four
+    # completed scenes instead of retaining the whole package cross product.
+    visits=iter(visits);first=next(visits,None)
+    from itertools import chain
+    from .resources import parallel_iter
+    values=() if first is None else chain((evaluate(first),),parallel_iter(evaluate,visits,profile=native_phase_profile()))
+    for number,(digits,states,frame) in enumerate(values):
+        cancel_check()
         repairs+=bool(frame['repair_refs'])
         remember(r,states,frame)
         clause=PoseClause(tuple((o,(int(d),)) for o,d in enumerate(digits)));index=grid.index(digits)

@@ -101,7 +101,9 @@ class V29Tests(unittest.TestCase):
                     # The fixed isolated obstacle is immutable. A via entering
                     # it cannot be solved by changing an unrelated route.
                     self.assertTrue(idx.matches(ds))
-                    with self.assertRaisesRegex(ValueError,'未提交该结果'):e.frame(z)
+                    diagnostic=e.frame(z);self.assertTrue(diagnostic['diagnostic_only']);self.assertTrue(diagnostic['reconstruction']['hard_failures'])
+                    # Immutable foreign pads have no editable A route; their
+                    # failed-source catalogue remains explicit without inventing a bridge.
                     continue
                 frame=e.frame(z);w=frame['width_analysis']
                 self.assertEqual(idx.matches(ds),scene_failure(frame['reconstruction']))
@@ -150,7 +152,7 @@ class V29Tests(unittest.TestCase):
         self.assertEqual([idx.at(i) for i in range(idx.total)],expected)
         self.assertEqual((result['scanned'],result['package_states']),(3,27))
         witness=result['witnesses'][layer,0]
-        self.assertEqual((witness['kind'],witness['gap_um'],witness['required_um'],witness['index']),('edge',2,10,g.index([2,0,0])))
+        self.assertEqual((witness['kind'],witness['gap_um'],witness['required_um'],witness['index']),('edge',2,9.9,g.index([2,0,0])))
         self.assertIn('DX +35 μm',pose_text(result['grid_key'],witness['index']))
 
     def test_edge_reference_point_undoes_rotation_with_offset_pivot(self):

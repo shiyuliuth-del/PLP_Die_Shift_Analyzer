@@ -448,7 +448,7 @@ class Reconstructor:
         # Route construction is pose-independent and reused after every handle edit.
         from .session_cache import logical_fingerprint
         base_key=logical_fingerprint((self.model.data.geometry_id,self.model.roles,self.model.connections.order,
-                                'source-routes-v48',bool(getattr(self,'measured_only',False)),self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
+                                'source-routes-v49',bool(getattr(self,'measured_only',False)),self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
         # Forcing/editing one source must not rebuild every source path. Mine
         # membership includes enclosure filtering; all-via ownership controls
         # allocation. Existing path identities survive later manual edits.

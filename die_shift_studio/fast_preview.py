@@ -139,6 +139,8 @@ class PreviewEngine:
     def __init__(self,cache,case,roles,motions,p,result,connections,cache_group=None,cache_identity=None,contact_model=None):
         self.bound=cache.bind(case,motions,[k for k in cache.layers if roles.get(k,'不参与')!='不参与'],p)
         self.roles=roles;self.p=p;self.result=result;self.connections=connections;self.cache_group=cache_group
+        from .settings import ViewSettings
+        self.default_settings=ViewSettings()
         from .session_cache import SessionCache
         self.shared_frames=cache_group is not None and cache_identity is not None
         if self.shared_frames:
@@ -236,7 +238,7 @@ class PreviewEngine:
         current=self.contact.current(states,self.p)
         deformation=None
         if deformation and deformation['replacements']:current=self.contact.current(states,self.p,deformation['replacements'])
-        mechanical=check_frame(self.bound,self.roles,self.p,self.result,states,layers,1,self.connections,False,settings=getattr(self,'drc_settings',None) or getattr(getattr(self,'reconstructor',None),'settings',None))
+        mechanical=check_frame(self.bound,self.roles,self.p,self.result,states,layers,1,self.connections,False,settings=getattr(self,'drc_settings',None) or getattr(getattr(self,'reconstructor',None),'settings',None) or getattr(getattr(self,'width_analyzer',None),'settings',None) or self.default_settings)
         checks={s:dict(mechanical,failures=list(mechanical['failures'])) for s in (1,2,3)}
         for s,check in checks.items():
             check['failures'] += [dict(kind=q['kind'],point=q['point']) for q in current['issues'] if q['scheme']==s]
@@ -268,7 +270,7 @@ class PreviewEngine:
             width,space=effective_rules(self.p,cfg)
             frame['drc_rules']=dict(tolerance_um=cfg.drc_tolerance_um,nominal_width_um=self.p.line_width_um,nominal_space_um=self.p.line_space_um,effective_width_um=width,effective_space_um=space,annulus_um=self.p.annulus_um)
         from .edge_clearance import edge_violations
-        cfg=getattr(self,'drc_settings',None) or getattr(getattr(self,'width_analyzer',None),'settings',None)
+        cfg=getattr(self,'drc_settings',None) or getattr(getattr(self,'width_analyzer',None),'settings',None) or self.default_settings
         overrides=frame.get('deformation',{}).get('replacements',{})
         edges=([v for v in frame['drc'] if v['kind']=='封装边缘线距不足'] if 'drc' in frame else
                edge_violations(self.contact,states,self.p,cfg,overrides))
