@@ -22,7 +22,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='rda-gd55-') as temp:
         folder = Path(temp)
         case = folder / 'GD55 inputs'
-        source_case = Path(os.environ.get('REALDATA_TEST_CASE', str(ROOT / 'cases/GD55')))
+        source_case = Path(os.environ.get('REALDATA_TEST_CASE', str(ROOT / 'Jobs/GD55')))
         shutil.copytree(source_case, case)
         source = case / 'GD55_1105.gds'
         before = hashlib.sha256(source.read_bytes()).hexdigest()

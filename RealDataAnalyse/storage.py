@@ -115,7 +115,12 @@ def configure_logging(root):
     folder.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger('RealDataAnalyse')
     logger.setLevel(logging.INFO)
-    if not logger.handlers:
+    destination = (folder / 'RealDataAnalyse.log').resolve()
+    for old in list(logger.handlers):
+        if isinstance(old, RotatingFileHandler) and Path(old.baseFilename).resolve() != destination:
+            logger.removeHandler(old)
+            old.close()
+    if not any(isinstance(h, RotatingFileHandler) and Path(h.baseFilename).resolve() == destination for h in logger.handlers):
         handler = RotatingFileHandler(folder / 'RealDataAnalyse.log', maxBytes=8 * 1024**2, backupCount=8, encoding='utf8')
         handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(threadName)s %(message)s'))
         logger.addHandler(handler)
