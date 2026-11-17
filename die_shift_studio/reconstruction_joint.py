@@ -9,7 +9,7 @@ from itertools import product
 import math
 import numpy as np
 import shapely
-from .resources import cancel_check,parallel_map,native_phase_profile
+from .resources import cancel_check,parallel_map
 from .extreme_filter import PoseClause,ProblemIndex
 
 
@@ -140,12 +140,10 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
             states=np.asarray([v[d] for v,d in zip(grid.locals,digits)])
             frame=r.frame(states)
         return digits,states,frame
-    # Prime immutable topology/native templates once. Stream at most four
-    # completed scenes instead of retaining the whole package cross product.
-    visits=iter(visits);first=next(visits,None)
-    from itertools import chain
-    from .resources import parallel_iter
-    values=() if first is None else chain((evaluate(first),),parallel_iter(evaluate,visits,profile=native_phase_profile()))
+    # Stream scenes without retaining their whole package cross product.
+    # One solver owns GEOS/plan caches; never concurrently mutate that solver.
+    # Independent source preparation remains parallel and repairs are cached.
+    values=map(evaluate,visits)
     for number,(digits,states,frame) in enumerate(values):
         cancel_check()
         repairs+=bool(frame['repair_refs'])

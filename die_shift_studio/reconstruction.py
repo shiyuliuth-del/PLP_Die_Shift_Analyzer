@@ -561,16 +561,16 @@ class Reconstructor:
         states=np.asarray(states,float);key=(states.tobytes(),'electrical-continuity',bool(quick),bool(diagnostics),None if targets is None else tuple(sorted(targets)))
         hit=self.cache.get(key) if diagnostics else None
         if hit is not None:return hit
-        raw=self._raw_frame(states,deformation,progress,quick,diagnostics=False,render_cache=render_cache)
+        raw=self._raw_frame(states,deformation,lambda n,t:progress(round(n*.35),t),quick,diagnostics=False,render_cache=render_cache)
         from .topology_routing import resolve,spacing
-        out,pieces,changed,blocked=resolve(self,raw['replacements'],raw['pieces'],states)
+        out,pieces,changed,blocked=resolve(self,raw['replacements'],raw['pieces'],states,lambda n,t:progress(35+round(n*.3),t))
         if blocked and not quick:
-            alternate=self._raw_frame(states,deformation,progress,True,diagnostics=False)
-            ao,ap,ac,ab=resolve(self,alternate['replacements'],alternate['pieces'],states)
+            alternate=self._raw_frame(states,deformation,lambda n,t:progress(65+round(n*.1),t),True,diagnostics=False)
+            ao,ap,ac,ab=resolve(self,alternate['replacements'],alternate['pieces'],states,lambda n,t:progress(75+round(n*.15),t))
             if len(ab)<len(blocked):raw,out,pieces,changed,blocked=alternate,ao,ap,ac,ab
         result=dict(raw,replacements=out,pieces=pieces,repair_refs=changed,hard_failures=blocked,
                     electrically_valid=not bool(blocked),constraints_complete=bool(diagnostics))
-        result['violations']=self.rules.check(out,states,progress) if diagnostics else []
+        result['violations']=self.rules.check(out,states,lambda n,t:progress(90+round(n*.09),t)) if diagnostics else []
         result['original_violations']=self.rules.nominal_check() if diagnostics else ()
         if diagnostics:spacing(self,out,pieces)
         decorate_problems(result)
@@ -749,7 +749,7 @@ class Reconstructor:
                                  rule_space_um=self.rule_space,movable_area_um2=sum(q['movable_area_um2'] for q in pieces),
                                  fixed_area_um2=sum(q['fixed_area_um2'] for q in pieces),cover_area_um2=sum(q['bridge_area_um2'] for q in pieces),
                                  max_shift_um=max((q['shift_um'] for q in pieces),default=0.),regions_used=len(self.settings.reconstruction_regions),regions_ambiguous=0))
-        result['violations']=self.rules.check(out,states,progress) if diagnostics else []
+        result['violations']=self.rules.check(out,states,lambda n,t:progress(90+round(n*.09),t)) if diagnostics else []
         result['original_violations']=self.rules.nominal_check() if diagnostics else ()
         result['constraints_complete']=bool(diagnostics)
         decorate_problems(result)
