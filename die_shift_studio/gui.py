@@ -281,8 +281,11 @@ class MainWindow(W.QMainWindow):
         page=self._page('偏移')
         self.gds_label=W.QLineEdit();self.gds_label.setReadOnly(True);self.gds_label.setPlaceholderText('尚未打开GDS/OAS');self.gds_label.setFixedHeight(25);page.addWidget(self.gds_label)
         row=W.QHBoxLayout();row.addWidget(W.QLabel('顶层Cell'));self.top=W.QComboBox();self.top.currentTextChanged.connect(self.top_changed);row.addWidget(self.top,1);page.addLayout(row)
-        self.open_gds_button=W.QPushButton('打开GDS/OAS');self.open_gds_button.setObjectName('Primary');self.open_gds_button.clicked.connect(self.open_gds);page.addWidget(self.open_gds_button)
-        self.layer_table=table(['显示','层 / 类型','用途']);self.layer_table.setMinimumHeight(275);page.addWidget(self.layer_table)
+        self.open_gds_button=W.QPushButton('打开GDS/OAS');self.open_gds_button.setStyleSheet('QPushButton {background:#e5f2ee;color:#245e52;border:1px solid #a5c9bd;border-radius:4px;padding:5px;} QPushButton:hover {background:#d3e9e1;}');self.open_gds_button.clicked.connect(self.open_gds);page.addWidget(self.open_gds_button)
+        self.layer_split=W.QSplitter(VERTICAL);self.layer_split.setChildrenCollapsible(False);page.addWidget(self.layer_split)
+        self.layer_table=table(['显示','层 / 类型','用途']);self.layer_table.setMinimumHeight(110);self.layer_split.addWidget(self.layer_table)
+        below=W.QWidget();below_layout=W.QVBoxLayout(below);below_layout.setContentsMargins(0,0,0,0);self.layer_split.addWidget(below)
+        page=below_layout;self.layer_split.setSizes([300,300])
         self.layer_table.verticalHeader().setSectionsMovable(True)
         self.layer_drag=LayerDrag(self.layer_table);self.layer_drag.styleRequested.connect(self.edit_layer_style)
         self.drag_timer=QtCore.QTimer(self);self.drag_timer.setSingleShot(True);self.drag_timer.setInterval(30)
@@ -301,7 +304,6 @@ class MainWindow(W.QMainWindow):
         page.addStretch()
         page=self._page('工艺');self.process_layout=page;self.process_sections={}
         self._group(page,'线宽线距',['panel_layers','wafer_layers','line_width_um','line_space_um','wafer_line_width_um','wafer_line_space_um','package_clearance_um'],collapsed=True)
-        page.addWidget(label('运动层按下层连接追溯所属芯片。固定层保持名义位置，层数由GDS用途自动统计。'))
         self._group(page,'过孔包围量',['moving_annulus_um','annulus_um'],collapsed=True)
         self._group(page,'图形过滤',['minimum_area_um2'],collapsed=True)
         self._group(page,'机械净距',['min_die_gap_um','min_package_clearance_um'],collapsed=True)
@@ -1026,6 +1028,7 @@ class MainWindow(W.QMainWindow):
                 toggle.setChecked(value)
                 toggle.blockSignals(False)
             self.case=None;self.result=None;self.geometry_cache=getattr(data,'geometry_cache',None);self.connections=None;self.reset_plot();self.top.clear();self.top.addItems(data.top_names);self.top.setCurrentText(data.top_name)
+            self.layer_split.setSizes([project.get('layer_table_height',300),max(220,self.layer_split.height()-project.get('layer_table_height',300))])
             selected_roles=project.get('roles',data.auto_roles)
             self.stage_hints=project.get('stage_hints',{})
             self.role_boxes={};self.visible_boxes={};self._layer_keys=stack_order(data,selected_roles,project.get('layer_order'))
@@ -1052,6 +1055,11 @@ class MainWindow(W.QMainWindow):
                 except ValueError:pass
             self.enable_settings();self.apply_automatic();self.per_die_changed();self.manual_preview.restore_fields(project.get('manual_preview'))
         finally:self.loading=False
+        if self.remote_locked or getattr(self,'requested_measured',False):
+            self.measured_output.startup_overlays={name:self.overlay_widget(name).isChecked() for name in ('reconstruction','width','drc','space','probability')} if not self.remote_locked else None
+            for name in ('reconstruction','width','drc','space','probability'):
+                widget=self.overlay_widget(name);widget.blockSignals(True);widget.setChecked(False);widget.blockSignals(False)
+            self.drop_result();self.dirty=True;self.plot_layout();return
         self._restoring_project=True
         self.drop_result();self.invalidate();self.plot_layout()
         from .project_results import restore
@@ -1776,6 +1784,7 @@ class MainWindow(W.QMainWindow):
     def cancel_previews(self):
         for worker in self.preview_workers:worker.cancelled.set()
     def request_preview(self,direct=False,settle=False,quiet=False):
+        if self.remote_locked or getattr(self,'requested_measured',False):return
         self._preview_quiet=bool(quiet)
         if not self.data or getattr(self,'_restoring_project',False):return
         if self.result is None and (self.width_toggle.isChecked() or self.reconstruction_toggle.isChecked()):
@@ -2007,6 +2016,7 @@ class MainWindow(W.QMainWindow):
         for ax,counts in zip(axes,(mag_counts,dir_counts)):ax.set_ylim(0,max(1,float(max(counts,default=0)))*1.15)
         self.distribution_canvas.draw_idle()
     def run_evaluation(self,automatic=False):
+        if self.remote_locked or getattr(self,'requested_measured',False):return
         if not self.data:self.error('请先打开GDS');return
         try:p=self.params();roles=self.roles();order=self.ordered_layers()
         except Exception as e:self.error(e);return
@@ -2406,7 +2416,7 @@ class MainWindow(W.QMainWindow):
                     ignored_reconstruction=dict(sha256=self.data.sha256,top_cell=self.data.top_name,refs=[list(r) for r in self.view_settings.reconstruction_ignored]),
                     ignored_width_lines=dict(sha256=self.data.sha256,top_cell=self.data.top_name,refs=[list(r) for r in sorted(self.ignored_width_lines)]),
                     extreme_view=dict(filter_problems=self.problem_filter.isChecked(),mode='focus' if self.grid_mode.currentIndex() else 'all',page_size=EXTREME_PAGE_SIZE,page=(self.preview_page if self.extremes is not None else self._initial_extreme_page)+1),
-                    expanded_settings=[title for title,header in self.setting_sections.items() if header.isChecked()],
+                    layer_table_height=max(110,self.layer_split.sizes()[0]),expanded_settings=[title for title,header in self.setting_sections.items() if header.isChecked()],
                     expanded_process=[title for title,header in self.process_sections.items() if header.isChecked()],manual_preview=self.manual_preview.state(),
                     overlays={name:self.overlay_widget(name).isChecked() for name in OVERLAY_DEFAULTS},layer_styles=self.layer_styles,
                     visibility={k:w.isChecked() for k,w in self.visible_boxes.items()},motions=self.motions(),layer_order=self.ordered_layers())
@@ -2491,7 +2501,7 @@ class MainWindow(W.QMainWindow):
         source=local_source(path,gds)
         from .area_filter import canonical_project
         project=dict(canonical_project(self.data,self.project_settings()),gds_path=source)
-        if self.remote_locked:
+        if self.remote_locked or getattr(self,'requested_measured',False):
             for name,value in self.measured_output.saved_overlays.items():
                 project['overlays']['footprint' if name=='probability' else name]=value
         from .core import clean_json
@@ -2567,7 +2577,7 @@ def launch(project=None,measured=False,ipc_endpoint=None):
         window.error=startup_error
         def activate():
             if window._closing:return
-            if window.data is not None and window.worker is None and not window.preview_workers:
+            if window.worker is None and not window.preview_workers and not window._tasks:
                 window.measured_output.toggle.setChecked(True)
                 if window.measured_output.active():window.error=MainWindow.error.__get__(window,MainWindow)
             else:QtCore.QTimer.singleShot(100,activate)

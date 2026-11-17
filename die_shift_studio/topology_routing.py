@@ -193,6 +193,7 @@ def resolve(r,replacements,pieces,states):
         b=shapely.union_all([original[ref],objects[ref]]).bounds;pad=r._rule_width*8+r.tol*32
         box=shapely.box(b[0]-pad,b[1]-pad,b[2]+pad,b[3]+pad)
         return shapely.union_all([g for other,g in objects.items() if nets[other][0]==nets[ref][0] and nets[other]!=nets[ref] and g.intersects(box)]+[r.rules.keepout.intersection(box),*foreign_hits(ref,box)])
+    def enters_keepout(g):return not r.rules.keepout.is_empty and shapely.relate_pattern(g,r.rules.keepout,'T********')
     def valid(ref,g):return g.is_valid and signature(g)==signature(original[ref]) and covers_ports(g,ports[ref],r.tol)
     def attempt(ref,reason):
         if ref not in mutable:return None
@@ -205,7 +206,7 @@ def resolve(r,replacements,pieces,states):
     # is an obstacle even when full native DRC artwork was not requested.
     for ref in sorted(mutable):
         cancel_check()
-        if valid(ref,objects[ref]) and not foreign_hits(ref,objects[ref]) and not any(q.get('connection_failed') for q in by_ref[ref]):continue
+        if valid(ref,objects[ref]) and not enters_keepout(objects[ref]) and not foreign_hits(ref,objects[ref]) and not any(q.get('connection_failed') for q in by_ref[ref]):continue
         candidate=attempt(ref,'保连通补偿：已调整连接轮廓，工艺规则另检')
         if candidate is not None:
             objects[ref]=candidate[0];changed.add(ref);_adopt(by_ref[ref],candidate[0],r.tol,candidate[1])
@@ -242,6 +243,7 @@ def resolve(r,replacements,pieces,states):
         if not progressed:break
     for ref in sorted(objects):
         if not valid(ref,objects[ref]):blocked.append((ref,'无法获得包含全部过孔且保持原拓扑的连通铜'))
+        if enters_keepout(objects[ref]):blocked.append((ref,'固定RDL进入禁布区，无法在保持电连接的同时避让'))
         if foreign_hits(ref,objects[ref]):blocked.append((ref,'固定RDL仍接触其他网络的实际过孔或同层金属'))
     values=[objects[ref] for ref in refs];tree=shapely.STRtree(values)
     for i,a in enumerate(values):
@@ -249,6 +251,8 @@ def resolve(r,replacements,pieces,states):
             if j>i and nets[refs[i]][0]==nets[refs[int(j)]][0] and nets[refs[i]]!=nets[refs[int(j)]]:
                 blocked.extend(((refs[i],'异网实体接触仍无法避让'),(refs[int(j)],'异网实体接触仍无法避让')))
     for plane,values in immutable.items():
+        for node,g in values:
+            if r.model.roles[node['key']]=='运动RDL' and enters_keepout(g):blocked.append(((node['key'],node['index']),'运动RDL进入禁布区，无法通过固定RDL改线消除'))
         nodes=[n for n,g in values]
         if len({n['owner'] for n in nodes})<2:continue
         actual=[g for n,g in values];tree=shapely.STRtree(actual)

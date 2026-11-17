@@ -8,7 +8,7 @@ class ResultAnalysis(QtCore.QObject):
     def __init__(self,w):super().__init__(w);self.w=w;self.worker=None;self.pending=None;self.next_result=None
     def activate(self):
         w=self.w
-        if w._closing or w.tabs.currentWidget() is not w.analysis_page:return
+        if w._closing or w.remote_locked or getattr(w,'requested_measured',False) or w.tabs.currentWidget() is not w.analysis_page:return
         r=w.result
         if r is None:w.statusBar().showMessage('请先进行方案评估');return
         if r.get('analysis_complete',bool(r.get('model_yield'))):

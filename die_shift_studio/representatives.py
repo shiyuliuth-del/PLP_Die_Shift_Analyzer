@@ -31,23 +31,15 @@ class RepresentativeExtremes:
             index=grid.index(digits)
             if index>=0 and index not in self.names:
                 self.indices.append(index);self.names[index]=title
-        zero=[0]*n
-        for i,local in enumerate(grid.locals):
-            for digit in range(1,len(local)):
-                d=zero.copy();d[i]=digit;add(d,f'DIE {i+1} · {grid.labels[i][digit]}')
-        for signs in product((0,-1,1),repeat=3):
-            add([lookup[signs] for lookup in grid.sign_digits],'同向 · '+grid._label(signs))
-        pairs=pair_tables(case,p,grid,1e-6) if pairs is None else pairs
-        self.pairs={tuple(info['owners']) for info in pairs}
-        for info in pairs:
-            i,j=info['owners']
-            for label,digits in [('相向',info['near']),('背向',info['far'])]:
-                d=zero.copy();d[i],d[j]=digits;add(d,f'DIE {i+1}/{j+1} {label}边界')
-        for i,j in sorted(self.pairs|{tuple(sorted(q)) for q in coupled}):
-            if len(grid.locals[i])==1 or len(grid.locals[j])==1:continue
-            for signs in product((-1,1),repeat=3):
-                d=zero.copy();d[i]=grid.sign_digits[i][signs];d[j]=grid.sign_digits[j][tuple(-s for s in signs)]
-                add(d,f'DIE {i+1}/{j+1} 反向 · '+grid._label(signs))
+        # One synchronous sweep covers every nonzero local state. Only the
+        # separate nominal row parks all DIEs; a movable DIE is never held at
+        # zero while another moves. Permanently zero-amplitude DIEs stay zero.
+        active=[list(range(1,len(local))) for local in grid.locals]
+        count=max((len(v) for v in active),default=0)
+        for ordinal in range(count):
+            digits=[v[ordinal%len(v)] if v else 0 for v in active]
+            add(digits,'同步重点 · '+str(ordinal+1))
+        self.pairs=set()
         self.total=len(self.indices)
 
     @classmethod

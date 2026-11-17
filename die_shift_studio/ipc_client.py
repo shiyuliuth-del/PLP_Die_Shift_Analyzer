@@ -16,14 +16,15 @@ def wait(endpoint,task_id,timeout=3600,poll=.1):
 
 
 def start(app,project,endpoint,timeout=120):
-    app=Path(app).resolve();project=Path(project).resolve();endpoint=Path(endpoint).resolve()
-    if not app.is_file() or not project.is_file():raise FileNotFoundError('App and project must exist')
+    app=Path(app).resolve();project=Path(project).resolve() if project else None;endpoint=Path(endpoint).resolve()
+    if not app.is_file() or (project is not None and not project.is_file()):raise FileNotFoundError('App and project must exist')
     try:
         existing=call(endpoint,'ping',timeout=2)
         if existing.get('status')=='completed':return dict(status='completed',result={'already_running':True,'endpoint':str(endpoint)})
     except (OSError,ValueError,EOFError,TimeoutError):pass
     command=([sys.executable,str(app)] if app.suffix.lower() in ('.py','.pyw') else [str(app)])
-    command+=['--project',str(project),'--measured-output','--ipc-endpoint',str(endpoint)]
+    command+=['--measured-output','--ipc-endpoint',str(endpoint)]
+    if project is not None:command+=['--project',str(project)]
     process=subprocess.Popen(command,cwd=app.parent,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
                              creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
     until=time.monotonic()+timeout
@@ -44,7 +45,7 @@ def main(argv=None):
     args=parser.parse_args(argv)
     try:
         params=json.loads(Path(args.args_file).read_text(encoding='utf8') if args.args_file else args.args)
-        reply=start(params['app'],params['project'],args.endpoint,args.timeout) if args.command=='app.start' else call(args.endpoint,args.command,params)
+        reply=start(params['app'],params.get('project'),args.endpoint,args.timeout) if args.command=='app.start' else call(args.endpoint,args.command,params)
         if args.wait and reply.get('task_id'):reply=wait(args.endpoint,reply['task_id'],args.timeout)
         print(json.dumps(reply,ensure_ascii=False,allow_nan=False))
         return 0 if reply.get('status') in ('accepted','completed') else 1

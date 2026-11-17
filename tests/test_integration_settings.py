@@ -13,7 +13,7 @@ class IntegrationSettingsTests(unittest.TestCase):
         self.assertTrue(q.show_annulus_range and q.show_spacing_range)
         self.assertIn('禁布区',q.width_display)
         self.assertEqual(q.reconstruction_regions,())
-        self.assertIn('nominal-physical-throat-v36',q.width_key())
+        self.assertIn('nominal-physical-throat-v47-sync-focus',q.width_key())
 
     def test_regions_and_all_cut_kinds_round_trip(self):
         plane=('3/0',2,(('1/0',7),('2/0',7)),1.,0.,12.,14.)

@@ -1,11 +1,13 @@
-# Die Shift Analyze V46
+# Die Shift Analyze V47
 
-V46修复圆点拖动闪退与边界错位，按源复用重构路径；重点/全部组合统一控制实际评估与良率范围。工程采用独立Jobs目录，实测OAS增加阶段文件；与[RealDataAnalyse](RealDataAnalyse/README.md)及[GD55案例](Jobs/GD55/README.md)同包发布。实际验证与限制见[V46记录](docs/V46_VALIDATION.md)。
+本轮实测模式按指令求解、空工程等待与忙时排队，重点目录精简为同步逐DIE覆盖，修复GD55端孔/共用主干控制；见[V47说明](docs/V47_使用说明.md)。
+
+保留V46的圆点拖动稳定性、边界显示修复和按源复用重构路径；重点/全部组合统一控制实际评估与良率范围。工程采用独立Jobs目录，实测OAS增加阶段文件；与[RealDataAnalyse](RealDataAnalyse/README.md)及[GD55案例](Jobs/GD55/README.md)同包发布。实际验证与限制见[V47记录](docs/V47_VALIDATION.md)。
 
 软件分析Die-first封装的DIE平移与旋转，提供三方案初筛、实体覆盖与极端足迹、通道宽度风险、重构动区编辑、规则/联合模型良率、工程结果保存、GDS/OAS导入、实测IPC及批量OAS输出。长度均为μm，GDS/OAS只读，工程节点可编辑。
 
 - [实测IPC接口与注意事项](docs/MEASURED_OUTPUT_API.md) · [GD55-1105独立验证脚本](tools/verify_measured_gd55.py)
-- [用户操作](docs/V46_使用说明.md)
+- [用户操作](docs/V47_使用说明.md)
 - [AI交接：主要功能、代码地图、算法和后续重点](docs/AI_HANDOFF.md)
 - [现行设计合同](docs/DESIGN_REQUIREMENTS.md)
 - [已知边界](docs/KNOWN_ISSUES.md)

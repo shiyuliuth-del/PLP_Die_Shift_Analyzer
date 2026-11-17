@@ -19,8 +19,27 @@ with tempfile.TemporaryDirectory() as tmp:
  project.write_text(json.dumps(dict(schema_version=5,gds_path=str(source),top_cell='TOP',roles=roles,layer_order=list(roles)[::-1],parameters=asdict(p),settings={'animation_enabled':False},overlays={})))
  def spawn(path,name):
   command=[os.environ['DIE_SHIFT_TEST_EXE']] if os.environ.get('DIE_SHIFT_TEST_EXE') else [sys.executable,str(ROOT/'main.py')]
-  log=(folder/name).open('wb');process=subprocess.Popen(command+['--project',str(path),'--measured-output','--ipc-endpoint',str(endpoint)],cwd=ROOT,env=os.environ.copy(),stdout=log,stderr=subprocess.STDOUT)
+  log=(folder/name).open('wb');process=subprocess.Popen(command+(['--project',str(path)] if path else [])+['--measured-output','--ipc-endpoint',str(endpoint)],cwd=ROOT,env=os.environ.copy(),stdout=log,stderr=subprocess.STDOUT)
   return process,log
+ process,log=spawn(None,'empty.log')
+ try:
+  end=time.monotonic()+120
+  while time.monotonic()<end:
+   assert process.poll() is None,(folder/'empty.log').read_text(errors='replace')
+   try:
+    reply=call(endpoint,'info')
+    if reply.get('status')=='completed':break
+   except (OSError,EOFError,ValueError):pass
+   time.sleep(.1)
+  else:raise AssertionError('empty IPC ready timeout')
+  assert reply['result']['project'] is None and not reply['result']['ready']
+  assert not reply['result']['running']
+  assert call(endpoint,'app.shutdown')['status']=='completed'
+  assert process.wait(timeout=60)==0
+ finally:
+  if process.poll() is None:
+   call(endpoint,'app.shutdown');process.wait(timeout=60)
+  log.close()
  process,log=spawn(project,'good.log')
  try:
   end=time.monotonic()+120
