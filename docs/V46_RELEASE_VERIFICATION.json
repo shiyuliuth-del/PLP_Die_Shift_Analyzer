@@ -1,0 +1,29 @@
+{
+  "version": "V46",
+  "status": "PUBLISHED_AND_VERIFIED",
+  "tag_commit": "d693a7d83d36d3232308a997da1d153e9e7b5f45",
+  "published_at": "2026-11-17T02:46:14Z",
+  "runtime_sha256": "0f313ea3f678cbce7e16126d5f3efdb2fdcf747622856b1a9c4e75240c0162a9",
+  "source_sha256": "eabb59883a0c7155ac6b7d5e67be41eb95fadce6edfc1da2fec69483ecadfbc8",
+  "files": 158,
+  "bytes": 2092436,
+  "source_commands": 51,
+  "core_tests": 430,
+  "external_tests": 2,
+  "gui_suites": 31,
+  "windows_runs": [
+    44002632393,
+    44002366720
+  ],
+  "checks": [
+    "release_zip_crc",
+    "release_zip_sha256",
+    "release_zip_matches_tag",
+    "api_and_script_match_tag",
+    "automatic_zip_matches_tag",
+    "automatic_tar_matches_tag",
+    "7zip"
+  ],
+  "retained_unreleased_pr": 34,
+  "retained_unreleased_commit": "7529ff4432915a14b56fef992bb41b4c568f336e"
+}
