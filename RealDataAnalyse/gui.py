@@ -714,16 +714,15 @@ class Window(W.QMainWindow):
                 meta = {k: json.loads(v) for k, v in db.execute('select key,value from meta')}
                 count = meta.get('count', 0)
                 self.page = min(self.page, max(0, (count - 1) // 200))
-                counts = dict(db.execute('select state,count(*) from packages group by state'))
-                rows = db.execute('select seq,package,cell,state,coalesce(result,task,\'\') from packages order by seq limit 200 offset ?', (self.page * 200,)).fetchall()
+                rows = db.execute('select seq,package,cell,state,coalesce(result,task,\'\') from packages where seq>? order by seq limit 200', (self.page * 200,)).fetchall()
             self.table.setRowCount(len(rows))
             for i, row in enumerate(rows):
                 for j, value in enumerate(row):
                     item = W.QTableWidgetItem(str(value)[:4000])
                     item.setToolTip(str(value)[:16000])
                     self.table.setItem(i, j, item)
-            done = counts.get('computed', 0) + counts.get('committed', 0)
-            self.page_label.setText(f'第{self.page + 1}页 · 共{count}封装 · 完成{done} · 失败{counts.get("error", 0)}')
+            state = {'imported': '已导入', 'running': '运行中', 'paused': '已暂停', 'blocked': '需处理', 'completed': '已完成'}.get(meta.get('state'), meta.get('state', ''))
+            self.page_label.setText(f'{state} · 第{self.page + 1}/{max(1, (count + 199) // 200)}页 · 共{count}封装')
         except (OSError, ValueError, sqlite3.Error):
             pass
 
