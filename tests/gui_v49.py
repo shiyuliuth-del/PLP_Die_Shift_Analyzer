@@ -46,12 +46,19 @@ try:
  key('K');event('button_press_event',(0,80));event('button_release_event',(0,80));event('button_press_event',(30,120));event('button_release_event',(30,120));assert len(w.rulers.rows)==1
  key('K',getattr(getattr(Qt,'KeyboardModifier',Qt),'ControlModifier'));assert not w.rulers.rows
  key('Escape');w.reconstruction_toggle.setChecked(True);wait();w.region_move.setChecked(True);w.canvas.draw()
+ handle=w.current_frame['reconstruction']['pieces'][0]['moved_cut'].centroid.coords[0]
+ event('button_press_event',handle);assert w.region_select.state is not None and w.cut_drag.state is None
+ key('Escape');w.region_move.setChecked(True);w.canvas.draw()
  event('button_press_event',(80,-60));event('motion_notify_event',(220,70));limits=(w.ax.get_xlim(),w.ax.get_ylim())
  event('scroll_event',(220,70),button='up',step=10)
  assert w.region_select.state is not None and np.isclose(w.region_select.state['angle'],-np.pi/9)
  np.testing.assert_allclose([w.ax.get_xlim(),w.ax.get_ylim()],limits)
  expected=w.region_select.vertices().copy();event('button_release_event',(220,70));wait()
  stored=w.view_settings.reconstruction_boxes[-1];np.testing.assert_allclose(stored[1],expected,atol=.01)
+ for q in w.current_frame['reconstruction']['pieces']:
+  source=w.geometry_cache.layers[q['layer']]['geometry'][q['index']]
+  wanted=source.intersection(shapely.Polygon(stored[1]))
+  if not wanted.is_empty:assert q['nominal_regions']['A'].symmetric_difference(wanted).area<1.e-6,(q['index'],q['nominal_regions']['A'].wkt,wanted.wkt)
  key('Escape');assert w.region_select.mode is None
  # Paging must never truncate the full canvas catalogue or change the row's source.
  rows=[dict(kind='线宽不足',layer='5/0',layers=('5/0',),point=[i,0],geometry=shapely.box(i,0,i+.1,1),required_um=10) for i in range(600)]

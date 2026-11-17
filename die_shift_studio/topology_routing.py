@@ -122,6 +122,24 @@ def connected_candidate(source,current,ports,obstacles,board,width,tol,space=0.)
     return None
 
 
+def cached_connection(r,source,current,ports,obstacles,board,width,tol,space):
+    """Repeat local scenes across package combinations without re-routing.
+
+    Actual posed obstacles and every physical terminal are part of the key;
+    reuse never substitutes nominal neighbours for a changed neighbour.
+    """
+    cancel_check()
+    blobs=(source.wkb,current.wkb,tuple(p.wkb for p in ports),obstacles.wkb,None if board is None else board.wkb)
+    key=('electrical-local-repair-v49',*blobs,float(width),float(tol),float(space))
+    value=r.geometry_pool.get(key)
+    if value is not None:return None if value[0] is None else shapely.from_wkb(value[0])
+    result=connected_candidate(source,current,ports,obstacles,board,width,tol,space)
+    blob=None if result is None else result.wkb
+    size=512+sum(len(b) for b in (blobs[0],blobs[1],*blobs[2],blobs[3],blobs[4] or b'',blob or b''))*2
+    r.geometry_pool.put(key,(blob,),size=size)
+    return result
+
+
 def _adopt(rows,geometry,tol,reason):
     """Keep material regions disjoint and attach compensation to its real A area."""
     def material(g):return shapely.union_all(parts(g))
@@ -208,7 +226,7 @@ def resolve(r,replacements,pieces,states):
         enclosed=[p.buffer(r.rules.p.annulus_um/math.cos(math.pi/128),quad_segs=32) for p in ports[ref]]
         for space in dict.fromkeys((r.rule_space,r.rule_space*.5,0.)):
             for targets in (enclosed,ports[ref]):
-                candidate=connected_candidate(original[ref],objects[ref],targets,foreign,r.rules.board,r._rule_width,r.tol,space)
+                candidate=cached_connection(r,original[ref],objects[ref],targets,foreign,r.rules.board,r._rule_width,r.tol,space)
                 if candidate is None:continue
                 if targets is enclosed and not all(candidate.buffer(r.tol*.1).covers(g) for g in enclosed):continue
                 if any(q.get('strict_box') is not None for q in by_ref.get(ref,())):

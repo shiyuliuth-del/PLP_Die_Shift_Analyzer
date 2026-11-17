@@ -152,7 +152,7 @@ def write_gds(snapshot,destination,dbu):
     path=Path(destination).resolve()
     if path.suffix.lower() not in ('.gds','.gdsii'):raise ValueError('单姿态输出须使用.gds后缀')
     if not path.parent.is_dir():raise ValueError('输出目录不存在')
-    lib=gdstk.Library(unit=1e-6,precision=dbu*1e-6);top=lib.new_cell('MeasuredPackage')
+    lib=gdstk.Library(unit=1e-6,precision=dbu*1e-6);top=lib.new_cell('MeasuredPackage');discarded=0
     for key,blobs in snapshot.layers.items():
         layer,datatype=map(int,key.split('/'))
         if not (0<=layer<=65535 and 0<=datatype<=65535):raise ValueError('图层或Datatype超过GDS 16位范围，请使用OAS输出')
@@ -163,12 +163,16 @@ def write_gds(snapshot,destination,dbu):
                     points=winding_outline(g);scaled=points/dbu
                     quantized=np.sign(scaled)*np.floor(np.abs(scaled)+.5)
                     if np.any(quantized<-(2**31)) or np.any(quantized>2**31-1):raise ValueError('GDS坐标超过32位DBU范围，拒绝溢出输出；请减小坐标或使用OAS')
+                    integer=quantized.astype(np.int64)
+                    integer=integer[np.any(integer!=np.roll(integer,1,axis=0),axis=1)]
+                    area2=sum(int(a[0])*int(b[1])-int(a[1])*int(b[0]) for a,b in zip(integer,np.roll(integer,-1,axis=0)))
+                    if len(integer)<3 or area2==0:discarded+=1;continue
                     top.add(gdstk.Polygon(points,layer=layer,datatype=datatype))
     fd,temp=tempfile.mkstemp(prefix='.dsa-measured-',suffix='.gds',dir=path.parent);os.close(fd)
     try:
         lib.write_gds(temp,max_points=8190);check=gdstk.read_gds(temp)
         if not check.top_level() or not check.top_level()[0].get_polygons():raise ValueError('GDS回读无有效图形')
         cancel_check();os.replace(temp,path)
-        return dict(path=str(path),bytes=path.stat().st_size,dbu_um=dbu)
+        return dict(path=str(path),bytes=path.stat().st_size,dbu_um=dbu,discarded_subgrid_fragments=discarded)
     finally:
         if os.path.exists(temp):os.unlink(temp)

@@ -285,7 +285,7 @@ class CutDrag:
     def _tolerance(self):
         t=self.w.ax.transData.inverted();return float(np.linalg.norm(t.transform((12,0))-t.transform((0,0))))
     def press(self,event):
-        if getattr(self.w.canvas,"ruler_active",False):return
+        if getattr(self.w.canvas,"ruler_active",False) or getattr(getattr(self.w,'region_select',None),'mode',None) is not None:return
         if getattr(self.w,"remote_locked",False):return
         w=self.w
         if not w.reconstruction_toggle.isChecked() or event.inaxes is not w.ax or event.xdata is None or getattr(w.canvas,'die_move_active',False):return
@@ -297,7 +297,6 @@ class CutDrag:
         overlay=w.reconstruction_overlay;overlay.selected=overlay._key(piece);overlay.selected_kind=kind
         if kind in ('bridge','problem'):return
         if event.button!=1:return
-        if getattr(w,'region_select',None) and w.region_select.mode is not None:w.exit_region_mode()
         if w.toolbar.mode:
             if 'pan' in str(w.toolbar.mode).lower():
                 if getattr(w.toolbar,'_pan_info',None) is not None:w.toolbar.release_pan(event)
