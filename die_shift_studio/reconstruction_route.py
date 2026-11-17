@@ -354,6 +354,16 @@ class RoutePlan:
         This is a bounded engineering search, not a global routing optimum.
         The same full-input displacement bound is used in every pose.
         """
+        preferred=getattr(self,'preferred_land',None)
+        if preferred is not None and preferred.difference(self.land).area>self.tolerance**2:
+            original_land=self.land;original_end=self.land_end
+            self.land=preferred
+            marks=terminal_marks(self.route,preferred);self.land_end=float(marks.max()) if len(marks) else original_end
+            self.preferred_land=None;self.cache.clear()
+            try:chosen=self.choose(max_travel)
+            finally:
+                self.land=original_land;self.land_end=original_end;self.cache.clear();self.preferred_land=preferred
+            if chosen is not None:return chosen
         eps=max(self.tolerance*16,.01)
         breaks=[(self.land_end+eps,0.),*self.corners,(self.fixed_start-eps,0.)]
         candidates=[]

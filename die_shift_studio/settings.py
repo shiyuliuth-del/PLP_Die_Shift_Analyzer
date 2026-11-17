@@ -226,7 +226,7 @@ class ViewSettings:
         return cls(**data)
 
     def width_key(self):
-        return (True,'nominal-physical-throat-v36',self.drc_tolerance_um,self.evaluation_scope)
+        return (True,'nominal-physical-throat-v47-sync-focus',self.drc_tolerance_um,self.evaluation_scope)
 
     def numeric_key(self):
         return tuple(getattr(self,k) for k in ('acceleration','probability_method','sample_exponent','random_seed',
@@ -234,7 +234,7 @@ class ViewSettings:
 
     def reconstruction_key(self):
         """Everything the reconstruction result depends on besides the pose."""
-        return (True,'nominal-route-continuity-1',self.evaluation_scope,self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_pad_trigger_um,self.reconstruction_ignored,self.reconstruction_following,self.drc_tolerance_um,
+        return (True,'nominal-route-continuity-v47',self.evaluation_scope,self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_pad_trigger_um,self.reconstruction_ignored,self.reconstruction_following,self.drc_tolerance_um,
                 self.reconstruction_corner_guard_um,tuple(self.reconstruction_intervals),
                 self.reconstruction_forced,self.reconstruction_angles,self.reconstruction_deleted,self.reconstruction_added,
                 tuple(self.reconstruction_regions),tuple(self.reconstruction_cuts),

@@ -14,10 +14,10 @@ class MeasuredOutput(QtCore.QObject):
     incoming=Signal(object,object,object);finished=Signal(str,object,object);progressed=Signal(str,int,str)
     def __init__(self,w,layout):
         super().__init__(w);self.w=w;self.server=None;self.session=None;self.options=Options();self.jobs=OrderedDict()
-        self.pool=None;self.generation=0;self.batch=None;self.current=None;self.render_engine=None;self.ready=False;self.last_error=None;self.transition=None;self.running={};self.stopping=False;self.requests=OrderedDict()
+        self.pending_enable=False;self.pool=None;self.generation=0;self.batch=None;self.current=None;self.render_engine=None;self.ready=False;self.last_error=None;self.transition=None;self.running={};self.stopping=False;self.requests=OrderedDict()
         self.incoming.connect(self.dispatch);self.finished.connect(self.complete);self.progressed.connect(self.progress)
         self.toggle=W.QCheckBox('实测输出');self.toggle.setStyleSheet('font-weight:bold; padding:4px 2px;');layout.addWidget(self.toggle)
-        box=W.QGroupBox();form=W.QFormLayout(box);layout.addWidget(box);self.toggle.toggled.connect(self.toggled)
+        self.settings_header,self.settings_body,form=w.collapsible(layout,'实测输出设置',w.setting_sections);self.toggle.toggled.connect(self.toggled)
         self.directory=W.QLineEdit();self.directory.setPlaceholderText('输出目录，可通过output.configure设置');form.addRow('输出目录',self.directory)
         self.memory=W.QSpinBox();self.memory.setRange(0,1048576);self.memory.setSpecialValueText('自动');self.memory.setSingleStep(128);form.addRow('最大内存 / MB',self.memory)
         self.threads=W.QSpinBox();self.threads.setRange(0,256);self.threads.setSpecialValueText('自动');form.addRow('最大线程',self.threads)
@@ -40,7 +40,7 @@ class MeasuredOutput(QtCore.QObject):
             widget=getattr(self.w,name,None)
             if widget is not None:widget.setEnabled(not locked)
         for widget in (self.directory,self.memory,self.threads):widget.setEnabled(not self.active())
-        self.toggle.setEnabled(not self.stopping)
+        self.toggle.setEnabled(not self.stopping and not self.pending_enable)
         if self.active() or self.stopping:self.w.task_control.button.setEnabled(not self.stopping)
     def toggled(self,on):
         if on:
@@ -52,14 +52,20 @@ class MeasuredOutput(QtCore.QObject):
     def enable(self,endpoint=None):
         if self.active():return
         w=self.w
-        if w.data is None:raise ValueError('请先打开并设置工程，再进入实测输出')
-        if w.worker is not None or w.preview_workers:raise ValueError('请等当前图纸任务完成后进入实测输出')
+        if w.worker is not None or w.preview_workers or w._tasks:
+            self.pending_enable=True;self.toggle.setEnabled(False)
+            w.statusBar().showMessage('等待当前任务完成后开启实测输出');return
+        self.pending_enable=False
         w.cut_drag.cancel();w.exit_region_mode()
         self.options=Options.from_dict(self.configuration())
+        self.saved_overlays=getattr(self,'startup_overlays',None) or {name:w.overlay_widget(name).isChecked() for name in ('reconstruction','width','drc','space','probability')}
         # Saving is a prerequisite; no IPC endpoint exists if persistence fails.
-        path=w.project_path or w.jobs_dir/('实测自动保存_'+time.strftime('%Y%m%d_%H%M%S')+'_'+uuid.uuid4().hex[:6]+'.dshift.json')
-        w.write_project(path);w.refresh_jobs();w.stop_animation();w.cancel_previews();w.mouse_die.exit();w.exit_region_mode()
-        self.saved_overlays={name:w.overlay_widget(name).isChecked() for name in ('reconstruction','width','drc','space','probability')}
+        if w.data is not None:
+            from .jobs import job_path
+            path=w.project_path or job_path(w.jobs_dir,'实测自动保存_'+time.strftime('%Y%m%d_%H%M%S')+'_'+uuid.uuid4().hex[:6])
+            w.write_project(path);w.refresh_jobs()
+        w.stop_animation();w.cancel_previews();w.mouse_die.exit();w.exit_region_mode()
+        self.startup_overlays=None
         from .local_ipc import Server
         home=Path(os.environ.get('LOCALAPPDATA',Path.home()/'.local'/'state'))/'DieShiftAnalyze'/'ipc'
         requested=endpoint or getattr(w,'requested_ipc_endpoint',None)
@@ -75,8 +81,8 @@ class MeasuredOutput(QtCore.QObject):
         w.width_yield.reset();w.reconstruction_yield.reset();w.constraint_feedback.cancel()
         self.endpoint.setText(str(self.server.endpoint));w.remote_locked=True;self.ready=False;self.last_error=None;self.current=None
         self.pool=ThreadPoolExecutor(max_workers=max(1,min(32,self.options.max_threads or resource_profile()['workers'])),thread_name_prefix='dsa-measured')
-        self.transition={'job':self.new_job('session.prepare'),'phase':'assess'};self.apply_lock()
-        w.log_bus.emit('实测输出已开启，工程已自动保存；IPC：'+str(self.server.endpoint))
+        self.transition={'job':self.new_job('session.freeze'),'phase':'freeze'} if w.data is not None else None;self.apply_lock()
+        w.log_bus.emit('实测输出已开启；等待指令，不进行方案评估或良率计算。IPC：'+str(self.server.endpoint))
     def new_job(self,command):
         key=uuid.uuid4().hex;self.jobs[key]=dict(task_id=key,command=command,status='queued',progress=0,created=time.time())
         while len(self.jobs)>10000:
@@ -118,7 +124,7 @@ class MeasuredOutput(QtCore.QObject):
         else:
             if kind=='prepare':
                 if self.session and self.session is not result:self.session.close()
-                self.session=result;self.ready=True;self.last_error=None;result={'ready':True,'project':str(self.w.project_path)}
+                self.session=result;self.w.case=result.case;self.w.geometry_cache=result.cache;self.ready=True;self.last_error=None;result={'ready':True,'project':str(self.w.project_path)}
             elif kind=='preview':
                 (frame,snapshot,details),engine=result;self.current=(frame,snapshot,details);w=self.w
                 if self.render_engine:self.render_engine.close()
@@ -145,6 +151,10 @@ class MeasuredOutput(QtCore.QObject):
             self.w.statusBar().showMessage('实测准备失败：'+str(message).splitlines()[0]+'；关闭实测输出后可调整工程。')
     def tick(self):
         w=self.w
+        if self.pending_enable and not (w.worker or w.preview_workers or w._tasks):
+            self.pending_enable=False
+            if not w._closing:self.toggled(True)
+            self.apply_lock()
         if self.stopping and not self.running and not w._tasks:
             if self.batch:
                 self.batch['executor'].shutdown(wait=False);self.batch['store'].close();self.batch=None
@@ -163,30 +173,32 @@ class MeasuredOutput(QtCore.QObject):
                     w.statusBar().showMessage('实测输出已关闭，恢复工程参数和零偏移预览。')
                 self.apply_lock();w.task_control.button.setEnabled(True)
         if self.active():self.apply_lock()
-        if self.transition and not w.worker and not w.preview_workers:
-            t=self.transition
-            if t['phase']=='load':t['phase']='assess'
-            if t['phase']=='assess':
-                if w.data is None:self.fail_transition('工程未能打开');return
-                if w.result is None or w.dirty:
-                    t['phase']='evaluating';w.run_evaluation(automatic=True);return
-                t['phase']='evaluating'
-            if t['phase']=='evaluating':
-                if w.result is None or not w.result.get('extreme_factors',{}).get('checked'):self.fail_transition('方案评估未完成');return
-                if w._tasks:return
-                self.transition=None
-                data,case,roles,motions,p,settings,cache=w.data,w.case,w.roles(),w.motions(),w.params(),w.view_settings,w.geometry_cache
-                from .reconstruction_status import clone_plan_pool
-                plans=clone_plan_pool(getattr(getattr(w.engine,'reconstructor',None),'plan_pool',{}))
-                def prepare(progress):
-                    session=Session(data,case,roles,motions,p,settings,cache,plans)
-                    try:session.prepare(progress);return session
-                    except Exception:session.close();raise
-                self.submit('session.prepare',prepare,'prepare',t['job'])
+        if self.transition and not w.worker and not w.preview_workers and not w._tasks:
+            t=self.transition;self.transition=None
+            if w.data is None:
+                self.transition=t;self.fail_transition('工程未能打开');return
+            try:
+                data,roles,motions,p,settings,cache=w.data,w.roles(),w.motions(),w.params(),w.view_settings,w.geometry_cache
+                existing_case=w.case
+            except Exception as exc:
+                self.transition=t;self.fail_transition(str(exc));return
+            def prepare(progress):
+                from .core import build_case
+                from .fast_preview import GeometryCache
+                progress(5,'建立实测连接快照')
+                actual_cache=cache or GeometryCache(data)
+                case=existing_case or build_case(data,roles,layer_order=t['order'])
+                session=Session(data,case,roles,motions,p,settings,actual_cache)
+                try:
+                    if t.get('plan'):session.prepare(progress)
+                    progress(100,'实测工程就绪，等待偏移指令');return session
+                except Exception:session.close();raise
+            t['order']=w.ordered_layers()
+            self.submit('session.prepare' if t.get('plan') else 'session.freeze',prepare,'prepare',t['job'])
         if self.active() and not self.running and not w._tasks:
             w.progress.hide();w.progress.setFormat('%p%')
     def stop(self,disable=False):
-        self.generation+=1;self.ready=False;self.current=None
+        self.pending_enable=False;self.generation+=1;self.ready=False;self.current=None
         for event,_,_ in self.running.values():event.set()
         if self.transition:self.jobs[self.transition['job']]['status']='cancelled';self.transition=None
         self.w.task_control.cancel();self.stopping=True
@@ -255,15 +267,15 @@ class MeasuredOutput(QtCore.QObject):
             return dict(status='completed',result=asdict(self.options))
         if command=='session.prepare':
             if self.running or self.batch or self.transition:raise RuntimeError('已有任务正在运行')
-            self.last_error=None;key=self.new_job(command);self.transition=dict(job=key,phase='assess');return dict(status='accepted',task_id=key)
-        if not self.ready or self.session is None:raise RuntimeError('工程尚未完成评估和共用动区准备，查询info或调用session.prepare')
+            self.last_error=None;key=self.new_job(command);self.transition=dict(job=key,phase='freeze',plan=True);return dict(status='accepted',task_id=key)
+        if not self.ready or self.session is None:raise RuntimeError('尚未打开有效实测工程，查询info或调用project.open/session.prepare')
         if command=='preview.submit':
             if self.running or self.batch:raise RuntimeError('已有任务正在执行')
             rows=args['dies'];session=self.session
             from .measured_core import pose_parameters
             pose_parameters(session.case,session.p,rows)
             def preview(progress):
-                product=session.run(rows,progress);_,p=pose_parameters(session.case,session.p,rows)
+                product=session.run(rows,progress,preview=False);_,p=pose_parameters(session.case,session.p,rows)
                 model,reconstructor=session.model(p)
                 from .fast_preview import PreviewEngine
                 engine=PreviewEngine(session.cache,session.case,session.roles,session.motions,p,None,session.case['connections'],contact_model=model)

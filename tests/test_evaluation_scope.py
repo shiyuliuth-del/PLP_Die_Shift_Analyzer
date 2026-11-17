@@ -17,12 +17,12 @@ class ScopeTests(unittest.TestCase):
   return Parameters(multi_bound_x_um=1,multi_bound_y_um=0,bound_angle_deg=0,target_nsigma=1)
  def test_focus_weights_condition_on_only_selected_joint_cells(self):
   p=self.parameters();grid,indices=focused_catalog(self.model(),p)
-  self.assertEqual(len(indices),7);self.assertEqual(grid.total+1,9);self.assertIn(-1,indices)
+  self.assertEqual(len(indices),3);self.assertEqual(grid.total+1,9);self.assertIn(-1,indices)
   weights,_,_=conditional_weights(grid,p,indices);self.assertAlmostEqual(weights.sum(),1.)
-  tail=(ndtr(1)-ndtr(.5))/(ndtr(1)-ndtr(-1));mass=1-2*tail**2
+  tail=(ndtr(1)-ndtr(.5))/(ndtr(1)-ndtr(-1));mass=(1-2*tail)**2+2*tail**2
   positive=int(np.flatnonzero(grid.locals[0][:,0]>0)[0]);clause=PoseClause(((0,(positive,)),))
   passed,failed=conditional_event(grid,indices,weights,[clause])
-  self.assertAlmostEqual(failed,tail*(1-tail)/mass);self.assertAlmostEqual(passed+failed,1.)
+  self.assertAlmostEqual(failed,tail**2/mass);self.assertAlmostEqual(passed+failed,1.)
  def test_infinite_level_keeps_last_finite_joint_law(self):
   p=replace(self.parameters(),reference_nsigma=1);grid,indices=focused_catalog(self.model(),p)
   finite=conditional_weights(grid,p,indices)[0]
@@ -39,7 +39,10 @@ class ScopeTests(unittest.TestCase):
            original=0,required=1,current=0,narrowing_um=11.,pair=('a','b'),probability_key=('site',))
   analyzer=SimpleNamespace(model=model,cache=SimpleNamespace(group=None),settings=ViewSettings(evaluation_scope='focus'),
                            probability=None,frame=lambda _:dict(rows=[row]))
-  with patch('die_shift_studio.width_keepout.routing_violations',return_value=[]):summary,bank=focused_width(analyzer,p,lambda *_:None)
+  from die_shift_studio.statistics import ExtremeCatalog
+  grid=ExtremeCatalog(model.case,p)
+  # Keep multi-chunk serialization covered independently of the now compact focus catalogue.
+  with patch('die_shift_studio.evaluation_scope.focused_catalog',return_value=(grid,tuple(range(-1,39)))), patch('die_shift_studio.width_keepout.routing_violations',return_value=[]):summary,bank=focused_width(analyzer,p,lambda *_:None)
   self.assertGreater(bank['total'],32);self.assertGreater(len(bank['chunks']),1)
   self.assertTrue(all(n<=32 and mask.bit_length()<=32 for n,mask,*_ in bank['chunks']))
   q=policy_yields(bank,{('5/0',0)})

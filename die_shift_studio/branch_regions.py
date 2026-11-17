@@ -201,7 +201,13 @@ def editable_piece(piece,point,kind=None):
         endpoint=shapely.Point(member['route_plan'].route.coords[0 if side==0 else -1])
         for row in piece['graph_members']:
             candidate=shapely.Point(row['route_plan'].route.coords[0 if side==0 else -1])
-            if distance(row)<=nearest_distance+tol*4 or (whole and candidate.distance(endpoint)<=tol*4):companions.append(row)
+            # A common seam may be assembled from slightly skew source cuts.
+            # Distance at the cursor alone misses the other contributors and
+            # leaves their overlapping A domains pinned. Couple contributors to
+            # THIS connected visible seam, not separate fork faces elsewhere.
+            shared_face=(not whole and nearest is not None and nearest.geom_type=='LineString'
+                         and row[name].intersection(nearest.buffer(tol*4)).length>tol*16)
+            if shared_face or distance(row)<=nearest_distance+tol*4 or (whole and candidate.distance(endpoint)<=tol*4):companions.append(row)
     if point_mode and kind in ('moved','extra'):
         # A union can swallow an individual path cut while retaining another
         # branch's seam. A displayed terminal point starts at that terminal,

@@ -60,7 +60,7 @@ class Session:
         from .session_cache import logical_fingerprint
         from . import __version__
         self.identity=logical_fingerprint((__version__,data.geometry_id,data.top_name,self.roles,list(cache.layers),self.motions,asdict(self.p),asdict(self.settings)))
-        self.lock=threading.Lock();self.local=threading.local();self.instances=[]
+        self.lock=threading.Lock();self.plan_lock=threading.Lock();self.local=threading.local();self.instances=[]
     def model(self,p):
         from .contact import ContactModel
         from .reconstruction import Reconstructor
@@ -73,16 +73,24 @@ class Session:
         model=ContactModel(self.data,self.case,self.roles,self.case['connections'],self.cache,self.motions,p)
         model.bound.acceleration=self.settings.acceleration
         with self.lock:plans=clone_plan_pool(self.plan_pool)
-        r=Reconstructor(model,p,self.settings,plan_pool=plans)
+        r=Reconstructor(model,p,self.settings,plan_pool=plans);r.measured_only=True
         self.local.model=(key,model,r)
         with self.lock:self.instances.append(r)
         return model,r
     def prepare(self,progress):
-        _,r=self.model(self.p);r._plans_for_all_poses(progress)
+        _,r=self.model(self.p);self.ensure_plans(r,progress)
+    def ensure_plans(self,r,progress):
+        # First batch request plans once; other lanes clone immutable nominal
+        # routes instead of running the same expensive tracing concurrently.
+        if r._plans is not None:return
         from .reconstruction_status import clone_plan_pool
-        with self.lock:self.plan_pool.update(clone_plan_pool(r.plan_pool))
+        with self.plan_lock:
+            with self.lock:r.plan_pool.update(clone_plan_pool(self.plan_pool))
+            r._plans_for_all_poses(progress)
+            with self.lock:self.plan_pool.update(clone_plan_pool(r.plan_pool))
     def run(self,rows,progress=lambda *_:None,*,preview=True):
         states,p=pose_parameters(self.case,self.p,rows);model,r=self.model(p)
+        self.ensure_plans(r,progress)
         # Batch omits global probability, width analysis, UI artwork and complete
         # DRC marker scans. The same curve solver still rejects invalid geometry.
         result=r.frame(states,progress=progress,diagnostics=preview)
@@ -93,7 +101,7 @@ class Session:
         bound.acceleration=self.settings.acceleration
         layers=bound.transform(states)
         frame=dict(states=states,layers=layers,rotation_centers=model.bound.centers.copy(),reconstruction=result,
-                   checks={i:dict(failures=[],problem_percent=0) for i in (1,2,3)},contact={'issues':[]},motion_issues=[])
+                   checks={i:dict(failures=[],problem_percent=0) for i in (1,2,3)},contact={'issues':[],'regions':[]},motion_issues=[])
         if preview:
             from .fast_preview import check_frame
             frame['contact']=model.current(states,p,result['replacements'])
@@ -116,7 +124,7 @@ class Session:
             r.cache.clear();r.geometry_pool.clear();r.block_cache.clear()
         return frame,frozen,dict(connection_failures=failures,connection_failure_count=len(failures),
                                 fixed_rdl_drc_checked=bool(preview),rule_groups=len(result.get('violations',())),
-                                scope='当前实际铜；已检查当前金属线宽、线距、孔盘包围与封装边距，不代表工艺签核' if preview else '当前实际铜；快速批量不计算全局DRC、概率或良率')
+                                scope='当前实际铜；已检查当前金属线宽、线距、孔盘包围与封装边距，不代表工艺签核' if preview else '当前实测铜；只核验电连接、异网隔离和禁布区；不计算全局尺寸DRC、概率或良率')
     def close(self):
         for r in self.instances:r.close()
         self.instances.clear();self.local=threading.local()
