@@ -60,7 +60,7 @@ with tempfile.TemporaryDirectory() as tmp:
     QTest.mouseRelease(viewport,Qt.LeftButton,pos=QtCore.QPoint(x,y1));app.processEvents()
     with patch.object(W.QInputDialog,'getText',return_value=('测试工程',True)) as dialog:
         window.save_project();assert dialog.call_count==1
-    saved=window.project_path;assert saved.parent==window.jobs_dir and saved.exists()
+    saved=window.project_path;assert saved.parent.parent==window.jobs_dir and saved.exists()
     assert json.loads(saved.read_text())['layer_order'][3:5]==['31/0','30/0']
     with patch.object(W.QInputDialog,'getText',side_effect=AssertionError('Existing jobs must overwrite')):window.save_project()
     window.job_combo.setCurrentIndex(0);assert window.project_path is None

@@ -47,7 +47,8 @@ def main():
     with patch.object(W.QInputDialog,'getText',return_value=('显示偏好',True)):w.save_project()
     print('Checking saved and legacy Jobs',file=sys.__stdout__,flush=True)
     saved=w.project_path;doc=json.loads(saved.read_text(encoding='utf8'));assert doc['settings']['show_spacing_range'] is False
-    assert (saved.parent/Path(doc['gds_path'])).resolve()==path.resolve()
+    assert (saved.parent/Path(doc['gds_path'])).read_bytes()==path.read_bytes()
+    assert (saved.parent/Path(doc['gds_path'])).parent==saved.parent
     for cfg in (doc,q):
         w.set_data(w.data,cfg)
         expected=cfg.get('settings',{}).get('show_spacing_range',True)

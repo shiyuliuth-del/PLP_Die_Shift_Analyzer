@@ -285,7 +285,7 @@ class MeasuredOutput(QtCore.QObject):
                 import psutil
                 baseline=psutil.Process().memory_info().rss
             except (ImportError,OSError):baseline=0
-            self.batch=dict(id=uuid.uuid4().hex,client_id=client_id,store=Store(destination.parent,self.session.data.dbu_um,max(1024**2,memory*1024**2//5)),lock=threading.Lock(),path=destination,baseline=baseline,
+            self.batch=dict(id=uuid.uuid4().hex,client_id=client_id,store=Store(destination.parent,self.session.data.dbu_um,max(1024**2,memory*1024**2//5),checkpoint_destination=destination.with_name(destination.stem+'.'+uuid.uuid4().hex[:12]+'.partial.oas')),lock=threading.Lock(),path=destination,baseline=baseline,
                             executor=ThreadPoolExecutor(max_workers=lanes,thread_name_prefix='dsa-batch'),pending=set(),inflight=set(),completed=0,failed=0,failures=[],ending=False,lanes=lanes,memory_mb=memory,semaphore=threading.Semaphore(lanes),allow_failed=bool(args.get('allow_failed',False)))
             return dict(status='completed',result=dict(batch_id=self.batch['id'],threads=lanes,max_memory_mb=memory,queue_limit=lanes*4))
         if command=='batch.submit':
@@ -316,8 +316,10 @@ class MeasuredOutput(QtCore.QObject):
                     with serial_scope():frame,snapshot,details=session.run(rows,bounded_progress,preview=False)
                     if details['connection_failure_count'] and not batch['allow_failed']:raise ValueError('存在未连接动区：'+json.dumps(details,ensure_ascii=False))
                     cancel_check()
-                    with batch['lock']:batch['store'].add(name,snapshot.layers,position,session.case['board'].bounds[:2])
-                    return dict(cell=name,**details)
+                    with batch['lock']:
+                        batch['store'].add(name,snapshot.layers,position,session.case['board'].bounds[:2])
+                        if batch['store'].count==1 or batch['store'].count%64==0:batch['store'].flush()
+                    return dict(cell=name,checkpoint=str(batch['store'].checkpoint_destination),checkpoint_cells=batch['store'].checkpoint_count,**details)
                 finally:batch['semaphore'].release()
             response=self.submit(command,produce,'batch.pose');batch['inflight'].add(response['task_id']);return response
         if command=='batch.end':

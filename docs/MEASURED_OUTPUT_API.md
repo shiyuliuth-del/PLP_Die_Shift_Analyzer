@@ -139,3 +139,7 @@ info新增instance_id、session_identity、batch_owner；冻结身份包括软�
 ## V45资源与交互DRC
 
 max_threads=0及max_memory_mb=0均表示自动（默认）。自动内存预算取当前可用内存35%，下限128 MB；显式预算不高于该可用内存预算。交互preview.submit在实际替换铜上执行运动/固定RDL的线宽、线距、名义连接过孔的包围量、封装边距与禁布区检查，表格和画布共用目录。batch.submit仍保留快速模式，明确不做完整显示DRC或概率分析。
+
+## V46阶段文件
+
+每批次生成独立的`<输出名>.<批次随机ID>.partial.oas`。首个成功封装、每64个封装及内存刷写阶段均原子发布带TopCell/CRC的完整阶段文件；失败或取消不会删除该文件，也不替换最终目标。batch.submit回执含checkpoint和checkpoint_cells，后者才是已落盘数量，不能把正在运行或排队数当作已落盘。阶段文件可直接读取，RealDataAnalyse现有重启逻辑仍完整重放未提交批次，不假装支持自动从阶段几何续接。

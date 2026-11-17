@@ -81,8 +81,9 @@ class Store:
     Completed packets flush in blocks to the same temporary OAS. SQLite holds
     only the index/placements, never all copper. Finalization appends TopCell.
     """
-    def __init__(self,directory,dbu,memory_bytes=64*1024**2):
+    def __init__(self,directory,dbu,memory_bytes=64*1024**2,checkpoint_destination=None):
         if not math.isfinite(dbu) or dbu<=0:raise ValueError('Output DBU must be finite and positive')
+        self.checkpoint_count=0;self.checkpoint_destination=Path(checkpoint_destination) if checkpoint_destination else None
         self.temp=tempfile.TemporaryDirectory(prefix='.dsa-batch-',dir=directory)
         self.db=sqlite3.connect(str(Path(self.temp.name)/'cells.sqlite'),check_same_thread=False)
         self.db.execute('pragma journal_mode=OFF');self.db.execute('pragma temp_store=FILE');self.db.execute('pragma cache_size=-4096')
@@ -127,6 +128,30 @@ class Store:
             self.db.execute('insert into cells values (?)',(name,));self.cell(name,body)
             self.db.execute('insert into packages values (?,?,?)',(name,x,y))
         self.db.commit();self.stream.flush();self.pending.clear();self.pending_names.clear();self.bytes=0
+        os.fsync(self.stream.fileno())
+        if self.checkpoint_destination and self.count:self.checkpoint()
+    def checkpoint(self):
+        """Publish a complete readable stage; retain it after cancellation/error."""
+        import shutil
+        if self.checkpoint_count==self.count:return
+        target=self.checkpoint_destination
+        fd,name=tempfile.mkstemp(prefix='.checkpoint-',dir=target.parent)
+        try:
+            with os.fdopen(fd,'wb') as out,self.stage.open('rb') as src:
+                shutil.copyfileobj(src,out,1024*1024)
+                crc=self.crc
+                def emit(data):
+                    nonlocal crc
+                    out.write(data);crc=zlib.crc32(data,crc)
+                emit(b'\x0e'+string('TopCell'))
+                for cell,x,y in self.db.execute('select name,x,y from packages order by name'):
+                    emit(placement(cell,(x,y),dbu=self.dbu))
+                emit(b'\x02'+uint(248)+b'\0'*248+b'\x01');out.write(struct.pack('<I',crc));out.flush();os.fsync(out.fileno())
+            if not verify_crc(name):raise ValueError('阶段OAS校验失败')
+            os.replace(name,target);self.checkpoint_count=self.count
+        finally:
+            if os.path.exists(name):os.unlink(name)
+
     def write(self,destination,progress=lambda *_:None):
         if self.finished:raise RuntimeError('Batch OAS already finalized')
         if not self.count:raise ValueError('批次没有成功的封装Cell，不替换已有文件')

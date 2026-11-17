@@ -48,7 +48,8 @@ try:
  w.view_settings=replace(w.view_settings,reconstruction_intervals=((*key(plan),100.,500.),),reconstruction_forced=(('5/0',0),))
  w.invalidate_reconstruction_edit();w.request_preview();wait();w.fit_plot();w.plot_layout(preserve=True);w.canvas.draw()
  q=w.current_frame['reconstruction']['pieces'][0];point=q['moved_cut'].centroid.coords[0]
- limits=(w.ax.get_xlim(),w.ax.get_ylim());event('button_press_event',point)
+ limits=(w.ax.get_xlim(),w.ax.get_ylim());w.region_mode('move',True);event('button_press_event',point)
+ assert w.region_select.mode is None, 'A boundary press must escape lingering box mode'
  assert w.cut_drag.state is not None
  before=w.reconstruction_overlay.cuts.get_segments()
  event('scroll_event',point,'down',-1)
@@ -74,6 +75,14 @@ try:
  assert ('5/0',0) in w.view_settings.reconstruction_ignored
  menu('增加动区',(300.,0.));assert w.current_frame['reconstruction']['pieces'];assert not w.view_settings.reconstruction_ignored
  save=folder/'edited.dshift.json';w.write_project(save);expected=w.view_settings.reconstruction_key();w.load_project(save);wait();assert w.view_settings.reconstruction_key()==expected
+ # Restored source-bound handles must remain editable, not just paintable.
+ q=next(q for q in w.current_frame['reconstruction']['pieces'] if q.get('route_plan') is not None)
+ point=q['moved_cut'].centroid.coords[0];event('button_press_event',point)
+ assert w.cut_drag.state is not None
+ target=np.asarray(point)+w.cut_drag.state['piece']['route_plan'].tangent(q['interval'][0])*12
+ event('motion_notify_event',target);w.cut_drag._tick()
+ assert w.cut_drag.state['part'] is not None
+ event('button_release_event',target);wait()
  # Cancelling a queued delivery cannot publish a new state after rollback.
  before=w.current_frame;applied=[];started=threading.Event()
  def work(progress):
