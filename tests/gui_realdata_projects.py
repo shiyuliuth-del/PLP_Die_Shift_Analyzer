@@ -87,6 +87,19 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         assert not w.file_entries()[1]['enabled'] and w.sheet.text() == 'Diagnostic' and w.workers.value() == 2
         w.file_view.item(1, 0).setCheckState(getattr(QtCore.Qt, 'CheckState', QtCore.Qt).Checked)
         w.sheet.setText('Measurements')
+        # Exercise the UI-to-import boundary with a genuinely different DIE2 file.
+        from openpyxl import load_workbook
+        workbook_path = folder/'GD55_SYNTHETIC_DIE2.xlsx'
+        book = load_workbook(workbook_path)
+        sheet = book['Measurements']; sheet.title = 'SeparateSheet'
+        sheet.insert_rows(1); sheet['A2'] = 'SeparatePackage'
+        book.save(workbook_path); book.close()
+        w.mapping_shared.click()
+        select(0); w.sheet.setText('Measurements')
+        select(2); w.sheet.setText('Measurements')
+        select(1)
+        assert w.sheet.text() == 'SeparateSheet' and w.header_row.value() == 2
+        select(0)
         w.import_button.click(); wait(w)
         assert w.table.rowCount() == 12
         previous_database = w.database.text()

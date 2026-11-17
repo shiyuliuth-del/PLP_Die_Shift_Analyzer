@@ -1,11 +1,11 @@
 {
-  "version": "V45",
+  "version": "V46",
   "status": "PASS",
-  "tested_at_utc": "2026-11-16T12:21:58.282604+00:00",
+  "tested_at_utc": "2026-11-17T01:47:29.951713+00:00",
   "scope": "Clean source checkout, local platform. Windows executable verification is recorded separately.",
   "platform": "linux",
-  "verified_runtime_sha256": "c61276ed08ced8c088150acf20cddfd4fa809fc95f52357acbbd8076d7b107ac",
-  "gui_suites": 29,
+  "verified_runtime_sha256": "98655362e7fac0dd219222d451cc99603896aa565ec6684ec0c4ead307f49b67",
+  "gui_suites": 30,
   "runs": [
     {
       "args": [
@@ -21,7 +21,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "Ran 407 tests in 46.598s",
+        "Ran 420 tests in 152.023s",
         "",
         "OK (skipped=2)"
       ]
@@ -371,6 +371,18 @@
     },
     {
       "args": [
+        "tests/gui_realdata_projects.py"
+      ],
+      "env": {},
+      "status": "PASS",
+      "summary": [
+        "This plugin does not support propagateSizeHints()",
+        "This plugin does not support propagateSizeHints()",
+        "REALDATA_PROJECT_GUI_PASS: folder -> linked server -> 3 XLSX -> 12 OAS, selections/settings, green/red status, continuous overlay, hidden log"
+      ]
+    },
+    {
+      "args": [
         "main.py",
         "--smoke-test",
         "results/default.json"
@@ -688,20 +700,5 @@
       "discrete_states": 3
     }
   ],
-  "tested_commit": "ffb4d0665eaeb1f2144e35e76b3d770b780397a0",
-  "external_tests": {
-    "status": "PASS",
-    "count": 2,
-    "source": "GD55_9-21.gds",
-    "seconds": 11.721
-  },
-  "windows": {
-    "status": "PASS",
-    "workflow_run": 43864525551,
-    "environments": [
-      "clean",
-      "with-cupy"
-    ],
-    "physical_gpu_tested": false
-  }
+  "verified_commit": "7e66532b51b26a7d25b2c078d4b1d0c59f6ffe11"
 }
