@@ -1,0 +1,17 @@
+{
+  "version": "V48",
+  "status": "PASS",
+  "tag_sha": "8536446d86c2329e743eade38a951488c11734d2",
+  "source_files": 163,
+  "uncompressed_bytes": 2119979,
+  "sha256": "aadace500c667c0d1a621b78472d41f11148b45e8e13d59b8aa51ee0c01a6c56",
+  "release_zip": "byte-for-byte matches tag; CRC/SHA-256/7-Zip PASS",
+  "automatic_zip": "byte-for-byte matches tag; CRC PASS",
+  "automatic_tar": "byte-for-byte matches tag",
+  "standalone_api_and_validator": "byte-for-byte matches tag",
+  "windows_workflow": 44016068299,
+  "windows_head": "7be169d0e6667cb8f7558900ea87d81e48c34aba",
+  "runtime_sha256": "0f7029b52165ea81b6fef1532725b195368e36753fab03bd69dc0e5fc126691f",
+  "source_scope": "451 core (2 external additionally verified), 35 GUI/process, 2 backends, 17 projects; 55 commands exit 0",
+  "release_url": "https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/releases/tag/V48"
+}

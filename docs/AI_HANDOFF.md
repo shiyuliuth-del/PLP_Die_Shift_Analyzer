@@ -151,3 +151,5 @@ V45用户清单单独排期：必须先完成V44双方联合发布，再做新�
 
 计划持久化/捕获/执行见plans.py，独立面板plan_ui.py；实例匹配instances.py，传输身份/追踪transport.py，脱敏有界会话conversation.py，可调表格widgets.py。Runner将批次定向Cache，发布前CRC/SHA与旧目标保护，Output唯一最终文件。发布后恢复使用write-ahead记录；旧结果归档映射同步计划行。新单元测试test_realdata_plans、Qt测试gui_realdata_plans与真实进程gui_realdata_plans_process进入聚合/Windows双EXE验收。
 V47最终资产和测试证据见V47_RELEASE_VERIFICATION与V47_VALIDATION。正式tag e51df6e不可改写；PR34后续分页草稿未纳入，保留来源历史。下一轮从最新main同步，勿因Release补文档而重打同名tag。
+
+V48已发布：PR39、标签8536446；实际资产验证见V48_RELEASE_VERIFICATION.json。PR34分页草稿完整历史已纳入V48，不再单独发布该草稿。V48后续改动须从最新main递增版本，不能重写V48标签；运行代码/测试/构建与已通过双Windows的7be169d一致。
