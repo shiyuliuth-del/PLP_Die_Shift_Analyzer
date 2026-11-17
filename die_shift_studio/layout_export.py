@@ -109,6 +109,7 @@ def export_layout(w):
     options=OutputOptions.from_dict(configuration(w));root=Path(options.directory or w.data.path).parent if not options.directory else Path(options.directory)
     dialog=W.QFileDialog(w,'输出GDS/OAS',str(root/(Path(w.data.path).stem+'_preview.oas')),'OASIS (*.oas);;GDSII (*.gds)')
     dialog.setAcceptMode(getattr(W.QFileDialog,'AcceptMode',W.QFileDialog).AcceptSave);dialog.setDefaultSuffix('oas')
+    dialog.filterSelected.connect(lambda name:dialog.setDefaultSuffix('gds' if name.startswith('GDSII') else 'oas'))
     ok=run_dialog(dialog)==ACCEPTED;paths=dialog.selectedFiles() if ok else [];dialog.deleteLater()
     if not paths:return
     path=Path(paths[0]).resolve()

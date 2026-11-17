@@ -1635,7 +1635,7 @@ class MainWindow(W.QMainWindow):
         if self.reconstruction_toggle.isChecked():
             from .reconstruction_overlay import COLORS,CUT_COLOR,SECOND_CUT_COLOR,WARNING_COLOR
             from .reconstruction_events import PALETTE
-            handles += [Patch(facecolor=PALETTE[k],alpha=.66,label=title) for k,title in [('red','动区违规'),('yellow','当前通过 / 其他极端风险'),('green','全部离散极端通过'),('gray','低概率满足要求')]]
+            handles += [Patch(facecolor=PALETTE[k],alpha=.66,label=title) for k,title in [('red','动区违规'),('yellow','当前通过 / 其他极端风险'),('green','所选组合均通过'),('gray','低概率满足要求')]]
             handles += [Patch(facecolor=COLORS[k],alpha=.66,label={'B':'C','C':'B'}[k]+' '+title) for k,title in [('B','静区'),('C','平移区')]]
             handles += [Line2D([],[],color=CUT_COLOR,lw=2,label='运动侧边界 / 整孔盘蓝点'),Line2D([],[],color=SECOND_CUT_COLOR,lw=2,label='固定侧边界 / 整孔盘蓝点'),Patch(facecolor='#dd5790',edgecolor='#bc386d',alpha=.45,label='动区自身风险 · 选中查看')]
         if self.current_frame and self.current_frame.get('motion_issues'):handles.append(Line2D([],[],color='#bf862c',ls='--',label='运动归属未定：保持名义位置'))
