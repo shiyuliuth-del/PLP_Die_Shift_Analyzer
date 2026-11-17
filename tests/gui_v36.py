@@ -37,7 +37,9 @@ def main():
         q['settings'].pop('width_yield_method',None)
         q['expanded_settings']=['宽度分析 · 元素显示']
         q['overlays']={'width':True}
-        w.set_data(read_gds(q['gds_path']),q);settle();w.run_evaluation();settle()
+        w.set_data(read_gds(q['gds_path']),q);settle()
+        # Full-grid probability labels retain their original numerical contract.
+        w.grid_mode.setCurrentIndex(0);settle();w.run_evaluation();settle()
         assert w.setting_sections['宽度分析'].isChecked()
         bank=w.width_yield.bank;assert bank['method']=='grid' and bank['probability_lines']
         summary=w.current_frame['width_summary'];ref=next(iter(summary['lines']))
