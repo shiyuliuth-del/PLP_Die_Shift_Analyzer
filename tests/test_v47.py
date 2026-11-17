@@ -69,6 +69,28 @@ class V47Tests(unittest.TestCase):
    self.assertTrue(all(not q[2]['fixed_rdl_drc_checked'] for q in results))
    self.assertTrue(all(not q[0]['contact']['regions'] for q in results))
   finally:s.close();e.close()
+ def test_measured_preserves_saved_alternative_route_identity(self):
+  from test_v38 import fixture
+  from die_shift_studio.reconstruction_route import RoutePlan
+  e,d,c=fixture();candidates={};original=RoutePlan.choose
+  def remember(plan,*args):
+   part=original(plan,*args)
+   if part is not None:candidates[plan.identity]=plan
+   return part
+  try:
+   with patch.object(RoutePlan,'choose',remember):e.reconstructor._plans_for_all_poses(lambda *_:None)
+   self.assertGreater(len(candidates),1)
+   # Preserve EACH competing trace, not merely the one fast ranking likes.
+   for plan in candidates.values():
+    a,b=plan.nominal_first+2,plan.nominal_second-2
+    cfg=replace(e.reconstructor.settings,reconstruction_intervals=((*plan.key,plan.identity,a,b),))
+    session=Session(d,c,e.roles,{},e.p,cfg,e.contact.cache)
+    try:
+     with patch('die_shift_studio.reconstruction_rules.FixedRules.candidate_mass',side_effect=AssertionError('unrequested probability work')):session.prepare(lambda *_:None)
+     r=session.model(session.p)[1];entry=next(q for q in r._plans if q.get('plan') and q['plan'].identity==plan.identity)
+     part,manual=r.interval(entry);self.assertTrue(manual);self.assertAlmostEqual(part['a'],a);self.assertAlmostEqual(part['b'],b)
+    finally:session.close()
+  finally:e.close()
  def test_keepout_current_copper_not_visibility_and_no_spacing_margin(self):
   source=shapely.box(-30,-20,330,20);keep=shapely.box(100,20,200,60)
   e,_,_=self.engine(source,[shapely.Point(0,0).buffer(5)],[shapely.Point(300,0).buffer(5)],keep)

@@ -324,6 +324,16 @@ class Reconstructor:
                     alternative=candidate(local_base,traced,self)
                     if alternative is not None:return alternative
                     return dict(local_base,plan=None,orphan=False,warning='拓扑无法分出相连的动/静/平移区；保留原图')
+                # A saved cut/angle belongs to its exact source route. The fast
+                # IPC ranking must not silently choose another valid trace and
+                # thereby drop the user's interval on a different route identity.
+                roots={str(row[4]).split('~')[0] for name in ('reconstruction_intervals','reconstruction_angles','reconstruction_deleted')
+                       for row in getattr(self.settings,name,())
+                       if (row[0],row[1],row[2],normalize_via_refs(row[3]))==candidates[0][2].key}
+                roots.update(str(row[5]).split('~')[0] for row in self.settings.reconstruction_added
+                             if row[:2]==(layer,index) and len(row)>5 and row[5]!='seed')
+                saved=[q for q in candidates if q[2].identity in roots]
+                if saved:candidates=saved
                 if pair_route or getattr(self,'measured_only',False):
                     # Individual pair copper is discarded by branch assembly.
                     # Native DRC on every pair checked a fictitious full net and
