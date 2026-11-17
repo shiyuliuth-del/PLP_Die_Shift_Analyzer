@@ -2506,7 +2506,8 @@ class MainWindow(W.QMainWindow):
             self.cleanup_retired_sessions();self.refresh_cache_status()
     def load_project(self,path):
         try:
-            path=__import__('die_shift_studio.jobs',fromlist=['resolve_project_path']).resolve_project_path(path);project=normalize_project(json.loads(path.read_text(encoding='utf-8')));gds=Path(project['gds_path'])
+            from .jobs import resolve_project_path
+            path=resolve_project_path(path);project=normalize_project(json.loads(path.read_text(encoding='utf-8')));gds=Path(project['gds_path'])
             if not gds.is_absolute():gds=path.parent/gds
             if self.remote_locked:
                 saved=project['overlays']
