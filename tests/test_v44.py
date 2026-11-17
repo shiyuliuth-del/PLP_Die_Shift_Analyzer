@@ -63,7 +63,7 @@ class FakeService:
                 self.batch_id = str(self.begin_count)
                 self.owner = args['client_id']
                 self.filename = args['filename']
-                return dict(result=dict(batch_id=self.batch_id, threads=2))
+                return dict(result=dict(batch_id=self.batch_id, threads=2,output_policy=args.get('output_policy')))
             if command == 'batch.submit':
                 if self.fail == 'crash' and self.begin_count == 1 and len(self.rows) >= 1:
                     self.alive_value = False
@@ -74,7 +74,7 @@ class FakeService:
                     raise AssertionError('duplicate cell')
                 self.rows[cell] = args
                 task = f'{self.batch_id}:{cell}'
-                result = dict(cell=cell, connection_failure_count=0, fixed_rdl_drc_checked=False)
+                result = dict(cell=cell, connection_failure_count=0, fixed_rdl_drc_checked=True)
                 if self.fail == 'geometry':
                     result = RemoteError(dict(status='error', error=dict(type='ValueError', message='未连接动区')))
                 self.tasks[task] = result
@@ -82,10 +82,10 @@ class FakeService:
             if command == 'batch.end':
                 import shapely
                 from die_shift_studio.oas_stream import Store
-                store = Store(self.output, .001, 1024**2)
+                store = Store(self.output, .001, 1024**2, error_layer=(65535,0))
                 try:
                     for cell, row in self.rows.items():
-                        store.add(cell, {'1/0': [shapely.box(0, 0, 10, 10).wkb]}, row['position_um'], (0, 0))
+                        store.add(cell, {'1/0': [shapely.box(0, 0, 10, 10).wkb]}, row['position_um'], (0, 0),errors=[],die_count=2)
                     receipt = store.write(self.output / self.filename)
                 finally:
                     store.close()

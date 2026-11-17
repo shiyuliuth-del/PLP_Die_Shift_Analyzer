@@ -178,3 +178,6 @@ V48发布回下载完成：PR39合并main为8536446d86c2329e743eade38a951488c117
 本窗口基于main30224fb，分支codex/v49-drc-rulers-reconstruction，进行用户14项测量/尺寸容差/失败诊断/分页/严格旋转框选/自动截面及并行排线选区。另一窗口已发布V48，标签不改写。当前7项新核心针对性回归通过；全量回归出现旧合同断言，正迁移并补GUI，不能宣称完成。GD55两处原因为中心到代表点的方向偏置与分叉独立斜切；轴向/沿源边界选路和真实固定孔中心优先后两处已生成正确方向的相对截面，实图全交互仍待验收。
 
 直接读取另一聊天用户原文确认“允许直接同步并协调合并”。双方V49文件归属：本窗口measured_core.py/measured_ui.py/measured_issues.py/partial_output.py及其测试；另一窗口oas_stream.py/oas_errors.py/RealDataAnalyse/Jobs/GD55。批量显式output_policy=omit_failed_regions保留未失败铜，partial_output/omitted_region_count记录真实局部删除；严格默认保留。DRC条目bounds_um为当前GDS坐标，die_ids为1起编号，无归属静态[0]；package_relative_bounds_um以名义封装左下角为原点，批量有top_cell_bounds_um。task.get首128条+issue_catalog，task.issues(offset,limit≤512)读全部SQLite持久目录；不按2MB消息上限截断结果。待接口提交后对方只merge已提交历史，双方共同通过最终Linux/Windows/真实压力用例再发布。
+## 2026-11-17 V49 RealDataAnalyse问题标记协作
+
+用户授权两窗口直接同步并协调合并。客户端窗口分支codex/v49-realdata-error-output负责oas_stream/oas_errors、RealDataAnalyse和GD55扩展案例；预演窗口负责完整实测DRC/连接问题目录、明确DIE归属和移除失败位置后的可输出快照。已向该窗口发送具体接口约定，正式发布共同用V49，不能改V48。本轮旧严格门禁须保留默认；客户端明确请求output_policy=omit_failed_regions，不能把allow_failed当成成功绕过。Store的可选error_layer及add(errors,die_count)已通过KLayout/gdstk双读者验证，完整应用接线及联合验收仍待完成。

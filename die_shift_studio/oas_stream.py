@@ -81,8 +81,9 @@ class Store:
     Completed packets flush in blocks to the same temporary OAS. SQLite holds
     only the index/placements, never all copper. Finalization appends TopCell.
     """
-    def __init__(self,directory,dbu,memory_bytes=64*1024**2,checkpoint_destination=None):
+    def __init__(self,directory,dbu,memory_bytes=64*1024**2,checkpoint_destination=None,*,error_layer=None):
         if not math.isfinite(dbu) or dbu<=0:raise ValueError('Output DBU must be finite and positive')
+        self.error_layer=error_layer;self.error_rectangles=0;self.error_packages=0
         self.checkpoint_count=0;self.checkpoint_destination=Path(checkpoint_destination) if checkpoint_destination else None
         self.temp=tempfile.TemporaryDirectory(prefix='.dsa-batch-',dir=directory)
         self.db=sqlite3.connect(str(Path(self.temp.name)/'cells.sqlite'),check_same_thread=False)
@@ -92,11 +93,17 @@ class Store:
         self.dbu=float(dbu);self.limit=max(1024**2,int(memory_bytes));self.pending=[];self.pending_names=set();self.bytes=0;self.count=0
         self.stage=Path(self.temp.name)/'stage.oas';self.stream=self.stage.open('wb');self.crc=0;self.finished=False
         self.emit(b'%SEMI-OASIS\r\n\x01'+string('1.0')+real(1/self.dbu)+b'\0'+b'\0'*12)
-    def add(self,name,layers,position,board_origin):
+        if error_layer is not None:
+            layer,datatype=error_layer
+            if any(type(n) is not int or not 0<=n<=65535 for n in (layer,datatype)):
+                self.close();raise ValueError('ERROR层编号无效')
+            # OASIS LAYERNAME geometry record: exact layer/datatype intervals.
+            self.emit(b'\x0b'+string('ERROR')+b'\x03'+uint(layer)+b'\x03'+uint(datatype))
+    def add(self,name,layers,position,board_origin,*,errors=None,die_count=0):
         if not name or len(name)>120 or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-' for c in name):raise ValueError('Cell name must be 1–120 ASCII letters/digits/_/-')
         if name=='TopCell' or name.startswith('G_'):raise ValueError('Reserved cell name')
         if name in self.pending_names or self.db.execute('select 1 from packages where name=?',(name,)).fetchone():raise ValueError('Duplicate package Cell: '+name)
-        children=[];cells=[]
+        children=[];cells=[];marker_count=0
         # Reuse canonical source features, not just whole layers. Changing one
         # trace must not duplicate all unchanged traces in the same fixed layer.
         for key,blobs in sorted(layers.items()):
@@ -108,11 +115,26 @@ class Store:
                 if not body:continue
                 child='G_'+hashlib.sha256(body).hexdigest();cells.append((child,body))
                 children.append(placement(child,origin,dbu=self.dbu))
+        if errors is not None:
+            if self.error_layer is None:raise ValueError('批次没有配置ERROR图层')
+            if f'{self.error_layer[0]}/{self.error_layer[1]}' in layers:raise ValueError('ERROR层与金属源层冲突')
+            from .oas_errors import rectangles
+            markers=rectangles(errors,die_count,self.dbu)
+            for die in range(0,die_count+1):
+                blobs=markers.get(die,())
+                if not blobs and die==0:continue
+                # Package cell names are reserved separately from generated G_
+                # geometry names; include a hash to avoid user-name collisions.
+                child='G_ERROR_'+name+f'_DIE_{die}'
+                cells.append((child,polygons({f'{self.error_layer[0]}/{self.error_layer[1]}':blobs},self.dbu)))
+                children.append(placement(child,dbu=self.dbu))
+            marker_count=sum(map(len,markers.values()))
         body=b''.join(children);shift=np.asarray(position,dtype=float)-np.asarray(board_origin)
         if shift.shape!=(2,) or not np.isfinite(shift).all():raise ValueError('Package origin must have two finite coordinates')
         self.pending.append((name,cells,body,tuple(shift)));self.pending_names.add(name);self.bytes+=sum(len(b) for _,b in cells)+len(body)
-        self.count+=1
+        self.count+=1;self.error_rectangles+=marker_count;self.error_packages+=bool(marker_count)
         if self.bytes>=self.limit:self.flush()
+        return dict(error_rectangles=marker_count,error_layer=(dict(layer=self.error_layer[0],datatype=self.error_layer[1],name='ERROR') if self.error_layer else None))
     def emit(self,data):
         self.stream.write(data);self.crc=zlib.crc32(data,self.crc)
     def cell(self,name,body):
@@ -164,7 +186,7 @@ class Store:
         self.stream.flush();os.fsync(self.stream.fileno());self.stream.close();self.finished=True
         if not verify_crc(self.stage):raise ValueError('OAS checksum validation failed')
         cancel_check();os.replace(self.stage,destination)
-        return dict(path=str(destination.resolve()),cells=self.count,unique_geometry_cells=total-self.count,bytes=destination.stat().st_size,dbu_um=self.dbu,top_cell='TopCell')
+        return dict(path=str(destination.resolve()),cells=self.count,unique_geometry_cells=total-self.count,bytes=destination.stat().st_size,dbu_um=self.dbu,top_cell='TopCell',error_layer=(dict(layer=self.error_layer[0],datatype=self.error_layer[1],name='ERROR') if self.error_layer else None),error_rectangles=self.error_rectangles,error_packages=self.error_packages)
     def close(self):
         if not self.stream.closed:self.stream.close()
         self.db.close();self.temp.cleanup()
