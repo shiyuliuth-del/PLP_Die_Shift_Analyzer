@@ -108,6 +108,8 @@ class FixedRules:
         if enabled(self.cfg,'board') and self.board is not None and (not self.board.covers(g) or g.distance(self.board.boundary)<self.border-self.dbu*.001):return False
         if enabled(self.cfg,'keepout') and not self.keepout.is_empty and shapely.relate_pattern(g,self.keepout,'T********'):return False
         from .native_backend import any_violation
+        from .geometry_rules import angle_regions
+        if enabled(self.cfg,'angle') and not angle_regions(g,getattr(self.cfg,'drc_min_angle_deg',0),self.dbu).is_empty:return False
         return not ((enabled(self.cfg,'width') and any_violation('width',g.wkb,self.dbu,self.width)) or (enabled(self.cfg,'space') and any_violation('space',g.wkb,self.dbu,self.space)))
 
     def context(self,plan):

@@ -41,7 +41,8 @@ def complex_mode(r,ref,vias,stationary_certificate):
     from .drc_rules import effective_rules
     width,space=effective_rules(r.p,r.settings)
     from .geometry_rules import width_ok
-    intrinsic_bad=int(not width_ok(source,width,r.tol))
+    from .drc_policy import enabled
+    intrinsic_bad=int(enabled(r.settings,'width') and not width_ok(source,width,r.tol))
     def reach(g,owners):
         values=[0.]
         for owner in owners:

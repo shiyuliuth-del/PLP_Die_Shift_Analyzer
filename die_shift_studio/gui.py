@@ -631,8 +631,12 @@ class MainWindow(W.QMainWindow):
         if self.loading:return
         values={k:(w.currentData() if isinstance(w,W.QComboBox) else w.isChecked() if isinstance(w,W.QCheckBox) else w.text() if isinstance(w,W.QLineEdit) else w.value()) for k,w in self.setting_fields.items()}
         updated=ViewSettings.from_dict(dict(asdict(self.view_settings),**values))
-        if not updated.reconstruction_auto and self.reconstruction_toggle.isChecked() and updated!=self.view_settings:
-            self.view_settings=updated;self.enable_settings();self.defer_reconstruction();return
+        if not updated.reconstruction_auto and self.reconstruction_toggle.isChecked():
+            numerical=updated.reconstruction_key()!=self.view_settings.reconstruction_key() or updated.numeric_key()!=self.view_settings.numeric_key()
+            if numerical:
+                self.view_settings=updated;self.enable_settings();self.defer_reconstruction();return
+            if self.view_settings.reconstruction_auto:
+                self.view_settings=updated;self.enable_settings();return
         if updated.reconstruction_auto and not self.view_settings.reconstruction_auto:
             self.view_settings=updated;self.enable_settings();self.compute_reconstruction();return
         analysis_inputs=('safe_box_precision','safe_box_budget','safe_box_starts','safe_box_passes','yield_method','yield_sample_exponent','yield_box_budget','yield_tolerance')

@@ -172,10 +172,11 @@ def frame(checker,states,replacements,settings,progress,owners=None,scopes=None)
     return items
 
 
-def locations(items):
+def locations(items,measure=True):
     """Exactly one table row and one locator per connected witness component."""
     rows=[];seen=set()
     for item in items:
+        cancel_check()
         pending=[item['geometry']]
         while pending:
             geometry=pending.pop()
@@ -186,7 +187,7 @@ def locations(items):
             if key in seen:continue
             seen.add(key)
             from .drc_actual import measured
-            rows.append(dict({k:v for k,v in item.items() if not k.startswith('_measurement')},**measured(item,geometry),geometry=geometry,point=list(geometry.representative_point().coords[0])))
+            rows.append(dict({k:v for k,v in item.items() if not k.startswith('_measurement')},**(measured(item,geometry) if measure else {}),geometry=geometry,point=list(geometry.representative_point().coords[0])))
     return sorted(rows,key=lambda q:(q.get('layer',''),q['kind'],tuple(q['point'])))
 
 

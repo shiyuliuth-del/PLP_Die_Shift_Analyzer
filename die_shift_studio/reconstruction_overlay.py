@@ -55,6 +55,20 @@ class ReconstructionOverlay:
             plan=q.get('route_plan')
             for kind,side,name in (('moved',0,'moved_cut'),('extra',1,'extra_cut')):
                 g=q.get(name);key=(self._key(q),kind)
+                if not self.w.view_settings.reconstruction_auto and getattr(self.w,'reconstruction_pending',False):
+                    staged=[];changed=False
+                    for member in q.get('graph_members',(q,)):
+                        route=member.get('route_plan')
+                        if route is None:continue
+                        saved=next((row for row in self.w.view_settings.reconstruction_intervals if (row[0],row[1],row[2],normalize_via_refs(row[3]),row[4])==(*route.key,route.identity)),None)
+                        part=route.partition(*saved[-2:]) if saved is not None else None
+                        if part is None:
+                            if member.get(name) is not None:staged.append(member[name])
+                            continue
+                        from .reconstruction_edits import apply_angles
+                        part=apply_angles(self.w.view_settings,route,part) or part
+                        staged.append(transform(part['far' if side else 'near'],frame['rotation_centers'][q['die']],frame['states'][q['die']]*q.get('endpoint_weights',(1.,0.))[side]));changed=True
+                    if changed:g=shapely.union_all(staged)
                 if g is None:continue
                 if plan is not None and g.geom_type=='Point':
                     local=plan.pad_handle(side)
@@ -297,6 +311,12 @@ class CutDrag:
         piece,xy,kind=picked
         from .branch_regions import editable_piece
         piece=editable_piece(piece,(event.xdata,event.ydata),kind)
+        if not w.view_settings.reconstruction_auto and piece.get('route_plan') is not None:
+            plan=piece['route_plan']
+            saved=next((row for row in w.view_settings.reconstruction_intervals if (row[0],row[1],row[2],normalize_via_refs(row[3]),row[4])==(*plan.key,plan.identity)),None)
+            if saved is not None:
+                part=plan.partition(saved[-2],saved[-1])
+                if part is not None:piece=dict(piece,interval=(part['a'],part['b']))
         overlay=w.reconstruction_overlay;overlay.selected=overlay._key(piece);overlay.selected_kind=kind
         if kind in ('bridge','problem'):return
         if event.button!=1:return
@@ -382,7 +402,7 @@ class CutDrag:
                     line=far if which else near
                     if self.w.view_settings.reconstruction_live and self.w.view_settings.reconstruction_auto:self._live(part)
                     view_piece=dict(piece,moved_cut=near,extra_cut=far)
-                    handles=self.w.reconstruction_overlay.handles if self.w.view_settings.reconstruction_live else self.w.reconstruction_overlay.handle_geometries([view_piece])
+                    handles=self.w.reconstruction_overlay.handles if self.w.view_settings.reconstruction_live and self.w.view_settings.reconstruction_auto else self.w.reconstruction_overlay.handle_geometries([view_piece])
                     handle=handles.get((self.w.reconstruction_overlay._key(piece),state['kind']))
                     if handle is None:handle=self.w.reconstruction_overlay.edited_handle(piece,state['kind'],line)
                     self.w.reconstruction_overlay.highlight((piece,_lines(handle)[0],state['kind']))
@@ -475,10 +495,12 @@ class CutDrag:
         self.w.reconstruction_overlay.clear_hover()
         if not state['moved']:return
         from .reconstruction_edits import commit_merges
-        updated=commit_merges(state['updated'],self.w.current_frame)
+        updated=commit_merges(state['updated'],self.w.current_frame) if self.w.view_settings.reconstruction_auto else state['updated']
         if updated.reconstruction_key()==self.w.view_settings.reconstruction_key():return
         self.w.view_settings=updated
         self.w.invalidate_reconstruction_edit();self.w.request_preview(quiet=True)
+        if not updated.reconstruction_auto:
+            self.w.reconstruction_overlay.stamp=None;self.w.reconstruction_overlay.draw();self.w.render_scene()
     def cancel(self):
         if self.state is None:return False
         self.w.canvas.reconstruction_drag_active=False

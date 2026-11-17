@@ -44,7 +44,9 @@ def catalogue(frame,case,model=None):
     import shapely,math
     from shapely.affinity import rotate
     rows=[];origin=np.asarray(case['board'].bounds[:2])
-    for i,q in enumerate(locations(frame.get('drc',()))):
+    for i,q in enumerate(frame['drc_locations'] if 'drc_locations' in frame else locations(frame.get('drc',()),measure=frame.get('measure_drc',True))):
+        from .resources import cancel_check
+        cancel_check()
         bounds=list(map(float,q['geometry'].bounds));point=list(map(float,q['point']))
         dies={int(o)+1 for o in q.get('dependencies',()) if o>=0}
         if q.get('owner',-1)>=0:dies.add(int(q['owner'])+1)

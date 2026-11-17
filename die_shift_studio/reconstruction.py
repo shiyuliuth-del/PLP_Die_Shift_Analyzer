@@ -75,6 +75,8 @@ def _compose_feature(source,ps,tolerance,moving):
                 owner['bridge_area_um2']=owner['bridge'].area
         if repairs:geometry=shapely.union_all([geometry,*repairs])
     mismatch=(len(parts(geometry))!=len(parts(source)) or sum(len(q.interiors) for q in parts(geometry))!=sum(len(q.interiors) for q in parts(source)))
+    if mismatch and all(q['regions']['A'].is_empty for q in ps):
+        for q in ps:q.update(valid=False,connection_failed=True,warning='独立刚体分支已断开；当前没有可适配动区')
     if not geometry.is_valid:
         for q in ps:
             if q.get('fallback_regions') is not None:

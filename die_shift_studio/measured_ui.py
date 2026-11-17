@@ -113,6 +113,8 @@ class MeasuredOutput(QtCore.QObject):
                         result=write(issue_path,key,result)
                 self.finished.emit(key,result,None)
             except Exception as exc:
+                import traceback
+                self.w.log_bus.emit(traceback.format_exc(),'ERROR')
                 payload=getattr(exc,'frame',None)
                 if payload is not None:
                     from .measured_issues import write

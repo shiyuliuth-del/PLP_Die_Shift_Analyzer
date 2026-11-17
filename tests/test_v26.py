@@ -65,10 +65,10 @@ class V26Tests(unittest.TestCase):
                 safe+=bool(fact['safe']);bad+=not fact['safe']
             self.assertTrue(safe and bad)
             focused=RepresentativeExtremes(c,p,g,pairs=factors['pairs'])
-            # V47 focus is a synchronous local-state cover, not pair minima.
+            # V50 includes complete local pairs, including one DIE zero.
             for owner,local in enumerate(g.locals):
-                self.assertEqual({g.choices(i)[owner] for i in focused.indices},set(range(1,len(local))))
-            self.assertTrue(all(all(d>0 for d in g.choices(i)) for i in focused.indices))
+                self.assertEqual({g.choices(i)[owner] for i in focused.indices},set(range(len(local))))
+            self.assertEqual({tuple(g.choices(i)) for i in focused.indices}|{(0,0)},set(__import__('itertools').product(range(g.radices[0]),range(g.radices[1]))))
         finally:e.close()
 
     def test_mixed_and_all_locked_grid_match_every_direct_pose(self):

@@ -33,13 +33,23 @@ try:
  assert '安全范围' not in w.setting_sections and '无接触良率' not in w.setting_sections
  assert not any(w.setting_sections[name].isChecked() for name in ('GDS/OAS输出参数','DXF输出参数','实测输出参数'))
  w.canvas.draw();w.rulers.enter()
- event('button_press_event',(-149.9,199.9));event('button_release_event',(-149.9,199.9));assert not w.rulers.rows
- event('motion_notify_event',(-100,230),key='shift');event('button_press_event',(-100,230),key='shift');event('button_release_event',(-100,230),key='shift')
- np.testing.assert_allclose(w.rulers.rows[0][0],[-150,200],atol=.1);assert abs(w.rulers.rows[0][1][1]-200)<.1
+ event('button_press_event',(-14.9,10.1));event('button_release_event',(-14.9,10.1));assert not w.rulers.rows
+ event('motion_notify_event',(20,30),key='shift');event('button_press_event',(20,30),key='shift');event('button_release_event',(20,30),key='shift')
+ np.testing.assert_allclose(w.rulers.rows[0][0],[-15,10],atol=.1);assert abs(w.rulers.rows[0][1][1]-10)<.1
  event('button_press_event',(150,100));event('button_release_event',(150,100));event('motion_notify_event',(190,135),key='ctrl');event('button_press_event',(190,135),key='ctrl');event('button_release_event',(190,135),key='ctrl')
  v=np.subtract(w.rulers.rows[1][1],w.rulers.rows[1][0]);assert abs(abs(v[0])-abs(v[1]))<1e-6
  w.rulers.exit();w.reconstruction_toggle.setChecked(True);wait();old=w.current_frame;ticket=w.preview_ticket
  w.setting_fields['reconstruction_auto'].setChecked(False);app.processEvents()
+ q=next(q for q in old['reconstruction']['pieces'] if q.get('route_plan') is not None and q['moved_cut'].geom_type=='LineString' and q['extra_cut'].geom_type=='LineString')
+ original_interval=q['interval']
+ for side,kind,delta in ((0,'moved_cut',10),(1,'extra_cut',-10)):
+  xy=np.asarray(q[kind].centroid.coords[0]);w.set_view(xy,400,240);w.plot_layout(preserve=True);w.canvas.draw()
+  event('button_press_event',xy);assert w.cut_drag.state is not None
+  target=xy+q['route_plan'].tangent(q['interval'][side])*delta
+  event('motion_notify_event',target);w.cut_drag._tick();event('button_release_event',target)
+  assert w.current_frame is old and w.reconstruction_pending
+ staged=next(row for row in w.view_settings.reconstruction_intervals if row[4]==q['route_plan'].identity)
+ assert abs(staged[-2]-original_interval[0])>1 and abs(staged[-1]-original_interval[1])>1
  style=w.setting_fields['reconstruction_style'];style.setCurrentIndex(style.findData('c1'));app.processEvents()
  assert w.reconstruction_pending and w.current_frame is old and not w.preview_pending
  w.reconstruction_compute.click();wait();assert not w.reconstruction_pending

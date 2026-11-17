@@ -164,11 +164,12 @@ def _adopt(rows,geometry,tol,reason):
         # Boolean quantization leaves thin residues along distant rigid edges.
         # They belong to that rigid region, not to a remote transition. Giving
         # them to A produced the apparent nonlinear spur at nul7123 5613/2266.
-        remote=support[index].is_empty or support[index].distance(g)>tol*8
         thin=g.area<=tol*g.length*2
-        if remote and thin and (not fixed.is_empty or not moving.is_empty):
-            if moving.is_empty or (not fixed.is_empty and fixed.distance(g)<=moving.distance(g)):fixed=overlay(fixed,g,'union')
-            else:moving=overlay(moving,g,'union')
+        if thin and (not fixed.is_empty or not moving.is_empty):
+            near=overlay(g,support[index].buffer(tol*8),'intersection') if not support[index].is_empty else shapely.Polygon()
+            far=overlay(g,near,'difference');regions[index]=overlay(regions[index],near,'union')
+            if moving.is_empty or (not fixed.is_empty and fixed.distance(far)<=moving.distance(far)):fixed=overlay(fixed,far,'union')
+            else:moving=overlay(moving,far,'union')
         else:regions[index]=overlay(regions[index],g,'union')
     for q,a in zip(rows,regions):
         for name in ('moved_cut','extra_cut'):

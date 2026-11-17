@@ -96,6 +96,43 @@ class V50Tests(unittest.TestCase):
      for line in shapely.get_parts(q[key]):
       if line.geom_type=='LineString':self.assertLess(line.hausdorff_distance(shapely.LineString([line.coords[0],line.coords[-1]])),1e-6)
   finally:e.close()
+ def test_explicit_partial_output_can_remove_the_entire_failed_region(self):
+  from test_v49_reconstruction import V49ReconstructionTests
+  from die_shift_studio.partial_output import omit
+  e,_,_=V49ReconstructionTests().fixture()
+  try:
+   ref=('5/0',0);g=e.contact.nodes[e.contact.ids[ref]]['poly']
+   reconstruction=dict(hard_failures=[(ref,'不可连接')],pieces=[dict(layer=ref[0],index=0,connection_failed=True,regions={'A':g})],replacements={ref[0]:[dict(indices=(0,),geometry=g)]})
+   frame,removed=omit(e.contact,dict(states=np.zeros((1,3)),reconstruction=reconstruction))
+   actual=next(row['geometry'] for row in frame['reconstruction']['replacements'][ref[0]] if 0 in row['indices'])
+   self.assertTrue(actual.is_empty);self.assertTrue(frame['partial_output_validated']);self.assertAlmostEqual(removed[0]['removed_area_um2'],g.area)
+  finally:e.close()
+ def test_many_to_many_box_material_and_straight_interfaces(self):
+  from test_v40 import make_engine
+  from shapely.geometry import LineString,Point,box
+  source=shapely.union_all([LineString([(0,y),(300,y)]).buffer(10) for y in (-40,40)]+[LineString([(x,-40),(x,40)]).buffer(10) for x in (150,)])
+  shapes={'127/0':[box(-200,-200,500,200)],'128/0':[box(-40,-80,40,80)],'3/0':[Point(0,y).buffer(8) for y in (-40,40)],'4/0':[Point(0,y).buffer(3) for y in (-40,40)],'5/0':[source],'6/0':[Point(300,y).buffer(3) for y in (-40,40)]}
+  polygon=box(80,-100,220,100);cfg=ViewSettings(reconstruction_boxes=(('5/0',tuple(polygon.exterior.coords)[:4]),),reconstruction_ignored=(('5/0',0),))
+  e,_,_=make_engine(shapes,Parameters(single_bound_x_um=5,single_bound_y_um=5,bound_angle_deg=0,line_width_um=10,line_space_um=5,annulus_um=5,moving_annulus_um=3),cfg)
+  try:
+   f=e.reconstructor.frame(np.zeros((1,3)),diagnostics=False,_raw=True);rows=f['pieces'];active=shapely.union_all([q['nominal_regions']['A'] for q in rows])
+   self.assertLess(active.symmetric_difference(source.intersection(polygon)).area,.001)
+   for q in rows:
+    for name in ('moved_cut','extra_cut'):
+     for line in shapely.get_parts(q[name]):
+      if line.geom_type=='LineString':
+       xy=np.asarray(line.coords);self.assertLess(np.ptp(xy[:,0]),1e-6);self.assertLess(min(abs(xy[0,0]-80),abs(xy[0,0]-220)),1e-6)
+  finally:e.close()
+ def test_angle_check_controls_factored_rule_yield(self):
+  from test_v49_reconstruction import V49ReconstructionTests
+  from die_shift_studio.reconstruction_rules import FixedRules
+  e,_,_=V49ReconstructionTests().fixture()
+  try:
+   g=shapely.Polygon([(0,0),(100,0),(100,10)]);cfg=replace(ViewSettings(),drc_checks=('angle',))
+   book=FixedRules(e.contact,e.p,cfg);key=next(iter(book.nets))
+   self.assertFalse(book.passes(key,g,np.zeros((1,3)),[]))
+   self.assertTrue(FixedRules(e.contact,e.p,replace(cfg,drc_checks=())).passes(key,g,np.zeros((1,3)),[]))
+  finally:e.close()
  def test_new_options_legacy_defaults_and_expand_migration(self):
   from die_shift_studio.project import normalize_project
   q=normalize_project(dict(schema_version=5,roles={},settings={},expanded_settings=['DXF','实测输出设置','安全范围','无接触良率']))

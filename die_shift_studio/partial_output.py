@@ -49,7 +49,7 @@ def omit(model,frame):
     for ref in failed:
         before=actual[ref];snapped=lattice[ref]
         delta=before.symmetric_difference(snapped)
-        if delta.difference(before.boundary.buffer(tol*2)).area>tol*tol*1.e-6:
+        if not delta.is_empty and delta.difference(before.boundary.buffer(tol*2)).area>tol*tol*1.e-6:
             raise ValueError('局部输出量化变化超过2 DBU，拒绝删除正常铜')
         # Long sub-DBU remnants may collapse inside a larger connected polygon.
         # Their disappeared portions are reported too, not just whole components.
