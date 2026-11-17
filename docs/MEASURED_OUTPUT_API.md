@@ -138,7 +138,7 @@ info新增instance_id、session_identity、batch_owner；冻结身份包括软�
 
 ## V45资源与交互DRC
 
-max_threads=0及max_memory_mb=0均表示自动（默认）。自动内存预算取当前可用内存35%，下限128 MB；显式预算不高于该可用内存预算。交互preview.submit在实际替换铜上执行运动/固定RDL的线宽、线距、名义连接过孔的包围量、封装边距与禁布区检查，表格和画布共用目录。batch.submit仍保留快速模式，明确不做完整显示DRC或概率分析。
+max_threads=0及max_memory_mb=0均表示自动（默认）。自动内存预算取当前可用内存35%，下限128 MB；显式预算不高于该可用内存预算。V47起preview.submit与batch.submit均为按指令的快速铜生成，保留连通/拓扑/异网隔离/禁布区门禁，不计算完整显示DRC或概率良率；普通交互的“显示接触位置”仍执行当前实际铜全层规则检查。
 
 ## V46阶段文件
 
