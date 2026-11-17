@@ -129,8 +129,8 @@ class Store:
             for die in range(0,die_count+1):
                 blobs=markers.get(die,())
                 if not blobs and die==0:continue
-                # Package cell names are reserved separately from generated G_
-                # geometry names; include a hash to avoid user-name collisions.
+                # G_ is reserved from package names; G_ERROR_ is disjoint from
+                # hexadecimal geometry hashes and keeps DIE ownership readable.
                 child='G_ERROR_'+name+f'_DIE_{die}'
                 cells.append((child,polygons({f'{self.error_layer[0]}/{self.error_layer[1]}':blobs},self.dbu)))
                 children.append(placement(child,dbu=self.dbu))
