@@ -8,7 +8,7 @@ from die_shift_studio.gui import MainWindow,W
 from die_shift_studio.qt_compat import QtCore,Qt,BINDING
 if BINDING=='PyQt6':from PyQt6.QtTest import QTest
 else:from PyQt5.QtTest import QTest
-parser=argparse.ArgumentParser();parser.add_argument('project',type=Path);parser.add_argument('--cycles',type=int,default=5);args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('project',type=Path);parser.add_argument('--cycles',type=int,default=5);parser.add_argument('--round-trip',action='store_true');args=parser.parse_args()
 app=W.QApplication([]);tmp=tempfile.TemporaryDirectory();folder=Path(tmp.name)
 job=json.loads(args.project.read_text());gds=Path(job['gds_path']);job['gds_path']=str(gds if gds.is_absolute() else (args.project.parent/gds).resolve());job['overlays']={};job.setdefault('settings',{})['animation_enabled']=False
 path=folder/'test.dshift.json';path.write_text(json.dumps(job));w=MainWindow(jobs_dir=folder/'Jobs');w.resize(1500,1000);w.show();errors=[];w.error=lambda value:(errors.append(str(value)),print('ERROR',value,flush=True))
@@ -45,6 +45,21 @@ try:
   print('DOT',cycle,w.cut_drag.state.get('part',{}).get('a'),w.cut_drag.state.get('part',{}).get('b'),flush=True)
   pump(.4);QTest.mouseRelease(w.canvas,left,pos=pos(target));pump(.5)
   assert not errors,errors
+  if args.round_trip:
+   wait(lambda:not w.preview_workers and not w.preview_pending)
+   picked=w.reconstruction_overlay.pick(*endpoint,80)
+   assert picked is not None and picked[2] in ('moved','extra'),picked
+   piece,xy,kind=picked;start=xy.mean(axis=0)
+   QTest.mousePress(w.canvas,left,pos=pos(start));pump(.03);assert w.cut_drag.state is not None
+   plan=w.cut_drag.state['piece']['route_plan'];side=int(kind=='extra');offset=w.cut_drag.state['handle_offset']
+   mark=max(0.,plan.fixed_start-60) if side else min(plan.length,plan.land_end+60)
+   target=np.asarray(plan.route.interpolate(mark).coords[0])+offset
+   for fraction in np.linspace(0,1,12):
+    q=pos(start+(target-start)*fraction);global_=w.canvas.mapToGlobal(q)
+    event=__import__('die_shift_studio.qt_compat',fromlist=['QtGui']).QtGui.QMouseEvent(getattr(QtCore.QEvent,'Type',QtCore.QEvent).MouseMove,QtCore.QPointF(q),QtCore.QPointF(global_),none,left,mods)
+    app.sendEvent(w.canvas,event);pump(.06)
+   QTest.mouseRelease(w.canvas,left,pos=pos(target));pump(.2)
+   print('RETURN_LINE',cycle,flush=True)
  print('REAL_QT_POINT_STRESS_PASS',flush=True)
 finally:
  w.close();wait(lambda:not w._tasks,120);app.processEvents();tmp.cleanup()
