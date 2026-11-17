@@ -136,6 +136,15 @@ class Contracts(unittest.TestCase):
         self.assertEqual(seen,[ids[0],ids[2],ids[3]])
         self.assertEqual(result['completed'],2);self.assertEqual(result['failed'],1)
         completed=self.plans.get(ids[0]);self.assertEqual(completed['progress'],100);self.assertIsNotNone(completed['ended'])
+    def test_plan_rejects_different_import_receipt_before_starting_server(self):
+        ident=self.plans.add(capture(self.config,self.stop));row=self.plans.get(ident)
+        database=Path(row['database_path']);import_files(self.files,database,2,2,self.stop)
+        with closing(Ledger(database)) as ledger:
+            sources=ledger.get('sources');sources[0]['sha256']='different';ledger.set('sources',sources)
+        with patch('RealDataAnalyse.plans.connect') as connect:
+            with self.assertRaisesRegex(ValueError,'校验与导入'):PlanRunner(self.plans).run_one(row)
+            connect.assert_not_called()
+
     def test_input_change_after_capture_is_red_at_execution(self):
         from RealDataAnalyse.plans import validate
         snapshot=capture(self.config,self.stop);self.files[0].write_bytes(b'changed')

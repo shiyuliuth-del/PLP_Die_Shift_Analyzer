@@ -282,13 +282,18 @@ class PlanRunner:
                              lambda message: report(message,0,15), snapshot['profile'], profiles)
             with closing(sqlite3.connect(database.as_uri()+'?mode=ro', uri=True)) as db:
                 batch_owner = json.loads(db.execute("select value from meta where key='run_id'").fetchone()[0])
+                sources = json.loads(db.execute("select value from meta where key='sources'").fetchone()[0])
+            expected = {item['path']: item['sha256'] for item in snapshot['inputs']}
+            if any(expected.get(item['path']) != item['sha256'] for item in sources):
+                raise ValueError('Excel在计划校验与导入之间发生变化；请重新创建计划')
             endpoint = default_endpoint().parent/('endpoint-plan-'+plan_id+'.json')
             def launched_callback(value):
-                nonlocal transport, owned_pid, owned_birth
+                nonlocal transport, owned_pid, owned_birth, owned
                 import psutil
+                owned = None
                 transport = value; owned_pid = value.process.pid
-                owned_birth = __import__('psutil').Process(owned_pid).create_time()
-                self.plans.update(plan_id, owned_pid=owned_pid, owned_birth=owned_birth)
+                owned_birth = psutil.Process(owned_pid).create_time()
+                self.plans.update(plan_id, owned_pid=owned_pid, owned_birth=owned_birth, owned_instance=None)
             transport, info, launched = connect(project, endpoint, self.stop, lambda message: report(message,15,10),
                                                  controls['timeout'], self.trace, exact=True, on_launch=launched_callback)
             if launched or transport.owns_descriptor(owned_pid, owned_birth):
