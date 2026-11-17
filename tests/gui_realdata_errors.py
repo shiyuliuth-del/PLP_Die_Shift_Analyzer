@@ -80,13 +80,19 @@ with tempfile.TemporaryDirectory(prefix='rda-error-output-') as temp:
   if endpoint.exists():
    import psutil
    descriptor=json.loads(endpoint.read_text());pid=descriptor['pid']
-   try:process=psutil.Process(pid)
-   except psutil.NoSuchProcess:process=None
+   processes=[]
+   try:
+    process=psutil.Process(pid);processes.append(process)
+    parent=process.parent()
+    if os.environ.get('DIE_SHIFT_TEST_EXE') and parent and Path(parent.exe()).resolve()==Path(os.environ['DIE_SHIFT_TEST_EXE']).resolve():processes.append(parent)
+   except psutil.NoSuchProcess:pass
    call(endpoint,'app.shutdown');end=time.monotonic()+90
-   while process is not None and time.monotonic()<end:
-    try:
-     if not process.is_running() or process.status()==psutil.STATUS_ZOMBIE:break
-    except psutil.NoSuchProcess:break
+   while time.monotonic()<end:
+    alive=[]
+    for process in processes:
+     try:
+      if process.is_running() and process.status()!=psutil.STATUS_ZOMBIE:alive.append(process)
+     except psutil.NoSuchProcess:pass
+    if not alive:break
     time.sleep(.1)
-   else:
-    if process is not None:raise AssertionError('server did not exit safely')
+   else:raise AssertionError('server and frozen launcher did not exit safely')
