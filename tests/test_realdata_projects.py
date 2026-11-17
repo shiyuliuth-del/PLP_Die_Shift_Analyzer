@@ -118,6 +118,33 @@ class Projects(unittest.TestCase):
         self.assertFalse(again['shared_mapping'])
         self.assertEqual(again['files'][1]['profile'], profile)
 
+    def test_project_change_between_prepare_and_batch_cannot_submit(self):
+        from test_v44 import FakeService
+        from RealDataAnalyse.excel import generate_example
+        from RealDataAnalyse.runner import Runner
+        from RealDataAnalyse.storage import Ledger
+        paths = generate_example(self.root/'race-input', count=2, die_count=2)
+        database = self.root/'race.sqlite'
+        import_files(paths, database, 2, 2, threading.Event())
+        class ChangedProject(FakeService):
+            def request(self, command, args=None, **kwargs):
+                reply = super().request(command, args, **kwargs)
+                if command == 'batch.begin':
+                    self.identity = 'a-different-frozen-project'
+                return reply
+        service = ChangedProject(self.root)
+        output = self.root/'retained.oas'; output.write_bytes(b'previous valid target')
+        runner = Runner(database, self.root/'endpoint.json', self.root/'case.json', output,
+                        transport=service, retries=0, timeout=10)
+        with self.assertRaisesRegex(ValueError, '工程身份或归属已变化'):
+            runner.run()
+        self.assertEqual(service.rows, {})
+        self.assertEqual(output.read_bytes(), b'previous valid target')
+        self.assertIsNone(service.batch_id)
+        ledger = Ledger(database)
+        try:self.assertEqual(ledger.get('state'), 'blocked')
+        finally:ledger.close()
+
     def test_real_case_import_progress_counts(self):
         config = load_folder(self.folder)
         events = []

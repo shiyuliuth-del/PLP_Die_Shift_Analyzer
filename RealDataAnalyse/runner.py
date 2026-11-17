@@ -147,6 +147,14 @@ class Runner:
         batch = begin['batch_id']
         lanes = max(1, min(self.workers, int(begin['threads'])))
         ledger.set('batch', batch)
+        # A second client could open another project after prepare() but before
+        # batch.begin. Once the batch owns the service, project switching is
+        # locked: verify that frozen identity again before submitting any copper.
+        locked = t.request('info', stop=self.stop)['result']
+        if (locked.get('batch') != batch or locked.get('batch_owner') != run
+                or locked.get('session_identity') != ledger.get('session_identity')
+                or Path(locked.get('project') or '').resolve() != Path(self.project)):
+            raise ValueError('批次开始时工程身份或归属已变化，未提交任何封装；请确认正确工程后重试')
         ledger.set('state', 'running')
         with ledger.db:
             ledger.db.execute("update packages set state='pending',task=null,result=null")
