@@ -29,9 +29,14 @@ with tempfile.TemporaryDirectory(prefix='rda-error-output-') as temp:
   assert len(rows)==count and all(row[4].startswith('committed') for row in rows)
   layout=k.Layout();layout.read(str(output));top=layout.top_cell();assert top.name=='TopCell';assert sum(1 for _ in top.each_inst())==count
   error_indices=[i for i in layout.layer_indexes() if layout.get_info(i).name=='ERROR'];assert len(error_indices)==1;error_index=error_indices[0]
+  server_info=call(endpoint,'info')['result'];board=server_info['board_bounds_um']
+  placements={inst.cell.name:inst.dcplx_trans.disp for inst in top.each_inst()}
   issue_packages=0;rectangles=0;failed=[]
   for seq,package,payload,receipt,state in rows:
    assert receipt['fixed_rdl_drc_checked'] is True
+   origin=placements[payload['cell']]
+   assert abs(origin.x-(payload['position_um'][0]-board[0]))<=layout.dbu
+   assert abs(origin.y-(payload['position_um'][1]-board[1]))<=layout.dbu
    if receipt.get('connection_failure_count'):
     failed.append(package);assert receipt['partial_output'] is True and receipt['omitted_region_count']>0
    catalog=receipt['issue_catalog'];path=Path(catalog['path']).resolve();assert path.is_relative_to(folder/'Cache'),path

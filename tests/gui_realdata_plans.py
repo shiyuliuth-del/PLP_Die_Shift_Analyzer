@@ -25,6 +25,8 @@ with tempfile.TemporaryDirectory(prefix='rda-plans-gui-') as name:
     try:
         assert w.timeout.value()==0
         assert w.import_button.text()=='创建任务'
+        assert w.create_plan_button.geometry().left()>w.import_button.geometry().left()
+        assert w.plans_button.geometry().left()>w.start_button.geometry().left()
         assert not any(b.text()=='刷新记录' for b in w.findChildren(W.QPushButton))
         tabs=w.findChild(W.QTabWidget);assert [tabs.tabText(i) for i in range(tabs.count())][-2:]==['全部IPC命令调试','实时命令信息']
         w.open_folder(folder,link=False);wait(w)

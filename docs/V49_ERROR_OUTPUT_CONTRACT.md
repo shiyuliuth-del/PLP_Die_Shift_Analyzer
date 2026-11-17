@@ -9,3 +9,7 @@
 - 客户端记录“已输出（含问题）”与DRC/未连接数量，允许本封装和后续封装完成；Output仍只保留最终OAS，目录及中间文件在Cache。
 
 原型独立验证：OASIS数字层和名称可同时保存，使用KLayout LayerInfo及官方API合同，真实回读确认ERROR名称与数值层、逐DIE直接矩形、零宽见证至少1DBU、原铜面积和封装平移保持。参考：https://www.klayout.de/doc/code/class_LayerInfo.html 。
+
+客户端接线已提交：协商策略不匹配拒绝启动新批次；回执需要fixed_rdl_drc_checked=true，连接失败还须partial_output=true且omitted_region_count>0，有问题须有error_rectangles。逐项计数与batch.end汇总相等才发布。每包记录区分committed/committed_with_issues，全部输入仍有最终Cell，计划顺序照常继续。
+
+GD55默认Ordinary60为180组独立XYZ，Stress42包括3个严格模式已复现的异网端孔碰接，FailureRecovery6夹有正常前后项；所有新表均已用实际Excel解析器验证。运行层接口已与另一窗口正常merge，完整端到端当前仍在排查裁剪导致的DBU退化片，不能提前宣称联合完成。
