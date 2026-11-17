@@ -52,7 +52,7 @@ try:
  event('button_release_event',destination)
  # Drag the composed common-trunk seam; both contributors must move, while
  # the opposite endpoint stays fixed. This used to leave an invisible old cut.
- w.ax.set_xlim(-2400,-1800);w.ax.set_ylim(900,1450);w.plot_layout(preserve=True);w.canvas.draw()
+ w.ax.set_xlim(-2400,-1800);w.ax.set_ylim(1200,1500);w.plot_layout(preserve=True);w.canvas.draw()
  q=next(q for q in w.current_frame['reconstruction']['pieces'] if (q['layer'],q['index'])==refs[1])
  original_cut=q['moved_cut'];original_far=q['extra_cut'];start=np.asarray(original_cut.interpolate(.85,normalized=True).coords[0])
  event('button_press_event',start);assert w.cut_drag.state is not None and len(w.cut_drag.state['companions'])==1
