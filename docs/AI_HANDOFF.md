@@ -1,6 +1,16 @@
-# V45交接入口
+# V46 开发交接
 
-当前UI与计算合同见[V45说明](V45_使用说明.md)，验收见[V45验证](V45_VALIDATION.md)。V44已独立发布，不能回改标签。
+V46最新范围合同：extreme_view.mode经GUI同步到ViewSettings.evaluation_scope；重点不是纯显示。evaluation_scope.py统一所选目录、代表单元权重与条件概率，零位包含在内。focused_reconstruction绕过全联合网格准备，复用直接姿态求解；width的汇总和两项良率共享focus bundle；原铜DRC保存显式已检查姿态，未访问状态必须checked=False。范围加入评估/重构/宽度缓存；切换触发代次更新。全部模式仍是原完整输入算法。
+
+当前分支修复用户新增的nul17123两处问题：首行(8914,5497)真实鼠标圆点触发过GEOS prepared STRtree原生崩溃；(8633,2284)部分姿态把源外周误画成分叉边界。`topology_routing.resolve`用调用私有的查询几何，不能改回跨工作线程共享prepared对象；`branch_regions.interior_interfaces`只提取内部材料分界，裁掉数DBU外周带只影响控制柄，不修改实际铜。混合分叉的线与整孔盘圆点同时保留；点击圆点从真实端点弧长开始。`CutDrag._live`相同吸附状态复用，发布前运行外部案例工具并确认进程退出码。
+
+V46入口变化：`jobs.py`兼容平铺JSON和项目目录；保存图纸副本+相对引用，结果在`Cache/`，运行缓存随项目迁移。`oas_stream.Store`支持阶段专属partial OAS，首次/每64项/内存阶段耐久刷新；最终目标仍全成功后原子替换。阶段文件可独立读取，客户端暂不从几何检查点自动续算，未提交批次仍重放。`ignored_motion.complex_mode`只在整个输入盒得到空间/端孔约束证明后自动选择复杂铜刚体模式；不可证明时保留局部求解。
+
+RealDataAnalyse在另一窗口协作，合并其已提交历史，不能复制未提交工作树或单独丢掉客户端发布。最终说明见V46使用说明，验证见V46_VALIDATION；以下V45基础合同继续适用。
+
+# V45基础行为（V46覆盖项除外）
+
+V45基础UI与计算合同见[V45说明](V45_使用说明.md)，验收见[V45验证](V45_VALIDATION.md)。V44已独立发布，不能回改标签。
 
 新增模块：current_drc.py统一实际铜规则/电连接依赖，drc_overlay.py画布定位，analysis_ui.py延迟任务控制，result_analysis.py概率与安全盒，manual_preview.py逐DIE弹窗。GlobalDRC缓存静态/同刚体检查，extreme_validation加入跨DIE规则因子；改变容差须改变零位帧缓存键。旧report.py/formula_render.py/width_yield_report.py已删除。
 
@@ -113,7 +123,7 @@ A颜色仅由A自身型变前/后的见证决定。两侧铜默认图层颜色�
 
 独立客户端目录：excel.py只读解析/磁盘join及可替换列映射；storage.py SQLite WAL/FULL日志与OS文件锁；transport.py有界认证/响应截止、同目录进程启动与PID出生时间检查；runner.py批次回执、冻结身份、整批重放与write-ahead发布；gui.py后台QThread和200行分页；main.py图形/自动化入口。新本地接口字段为info.session_identity、instance_id、batch_owner及batch.begin.client_id，协议1向后兼容，可靠客户端要求这些字段。Busy不缓存为最终回执，同request_id通信重试不重复接受命令。
 
-发布白名单增RealDataAnalyse全部运行必需文件与cases/GD55六文件；GD55公开授权来自本轮用户后续明确指令，其余私人数据仍禁止发布。新回归test_v44/gui_v44/gui_v44_process；Windows验收实际两个相邻EXE及从非安装cwd启动。未提交批次必须整批重放，单项computed不是成品。日志不写IPC密钥。真实Excel模板尚待提供；在excel适配层扩展而不是更改姿态/几何内核。
+发布白名单增RealDataAnalyse全部运行必需文件与Jobs/GD55六文件；GD55公开授权来自本轮用户后续明确指令，其余私人数据仍禁止发布。新回归test_v44/gui_v44/gui_v44_process；Windows验收实际两个相邻EXE及从非安装cwd启动。未提交批次必须整批重放，单项computed不是成品。日志不写IPC密钥。真实Excel模板尚待提供；在excel适配层扩展而不是更改姿态/几何内核。
 
 ## V44重构内核增量
 

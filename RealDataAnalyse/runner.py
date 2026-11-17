@@ -44,23 +44,28 @@ class Runner:
         self.progress = progress
         self.transport = transport or Transport(endpoint, timeout=min(15, timeout))
         self.ledger = None
+        self.active_progress = {}
+        self.progress_lock = threading.Lock()
+        self.last_progress = 0
+        self.completed_count = 0
 
     def note(self, message, level='INFO'):
         self.ledger.event(message, level)
         self.progress(message)
 
     def prepare(self):
+        self.progress(dict(text='连接预演软件 · 核对工程与任务身份', current=0, total=1))
         t = self.transport
         try:
             info = t.request('info', stop=self.stop, retries=1)['result']
-        except (OSError, EOFError, TimeoutError):
+        except (OSError, EOFError, TimeoutError, json.JSONDecodeError):
             if t.alive():
                 raise RuntimeError('服务无响应但进程仍活着；无法安全重启，保留任务等待人工处理')
             self.note('服务已退出，尝试启动同目录 Die Shift Analyze', 'WARNING')
             t.launch(self.project)
-            info = t.wait_ready(self.stop, self.timeout)
+            info = t.wait_ready(self.stop, self.timeout, progress=self.progress) if isinstance(t, Transport) else t.wait_ready(self.stop, self.timeout)
         if not info.get('ready'):
-            info = t.wait_ready(self.stop, self.timeout)
+            info = t.wait_ready(self.stop, self.timeout, progress=self.progress) if isinstance(t, Transport) else t.wait_ready(self.stop, self.timeout)
         if Path(info.get('project') or '').resolve() != Path(self.project):
             raise ValueError('已打开的软件工程与本任务不符；请先用调试界面打开正确工程')
         identity = info.get('session_identity')
@@ -110,7 +115,20 @@ class Runner:
         if response.get('status') != 'accepted':
             raise RemoteError(response)
         task = response['task_id']
-        result = self.transport.wait_task(task, stop, self.timeout)
+        def report(update):
+            with self.progress_lock:
+                self.active_progress[seq] = update
+                now = time.monotonic()
+                if now - self.last_progress < .2:
+                    return
+                self.last_progress = now
+                fraction = sum(min(99, max(0, u.get('current', 0))) / 100 for u in self.active_progress.values())
+                text = f'批次{attempt} · 完成{self.completed_count}/{self.total} · 并行{len(self.active_progress)} · 封装{seq} {update.get("text", "计算中")}'
+                self.progress(dict(text=text, current=int((self.completed_count + fraction) * 100), total=self.total * 100))
+        if isinstance(self.transport, Transport):
+            result = self.transport.wait_task(task, stop, self.timeout, progress=report)
+        else:
+            result = self.transport.wait_task(task, stop, self.timeout)
         if result.get('cell') != payload['cell'] or result.get('connection_failure_count', 0):
             raise RemoteError(dict(error=dict(type='GeometryFailure', message='封装结果不匹配或存在未连接动区'), result=result))
         return task, result
@@ -129,6 +147,14 @@ class Runner:
         batch = begin['batch_id']
         lanes = max(1, min(self.workers, int(begin['threads'])))
         ledger.set('batch', batch)
+        # A second client could open another project after prepare() but before
+        # batch.begin. Once the batch owns the service, project switching is
+        # locked: verify that frozen identity again before submitting any copper.
+        locked = t.request('info', stop=self.stop)['result']
+        if (locked.get('batch') != batch or locked.get('batch_owner') != run
+                or locked.get('session_identity') != ledger.get('session_identity')
+                or Path(locked.get('project') or '').resolve() != Path(self.project)):
+            raise ValueError('批次开始时工程身份或归属已变化，未提交任何封装；请确认正确工程后重试')
         ledger.set('state', 'running')
         with ledger.db:
             ledger.db.execute("update packages set state='pending',task=null,result=null")
@@ -138,6 +164,9 @@ class Runner:
         pending = {}
         cursor = ledger.db.execute('select seq,payload from packages order by seq')
         completed = 0
+        self.total = ledger.get('count')
+        self.completed_count = 0
+        self.active_progress.clear()
         # Only O(workers) Futures; never enqueue the entire lot in Python.
         # An interrupted SELECT can retain a Windows file handle through the
         # exception traceback even after Connection.close(). Finalize it here.
@@ -161,6 +190,8 @@ class Runner:
                 done, _ = wait(pending, timeout=.25, return_when=FIRST_COMPLETED)
                 for future in done:
                     seq = pending.pop(future)
+                    with self.progress_lock:
+                        self.active_progress.pop(seq, None)
                     try:
                         task, result = future.result()
                     except Exception as exc:
@@ -172,6 +203,8 @@ class Runner:
                         self.note(f'封装序号{seq}失败：{exc}', 'ERROR')
                     else:
                         completed += 1
+                        self.completed_count = completed
+                        self.progress(dict(text=f'批次{attempt} · 完成{completed}/{self.total} · 待回执{len(pending)} · 尚未最终提交', current=completed, total=self.total))
                         with ledger.db:
                             ledger.db.execute("update packages set state='computed',task=?,result=? where seq=?", (task, dumps(result), seq))
                         if completed == 1 or completed % 20 == 0 or completed == ledger.get('count'):
@@ -180,13 +213,19 @@ class Runner:
             raise InterruptedError('用户停止；保留输入与任务回执，继续时补算未提交批次')
         if error:
             raise error
+        self.progress(dict(text='OAS整理 · 合并TopCell、写入校验尾部', current=0, total=100))
         reply = t.request('batch.end', {'batch_id': batch}, request_id=uuid.uuid5(uuid.UUID(run), f'end:{attempt}').hex, stop=self.stop)
-        receipt = t.wait_task(reply['task_id'], self.stop, self.timeout)
+        if isinstance(t, Transport):
+            receipt = t.wait_task(reply['task_id'], self.stop, self.timeout, progress=lambda u: self.progress(dict(u, text='OAS写入 · ' + u['text'])))
+        else:
+            receipt = t.wait_task(reply['task_id'], self.stop, self.timeout)
         if receipt.get('cells') != ledger.get('count') or Path(receipt['path']).resolve() != stage:
             raise ValueError('OAS完成回执与请求数量或路径不符')
         from die_shift_studio.oas_validation import verify_crc
+        self.progress(dict(text='OAS验证 · 流式CRC校验', current=0, total=1))
         if not verify_crc(stage, stop=self.stop):
             raise ValueError('实际OAS的CRC校验失败')
+        self.progress(dict(text='OAS验证 · 流式SHA-256校验', current=0, total=1))
         digest = sha256(stage, self.stop)
         # Write-ahead commit record: recover a crash between rename and DB update.
         ledger.set('publish', dict(stage=str(stage), sha256=digest, receipt=receipt))
@@ -199,6 +238,7 @@ class Runner:
             return False
         if self.stop.is_set():
             raise InterruptedError('已停止发布；验证后的暂存文件保留供继续')
+        self.progress(dict(text='最终提交 · 校验新旧文件与原子替换', current=0, total=1))
         stage = Path(record['stage'])
         digest = record['sha256']
         if self.output.is_file() and sha256(self.output, self.stop) == digest:
@@ -217,6 +257,7 @@ class Runner:
             ledger.db.execute("update packages set state='committed'")
         ledger.set('state', 'completed')
         self.note(f'完成：{ledger.get("count")}封装，{self.output}，SHA-256 {digest}')
+        self.progress(dict(text=f'完成 · {ledger.get("count")}封装 · OAS已校验并提交', current=1, total=1))
         return True
 
     def run(self):

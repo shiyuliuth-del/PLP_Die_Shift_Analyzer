@@ -42,3 +42,9 @@ RealDataAnalyse-output/
 *.sqlite-wal
 *.sqlite-shm
 *.lock
+
+# Project-owned runs are private; the six Jobs/GD55 case inputs are versioned.
+Jobs/**/Cache/
+Jobs/**/Tasks/
+Jobs/**/Output/
+Jobs/**/RealDataAnalyse.project.json

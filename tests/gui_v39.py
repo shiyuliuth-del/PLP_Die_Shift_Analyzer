@@ -46,6 +46,8 @@ try:
  assert w.regions_dxf_button.text()=='动静区输出'
  assert not w.show_issues.isChecked() and not w.view_settings.show_low_contact
  w.load_project(ROOT/'Jobs/示例F_逐芯片幅度与迭代窗口.dshift.json');wait()
+ # This suite checks whole-input reconstructed yields; focus has its own suite.
+ w.grid_mode.setCurrentIndex(0);wait()
  w.view_settings=replace(w.view_settings,animation_enabled=False,reconstruction_live=True);w.load_view_settings()
  w.run_evaluation();wait();w.reconstruction_toggle.setChecked(True);wait()
  w.manual_states=np.array([[25.,10.,.01],[0,0,0]]);w.request_preview();wait()

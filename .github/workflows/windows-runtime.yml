@@ -4,8 +4,16 @@ on:
     paths:
       - 'die_shift_studio/**'
       - 'RealDataAnalyse/**'
-      - 'cases/GD55/**'
+      - 'Jobs/GD55/**'
+      - 'tests/test_realdata_projects.py'
+      - 'tests/test_v46.py'
+      - 'tests/test_evaluation_scope.py'
+      - 'tests/gui_evaluation_scope.py'
+      - 'tests/gui_realdata_projects.py'
       - 'tests/test_v45.py'
+      - 'tests/test_v46.py'
+      - 'tests/test_evaluation_scope.py'
+      - 'tests/gui_evaluation_scope.py'
       - 'tests/gui_v45.py'
       - 'tests/test_v44.py'
       - 'tests/gui_v44*.py'
@@ -70,6 +78,15 @@ jobs:
         run: |
           python -m venv .venv
           .\.venv\Scripts\python -m pip install -r requirements.txt ezdxf
+      - name: V46 project folders, staged OAS and isolated geometry regression
+        shell: cmd
+        run: |
+          .\.venv\Scripts\python -m unittest discover -s tests -p test_v46.py -v
+          if errorlevel 1 exit /b 1
+          .\.venv\Scripts\python -m unittest discover -s tests -p test_evaluation_scope.py -v
+          if errorlevel 1 exit /b 1
+          .\.venv\Scripts\python tests/gui_evaluation_scope.py
+          if errorlevel 1 exit /b 1
       - name: Exercise an existing CuPy build environment
         if: matrix.environment == 'with-cupy'
         run: .\.venv\Scripts\python -m pip install cupy-cuda12x
@@ -202,6 +219,15 @@ jobs:
           "%DIE_SHIFT_PYTHON%" tests/gui_v44.py
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" tests/gui_v44_process.py
+      - name: Verify project-folder client and continuous Windows progress
+        shell: cmd
+        run: |
+          set PYTHONPATH=.;tests
+          "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_v46.py -v
+          if errorlevel 1 exit /b 1
+          "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_realdata_projects.py -v
+          if errorlevel 1 exit /b 1
+          "%DIE_SHIFT_PYTHON%" tests/gui_realdata_projects.py
       - name: Exercise the one-click BUILD.bat from the extracted source
         shell: cmd
         run: call "%DSA_TEST_SOURCE%\BUILD.bat"

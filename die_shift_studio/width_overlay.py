@@ -195,6 +195,16 @@ class WidthOverlay:
         for a in (self.boxes,self.edges,self.barriers,*self.inset.values()):a.set_visible(False)
         self.rows=[];self.tree=None;self.summary_labels(summary,selected,visible,modes)
 
+    def scoped_row(self,row):
+        if self.w.view_settings.evaluation_scope!='focus':return row
+        value=self.problem_probability(row);event=None
+        if value is not None:
+            threshold=self.w.params().failure_threshold
+            low=0<self.w.params().target_nsigma<float('inf') and value['p']<=threshold and self.w.manual_states is None
+            event=dict(lower=value['p'],upper=value['p'],threshold=threshold,low=low,
+                       reason='重点组合内归一化离散概率')
+        return dict(row,event_probability=event)
+
     def draw(self):
         w = self.w
         data = (w.current_frame or {}).get('width_analysis') if w.width_toggle.isChecked() else None
@@ -209,7 +219,7 @@ class WidthOverlay:
                 w.ax.add_collection(item)
             self.stamp = self.table_stamp = self.summary_stamp = None
         visible = frozenset(k for k,check in w.visible_boxes.items() if check.isChecked())
-        flags = (id(data),w.width_sufficient_toggle.isChecked(),w.view_settings.show_low_width,w.ignored_width_lines)
+        flags = (id(data),w.width_sufficient_toggle.isChecked(),w.view_settings.show_low_width,w.ignored_width_lines,id(w.width_yield.bank),w.view_settings.evaluation_scope)
         modes=w.view_settings.width_display
         nominal=w.width_toggle.isChecked() and (w.current_frame or {}).get('nominal_global')
         selected=tuple(w.selection.selected)
@@ -226,7 +236,7 @@ class WidthOverlay:
         rules = (data or {}).get('parameters',{})
         if getattr(self,'row_filter',None)!=(flags,visible):
             self.row_filter=(flags,visible)
-            self.table_rows=[r for r in (data or {}).get('rows',[]) if (flags[1] or r['status']!=ADEQUATE) and (flags[2] or not low_risk(r))]
+            self.table_rows=[r for r in map(self.scoped_row,(data or {}).get('rows',[])) if (flags[1] or r['status']!=ADEQUATE) and (flags[2] or not low_risk(r))]
             self.active_rows=[r for r in self.table_rows if visible.intersection(r['layers'])
                       and all(not ks or visible.intersection(ks) for ks in r['boundary_layers'])
                       and all(any(k in visible for k,_ in refs) for refs in r['boundary_refs'])
@@ -274,7 +284,7 @@ class WidthOverlay:
         self.boxes.set_edgecolors([low_ink(tint(c,modes['截面']),low_risk(r)) for c,r in zip(colors,shown)])
         self.boxes.set_visible(bool(shown) and modes['截面']!='hide')
         board_visible=any(k in visible for k,r in w.roles().items() if r=='封装边框')
-        edges=[v for v in (data or {}).get('edge_violations',[]) if (flags[2] or not low_risk(v)) and v['layer'] in visible
+        edges=[v for v in map(self.scoped_row,(data or {}).get('edge_violations',[])) if (flags[2] or not low_risk(v)) and v['layer'] in visible
                and (bool(visible.intersection(v['boundary_layers'])) if v['kind']=='禁布区侵入' else board_visible)
                and overlaps(v['geometry'].bounds,w.view_bounds)]
         edges=[q for v in edges if (q:=visible_keepout_intrusion(v,visible,w.geometry_cache)) is not None]

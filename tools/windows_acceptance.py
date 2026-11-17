@@ -56,6 +56,9 @@ def main():
     parser.add_argument('--source-root',required=True,type=Path)
     source=parser.parse_args().source_root.resolve()
     binary=source/'dist'/'Die_Shift_Analyze.exe'
+    assert (source/'dist'/'Jobs'/'GD55'/'GD55.dshift.json').is_file()
+    for item in (source/'Jobs'/'GD55').iterdir():
+        if item.is_file():assert (source/'dist'/'Jobs'/'GD55'/item.name).read_bytes()==item.read_bytes()
     from PyInstaller.archive.readers import CArchiveReader
     archive=CArchiveReader(str(binary));pyz=next(n for n in archive.toc if n.lower().endswith('.pyz'))
     modules=archive.open_embedded_archive(pyz).toc
@@ -66,6 +69,8 @@ def main():
     assert not report['unexpected_cuda_dlls'] and report['exe_bytes']==binary.stat().st_size
     assert 0<report['exe_bytes']<256*2**20,report
     print('WINDOWS_SIZE_BYTES',report['exe_bytes'],'LARGEST_INPUTS',report['largest_inputs'][:5],flush=True)
+    with pefile.PE(str(source/'dist'/'RealDataAnalyse.exe')) as client_pe:
+        assert client_pe.OPTIONAL_HEADER.Subsystem == 2, 'RealDataAnalyse must not open a console'
     with pefile.PE(str(binary)) as pe:
         assert pe.FILE_HEADER.Machine==0x8664 and pe.OPTIONAL_HEADER.Subsystem==2,'Windows x64 GUI subsystem required'
         resources={x.id:x for x in pe.DIRECTORY_ENTRY_RESOURCE.entries}
@@ -119,7 +124,7 @@ def main():
         paired_env=dict(ipc_env,REALDATA_TEST_EXE=str(client))
         subprocess.run([sys.executable,str(ROOT/'tests/gui_v44_process.py')],cwd=ROOT,env=paired_env,check=True,timeout=600)
         print('FROZEN_REALDATA_PASS: both sibling EXEs, named pipe, Excel join, OAS and sibling restart',flush=True)
-        gd55_env=dict(paired_env,REALDATA_TEST_CASE=str(source/'cases/GD55'))
+        gd55_env=dict(paired_env,REALDATA_TEST_CASE=str(source/'Jobs/GD55'))
         subprocess.run([sys.executable,str(ROOT/'tests/gui_v44_gd55.py')],cwd=ROOT,env=gd55_env,check=True,timeout=1350)
         print('FROZEN_GD55_XLSX_PASS: actual packaged Excel parser, paired EXEs and bundled case',flush=True)
     print('WINDOWS_SOURCE_BUILD_PASS',__version__,platform.platform(),

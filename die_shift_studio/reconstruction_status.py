@@ -25,7 +25,7 @@ class ReconstructionYieldDisplay:
         try:p=replace(w.params(),target_nsigma=0)
         except ValueError:self.reset();return
         cfg=settings or w.view_settings
-        token=('reconstruction-analysis-continuity',logical_fingerprint((w.data.geometry_id,w.data.top_name,w.roles(),w.ordered_layers(),asdict(p),cfg.reconstruction_key(),cfg.reconstruction_grid_nodes)))
+        token=('reconstruction-analysis-continuity',logical_fingerprint((w.data.geometry_id,w.data.top_name,w.roles(),w.ordered_layers(),asdict(p),cfg.reconstruction_key(),cfg.reconstruction_grid_nodes if cfg.evaluation_scope=='all' else 0)))
         key=(id(w.cache_group),token)
         if key==self.key:self.render();return
         self.reset();self.key=key
@@ -46,7 +46,7 @@ class ReconstructionYieldDisplay:
         completed=getattr(getattr(self.w,'engine',None),'reconstructor',None)
         if completed is not None and completed._plans is not None and not self.w.preview_workers:
             self.plan_pool.update(clone_plan_pool(completed.plan_pool))
-        while len(self.plan_pool)>16:self.plan_pool.pop(next(iter(self.plan_pool)))
+        while len(self.plan_pool)>max(64,4*len(getattr(completed,'plan_pool',{}))):self.plan_pool.pop(next(iter(self.plan_pool)))
         from .gui import Worker
         def work(progress):
             def calculate():
@@ -64,6 +64,11 @@ class ReconstructionYieldDisplay:
                     from .reconstruction_events import scan
                     from .reconstruction_probability import attach
                     evidence_key=('reconstruction-extreme-events-continuity',logical_fingerprint((data.geometry_id,data.top_name,roles,order,asdict(p),cfg.reconstruction_key())))
+                    if cfg.evaluation_scope=='focus':
+                        from .evaluation_scope import focused_catalog,focused_reconstruction
+                        grid,indices=focused_catalog(model,p)
+                        evidence,bank=focused_reconstruction(engine,grid,indices,progress)
+                        return {'yield':bank,'evidence':evidence}
                     evidence=group.values.get_or_compute(evidence_key,lambda:attach(scan(engine,ExtremeCatalog(case,p),lambda n,t:progress(round(n*.8),t),source_cache=group.values),engine))
                     worker.publish({'evidence':evidence})
                     bank=measure_reconstruction_yield(engine,p,cfg,lambda n,t:progress(80+round(n*.2),t),self.factor_pool,
@@ -90,8 +95,8 @@ class ReconstructionYieldDisplay:
         if self.bank is None:return
         from .width_yield import percentage_text
         b=self.bank;decimals=self.w.view_settings.width_yield_decimals
-        text='重构良率 '+('≤' if b.get('partial') else '≈')+percentage_text(b['value'],b['failure'],decimals)+('（检查中）' if b.get('partial') else '')
-        tip=f"{b['scope']}\n每轴{b['grid_nodes']}节点，完整联合网格{b['total']:,}个姿态；局部{b['local_checks']:,}次、异网{b['pair_checks']:,}次。\n{b['limitation']}\n0/∞沿用最近有限概率尺度：{b['scale_nsigma']:g}σ。"
+        text=('重点组合良率 ' if b.get('method')=='focus' else '重构良率 ')+('≤' if b.get('partial') else '≈')+percentage_text(b['value'],b['failure'],decimals)+('（检查中）' if b.get('partial') else '')
+        tip=f"{b['scope']}\n本范围{b['total']:,}个姿态；局部{b['local_checks']:,}次、异网{b['pair_checks']:,}次。\n{b['limitation']}\n0/∞沿用最近有限概率尺度：{b['scale_nsigma']:g}σ。"
         self.w.width_yield.label.set_extra(text,tip)
         if self.w.result is not None:self.w.result['reconstruction_yield']=b
 
@@ -134,7 +139,7 @@ class ConstraintFeedback:
                     if not changed:return rebuilt.frame(frame['states'],progress=progress)
                     if local_pool is not None:
                         from .reconstruction_zones import expand
-                        rebuilt.auto_ignored=dict(current.auto_ignored);rebuilt.safe_vias=dict(current.safe_vias)
+                        rebuilt.auto_following=set(current.auto_following);rebuilt.auto_ignored=dict(current.auto_ignored);rebuilt.safe_vias=dict(current.safe_vias)
                         rebuilt._envelopes=current._envelopes;rebuilt._plans=expand(rebuilt,local_pool['local'])
                     local=rebuilt.frame(frame['states'],targets=changed,diagnostics=False,progress=progress,_raw=True)
                     frame_data=frame['reconstruction'];refs=set(changed)

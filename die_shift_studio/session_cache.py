@@ -30,9 +30,25 @@ def logical_fingerprint(value):
 
 class ProjectCacheGroup:
     def __init__(self,key,max_entries=2000):
+        self.disk_root=None
         self.key=key;self.max_entries=max_entries;self.lock=threading.RLock()
         self.caches={};self.recent=OrderedDict();self.pinned=set();self.bytes=0;self.enabled=True;self.revision=0
         self.values=None;self.motions=None;self.replays=OrderedDict();self.engines={};self.frame_stores={};self.last_assessment=None;self.nominal={};self.frame_ram=None
+    def relocate(self,directory):
+        import shutil
+        directory=Path(directory).resolve();directory.mkdir(parents=True,exist_ok=True)
+        with self.lock:
+            self.disk_root=directory
+            for cache in self.caches.values():
+                if cache.closed or cache.root.parent==directory:continue
+                fresh=tempfile.TemporaryDirectory(prefix='session-',dir=directory);root=Path(fresh.name)
+                try:
+                    for item in cache.root.iterdir():shutil.move(str(item),root/item.name)
+                except Exception:
+                    for item in root.iterdir():shutil.move(str(item),cache.root/item.name)
+                    fresh.cleanup();raise
+                cache.directory.cleanup();cache.directory=fresh;cache.root=root
+
     def shared_frame_ram(self):
         with self.lock:
             if self.frame_ram is None:
@@ -168,7 +184,7 @@ class SessionCache(MutableMapping):
     def __init__(self, budget_bytes=32 * 1024**2, group=None, frame_ram=None):
         self.frame_ram=frame_ram
         self.budget=max(0,budget_bytes);self.memory=OrderedDict();self.sizes={};self.paths={};self.used=0
-        self.directory=tempfile.TemporaryDirectory(prefix='die_shift_cache_')
+        self.directory=tempfile.TemporaryDirectory(prefix='die_shift_cache_',dir=getattr(group,'disk_root',None))
         self.root=Path(self.directory.name);self.group=group;self.lock=group.lock if group is not None else threading.RLock();self.pinned=set()
         self.hits=0;self.misses=0;self.closed=False;self.inflight={};self.pose_source=None;self.completed=set();self.row_status={}
         if group is not None:group.register(self)

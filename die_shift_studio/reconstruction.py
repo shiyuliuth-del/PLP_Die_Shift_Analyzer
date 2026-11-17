@@ -165,7 +165,7 @@ class Reconstructor:
         self.block_cache=EphemeralCache(budget=16*1024**2,max_entries=2048)
         self.tol=max(1e-6,model.data.dbu_um);self._rule_width,self.rule_space=effective_rules(parameters,settings)
         self.overlap_um=parameters.annulus_um;self.length_um=self.width_um=self.extra_um=0.
-        self.auto_ignored={};self.safe_vias={}
+        self.auto_ignored={};self.auto_following=set();self.safe_vias={}
         self.vias=[];self.stays=[];self.vias_by_target={};self._plans=None;self.manual_quality={};self.manual_masses={}
         self.plan_pool=plan_pool if plan_pool is not None else {}
         self._last_raw_frames={}
@@ -203,6 +203,7 @@ class Reconstructor:
         return next(self._matching_cut_rows(values,layer,index,vias),None)
 
     def _plans_for_all_poses(self,progress):
+        from .resources import parallel_map
         from .reconstruction_route import trace,RoutePlan
         from .statistics import mean_and_bounds
         if self._plans is not None:return self._plans
@@ -214,15 +215,23 @@ class Reconstructor:
         priority_grid=WidthGrid(probability_parameters,len(self.model.bound.centers),3)
         from .reconstruction_enclosure import enclosure_certificate
         groups=[]
-        for ref,vias in self.vias_by_target.items():
-            if ref in self.settings.reconstruction_forced:continue
+        def classify(item):
+            ref,vias=item
+            if ref in self.settings.reconstruction_forced:return ref,[],None,None
             source=self.model.cache.layers[ref[0]]['geometry'][ref[1]]
+            if any(layer==ref[0] and source.intersects(shapely.box(*bounds)) for layer,bounds,mode in self.settings.reconstruction_regions):return ref,[],None,None
             safe=[v for v in vias if enclosure_certificate(self.model,self.p,source,[v])]
+            cert=enclosure_certificate(self.model,self.p,source,vias) if len(safe)==len(vias) else None
+            from .ignored_motion import fixed_enclosures_safe,complex_mode
+            if ref in self.settings.reconstruction_following and not fixed_enclosures_safe(self,ref,vias):cert=None;safe=[]
+            manual=ref in self.settings.reconstruction_ignored or any(row[:2]==ref for row in self.settings.reconstruction_intervals)
+            mode=None if manual else complex_mode(self,ref,vias,cert)
+            if mode is not None:cert=dict(certified=True,scope='完整输入盒刚体包围及邻网/封装空间证明',following=mode)
+            return ref,safe,cert,mode
+        for ref,safe,cert,mode in parallel_map(classify,list(self.vias_by_target.items())):
             self.safe_vias[ref]=safe
-            from .ignored_motion import fixed_enclosures_safe
-            if len(safe)==len(vias):
-                if ref not in self.settings.reconstruction_following or fixed_enclosures_safe(self,ref,vias):self.auto_ignored[ref]=enclosure_certificate(self.model,self.p,source,vias)
-                else:self.safe_vias[ref]=[]
+            if cert:self.auto_ignored[ref]=cert
+            if mode:self.auto_following.add(ref)
         for (layer,index),vias in sorted(self.vias_by_target.items()):
             if (layer,index) in self.auto_ignored:continue
             safe_ids={(v['key'],v['index']) for v in self.safe_vias.get((layer,index),())}
@@ -411,13 +420,25 @@ class Reconstructor:
             return rows
         # Route construction is pose-independent and reused after every handle edit.
         from .session_cache import logical_fingerprint
-        key=logical_fingerprint((self.model.data.geometry_id,self.model.roles,self.model.connections.order,
-                                'continuity-branches-2',self.settings.reconstruction_forced,self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
-        if key not in self.plan_pool:
-            from .resources import parallel_map,native_phase_profile
-            self.plan_pool[key]=[entry for rows in parallel_map(build,groups,profile=native_phase_profile(),progress=lambda n,total:progress(round(65*n/max(1,total)),f'建立全姿态共用动区 {n}/{total}')) for entry in rows]
+        base_key=logical_fingerprint((self.model.data.geometry_id,self.model.roles,self.model.connections.order,
+                                'source-routes-v46',self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
+        # Forcing/editing one source must not rebuild every source path. Mine
+        # membership includes enclosure filtering; all-via ownership controls
+        # allocation. Existing path identities survive later manual edits.
+        keys=[logical_fingerprint((base_key,l,i,owner,[(v['key'],v['index']) for v in mine],
+                                   [(v['key'],v['index'],v['owner']) for v in all_vias]))
+              for l,i,owner,mine,all_vias in groups]
+        missing=[(key,task) for key,task in zip(keys,groups) if key not in self.plan_pool]
+        from .resources import native_phase_profile
+        built=parallel_map(lambda item:(item[0],build(item[1])),missing,profile=native_phase_profile(),
+                           progress=lambda n,total:progress(round(65*n/max(1,total)),f'建立全姿态共用动区 {n}/{total}'))
+        self.plan_pool.update(built)
+        keep=set(keys)
+        for old_key in list(self.plan_pool):
+            if len(self.plan_pool)<=max(64,4*len(keys)):break
+            if old_key not in keep:self.plan_pool.pop(old_key,None)
         from .reconstruction_zones import expand
-        self._base_plans=self.plan_pool[key]
+        self._base_plans=[entry for key in keys for entry in self.plan_pool[key]]
         self._plans=expand(self,[e for e in self._base_plans if (e['layer'],e['index']) not in self.settings.reconstruction_ignored])
         from .ignored_motion import entries as ignored_entries
         self._plans.extend(ignored_entries(self))
@@ -434,8 +455,10 @@ class Reconstructor:
                 if part is not None:
                     from .reconstruction_edits import apply_angles
                     adjusted=apply_angles(self.settings,plan,part)
-                    if adjusted is not None:return adjusted,True
-        if entry.get('seeded'):
+                    if adjusted is not None:
+                        a,b=adjusted['a'],adjusted['b'];manual=True
+                        if not self.settings.reconstruction_regions:return adjusted,True
+        if entry.get('seeded') and not self.settings.reconstruction_regions:
             from .reconstruction_edits import apply_angles
             return apply_angles(self.settings,plan,plan.partition(a,b)),True
         # Migrate legacy cut planes by projecting their NOMINAL points on the route.
@@ -666,7 +689,7 @@ class Reconstructor:
             def measure(item):
                 idx,net=item;tree,others=trees[net]
                 if not others:return idx,None
-                probe=replaced[idx]
+                probe=shapely.from_wkb(replaced[idx].wkb)
                 # Actual overlaps need no nearest-boundary search. Preparing the
                 # one probe amortises the batched predicate over candidate nets.
                 nearby=tree.query(probe)

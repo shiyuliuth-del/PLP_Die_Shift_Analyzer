@@ -160,8 +160,10 @@ class ReconstructionOverlay:
                 if not g.is_empty and _in_view(g.bounds,w.view_bounds):markers[g.wkb]=g
             for kind,target,dot_list,line_list in (('moved','moved_cut',dots,first),('extra','extra_cut',far_dots,second)):
                 face=self.handles.get((self._key(q),kind),q.get(target))
-                if face is not None and face.geom_type in ('Point','MultiPoint'):dot_list.extend(shapely.get_coordinates(face))
-                else:line_list.extend(_lines(face))
+                if face is not None:
+                    for component in shapely.get_parts(face):
+                        if component.geom_type in ('Point','MultiPoint'):dot_list.extend(shapely.get_coordinates(component))
+                        else:line_list.extend(_lines(component))
         # Ignoring deformation keeps real fixed copper, not an exemption from
         # its physical rules. Its current witnesses must remain visible too.
         for row in (data or {}).get('violations',()):
@@ -286,7 +288,6 @@ class CutDrag:
         if getattr(self.w,"remote_locked",False):return
         w=self.w
         if not w.reconstruction_toggle.isChecked() or event.inaxes is not w.ax or event.xdata is None or getattr(w.canvas,'die_move_active',False):return
-        if getattr(w,'region_select',None) and w.region_select.mode is not None:return
         picked=w.reconstruction_overlay.pick(event.xdata,event.ydata,self._tolerance())
         if picked is None:return
         piece,xy,kind=picked
@@ -295,6 +296,12 @@ class CutDrag:
         overlay=w.reconstruction_overlay;overlay.selected=overlay._key(piece);overlay.selected_kind=kind
         if kind in ('bridge','problem'):return
         if event.button!=1:return
+        if getattr(w,'region_select',None) and w.region_select.mode is not None:w.exit_region_mode()
+        if w.toolbar.mode:
+            if 'pan' in str(w.toolbar.mode).lower():
+                if getattr(w.toolbar,'_pan_info',None) is not None:w.toolbar.release_pan(event)
+                w.toolbar.pan()
+            else:w.toolbar.zoom()
         event.reconstruction_cut_handled=True
         w.stop_animation();w.cancel_previews()
         if event.dblclick:self.clear(overlay._key(piece),piece,kind);return
@@ -403,6 +410,12 @@ class CutDrag:
     def _live(self,part):
         from .reconstruction_route import warp,failed_connection,missing_area
         state=self.state;old=state['frame'];piece=state['piece'];plan=piece['route_plan']
+        from .reconstruction_route import part_key
+        live_key=(state['updated'].reconstruction_key(),part_key(part))
+        # A snapped point may receive dozens of mouse moves with identical
+        # geometry. Reuse the accepted preview and its running checks.
+        if state.get('live_key')==live_key:return
+        state['live_key']=live_key
         if piece.get('graph_edit') or piece.get('endpoint_weights',(1.,0.))!=(1.,0.):
             from .reconstruction_zones import live_serial
             proposed=live_serial(self.w,state['updated'],old,(piece['layer'],piece['index']))
@@ -453,7 +466,9 @@ class CutDrag:
         self.w.reconstruction_overlay.clear_hover()
         if not state['moved']:return
         from .reconstruction_edits import commit_merges
-        self.w.view_settings=commit_merges(state['updated'],self.w.current_frame)
+        updated=commit_merges(state['updated'],self.w.current_frame)
+        if updated.reconstruction_key()==self.w.view_settings.reconstruction_key():return
+        self.w.view_settings=updated
         self.w.invalidate_reconstruction_edit();self.w.request_preview(quiet=True)
     def cancel(self):
         if self.state is None:return False
@@ -604,7 +619,7 @@ class RegionSelect:
         for layer in layers:
             regions.append((layer, bounds, self.mode))
         self.w.view_settings = replace(self.w.view_settings, reconstruction_regions=tuple(regions))
-        self.w.dirty=True
+        self.w.invalidate_reconstruction_edit()
         self.w.statusBar().showMessage(
             f'已写入 {len(layers)} 个图层的{REGION_LABELS[self.mode]}；可继续框选，或点“清除全部手动区域”恢复')
         self.w.request_preview(quiet=True)

@@ -26,6 +26,21 @@ def terminal_tree(moving,fixed):
     return result
 
 
+def interior_interfaces(source,domain,rigid,tolerance):
+    """Only material-to-material seams are controls, never source perimeter.
+
+    Snapped Boolean operations can leave sub-DBU slivers along the exterior.
+    Buffering a domain to recover coincident seams otherwise picks the whole
+    sliver contour and transforms it into a long, detached drag handle.
+    This display-only trim leaves copper partitions and exported seams intact.
+    """
+    exterior=source.boundary.buffer(tolerance*4)
+    interfaces=[g.boundary.intersection(domain.buffer(tolerance*.05)).difference(exterior) for g in rigid]
+    lines=[line for g in interfaces for line in shapely.get_parts(g)
+           if line.geom_type=='LineString' and line.length>tolerance*8]
+    return shapely.line_merge(shapely.union_all(lines))
+
+
 def assemble(r,source,rows,states):
     from .reconstruction import transform
     owner=rows[0]['die'];pose=states[owner];center=r.model.bound.centers[owner]
@@ -98,9 +113,7 @@ def assemble(r,source,rows,states):
             # Difference/union can leave ulp-different seam coordinates. A
             # display-only sub-DBU neighbourhood recovers the real line; isolated
             # touch points are NOT whole-pad controls.
-            interfaces=[rigid[i].boundary.intersection(group.buffer(r.tol*.05)) for i in ids if i<physical_count and abs(values[i]-weight)<1e-10]
-            lines=[line for g in interfaces for line in shapely.get_parts(g) if line.geom_type=='LineString' and line.length>r.tol*8]
-            if lines:return shapely.line_merge(shapely.union_all(lines))
+            seam=interior_interfaces(source,group,[rigid[i] for i in ids if i<physical_count and abs(values[i]-weight)<1e-10],r.tol)
             terminals=[]
             for member in members:
                 plan=member['route_plan'];s=member['interval'][side]
@@ -111,7 +124,7 @@ def assemble(r,source,rows,states):
                     actual=getattr(plan,'terminal_vias',((),()))[side]
                     terminal=min(actual,key=lambda g:g.distance(shapely.Point(endpoint))).centroid if actual else shapely.Point(endpoint)
                     terminals.append(terminal)
-            return shapely.union_all(terminals)
+            return shapely.union_all([seam,*terminals])
         nearcut,farcut=face(high,0),face(low,1)
         # Whole-pad controls are physical terminal locations. Floating material
         # weights apply to interface lines, never to the terminal itself.
@@ -137,7 +150,7 @@ def consolidate(r,pieces,states):
         else:other.append(q)
     for rows in groups.values():
         source=rows[0]['route_plan'].source
-        cache_key=('branch-assembly-continuity',r.rules.identity,r.settings.reconstruction_style,
+        cache_key=('branch-assembly-interior-seams-v46',r.rules.identity,r.settings.reconstruction_style,
                    tuple(r.model.bound.centers[rows[0]['die']]),states[rows[0]['die']].tobytes(),
                    tuple((q['route_identity'],q['interval'],q['boundary_angles'],tuple(q['nominal_regions'][k].wkb for k in 'ABC')) for q in rows))
         cached=r.geometry_pool.get(cache_key)
@@ -166,11 +179,21 @@ def editable_piece(piece,point,kind=None):
     if not piece.get('graph_members'):return piece
     p=shapely.Point(point)
     names=('extra_cut',) if kind=='extra' else ('moved_cut',) if kind=='moved' else ('moved_cut','extra_cut')
-    member=min(piece['graph_members'],key=lambda q:min(q[name].distance(p) for name in names))
+    side=1 if kind=='extra' else 0
+    controls=shapely.get_parts(piece[names[0]])
+    nearest=min((g for g in controls if not g.is_empty),key=lambda g:g.distance(p),default=None)
+    point_mode=nearest is not None and nearest.geom_type=='Point'
+    def distance(q):
+        if point_mode:
+            plan=q['route_plan'];endpoint=shapely.Point(plan.route.coords[-1 if side else 0])
+            if not side:return q['moving_terminals'].distance(p)
+            return endpoint.distance(p)
+        return min(q[name].distance(p) for name in names)
+    member=min(piece['graph_members'],key=distance)
     companions=[];side=1 if kind=='extra' else 0;name=names[0]
     if kind in ('moved','extra'):
-        distance=member[name].distance(p);tol=member['route_plan'].tolerance
-        whole=piece[name].geom_type in ('Point','MultiPoint')
+        nearest_distance=distance(member);tol=member['route_plan'].tolerance
+        whole=point_mode or piece[name].geom_type in ('Point','MultiPoint')
         # A common trunk cut belongs to several terminal paths. Editing just
         # one of them left the other path's A over it, so the boundary appeared
         # frozen. Couple only coincident cuts / the SAME terminal, not branches
@@ -178,5 +201,15 @@ def editable_piece(piece,point,kind=None):
         endpoint=shapely.Point(member['route_plan'].route.coords[0 if side==0 else -1])
         for row in piece['graph_members']:
             candidate=shapely.Point(row['route_plan'].route.coords[0 if side==0 else -1])
-            if row[name].distance(p)<=distance+tol*4 or (whole and candidate.distance(endpoint)<=tol*4):companions.append(row)
+            if distance(row)<=nearest_distance+tol*4 or (whole and candidate.distance(endpoint)<=tol*4):companions.append(row)
+    if point_mode and kind in ('moved','extra'):
+        # A union can swallow an individual path cut while retaining another
+        # branch's seam. A displayed terminal point starts at that terminal,
+        # not at the now-internal member's old arclength (which caused jumps).
+        def at_terminal(row):
+            plan=row['route_plan'];a,b=row['interval']
+            origin=shapely.Point(plan.route.coords[-1 if side else 0])
+            return dict(row,interval=(a,plan.length) if side else (0.,b),
+                        **{name:nearest,**({} if side else {'cut':origin})})
+        member=at_terminal(member);companions=[at_terminal(row) for row in companions]
     return dict(member,graph_edit=True,endpoint_weights=piece['endpoint_weights'],drag_members=tuple(companions))

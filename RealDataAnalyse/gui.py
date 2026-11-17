@@ -1,5 +1,6 @@
 """Qt GUI; all IO/Excel/IPC work stays outside the GUI thread."""
 import json
+import copy
 from contextlib import closing
 from pathlib import Path
 import threading
@@ -7,7 +8,8 @@ import time
 
 from die_shift_studio.qt_compat import QtCore, QtGui, QtWidgets as W, Signal
 from . import __version__
-from .excel import DEFAULT_PROFILE, generate_example, import_files
+from .excel import DEFAULT_PROFILE, HEADERS, import_files
+from .projects import load_folder, save_folder, inside, copy_excel
 from .runner import Runner
 from .storage import Ledger, configure_logging
 from .transport import Transport, default_endpoint, installation
@@ -26,7 +28,7 @@ COMMANDS = {
 
 
 class Worker(QtCore.QThread):
-    message = Signal(str)
+    message = Signal(object)
     done = Signal(object, object)
 
     def __init__(self, function, parent):
@@ -42,6 +44,44 @@ class Worker(QtCore.QThread):
             self.done.emit(None, str(exc))
 
 
+class ProgressBar(W.QProgressBar):
+    """Single continuous fill and one centered label, independent of Windows chunks."""
+    def __init__(self):
+        super().__init__()
+        self.setMinimumHeight(30)
+        self.setTextVisible(False)
+        self.detail = '就绪 · 请选择项目文件夹'
+        self.started = None
+        self.elapsed = 0
+        self.failed = False
+
+    def paintEvent(self, event):
+        painter = QtGui.QPainter(self)
+        rect = self.rect().adjusted(1, 1, -1, -1)
+        painter.fillRect(rect, QtGui.QColor('#edf2f7'))
+        span = max(1, self.maximum() - self.minimum())
+        fraction = max(0., min(1., (self.value() - self.minimum()) / span))
+        fill = QtCore.QRect(rect)
+        fill.setWidth(round(rect.width() * fraction))
+        painter.fillRect(fill, QtGui.QColor('#efb3ad' if self.failed else '#79bce8'))
+        painter.setPen(QtGui.QColor('#8796a5'))
+        painter.drawRect(rect)
+        painter.setPen(QtGui.QColor('#142536'))
+        elapsed = int(time.monotonic() - self.started) if self.started else self.elapsed
+        label = self.detail + (f' · {round(fraction * 100)}%' if self.maximum() > 1 else '') + (f' · 已用 {elapsed // 60:02d}:{elapsed % 60:02d}' if elapsed else '')
+        alignment = getattr(QtCore.Qt, 'AlignmentFlag', QtCore.Qt).AlignCenter
+        elide = getattr(QtCore.Qt, 'TextElideMode', QtCore.Qt).ElideRight
+        painter.drawText(rect.adjusted(8, 0, -8, 0), alignment, self.fontMetrics().elidedText(label, elide, rect.width() - 16))
+
+    def status(self, text, current=None, total=None):
+        self.detail = str(text).replace('\n', ' ')
+        self.setToolTip(self.detail)
+        if current is not None:
+            self.setRange(0, max(1, int(total or 1)))
+            self.setValue(int(current))
+        self.update()
+
+
 class Window(W.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -50,29 +90,50 @@ class Window(W.QMainWindow):
         self.worker = None
         self.pending_close = False
         self.page = 0
-        self.files = []
+        self.project_root = None
+        self.operation = ''
+        self.last_log_update = 0
+        self.shared_profile = copy.deepcopy(DEFAULT_PROFILE)
+        self.file_profiles = {}
+        self.mapping_file = None
+        self.mapping_mode = True
+        self.mapping_guard = False
         self.settings = QtCore.QSettings('DieShiftAnalyze', 'RealDataAnalyse')
         self.logger = configure_logging(installation())
         self.logger.info('RealDataAnalyse %s started', __version__)
         base = W.QWidget()
         self.setCentralWidget(base)
         layout = W.QVBoxLayout(base)
-        title = W.QLabel('RealDataAnalyse  ·  实测封装批量输出')
-        title.setStyleSheet('font-size:20px; font-weight:600; padding:6px')
-        layout.addWidget(title)
         connection = W.QGroupBox('连接与工程')
         form = W.QFormLayout(connection)
+        folder_row = W.QHBoxLayout()
+        self.folder = W.QLineEdit()
+        self.folder.setReadOnly(True)
+        self.folder_button = W.QPushButton('选择项目文件夹…')
+        folder_row.addWidget(self.folder, 1)
+        folder_row.addWidget(self.folder_button)
+        form.addRow('项目文件夹', folder_row)
+        # Paths are project-owned state, never independent user input rows.
+        self.project = W.QLineEdit(self)
+        self.database = W.QLineEdit(self)
+        self.output = W.QLineEdit(self)
+        for state in (self.project, self.database, self.output):
+            state.hide()
         self.endpoint = self.path_row(form, 'IPC入口', str(default_endpoint()), '*.json', 'endpoint')
-        self.project = self.path_row(form, 'Die Shift Analyze工程', '', '*.json', 'project')
-        layout.addWidget(connection)
         buttons = W.QHBoxLayout()
-        self.connect_button = W.QPushButton('连接 / 查询状态')
-        self.start_button = W.QPushButton('启动同目录软件')
+        self.connect_button = W.QPushButton('连接状态')
+        self.start_button = W.QPushButton('启动预演软件')
         buttons.addWidget(self.connect_button)
         buttons.addWidget(self.start_button)
-        self.connection_label = W.QLabel('先在 Die Shift Analyze 开启“实测输出”')
-        buttons.addWidget(self.connection_label, 1)
-        layout.addLayout(buttons)
+        form.addRow(buttons)
+        controls = W.QHBoxLayout()
+        self.dies = self.spin(controls, 'DIE数量', 1, 10000, 3)
+        self.workers = self.spin(controls, '并发线程', 1, 64, 4)
+        self.memory = self.spin(controls, '内存MB', 128, 1048576, 2048)
+        self.retries = self.spin(controls, '自动重试', 0, 10, 3)
+        self.timeout = self.spin(controls, '任务超时秒', 10, 86400, 900)
+        form.addRow(controls)
+        layout.addWidget(connection)
         tabs = W.QTabWidget()
         layout.addWidget(tabs, 1)
         batch = W.QWidget()
@@ -82,32 +143,47 @@ class Window(W.QMainWindow):
         tabs.addTab(batch_scroll, 'Excel批量 / 故障恢复')
         batch_layout = W.QVBoxLayout(batch)
         row = W.QHBoxLayout()
-        self.add_files = W.QPushButton('选择各DIE Excel')
-        self.example = W.QPushButton('生成GD55合成示例')
-        self.file_label = W.QLabel('未选择文件；一个Excel对应一颗DIE')
+        self.add_files = W.QPushButton('添加Excel行')
+        self.remove_files = W.QPushButton('删除选中行')
         row.addWidget(self.add_files)
-        row.addWidget(self.example)
-        row.addWidget(self.file_label, 1)
+        row.addWidget(self.remove_files)
+        row.addStretch()
         batch_layout.addLayout(row)
-        self.file_view = W.QPlainTextEdit()
-        self.file_view.setReadOnly(True)
-        self.file_view.setMaximumHeight(50)
+        self.file_view = W.QTableWidget(0, 2)
+        self.file_view.setHorizontalHeaderLabels(['使用', 'Excel文件（相对于项目文件夹）'])
+        self.file_view.setColumnWidth(0, 55)
+        self.file_view.horizontalHeader().setStretchLastSection(True)
+        self.file_view.setSelectionBehavior(getattr(W.QAbstractItemView, 'SelectionBehavior', W.QAbstractItemView).SelectRows)
+        self.file_view.setMinimumHeight(100)
+        self.file_view.setMaximumHeight(160)
         batch_layout.addWidget(self.file_view)
-        settings_form = W.QFormLayout()
-        batch_layout.addLayout(settings_form)
-        self.database = self.path_row(settings_form, '任务记录 / 继续已有任务', '', '*.sqlite', 'database')
-        self.output = self.path_row(settings_form, '最终OAS', str(installation() / 'RealDataAnalyse-output' / 'lot.oas'), '*.oas', 'output', save=True)
-        controls = W.QHBoxLayout()
-        self.dies = self.spin(controls, 'DIE数量', 1, 10000, 3)
-        self.workers = self.spin(controls, '并发线程', 1, 64, 4)
-        self.memory = self.spin(controls, '内存MB', 128, 1048576, 2048)
-        self.retries = self.spin(controls, '自动重试', 0, 10, 3)
-        self.timeout = self.spin(controls, '任务超时秒', 10, 86400, 900)
-        settings_form.addRow(controls)
-        self.profile = W.QPlainTextEdit(json.dumps(DEFAULT_PROFILE, ensure_ascii=False, indent=2))
-        self.profile.setMaximumHeight(95)
-        profile_box = W.QGroupBox('Excel列映射（长度μm，角度°；中心留空沿用工程）')
+        profile_box = W.QGroupBox()
         profile_layout = W.QVBoxLayout(profile_box)
+        self.mapping_shared = W.QCheckBox('Excel列映射（长度μm，角度°；中心留空沿用工程）')
+        self.mapping_shared.setChecked(True)
+        self.mapping_shared.setToolTip('勾选：所有Excel共用列映射；取消：点击上方Excel行编辑该文件的独立映射')
+        profile_layout.addWidget(self.mapping_shared)
+        sheet_row = W.QHBoxLayout()
+        sheet_row.addWidget(W.QLabel('工作表'))
+        self.sheet = W.QLineEdit(DEFAULT_PROFILE['sheet'])
+        sheet_row.addWidget(self.sheet, 1)
+        self.header_row = self.spin(sheet_row, '表头行', 1, 1048576, 1)
+        profile_layout.addLayout(sheet_row)
+        self.profile = W.QTableWidget(len(HEADERS), 3)
+        self.profile.setHorizontalHeaderLabels(['数据字段', 'Excel列名', '要求 / 单位'])
+        self.profile.verticalHeader().hide()
+        self.profile.horizontalHeader().setStretchLastSection(True)
+        self.profile.setColumnWidth(0, 220)
+        self.profile.setColumnWidth(1, 250)
+        descriptions = ['必填文本，保留前导零', '必填整数，从1起', '必填 / μm', '必填 / μm', '必填 / °', '必填 / μm', '必填 / μm', '可选，XY成对 / μm', '可选，XY成对 / μm']
+        for i, field in enumerate(HEADERS):
+            for j, text in enumerate((field, field, descriptions[i])):
+                item = W.QTableWidgetItem(text)
+                if j != 1:
+                    item.setFlags(item.flags() & ~getattr(QtCore.Qt, 'ItemFlag', QtCore.Qt).ItemIsEditable)
+                self.profile.setItem(i, j, item)
+        self.profile.setMinimumHeight(150)
+        self.profile.setMaximumHeight(220)
         profile_layout.addWidget(self.profile)
         batch_layout.addWidget(profile_box)
         controls = W.QHBoxLayout()
@@ -119,11 +195,6 @@ class Window(W.QMainWindow):
         for widget in (self.import_button, self.run_button, self.stop_button, self.refresh_button):
             controls.addWidget(widget)
         batch_layout.addLayout(controls)
-        self.progress = W.QProgressBar()
-        self.progress.setFormat('尚未开始 %p%')
-        batch_layout.addWidget(self.progress)
-        self.summary = W.QLabel('未提交的批次会完整重放；几何失败保留明细，修正后新建任务。')
-        batch_layout.addWidget(self.summary)
         self.table = W.QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(['序号', '封装ID', 'Cell', '状态', '任务/错误'])
         self.table.setEditTriggers(W.QAbstractItemView.EditTrigger.NoEditTriggers if hasattr(W.QAbstractItemView, 'EditTrigger') else W.QAbstractItemView.NoEditTriggers)
@@ -137,6 +208,8 @@ class Window(W.QMainWindow):
         nxt = W.QPushButton('下一页')
         paging.addWidget(prev)
         paging.addWidget(nxt)
+        self.page_label = W.QLabel()
+        paging.addWidget(self.page_label)
         paging.addStretch()
         batch_layout.addLayout(paging)
         debug = W.QWidget()
@@ -159,14 +232,26 @@ class Window(W.QMainWindow):
         self.log_view.setReadOnly(True)
         self.log_view.setMaximumBlockCount(600)
         self.log_view.setMaximumHeight(115)
+        self.log_check = W.QCheckBox()
+        self.log_check.setToolTip('显示 / 隐藏信息输出')
+        self.log_check.setAccessibleName('显示信息输出')
+        self.log_view.hide()
+        self.log_check.toggled.connect(self.log_view.setVisible)
         layout.addWidget(self.log_view)
-        scope = W.QLabel('批量OAS执行几何/连接检查，跳过完整DRC及概率；完成不代表生产签核。日志在程序旁 logs。')
-        scope.setWordWrap(True)
-        layout.addWidget(scope)
+        self.progress = ProgressBar()
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        progress_row = W.QHBoxLayout()
+        progress_row.addWidget(self.log_check)
+        progress_row.addWidget(self.progress, 1)
+        layout.addLayout(progress_row)
+        self.mapping_shared.toggled.connect(self.toggle_mapping)
+        self.file_view.currentCellChanged.connect(self.select_mapping)
+        self.folder_button.clicked.connect(self.select_folder)
         self.connect_button.clicked.connect(self.connect_server)
         self.start_button.clicked.connect(self.start_server)
         self.add_files.clicked.connect(self.select_files)
-        self.example.clicked.connect(self.make_example)
+        self.remove_files.clicked.connect(self.delete_files)
         self.import_button.clicked.connect(self.do_import)
         self.run_button.clicked.connect(self.do_run)
         self.stop_button.clicked.connect(self.stop_work)
@@ -178,11 +263,13 @@ class Window(W.QMainWindow):
         self.timer = QtCore.QTimer(self)
         self.timer.setInterval(1000)
         self.timer.timeout.connect(self.refresh)
+        self.timer.timeout.connect(self.progress.update)
         self.timer.start()
 
-    def path_row(self, form, label, default, pattern, key, save=False):
+    def path_row(self, form, label, default, pattern, key, save=False, readonly=False):
         row = W.QHBoxLayout()
-        edit = W.QLineEdit(str(self.settings.value(key, default)))
+        edit = W.QLineEdit(str(self.settings.value(key, default) if key == 'endpoint' else default))
+        edit.setReadOnly(readonly)
         button = W.QPushButton('浏览…')
         def browse():
             dialog = W.QFileDialog.getSaveFileName if save else W.QFileDialog.getOpenFileName
@@ -191,7 +278,9 @@ class Window(W.QMainWindow):
                 edit.setText(path)
         button.clicked.connect(browse)
         row.addWidget(edit, 1)
-        row.addWidget(button)
+        if not readonly:
+            row.addWidget(button)
+        self.path_buttons = getattr(self, 'path_buttons', []) + [button]
         form.addRow(label, row)
         edit.editingFinished.connect(lambda: self.settings.setValue(key, edit.text()))
         return edit
@@ -206,36 +295,61 @@ class Window(W.QMainWindow):
         return spin
 
     def log(self, message):
-        self.log_view.appendPlainText(time.strftime('%H:%M:%S ') + str(message))
+        if isinstance(message, dict):
+            self.progress.status(message.get('text', ''), message.get('current'), message.get('total'))
+            now = time.monotonic()
+            if now - self.last_log_update >= 1:
+                self.last_log_update = now
+                text = str(message.get('text', ''))
+                self.log_view.appendPlainText(time.strftime('%H:%M:%S ') + text)
+                self.logger.info('%s', text)
+            return
+        text = str(message)
+        self.log_view.appendPlainText(time.strftime('%H:%M:%S ') + text)
+        self.progress.status(text)
 
     def busy(self, on):
-        for button in (self.connect_button, self.start_button, self.add_files, self.example,
-                       self.import_button, self.run_button, self.send_button):
-            button.setEnabled(not on)
-        for edit in (self.endpoint, self.project, self.database, self.output, self.dies, self.profile,
-                     self.workers, self.memory, self.retries, self.timeout):
-            edit.setEnabled(not on)
+        for widget in (self.connect_button, self.start_button, self.add_files, self.remove_files,
+                       self.folder_button, self.import_button, self.run_button, self.send_button,
+                       self.endpoint, self.project, self.database, self.output, self.dies, self.profile,
+                       self.workers, self.memory, self.retries, self.timeout, self.file_view, self.sheet, self.header_row, self.mapping_shared,
+                       *self.path_buttons):
+            widget.setEnabled(not on)
         self.stop_button.setEnabled(on)
 
-    def execute(self, fn, callback=None):
+    def execute(self, fn, callback=None, failure=None, operation='操作'):
         if self.worker:
             return
+        self.operation = operation
         self.busy(True)
+        self.progress.failed = False
+        self.progress.started = time.monotonic()
+        self.progress.status(operation + ' · 正在开始', 0, 100)
         worker = Worker(fn, self)
         self.worker = worker
         worker.message.connect(self.log)
         def result(value, error):
-            if error:
-                self.log(error)
-                self.logger.error('%s', error)
-                self.response.setPlainText(error)
-            else:
-                self.response.setPlainText(json.dumps(value, ensure_ascii=False, indent=2))
+            try:
+                if error:
+                    raise RuntimeError(error)
                 if callback:
                     callback(value)
-                self.log('操作完成')
+                self.response.setPlainText(json.dumps(value, ensure_ascii=False, indent=2))
+                self.log_view.appendPlainText(time.strftime('%H:%M:%S ') + operation + '完成')
+                detail = self.progress.detail if self.progress.detail.startswith(('完成 ·', '导入完成 ·')) else operation + '完成'
+                self.progress.status(detail, 100, 100)
+            except Exception as exc:
+                self.log(str(exc))
+                self.logger.error('%s', exc)
+                self.response.setPlainText(str(exc))
+                self.progress.failed = True
+                self.progress.status(operation + '停止 · ' + str(exc))
+                if failure:
+                    failure(str(exc))
         worker.done.connect(result)
         def finished():
+            self.progress.elapsed = int(time.monotonic() - self.progress.started)
+            self.progress.started = None
             self.worker = None
             self.busy(False)
             self.refresh()
@@ -245,73 +359,286 @@ class Window(W.QMainWindow):
         worker.finished.connect(finished)
         worker.start()
 
+    @staticmethod
+    def button_status(button, good):
+        color = '#237844' if good else '#b33630'
+        button.setStyleSheet(f'QPushButton {{background-color:{color}; color:white; padding:5px; border:1px solid {color}; border-radius:3px}}')
+        button.setProperty('connected', good)
+
+    def accept_info(self, info):
+        self.info = info
+        self.button_status(self.connect_button, True)
+        self.connect_button.setToolTip(f'连接正常 · ready={info.get("ready")} · 工程={info.get("project")}')
+        if info.get('die_count'):
+            self.dies.setValue(info['die_count'])
+
     def connect_server(self):
         endpoint = self.endpoint.text()
-        def connected(response):
-            info = response['result']
-            self.connection_label.setText(f'ready={info.get("ready")}  DIE={info.get("die_count")}  工程={info.get("project")}')
-            if info.get('project'):
-                self.project.setText(info['project'])
-                self.settings.setValue('project', info['project'])
-            if info.get('die_count'):
-                self.dies.setValue(info['die_count'])
-            self.info = info
-        self.execute(lambda stop, progress: Transport(endpoint).request('info', stop=stop), connected)
+        self.execute(lambda stop, progress: Transport(endpoint).request('info', stop=stop),
+                     lambda reply: self.accept_info(reply['result']),
+                     lambda error: self.button_status(self.connect_button, False), '查询连接状态')
+
+    @staticmethod
+    def linked_project(endpoint, project, stop, progress, timeout, output=None):
+        transport = Transport(endpoint)
+        progress(dict(text='连接预演软件 · 查询当前工程', current=0, total=1))
+        try:
+            info = transport.request('info', stop=stop, retries=1)['result']
+        except (OSError, EOFError, TimeoutError, json.JSONDecodeError):
+            if transport.alive():
+                raise RuntimeError('预演软件仍存活但未响应，请检查窗口；不会重复启动')
+            transport.launch(project)
+            progress(dict(text='预演软件已启动 · 等待图纸加载、评估和实测准备', current=0, total=1))
+            info = transport.wait_ready(stop, timeout, progress=progress)
+        if Path(info.get('project') or '').resolve() != Path(project).resolve():
+            if info.get('running') or info.get('batch'):
+                raise ValueError('预演软件有活动任务，不能切换工程；请完成后重试启动预演软件')
+            progress(dict(text='联动打开所选工程 · 等待加载和评估', current=0, total=1))
+            reply = transport.request('project.open', {'path': project}, stop=stop)
+            if reply.get('task_id'):
+                transport.wait_task(reply['task_id'], stop, timeout, progress=progress)
+            info = transport.wait_ready(stop, timeout, progress=progress)
+        elif not info.get('ready'):
+            info = transport.wait_ready(stop, timeout, progress=progress)
+        if output is not None:
+            directory = Path(output).parent
+            directory.mkdir(parents=True, exist_ok=True)
+            if info.get('batch') or info.get('running'):
+                raise ValueError('预演软件仍有活动任务，不能修改项目输出目录')
+            transport.request('output.configure', {'output_directory': str(directory)}, stop=stop)
+        return info
 
     def start_server(self):
-        endpoint, project = self.endpoint.text(), self.project.text()
-        def start(stop, progress):
-            t = Transport(endpoint)
+        try:
+            self.persist()
+        except (OSError, ValueError) as exc:
+            self.log(exc)
+            self.button_status(self.start_button, False)
+            return
+        endpoint, project, timeout, output = self.endpoint.text(), self.project.text(), self.timeout.value(), self.output.text()
+        def done(info):
+            self.accept_info(info)
+            self.button_status(self.start_button, True)
+        def failed(error):
+            self.button_status(self.start_button, False)
+            self.button_status(self.connect_button, False)
+        self.execute(lambda stop, progress: self.linked_project(endpoint, project, stop, progress, timeout, output), done, failed, '启动 / 联动预演工程')
+
+    def select_folder(self):
+        folder = W.QFileDialog.getExistingDirectory(self, '选择项目文件夹', str(installation() / 'Jobs'))
+        if folder:
+            self.open_folder(folder)
+
+    def open_folder(self, folder, link=True):
+        if self.worker:
+            return
+        if self.project_root is not None:
             try:
-                return t.request('info', stop=stop, retries=0)
-            except (OSError, EOFError, TimeoutError):
-                pid = t.launch(project)
-                progress(f'已启动同目录程序 PID {pid}，等待工程准备')
-                return dict(result=t.wait_ready(stop))
-        self.execute(start)
+                self.persist()
+            except (OSError, ValueError) as exc:
+                self.log(exc)
+                return
+        endpoint, timeout = self.endpoint.text(), self.timeout.value()
+        def load(stop, progress):
+            config = load_folder(folder)
+            configure_logging(Path(config['folder']))
+            if link:
+                try:
+                    config['info'] = self.linked_project(endpoint, config['project'], stop, progress, timeout, config['output'])
+                except Exception as exc:
+                    config['connection_error'] = str(exc)
+            return config
+        def done(config):
+            self.project_root = Path(config['folder'])
+            self.folder.setText(config['folder'])
+            self.project.setText(config['project'])
+            self.database.setText(config['database'])
+            self.output.setText(config['output'])
+            self.shared_profile = copy.deepcopy(config['profile'])
+            self.file_profiles = {entry['path']: copy.deepcopy(entry['profile']) for entry in config['files'] if 'profile' in entry}
+            self.mapping_file = None
+            self.mapping_mode = config.get('shared_mapping', True)
+            self.mapping_shared.blockSignals(True)
+            self.mapping_shared.setChecked(self.mapping_mode)
+            self.mapping_shared.blockSignals(False)
+            self.set_profile(self.shared_profile)
+            self.set_files(config['files'])
+            for name, value in config['controls'].items():
+                if name in ('dies', 'workers', 'memory', 'retries', 'timeout'):
+                    getattr(self, name).setValue(int(value))
+            self.logger = configure_logging(self.project_root)
+            self.page = 0
+            self.table.setRowCount(0)
+            if config.get('info'):
+                self.accept_info(config['info'])
+                self.button_status(self.start_button, True)
+            elif config.get('connection_error'):
+                self.button_status(self.connect_button, False)
+                self.button_status(self.start_button, False)
+                self.logger.error('工程已选择，但联动失败：%s', config['connection_error'])
+                raise ValueError('项目已载入，联动失败：' + config['connection_error'])
+        self.execute(load, done, operation='载入项目文件夹')
+
+    def set_files(self, files):
+        self.capture_mapping()
+        self.file_view.blockSignals(True)
+        self.file_view.setRowCount(len(files))
+        for row, entry in enumerate(files):
+            check = W.QTableWidgetItem()
+            check.setFlags(getattr(QtCore.Qt, 'ItemFlag', QtCore.Qt).ItemIsEnabled | getattr(QtCore.Qt, 'ItemFlag', QtCore.Qt).ItemIsSelectable | getattr(QtCore.Qt, 'ItemFlag', QtCore.Qt).ItemIsUserCheckable)
+            check.setCheckState(getattr(QtCore.Qt, 'CheckState', QtCore.Qt).Checked if entry.get('enabled', True) else getattr(QtCore.Qt, 'CheckState', QtCore.Qt).Unchecked)
+            self.file_view.setItem(row, 0, check)
+            path = Path(entry['path']).resolve()
+            item = W.QTableWidgetItem(str(path.relative_to(self.project_root)) if self.project_root else str(path))
+            item.setData(getattr(QtCore.Qt, 'ItemDataRole', QtCore.Qt).UserRole, str(path))
+            item.setToolTip(str(path))
+            item.setFlags(item.flags() & ~getattr(QtCore.Qt, 'ItemFlag', QtCore.Qt).ItemIsEditable)
+            self.file_view.setItem(row, 1, item)
+        self.file_view.blockSignals(False)
+        if files:
+            selected = next((i for i, entry in enumerate(files) if entry['path'] == self.mapping_file), 0)
+            self.file_view.setCurrentCell(selected, 1)
+        self.select_mapping()
+
+    def file_entries(self):
+        self.capture_mapping()
+        entries = []
+        for row in range(self.file_view.rowCount()):
+            path = self.file_view.item(row, 1).data(getattr(QtCore.Qt, 'ItemDataRole', QtCore.Qt).UserRole)
+            entry = dict(path=path, enabled=self.file_view.item(row, 0).checkState() == getattr(QtCore.Qt, 'CheckState', QtCore.Qt).Checked)
+            if path in self.file_profiles:
+                entry['profile'] = copy.deepcopy(self.file_profiles[path])
+            entries.append(entry)
+        return entries
+
+    def capture_mapping(self):
+        if self.mapping_guard:
+            return
+        value = self.profile_value()
+        if self.mapping_mode:
+            self.shared_profile = value
+        elif self.mapping_file:
+            self.file_profiles[self.mapping_file] = value
+
+    def select_mapping(self, *unused):
+        if self.mapping_guard:
+            return
+        self.capture_mapping()
+        row = self.file_view.currentRow()
+        self.mapping_file = self.file_view.item(row, 1).data(getattr(QtCore.Qt, 'ItemDataRole', QtCore.Qt).UserRole) if row >= 0 and self.file_view.item(row, 1) else None
+        value = self.shared_profile if self.mapping_mode else self.file_profiles.get(self.mapping_file, self.shared_profile)
+        self.set_profile(value)
+        self.sheet.setToolTip('所有Excel共用' if self.mapping_mode else f'当前Excel：{self.mapping_file or "请先选择Excel行"}')
+
+    def toggle_mapping(self, shared):
+        self.capture_mapping()
+        self.mapping_mode = shared
+        if not shared:
+            for row in range(self.file_view.rowCount()):
+                path = self.file_view.item(row, 1).data(getattr(QtCore.Qt, 'ItemDataRole', QtCore.Qt).UserRole)
+                self.file_profiles.setdefault(path, copy.deepcopy(self.shared_profile))
+        self.set_profile(self.shared_profile if shared else self.file_profiles.get(self.mapping_file, self.shared_profile))
+        self.sheet.setToolTip('所有Excel共用' if shared else f'当前Excel：{self.mapping_file or "请先选择Excel行"}')
+
+    def import_profiles(self, entries):
+        self.capture_mapping()
+        if self.mapping_mode:
+            return None
+        return {entry['path']: copy.deepcopy(self.file_profiles.get(entry['path'], self.shared_profile)) for entry in entries if entry['enabled']}
+
+    def set_profile(self, profile):
+        self.mapping_guard = True
+        self.sheet.setText(profile['sheet'])
+        self.header_row.setValue(profile['header_row'])
+        for row, field in enumerate(HEADERS):
+            self.profile.item(row, 1).setText(profile.get('columns', {}).get(field, field))
+        self.mapping_guard = False
+
+    def profile_value(self):
+        columns = {field: self.profile.item(row, 1).text().strip() for row, field in enumerate(HEADERS)}
+        return dict(sheet=self.sheet.text().strip(), header_row=self.header_row.value(), columns=columns)
+
+    def persist(self):
+        if self.project_root is None:
+            raise ValueError('请先选择项目文件夹')
+        files = self.file_entries()
+        profile = copy.deepcopy(self.shared_profile)
+        save_folder(self.project_root, self.project.text(), files, self.database.text(), self.output.text(), profile,
+                    {key: getattr(self, key).value() for key in ('dies', 'workers', 'memory', 'retries', 'timeout')}, shared_mapping=self.mapping_mode)
+        return files, profile
 
     def select_files(self):
-        files, _ = W.QFileDialog.getOpenFileNames(self, '选择每颗DIE对应的Excel', '', 'Excel (*.xlsx)')
-        if files:
-            self.files = files
-            self.file_label.setText(f'{len(files)} 个Excel')
-            self.file_view.setPlainText('\n'.join(files))
-
-    def make_example(self):
-        folder = W.QFileDialog.getExistingDirectory(self, '合成示例输出目录')
-        if not folder:
+        if self.project_root is None:
+            self.log('请先选择项目文件夹')
             return
-        dies = self.dies.value()
-        bounds = getattr(self, 'info', {}).get('board_bounds_um')
-        pitch = (bounds[2] - bounds[0] + 100, bounds[3] - bounds[1] + 100) if bounds else (12000, 12000)
-        def done(files):
-            self.files = files
-            self.file_label.setText(f'{len(files)} 个合成示例Excel')
-            self.file_view.setPlainText('\n'.join(files))
-        self.execute(lambda stop, progress: generate_example(folder, die_count=dies, pitch=pitch), done)
+        files, _ = W.QFileDialog.getOpenFileNames(self, '添加各DIE Excel（外部文件将复制到项目内）', str(self.project_root), 'Excel (*.xlsx)')
+        if not files:
+            return
+        entries = self.file_entries()
+        existing = {entry['path'] for entry in entries}
+        def done(paths):
+            for path in paths:
+                if path not in existing:
+                    entries.append(dict(path=path, enabled=True))
+                    existing.add(path)
+            self.set_files(entries)
+            self.persist()
+        root = self.project_root
+        self.execute(lambda stop, progress: copy_excel(root, files, stop), done, operation='添加Excel')
+
+    def delete_files(self):
+        for row in sorted({index.row() for index in self.file_view.selectedIndexes()}, reverse=True):
+            self.file_view.removeRow(row)
+        try:
+            self.persist()
+        except ValueError as exc:
+            self.log(exc)
 
     def do_import(self):
-        target, _ = W.QFileDialog.getSaveFileName(self, '创建新的任务数据库', str(installation() / 'RealDataAnalyse-run.sqlite'), '任务 (*.sqlite)')
-        if not target:
-            return
         try:
-            profile = json.loads(self.profile.toPlainText())
-        except ValueError as exc:
-            self.log(str(exc))
+            files, profile = self.persist()
+            target = inside(self.project_root, self.database.text())
+            if target.exists():
+                import uuid
+                target = target.with_name(target.stem + '_' + time.strftime('%Y%m%d_%H%M%S') + '_' + uuid.uuid4().hex[:6] + '.sqlite')
+        except (OSError, ValueError) as exc:
+            self.log(exc)
             return
-        files, dies, workers = list(self.files), self.dies.value(), self.workers.value()
+        profiles = self.import_profiles(files)
+        files = [entry['path'] for entry in files if entry['enabled']]
+        dies, workers = self.dies.value(), self.workers.value()
         def done(value):
             self.database.setText(value['database'])
-            self.settings.setValue('database', value['database'])
             self.page = 0
-        self.execute(lambda stop, progress: import_files(files, target, dies, workers, stop, progress, profile), done)
+            self.persist()
+        self.execute(lambda stop, progress: import_files(files, target, dies, workers, stop, progress, profile, profiles), done, operation='校验Excel并创建任务')
 
     def do_run(self):
+        try:
+            self.persist()
+        except (OSError, ValueError) as exc:
+            self.log(exc)
+            return
         kwargs = dict(database=self.database.text(), endpoint=self.endpoint.text(), project=self.project.text(), output=self.output.text(),
                       workers=self.workers.value(), memory_mb=self.memory.value(), retries=self.retries.value(), timeout=self.timeout.value())
-        for key in ('database', 'endpoint', 'project', 'output'):
-            self.settings.setValue(key, kwargs[key])
-        self.execute(lambda stop, progress: Runner(**kwargs, stop=stop, progress=progress).run())
+        entries = self.file_entries()
+        selected = sorted(p['path'] for p in entries if p['enabled'])
+        profile = copy.deepcopy(self.shared_profile)
+        profiles = self.import_profiles(entries) or {}
+        def run(stop, progress):
+            import sqlite3
+            with closing(sqlite3.connect(Path(kwargs['database']).resolve().as_uri() + '?mode=ro', uri=True)) as db:
+                meta = {k: json.loads(v) for k, v in db.execute('select key,value from meta')}
+            if selected != sorted(p['path'] for p in meta.get('sources', [])) or profile != meta.get('profile') or profiles != meta.get('profiles', {}) or self_die != meta.get('die_count'):
+                raise ValueError('Excel勾选、列映射或DIE数量与任务记录不符，请先校验并创建新任务')
+            from .storage import sha256
+            for index, source in enumerate(meta.get('sources', []), 1):
+                progress(dict(text=f'核对Excel输入 · {index}/{len(selected)} · {Path(source["path"]).name}', current=index - 1, total=len(selected)))
+                if sha256(source['path'], stop) != source['sha256']:
+                    raise ValueError('Excel内容已修改，请先校验并创建新任务')
+            return Runner(**kwargs, stop=stop, progress=progress).run()
+        self_die = self.dies.value()
+        self.execute(run, operation='批量计算与OAS输出')
 
     def command_changed(self, command):
         args = dict(COMMANDS[command])
@@ -339,12 +666,26 @@ class Window(W.QMainWindow):
         except ValueError as exc:
             self.log(str(exc))
             return
+        try:
+            if command == 'project.open':
+                if self.project_root is None:
+                    raise ValueError('请先选择项目文件夹')
+                args['path'] = str(inside(self.project_root, args['path']))
+            if command == 'output.configure':
+                if self.project_root is None:
+                    raise ValueError('请先选择项目文件夹')
+                directory = inside(self.project_root, args['output_directory'])
+                directory.mkdir(parents=True, exist_ok=True)
+                args['output_directory'] = str(directory)
+        except (OSError, ValueError) as exc:
+            self.log(exc)
+            return
         endpoint, should_wait, timeout = self.endpoint.text(), self.wait_check.isChecked(), self.timeout.value()
         def send(stop, progress):
             t = Transport(endpoint)
             response = t.request(command, args, stop=stop)
             if should_wait and response.get('task_id'):
-                response = dict(response, completed_result=t.wait_task(response['task_id'], stop, timeout))
+                response = dict(response, completed_result=t.wait_task(response['task_id'], stop, timeout, progress=progress))
             return response
         def done(response):
             if response.get('task_id'):
@@ -382,10 +723,7 @@ class Window(W.QMainWindow):
                     item.setToolTip(str(value)[:16000])
                     self.table.setItem(i, j, item)
             done = counts.get('computed', 0) + counts.get('committed', 0)
-            self.progress.setRange(0, max(1, count))
-            self.progress.setValue(done)
-            self.progress.setFormat(f'{meta.get("state")}  {done}/{count}  %p%')
-            self.summary.setText(f'第{self.page + 1}页 · 每页200条 · {counts}（computed尚未整批提交）')
+            self.page_label.setText(f'第{self.page + 1}页 · 共{count}封装 · 完成{done} · 失败{counts.get("error", 0)}')
         except (OSError, ValueError, sqlite3.Error):
             pass
 
@@ -395,6 +733,11 @@ class Window(W.QMainWindow):
             self.stop_work()
             event.ignore()
         else:
+            if self.project_root is not None:
+                try:
+                    self.persist()
+                except (OSError, ValueError) as exc:
+                    self.logger.error('关闭时项目设置未保存：%s', exc)
             self.logger.info('GUI closed')
             event.accept()
 

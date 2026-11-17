@@ -237,7 +237,11 @@ class MainWindow(W.QMainWindow):
         scroll=W.QScrollArea();scroll.setWidgetResizable(True);page=W.QWidget();lay=W.QVBoxLayout(page)
         lay.setContentsMargins(10,10,10,10);lay.setSpacing(10);scroll.setWidget(page);self.controls.addTab(scroll,title);return lay
     def _group(self,parent,title,keys,collapsed=False):
-        box=W.QGroupBox(title);form=W.QFormLayout(box);form.setVerticalSpacing(7)
+        if collapsed:
+            header,box,form=self.collapsible(parent,title,self.process_sections)
+        else:
+            box=W.QGroupBox(title);form=W.QFormLayout(box);parent.addWidget(box)
+        form.setVerticalSpacing(7)
         for key in keys:
             name,low,high,d=SPECS[key]
             spin=W.QSpinBox() if d==0 else W.QDoubleSpinBox();spin.setRange(low,high)
@@ -245,11 +249,18 @@ class MainWindow(W.QMainWindow):
             spin.setValue(getattr(Parameters(),key));spin.setKeyboardTracking(False)
             spin.setToolTip(name);spin.valueChanged.connect(self.area_changed if key=="minimum_area_um2" else self.invalidate)
             form.addRow(name,spin);self.fields[key]=spin
-        if collapsed:
-            toggle=W.QToolButton();toggle.setText('▸ '+title);toggle.setCheckable(True);box.hide()
-            self.process_sections[title]=toggle
-            toggle.toggled.connect(box.setVisible);toggle.toggled.connect(lambda checked:toggle.setText(('▾ ' if checked else '▸ ')+title));parent.addWidget(toggle)
-        parent.addWidget(box);return form
+        return form
+    def collapsible(self,parent,title,registry):
+        header=W.QToolButton();header.setText(title);header.setCheckable(True)
+        header.setToolButtonStyle(getattr(Qt,'ToolButtonStyle',Qt).ToolButtonTextBesideIcon)
+        header.setArrowType(getattr(Qt,'ArrowType',Qt).RightArrow)
+        policy=getattr(W.QSizePolicy,'Policy',W.QSizePolicy);header.setSizePolicy(policy.Expanding,policy.Fixed)
+        header.setStyleSheet('QToolButton {text-align:left; padding:5px; background:white; border:1px solid #dae1eb; border-radius:4px; font-weight:bold;}')
+        body=W.QWidget();form=W.QFormLayout(body);body.hide()
+        def expand(opened):
+            body.setVisible(opened);header.setArrowType(getattr(Qt,'ArrowType',Qt).DownArrow if opened else getattr(Qt,'ArrowType',Qt).RightArrow)
+        header.toggled.connect(expand);parent.addWidget(header);parent.addWidget(body);registry[title]=header
+        return header,body,form
     def _build(self):
         central=W.QWidget();root=W.QVBoxLayout(central);self.setCentralWidget(central)
         root.setContentsMargins(6,4,6,4);root.setSpacing(4)
@@ -349,7 +360,8 @@ class MainWindow(W.QMainWindow):
         self.problem_filter.setToolTip('重构开启时按重构后的线宽、线距与连接等规则筛选；否则按宽度红色风险或当前整层DRC筛选。空白首行始终保留。')
         nav.addWidget(self.problem_filter);self.manual_button=W.QPushButton('手动偏移');nav.addWidget(self.manual_button);self.manual_button.clicked.connect(lambda:self.manual_preview.open_editor());nav.addStretch();ep.addLayout(nav)
         self.problem_filter.toggled.connect(lambda *_:self.filter_changed())
-        self.grid_mode.currentIndexChanged.connect(lambda *_:self.show_extreme_page(0))
+        self.grid_mode.currentIndexChanged.connect(self.evaluation_scope_changed)
+        self.view_settings=replace(self.view_settings,evaluation_scope='focus')
         self.page_prev.clicked.connect(lambda:self.show_extreme_page(self.preview_page-1))
         self.page_next.clicked.connect(lambda:self.show_extreme_page(self.preview_page+1))
         self.page_edit.returnPressed.connect(self.jump_extreme_page)
@@ -400,21 +412,10 @@ class MainWindow(W.QMainWindow):
     def build_settings(self,page):
         self.setting_sections={}
         def group(title):
-            header=W.QToolButton()
-            header.setText(title);header.setCheckable(True)
-            header.setToolButtonStyle(getattr(Qt,'ToolButtonStyle',Qt).ToolButtonTextBesideIcon)
-            header.setArrowType(getattr(Qt,'ArrowType',Qt).RightArrow)
-            policy=getattr(W.QSizePolicy,'Policy',W.QSizePolicy);header.setSizePolicy(policy.Expanding,policy.Fixed)
-            header.setStyleSheet('QToolButton {text-align:left; padding:5px; background:white; border:1px solid #dae1eb; border-radius:4px; font-weight:bold;}')
-            body=W.QWidget();form=W.QFormLayout(body);body.hide()
-            def expand(opened):
-                body.setVisible(opened)
-                header.setArrowType(getattr(Qt,'ArrowType',Qt).DownArrow if opened else getattr(Qt,'ArrowType',Qt).RightArrow)
             target=self.process_layout if title=='DRC' else page
             if title=='DRC' and target.count() and target.itemAt(target.count()-1).spacerItem():target.takeAt(target.count()-1)
             registry=self.process_sections if title=='DRC' else self.setting_sections
-            header.toggled.connect(expand);target.addWidget(header);target.addWidget(body)
-            registry[title]=header
+            header,body,form=self.collapsible(target,title,registry)
             if title=='DRC':target.addStretch()
             return form
         general=group('通用')
@@ -428,7 +429,7 @@ class MainWindow(W.QMainWindow):
             widget.valueChanged.connect(self.invalidate);biases.addRow(name,widget);self.fields[key]=widget
         hardware=group('硬件与计算资源')
         saved=W.QCheckBox('保存工程时保存计算结果');self.setting_fields['save_project_results']=saved;hardware.addRow(saved);saved.toggled.connect(self.settings_changed)
-        directory=W.QLineEdit();directory.setPlaceholderText('默认与工程同目录');self.setting_fields['result_cache_directory']=directory;hardware.addRow('结果临时文件目录',directory);directory.editingFinished.connect(self.settings_changed)
+        hardware.addRow(label('计算结果与运行缓存：当前项目文件夹 / Cache'))
         profile=resource_profile()
         self.hardware_label=label(f"{profile['cpu']} 逻辑CPU · 可用内存 {profile['available_memory_mb']} MB · 最多 {profile['workers']} 线程 / {profile['process_workers']} 进程\n显卡检测中…");hardware.addRow(self.hardware_label)
         accel=W.QComboBox();accel.addItem('自动（按任务大小）','auto');accel.addItem('CPU','cpu');accel.addItem('CUDA（等待设备自检）','cuda')
@@ -603,8 +604,11 @@ class MainWindow(W.QMainWindow):
     def enable_settings(self):
         if not self.setting_fields:return
         grid=self.setting_fields['width_yield_method'].currentData()=='grid'
-        self.setting_fields['width_grid_nodes'].setEnabled(grid)
-        for key in ('width_yield_exponent','width_yield_seed'):self.setting_fields[key].setEnabled(not grid)
+        full=self.view_settings.evaluation_scope=='all'
+        self.setting_fields['width_yield_method'].setEnabled(full)
+        self.setting_fields['reconstruction_grid_nodes'].setEnabled(full)
+        self.setting_fields['width_grid_nodes'].setEnabled(full and grid)
+        for key in ('width_yield_exponent','width_yield_seed'):self.setting_fields[key].setEnabled(full and not grid)
         partition=self.setting_fields['yield_method'].currentData()=='partition'
         self.setting_fields['yield_sample_exponent'].setEnabled(not partition)
         for key in ('yield_box_budget','yield_tolerance'):self.setting_fields[key].setEnabled(partition)
@@ -802,6 +806,7 @@ class MainWindow(W.QMainWindow):
         return True
     def _attach_cache_group(self,key,count):
         self.cache_project_key=key;self.cache_group=self.cache_registry.get(key,count)
+        if getattr(self,'_project_cache_root',None):self.cache_group.relocate(self._project_cache_root)
         self.session_values=self.cache_group.values;self.session_engines=self.cache_group.engines;self.engine=None
         from .session_cache import EphemeralCache
         self.space_motion_fields=EphemeralCache()
@@ -865,7 +870,7 @@ class MainWindow(W.QMainWindow):
         self.parked_groups.clear()
     def assessment_identity(self,data,roles,order,p,settings):
         from .session_cache import logical_fingerprint
-        return ('assessment-v28',logical_fingerprint((data.geometry_id,data.top_name,roles,order,asdict(p),settings.numeric_key(),settings.drc_tolerance_um,settings.drc_min_angle_deg)))
+        return ('assessment-v28',logical_fingerprint((data.geometry_id,data.top_name,roles,order,asdict(p),settings.numeric_key(),settings.drc_tolerance_um,settings.drc_min_angle_deg,settings.evaluation_scope)))
     def preview_identity(self,data,roles,order,motions,params,result):
         from .session_cache import logical_fingerprint
         digest=None
@@ -995,6 +1000,7 @@ class MainWindow(W.QMainWindow):
         for message in getattr(data,'merge_notes',()):self.log_bus.emit(message)
         cache_settings=ViewSettings.from_dict(project.get('settings'))
         cache_id=logical_fingerprint((str(Path(project_path or data.path).resolve()),data.sha256,data.top_name))
+        self._project_cache_root=Path(project_path).resolve().parent/'Cache'/'runtime' if project_path else None
         self.switch_project_cache(cache_id,cache_settings.cache_max_entries)
         pars=Parameters.from_dict(project.get('parameters',{}),require_rdl=False);self.manual_states=None;self.probability_data=None;self.footprint_data=None;self.space_data=None;self.dirty=False
         self.coverage_timer.stop();self._coverage_pending=False;self._evaluation_requested=False
@@ -1013,7 +1019,7 @@ class MainWindow(W.QMainWindow):
             self._initial_extreme_page=view['page']-1
             for title,header in self.setting_sections.items():header.setChecked(title in project.get('expanded_settings',[]))
             for title,header in self.process_sections.items():header.setChecked(title in project.get('expanded_process',[]))
-            self.view_settings=replace(ViewSettings.from_dict(project.get('settings')),reconstruction_ignored=tuple(sorted(restored_width_ignores(project,data,'ignored_reconstruction'))));self.load_view_settings();self.layer_styles=project.get('layer_styles',{})
+            self.view_settings=replace(ViewSettings.from_dict(project.get('settings')),evaluation_scope='focus' if self.grid_mode.currentIndex() else 'all',reconstruction_ignored=tuple(sorted(restored_width_ignores(project,data,'ignored_reconstruction'))));self.load_view_settings();self.layer_styles=project.get('layer_styles',{})
             for name,value in project_overlays(project).items():
                 toggle=self.overlay_widget(name)
                 toggle.blockSignals(True)
@@ -1169,7 +1175,7 @@ class MainWindow(W.QMainWindow):
             q=frame['width_analysis']['counts'];message+=f" · 保宽足够 {q['宽度足够']}，需收窄 {q['需局部收窄']}，宽度不足 {q['宽度不足']}"
         if frame and frame.get('width_summary') and self.width_toggle.isChecked():
             s=self._coupled_data if self.coupled_view() else frame['width_summary']
-            if s:message+=f" · 全部 {s['package_states']:,} 种姿态，{len(s['lines'])} 条风险线路"
+            if s:message+=f" · {'重点组合' if self.view_settings.evaluation_scope=='focus' else '全部'} {s['package_states']:,} 种姿态，{len(s['lines'])} 条风险线路"
             else:message+=' · 正在核实型变后首行汇总'
         self.statusBar().showMessage(message)
         self.refresh_extreme_colors(frame)
@@ -1256,6 +1262,11 @@ class MainWindow(W.QMainWindow):
         if self.loading:return
         if on:
             self.mouse_die.exit();self.navigation.cancel_zoom()
+            if self.toolbar.mode:
+                if 'pan' in str(self.toolbar.mode).lower():self.toolbar.pan()
+                else:self.toolbar.zoom()
+            self.tabs.setCurrentIndex(0)
+            if not self.reconstruction_toggle.isChecked():self.reconstruction_toggle.setChecked(True)
             other=self.region_stay if mode=='move' else self.region_move
             other.blockSignals(True);other.setChecked(False);other.blockSignals(False)
             self.region_select.set_mode(mode)
@@ -2014,7 +2025,7 @@ class MainWindow(W.QMainWindow):
                 nonlocal model
                 model=ContactModel(data,case,roles,connections,actual_cache,motions,p)
                 return evaluate(data,roles,p,progress=progress,layer_order=order,connections=connections,motions=motions,include_analysis=False,
-                                settings=settings,safe_range_cache=values,contact_model=model,validate_extremes=True)
+                                settings=settings,safe_range_cache=values,contact_model=model,validate_extremes=True,extreme_scope=settings.evaluation_scope)
             r=dict(values.get_or_compute(key,assess),motions=motions,view_settings=asdict(settings))
             catalog=ExtremeCatalog(case,p)
             from .session_cache import logical_fingerprint
@@ -2180,6 +2191,16 @@ class MainWindow(W.QMainWindow):
             if pending_ok and ((self.reconstruction_toggle.isChecked() and self.reconstruction_yield.evidence is None) or (self.coupled_view() and self._coupled_data is None) or (self.width_toggle.isChecked() and self._width_grid_summary is None)):
                 self.active_preview=current;self.leave_extreme_selection()
             else:self.select_preview(0,0)
+
+    def evaluation_scope_changed(self,*_):
+        if self.loading:return
+        self.view_settings=replace(self.view_settings,evaluation_scope='focus' if self.grid_mode.currentIndex() else 'all')
+        self.enable_settings();self.revision+=1;self.stop_animation();self.cancel_previews()
+        self.width_yield.reset();self.reconstruction_yield.reset();self.constraint_feedback.cancel()
+        self._width_grid_summary=None;self._coupled_data=None;self._problem_tag=None
+        if self.result is not None or self._evaluation_requested:
+            self._coverage_pending=True;self.coverage_timer.start()
+        self.show_extreme_page(0,redraw=False)
 
     def show_extreme_page(self,page=0,redraw=True):
         if self.extremes is None:return
@@ -2374,6 +2395,7 @@ class MainWindow(W.QMainWindow):
                 path=job_path(self.jobs_dir,name)
                 if path.exists():raise ValueError('同名工程已存在，请从下拉菜单打开后保存，或使用不同名称')
             except ValueError as exc:self.error(exc);return
+        if Path(path).parent.resolve()==self.jobs_dir.resolve():path=job_path(self.jobs_dir,Path(path).name.removesuffix('.json').removesuffix('.dshift'))
         try:self.write_project(path);self.refresh_jobs();self.statusBar().showMessage('工程已保存：'+Path(path).stem)
         except Exception as exc:self.error(exc)
     def project_settings(self):
@@ -2465,7 +2487,8 @@ class MainWindow(W.QMainWindow):
         path=Path(path).resolve();gds=Path(self.data.path).resolve()
         # Windows cannot express a relative path between different volumes or UNC shares.
         portable=gds.anchor.casefold()==path.anchor.casefold() and gds.is_relative_to(installation_root())
-        source=os.path.relpath(gds,path.parent) if portable else str(gds)
+        from .jobs import local_source
+        source=local_source(path,gds)
         from .area_filter import canonical_project
         project=dict(canonical_project(self.data,self.project_settings()),gds_path=source)
         if self.remote_locked:
@@ -2486,6 +2509,7 @@ class MainWindow(W.QMainWindow):
             try:project['saved_results']=save(self,path)
             except (ValueError,TypeError,OSError) as exc:self.log_bus.emit('结果未保存：'+str(exc),'WARNING')
         atomic_save(path,clean_json(project));self.project_path=path
+        self._project_cache_root=path.parent/'Cache'/'runtime';self.cache_group.relocate(self._project_cache_root)
         from .session_cache import logical_fingerprint
         cache_id=logical_fingerprint((str(path),self.data.sha256,self.data.top_name))
         if cache_id!=self.cache_project_key:
@@ -2496,7 +2520,8 @@ class MainWindow(W.QMainWindow):
             self.cleanup_retired_sessions();self.refresh_cache_status()
     def load_project(self,path):
         try:
-            path=Path(path).resolve();project=normalize_project(json.loads(path.read_text(encoding='utf-8')));gds=Path(project['gds_path'])
+            from .jobs import resolve_project_path
+            path=resolve_project_path(path);project=normalize_project(json.loads(path.read_text(encoding='utf-8')));gds=Path(project['gds_path'])
             if not gds.is_absolute():gds=path.parent/gds
             if self.remote_locked:
                 saved=project['overlays']

@@ -111,7 +111,7 @@ def live_serial(window,settings,old,ref):
     pool=clone_plan_pool({'local':[q for q in base if (q['layer'],q['index'])==ref]}) if base is not None else clone_plan_pool(original.plan_pool)
     rebuilt=Reconstructor(original.model,original.p,settings,plan_pool=pool)
     if base is not None:
-        rebuilt.auto_ignored=dict(original.auto_ignored);rebuilt.safe_vias=dict(original.safe_vias)
+        rebuilt.auto_following=set(original.auto_following);rebuilt.auto_ignored=dict(original.auto_ignored);rebuilt.safe_vias=dict(original.safe_vias)
         rebuilt._envelopes=original._envelopes;rebuilt._plans=expand(rebuilt,pool['local'])
     try:local=rebuilt.frame(old['states'],targets={ref},diagnostics=False,quick=True,_raw=True)
     finally:

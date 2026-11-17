@@ -120,14 +120,14 @@ class Transport:
         self.endpoint.parent.mkdir(parents=True, exist_ok=True)
         command = [str(app)] if app.suffix.lower() == '.exe' else [sys.executable, str(app)]
         command += ['--project', str(project), '--measured-output', '--ipc-endpoint', str(self.endpoint)]
-        logs = installation() / 'logs'
+        logs = project.parent / 'logs'
         logs.mkdir(parents=True, exist_ok=True)
         with (logs / 'RealDataAnalyse-child.log').open('ab') as stream:
             self.process = subprocess.Popen(command, cwd=app.parent, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
         return self.process.pid
 
-    def wait_ready(self, stop, timeout=900):
+    def wait_ready(self, stop, timeout=900, progress=None):
         until = time.monotonic() + timeout
         last = None
         while time.monotonic() < until:
@@ -141,6 +141,10 @@ class Transport:
                 if info.get('last_error'):
                     raise RemoteError(dict(error=info['last_error']))
                 last = '工程仍在准备'
+                if progress:
+                    task_id = info.get('preparing_task')
+                    task = self.request('task.get', {'task_id': task_id}, stop=stop)['result'] if task_id else {}
+                    progress(dict(text='工程准备 · ' + str(task.get('message') or '加载图纸 / 评估 / 冻结'), current=task.get('progress', 0), total=100))
             except (OSError, EOFError, TimeoutError, json.JSONDecodeError) as exc:
                 last = str(exc)
                 if self.process is not None and self.process.poll() is not None:
@@ -148,10 +152,12 @@ class Transport:
             stop.wait(.3)
         raise TimeoutError(f'等待工程ready超时：{last}')
 
-    def wait_task(self, task_id, stop, timeout=900):
+    def wait_task(self, task_id, stop, timeout=900, progress=None):
         until = time.monotonic() + timeout
         while time.monotonic() < until:
             task = self.request('task.get', {'task_id': task_id}, stop=stop)['result']
+            if progress:
+                progress(dict(text=str(task.get('message') or task['status']), current=task.get('progress', 0), total=100))
             if task['status'] == 'completed':
                 return task['result']
             if task['status'] in ('error', 'cancelled'):

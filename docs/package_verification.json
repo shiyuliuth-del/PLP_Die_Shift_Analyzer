@@ -1,11 +1,11 @@
 {
-  "version": "V45",
+  "version": "V46",
   "status": "PASS",
-  "tested_at_utc": "2026-11-16T12:21:58.282604+00:00",
+  "tested_at_utc": "2026-11-17T02:36:05.731517+00:00",
   "scope": "Clean source checkout, local platform. Windows executable verification is recorded separately.",
   "platform": "linux",
-  "verified_runtime_sha256": "c61276ed08ced8c088150acf20cddfd4fa809fc95f52357acbbd8076d7b107ac",
-  "gui_suites": 29,
+  "verified_runtime_sha256": "0f313ea3f678cbce7e16126d5f3efdb2fdcf747622856b1a9c4e75240c0162a9",
+  "gui_suites": 31,
   "runs": [
     {
       "args": [
@@ -21,7 +21,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "Ran 407 tests in 46.598s",
+        "Ran 430 tests in 123.637s",
         "",
         "OK (skipped=2)"
       ]
@@ -371,6 +371,30 @@
     },
     {
       "args": [
+        "tests/gui_realdata_projects.py"
+      ],
+      "env": {},
+      "status": "PASS",
+      "summary": [
+        "This plugin does not support propagateSizeHints()",
+        "This plugin does not support propagateSizeHints()",
+        "REALDATA_PROJECT_GUI_PASS: folder -> linked server -> 3 XLSX -> 12 OAS, selections/settings, green/red status, continuous overlay, hidden log"
+      ]
+    },
+    {
+      "args": [
+        "tests/gui_evaluation_scope.py"
+      ],
+      "env": {},
+      "status": "PASS",
+      "summary": [
+        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
+        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
+        "GUI_EVALUATION_SCOPE_PASS focus 7 / all 9, reconstruction/DRC/width/cache/saved mode"
+      ]
+    },
+    {
+      "args": [
         "main.py",
         "--smoke-test",
         "results/default.json"
@@ -687,21 +711,5 @@
       ],
       "discrete_states": 3
     }
-  ],
-  "tested_commit": "ffb4d0665eaeb1f2144e35e76b3d770b780397a0",
-  "external_tests": {
-    "status": "PASS",
-    "count": 2,
-    "source": "GD55_9-21.gds",
-    "seconds": 11.721
-  },
-  "windows": {
-    "status": "PASS",
-    "workflow_run": 43864525551,
-    "environments": [
-      "clean",
-      "with-cupy"
-    ],
-    "physical_gpu_tested": false
-  }
+  ]
 }

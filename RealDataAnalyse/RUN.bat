@@ -21,7 +21,10 @@ if not exist "%RDA_PYTHON%" (
 )
 if /i "%~1"=="build" (
     "%RDA_PYTHON%" -m PyInstaller --clean --noconfirm "%~dp0RealDataAnalyse.spec"
+    if errorlevel 1 exit /b 1
+    "%RDA_PYTHON%" -m RealDataAnalyse.projects --install-case "%~dp0..\dist"
     exit /b
 )
+for %%P in ("%RDA_PYTHON%") do if exist "%%~dpPpythonw.exe" set "RDA_PYTHON=%%~dpPpythonw.exe"
 start "" "%RDA_PYTHON%" "%~dp0main.py" %*
 exit /b
