@@ -49,7 +49,7 @@ def local_source(project,source):
         fd,name=tempfile.mkstemp(dir=project.parent,prefix='.source-');os.close(fd)
         try:
             shutil.copyfile(source,name)
-            with open(name,'rb') as f:os.fsync(f.fileno())
+            with open(name,'r+b') as f:os.fsync(f.fileno())
             os.replace(name,target)
         finally:
             if os.path.exists(name):os.unlink(name)

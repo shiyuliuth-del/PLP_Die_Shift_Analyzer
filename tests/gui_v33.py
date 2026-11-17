@@ -85,6 +85,7 @@ def main():
         w.save_project()
     if os.environ.get('DSA_GUI_CAPTURE'):
         w.grab().save(os.environ['DSA_GUI_CAPTURE'])
+    assert not errors,errors
     saved=w.project_path;record=json.loads(saved.read_text())
     assert record['ignored_width_lines']['refs'] and record['settings']['width_yield_decimals']==3
     w.load_project(saved);settle();assert w.ignored_width_lines==all_refs
