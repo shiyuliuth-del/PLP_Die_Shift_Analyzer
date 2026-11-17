@@ -19,7 +19,7 @@ def wait(w):
     assert w.worker is None and not w.progress.failed,w.response.toPlainText()
     app.processEvents()
 with tempfile.TemporaryDirectory(prefix='rda-plans-gui-') as name:
-    root=Path(name);folder=root/'GD55'
+    root=Path(name).resolve();folder=root/'GD55'
     shutil.copytree(Path(__file__).resolve().parents[1]/'Jobs/GD55',folder)
     w=Window(plan_path=root/'plans.sqlite');w.show();app.processEvents()
     try:

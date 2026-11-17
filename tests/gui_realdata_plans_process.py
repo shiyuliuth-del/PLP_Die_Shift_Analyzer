@@ -17,7 +17,7 @@ from die_shift_studio.oas_validation import verify_crc
 import gdstk
 ROOT=Path(__file__).resolve().parents[1]
 with tempfile.TemporaryDirectory(prefix='rda-plans-process-') as name:
-    root=Path(name);plans=Plans(root/'plans.sqlite');ids=[];sources=[]
+    root=Path(name).resolve();plans=Plans(root/'plans.sqlite');ids=[];sources=[]
     for index in range(2):
         folder=root/f'GD55 project {index+1}'
         shutil.copytree(Path(os.environ.get('REALDATA_TEST_CASE',ROOT/'Jobs/GD55')),folder)

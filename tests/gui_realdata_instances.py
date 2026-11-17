@@ -14,7 +14,7 @@ from RealDataAnalyse.instances import connect
 from RealDataAnalyse.transport import Transport, default_endpoint
 ROOT=Path(__file__).resolve().parents[1]
 with tempfile.TemporaryDirectory(prefix='rda-instances-') as name:
-    root=Path(name);old=os.environ.get('LOCALAPPDATA');os.environ['LOCALAPPDATA']=str(root/'state')
+    root=Path(name).resolve();old=os.environ.get('LOCALAPPDATA');os.environ['LOCALAPPDATA']=str(root/'state')
     projects=[];processes=[];transports=[];streams=[]
     command=[os.environ['DIE_SHIFT_TEST_EXE']] if os.environ.get('DIE_SHIFT_TEST_EXE') else [sys.executable,str(ROOT/'main.py')]
     def start(project):

@@ -19,7 +19,7 @@ from test_v44 import FakeService
 
 class Contracts(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(); self.root = Path(self.temp.name)
+        self.temp = tempfile.TemporaryDirectory(); self.root = Path(self.temp.name).resolve()
         self.stop = threading.Event()
         self.files = [Path(p) for p in generate_example(self.root, count=3, die_count=2)]
         (self.root/'source.gds').write_bytes(b'synthetic input')
@@ -28,7 +28,10 @@ class Contracts(unittest.TestCase):
             files=[dict(path=str(p),enabled=True) for p in self.files], profile=copy.deepcopy(DEFAULT_PROFILE),
             controls=dict(dies=2,workers=2,memory=512,retries=1,timeout=0), shared_mapping=True)
         self.plans = Plans(self.root/'plans.sqlite')
-    def tearDown(self):self.temp.cleanup()
+    def tearDown(self):
+        from RealDataAnalyse.storage import configure_logging
+        configure_logging(Path(__file__).resolve().parents[1])
+        self.temp.cleanup()
     def runner(self, database='run.sqlite', name='final.oas'):
         db=self.root/database
         if not db.exists():import_files(self.files,db,2,2,self.stop)
