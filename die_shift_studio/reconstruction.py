@@ -420,13 +420,25 @@ class Reconstructor:
             return rows
         # Route construction is pose-independent and reused after every handle edit.
         from .session_cache import logical_fingerprint
-        key=logical_fingerprint((self.model.data.geometry_id,self.model.roles,self.model.connections.order,
-                                'continuity-branches-2',self.settings.reconstruction_forced,self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
-        if key not in self.plan_pool:
-            from .resources import parallel_map,native_phase_profile
-            self.plan_pool[key]=[entry for rows in parallel_map(build,groups,profile=native_phase_profile(),progress=lambda n,total:progress(round(65*n/max(1,total)),f'建立全姿态共用动区 {n}/{total}')) for entry in rows]
+        base_key=logical_fingerprint((self.model.data.geometry_id,self.model.roles,self.model.connections.order,
+                                'source-routes-v46',self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
+        # Forcing/editing one source must not rebuild every source path. Mine
+        # membership includes enclosure filtering; all-via ownership controls
+        # allocation. Existing path identities survive later manual edits.
+        keys=[logical_fingerprint((base_key,l,i,owner,[(v['key'],v['index']) for v in mine],
+                                   [(v['key'],v['index'],v['owner']) for v in all_vias]))
+              for l,i,owner,mine,all_vias in groups]
+        missing=[(key,task) for key,task in zip(keys,groups) if key not in self.plan_pool]
+        from .resources import native_phase_profile
+        built=parallel_map(lambda item:(item[0],build(item[1])),missing,profile=native_phase_profile(),
+                           progress=lambda n,total:progress(round(65*n/max(1,total)),f'建立全姿态共用动区 {n}/{total}'))
+        self.plan_pool.update(built)
+        keep=set(keys)
+        for old_key in list(self.plan_pool):
+            if len(self.plan_pool)<=max(64,4*len(keys)):break
+            if old_key not in keep:self.plan_pool.pop(old_key,None)
         from .reconstruction_zones import expand
-        self._base_plans=self.plan_pool[key]
+        self._base_plans=[entry for key in keys for entry in self.plan_pool[key]]
         self._plans=expand(self,[e for e in self._base_plans if (e['layer'],e['index']) not in self.settings.reconstruction_ignored])
         from .ignored_motion import entries as ignored_entries
         self._plans.extend(ignored_entries(self))

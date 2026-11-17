@@ -35,10 +35,11 @@ def entries(r):
 
 def complex_mode(r,ref,vias,stationary_certificate):
     """Choose only a rigid mode certified over the complete independent box."""
-    if len(vias)<4:return None
+    source=r.model.cache.layers[ref[0]]['geometry'][ref[1]]
+    fixed=[v for v in r.stays if v['net']==vias[0]['net'] and source.intersects(v['poly'])]
+    if len(vias)+len(fixed)<4:return None
     from .drc_rules import effective_rules
     width,space=effective_rules(r.p,r.settings)
-    source=r.model.cache.layers[ref[0]]['geometry'][ref[1]]
     from .geometry_rules import width_ok
     if not width_ok(source,width,r.tol):return None
     def reach(g,owners):

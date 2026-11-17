@@ -160,8 +160,10 @@ class ReconstructionOverlay:
                 if not g.is_empty and _in_view(g.bounds,w.view_bounds):markers[g.wkb]=g
             for kind,target,dot_list,line_list in (('moved','moved_cut',dots,first),('extra','extra_cut',far_dots,second)):
                 face=self.handles.get((self._key(q),kind),q.get(target))
-                if face is not None and face.geom_type in ('Point','MultiPoint'):dot_list.extend(shapely.get_coordinates(face))
-                else:line_list.extend(_lines(face))
+                if face is not None:
+                    for component in shapely.get_parts(face):
+                        if component.geom_type in ('Point','MultiPoint'):dot_list.extend(shapely.get_coordinates(component))
+                        else:line_list.extend(_lines(component))
         # Ignoring deformation keeps real fixed copper, not an exemption from
         # its physical rules. Its current witnesses must remain visible too.
         for row in (data or {}).get('violations',()):

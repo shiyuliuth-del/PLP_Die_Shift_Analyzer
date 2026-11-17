@@ -104,13 +104,25 @@ class FilteredCatalog:
         return rows
 
 
+def _explicit_factors(checks,field):
+    rows=[]
+    for key,status in checks['pose_status'].items():
+        if not status.get(field):continue
+        n=int(key)+1;digits=[]
+        for radix in reversed(checks['radices']):n,d=divmod(n,radix);digits.append(d)
+        rows.append(PoseClause(tuple((i,(d,)) for i,d in enumerate(reversed(digits)))))
+    return rows
+
+
 def contact_factors(checks):
+    if 'pose_status' in checks:return _explicit_factors(checks,'contact')
     if checks['base'][0]:return [((),True)]
     return [((i,),[row[0]>0 for row in rows]) for i,rows in enumerate(checks['local'])]
 
 
 def current_drc_factors(checks,moving_only=False):
     if not checks or not checks.get('checked'):return []
+    if 'pose_status' in checks:return _explicit_factors(checks,'moving_drc' if moving_only else 'drc')
     if moving_only:
         if checks.get('moving_drc_base'):return [((),True)]
         local=[((i,),np.asarray(rows)>0) for i,rows in enumerate(checks.get('moving_drc_local',()))]

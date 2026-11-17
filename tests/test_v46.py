@@ -41,6 +41,35 @@ class V46Tests(unittest.TestCase):
     result=resolve(r,frame['replacements'],frame['pieces'],states)
    self.assertTrue(seen);self.assertFalse(result[-1])
   finally:e.close()
+ def test_mixed_branch_point_selects_its_terminal_without_jump(self):
+  from types import SimpleNamespace
+  from die_shift_studio.branch_regions import editable_piece
+  def member(y):
+   plan=SimpleNamespace(route=shapely.LineString([(0,y),(100,y)]),length=100.,tolerance=.001)
+   return dict(route_plan=plan,interval=(30.,80.),moved_cut=shapely.LineString([(30,y-10),(30,y+10)]),
+               extra_cut=shapely.LineString([(80,y-10),(80,y+10)]),moving_terminals=shapely.Point(0,y).buffer(3))
+  first,second=member(0),member(100)
+  piece=dict(first,graph_members=(first,second),endpoint_weights=(1.,0.),
+             moved_cut=shapely.GeometryCollection([shapely.Point(0,0),second['moved_cut']]))
+  picked=editable_piece(piece,(.2,.1),'moved')
+  self.assertIs(picked['route_plan'],first['route_plan'])
+  self.assertEqual(picked['interval'],(0.,80.));self.assertEqual(first['interval'],(30.,80.))
+  self.assertEqual(len(picked['drag_members']),1)
+ def test_forcing_existing_source_reuses_its_paths(self):
+  from test_v38 import fixture
+  from dataclasses import replace
+  from unittest.mock import patch
+  import numpy as np
+  e,_,_=fixture()
+  try:
+   r=e.reconstructor;r.frame(np.zeros((1,3)),diagnostics=False,_raw=True)
+   plans=[q['plan'] for q in r._base_plans];self.assertTrue(plans)
+   cfg=replace(r.settings,reconstruction_forced=(('5/0',0),))
+   e.configure_reconstruction(True,cfg)
+   with patch('die_shift_studio.reconstruction_route.trace',side_effect=AssertionError('unchanged source was retraced')):
+    e.reconstructor._plans_for_all_poses(lambda *_:None)
+   self.assertEqual(plans,[q['plan'] for q in e.reconstructor._base_plans])
+  finally:e.close()
  def test_project_folder_and_legacy_discovery(self):
   with tempfile.TemporaryDirectory() as t:
    root=Path(t);source=root/'input.gds';source.write_bytes(b'original')
@@ -56,6 +85,18 @@ class V46Tests(unittest.TestCase):
    self.assertTrue(verify_crc(path));self.assertEqual(len(gdstk.read_oas(path).top_level()[0].references),1)
    s.add('P2',{'5/0':[shapely.box(0,0,20,20).wkb]},(300,200),(0,0));s.flush();s.close()
    self.assertTrue(verify_crc(path));self.assertEqual(len(gdstk.read_oas(path).top_level()[0].references),2)
+ def test_many_fixed_ports_also_count_as_complex(self):
+  from test_v40 import make_engine
+  from die_shift_studio.core import Parameters
+  from die_shift_studio.settings import ViewSettings
+  import numpy as np
+  shapes={'127/0':[shapely.box(-500,-500,500,500)],'128/0':[shapely.box(60,-30,95,30)],
+          '3/0':[shapely.box(65,-25,95,25)],'4/0':[shapely.Point(80,0).buffer(3)],
+          '5/0':[shapely.box(-100,-50,100,50)],'6/0':[shapely.Point(x,0).buffer(3) for x in (-40,-30,-20)]}
+  e,_,_=make_engine(shapes,Parameters(single_bound_x_um=35,single_bound_y_um=0,bound_angle_deg=0,annulus_um=5,moving_annulus_um=5),ViewSettings())
+  try:
+   e.reconstructor.frame(np.array([[35.,0,0]]));self.assertIn(('5/0',0),e.reconstructor.auto_following)
+  finally:e.close()
  def test_complex_source_can_choose_rigid_following(self):
   import numpy as np
   from shapely.geometry import box,Point

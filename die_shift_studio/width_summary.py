@@ -296,6 +296,9 @@ def _solve_throat(analyzer,name,plane,grid,target,partners,ambiguous,found,witne
 
 
 def summarize(analyzer,p,progress=lambda *_:None):
+    if analyzer.settings.evaluation_scope=='focus':
+        from .evaluation_scope import focused_width
+        return focused_width(analyzer,p,progress)[0]
     grid=ExtremeCatalog(analyzer.model.case,p);binary=p.target_nsigma==0 or math.isinf(p.target_nsigma)
     found={};witnesses={};factors=[];nchecks=0;clauses=set()
     analyzer.frame({'states':np.zeros((grid.count,3))},lambda n,t:progress(round(n*.08),t))

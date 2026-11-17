@@ -406,7 +406,7 @@ def spacing_violation(polys,space):
     return False
 
 
-def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order=None,connections=None,contact_model=None,motions=None,settings=None,safe_range_cache=None,validate_extremes=False,include_analysis=True):
+def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order=None,connections=None,contact_model=None,motions=None,settings=None,safe_range_cache=None,validate_extremes=False,include_analysis=True,extreme_scope="all"):
     notify=progress
     if validate_extremes:progress=lambda n,t:notify(round(.92*n),t)
     params.validate(); p=replace(params,residual_budget_um=0.,routing_edge_keepout_um=0.)
@@ -540,7 +540,9 @@ def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order
         from .fast_preview import PreviewEngine
         engine=PreviewEngine(contact_model.cache,original_case,roles,motions or {},p,result,connections,contact_model=contact_model)
         try:
-            factors=evaluate_states(engine,grid,cfg,notify)
+            from .representatives import RepresentativeExtremes
+            selected=RepresentativeExtremes.from_result(original_case,p,result,grid) if extreme_scope=='focus' else grid
+            factors=evaluate_states(engine,selected,cfg,notify)
         except InterruptedError:raise
         except Exception as exc:
             import logging
@@ -548,6 +550,9 @@ def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order
             factors=dict(checked=False,reason=str(exc))
         finally:engine.close()
         result['extreme_factors']=factors
+        result['evaluation_scope']=extreme_scope
+        result['available_discrete_states']=grid.total+1
+        if extreme_scope=='focus':result['discrete_states']=len(selected.indices)+1
         from .representatives import RepresentativeExtremes
         result['focused_states']=len(RepresentativeExtremes.from_result(original_case,p,result,grid))
         counts=[grid.radices[r['owner']] for r in contact_model.records if grid.radices[r['owner']]>1]

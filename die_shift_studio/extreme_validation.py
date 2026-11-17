@@ -29,6 +29,17 @@ def evaluate_states(engine,catalog,settings,progress=lambda *_:None):
     from .statistics import ExtremeCatalog
     grid=catalog if isinstance(catalog,ExtremeCatalog) else catalog.full
     engine.configure_deformation(False,settings);engine.configure_drc(True,settings)
+    if not isinstance(catalog,ExtremeCatalog):
+        from .evaluation_scope import digits_for
+        poses={};indices=(-1,*catalog.indices)
+        for number,index in enumerate(indices):
+            digits=digits_for(grid,index);states=np.asarray([v[d] for v,d in zip(grid.locals,digits)])
+            frame=engine.frame(states);status=frame_status(frame)
+            status['moving_drc']=sum(all(engine.roles.get(k)!='固定RDL' for k in q.get('layers',(q.get('layer'),))) for q in frame['drc'])
+            poses[str(index)]=status
+            progress(93+round(6*(number+1)/len(indices)),f'重点组合 DRC {number+1}/{len(indices)}')
+        return dict(checked=True,scope='focus',pose_status=poses,scope_indices=indices,radices=grid.radices,
+                    base=[0,0,0],local=[],pairs=None,drc_factors=[],unknown=0,package_states=len(indices))
     n=grid.count;model=engine.contact;bound=engine.bound;p=engine.p
     model.configure_parameters(p);tol=max(1e-9,model.data.dbu_um*1e-6)
     waves=max(grid.radices);unknown=sum(np.count_nonzero(own<0) for k,own in bound.owners.items() if engine.roles.get(k) in ('运动过孔','运动RDL'))
@@ -84,6 +95,10 @@ def evaluate_states(engine,catalog,settings,progress=lambda *_:None):
 def status_for(factors,digits):
     if not factors or not factors.get('checked'):
         return dict(safe=None,checked=False,reason=(factors or {}).get('reason','尚未校验'))
+    if 'pose_status' in factors:
+        index=0
+        for d,n in zip(digits,factors['radices']):index=index*n+d
+        return factors['pose_status'].get(str(index-1),dict(safe=None,checked=False,reason='未纳入当前重点组合'))
     contact,failures,drc=factors['base']
     for i,digit in enumerate(digits):
         c,f,r=factors['local'][i][digit]
