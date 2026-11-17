@@ -26,6 +26,7 @@ on:
       - 'tests/test_oas_errors.py'
       - 'tests/test_gd55_cases.py'
       - 'tests/test_v49_reconstruction.py'
+      - 'tests/test_measured_issue_concurrency.py'
       - 'tests/gui_v49.py'
       - 'tests/gui_v49_gd55.py'
       - 'tests/gui_v44*.py'
@@ -143,6 +144,8 @@ jobs:
         run: |
           set PYTHONPATH=.;tests
           "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_oas_errors.py -v
+          if errorlevel 1 exit /b 1
+          "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_measured_issue_concurrency.py -v
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_realdata_errors.py -v
           if errorlevel 1 exit /b 1
