@@ -128,6 +128,7 @@ def main():
         subprocess.run([sys.executable,str(ROOT/'tests/gui_v44_gd55.py')],cwd=ROOT,env=gd55_env,check=True,timeout=1350)
         subprocess.run([sys.executable,str(ROOT/'tests/gui_realdata_plans_process.py')],cwd=ROOT,env=gd55_env,check=True,timeout=900)
         subprocess.run([sys.executable,str(ROOT/'tests/gui_realdata_instances.py')],cwd=ROOT,env=gd55_env,check=True,timeout=600)
+        subprocess.run([sys.executable,str(ROOT/'tests/gui_realdata_errors.py')],cwd=ROOT,env=gd55_env,check=True,timeout=2400)
         print('FROZEN_GD55_XLSX_PASS: actual packaged Excel parser, paired EXEs and bundled case',flush=True)
     print('WINDOWS_SOURCE_BUILD_PASS',__version__,platform.platform(),
           f'normal window {elapsed:.2f}s, {icons} icon sizes, source BAT and isolated EXE verified; no binary published',flush=True)
