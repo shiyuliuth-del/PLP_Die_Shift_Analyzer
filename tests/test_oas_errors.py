@@ -38,4 +38,26 @@ class ErrorOutputTests(unittest.TestCase):
  def test_duplicate_rectangles_are_not_duplicated_per_die(self):
   row=dict(bounds_um=[0,0,1,1],die_ids=[1,1,2]);self.assertEqual({k:len(v) for k,v in rectangles([row,row],2,.001).items()},{1:1,2:1})
 
+ def test_subgrid_point_and_collinear_slivers_drop_without_changing_good_copper(self):
+  from shapely.geometry import Polygon,box
+  with tempfile.TemporaryDirectory() as temp:
+   target=Path(temp)/'out.oas';s=Store(temp,.001,error_layer=(65535,0))
+   try:
+    good=box(10,10,20,20)
+    tiny=box(.0001,.0001,.0002,.0002)
+    collinear=Polygon([(2,0),(3,.0002),(4,0)])
+    result=s.add('P',{'1/0':[good.wkb,tiny.wkb,collinear.wkb]},(0,0),(0,0),errors=[],die_count=1)
+    self.assertEqual(result['discarded_subgrid_fragments'],2)
+    receipt=s.write(target);self.assertEqual(receipt['discarded_subgrid_fragments'],2)
+   finally:s.close()
+   lib=gdstk.read_oas(target);polys=lib.top_level()[0].get_polygons(layer=1,datatype=0)
+   self.assertEqual(len(polys),1);self.assertEqual(polys[0].area(),100)
+   self.assertEqual(tuple(map(tuple,polys[0].bounding_box())),((10,10),(20,20)))
+   self.assertTrue(verify_crc(target))
+ def test_invalid_nondegenerate_copper_remains_rejected(self):
+  from shapely.geometry import Polygon
+  from die_shift_studio.oas_stream import polygons
+  with self.assertRaisesRegex(ValueError,'invalid copper'):
+   polygons({'1/0':[Polygon([(0,0),(2,2),(0,2),(2,0)]).wkb]},.001)
+
 if __name__=='__main__':unittest.main()

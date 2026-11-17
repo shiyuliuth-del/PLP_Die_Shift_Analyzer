@@ -50,7 +50,7 @@ def placement(name,origin=(0.,0.),angle=0.,dbu=.001):
     return (b'\x12\xb2'+string(name)+real(angle) if angle else b'\x11\xb0'+string(name))+sint(int(xy[0]))+sint(int(xy[1]))
 
 
-def polygons(layers,dbu,origin=(0.,0.)):
+def polygons(layers,dbu,origin=(0.,0.),*,stats=None):
     from .gds_merge import winding_outline
     out=bytearray()
     for key,values in sorted(layers.items()):
@@ -68,7 +68,13 @@ def polygons(layers,dbu,origin=(0.,0.)):
                 xy=np.rint(winding_outline(g)/dbu)-np.rint(np.asarray(origin)/dbu)
                 if not np.isfinite(xy).all() or np.max(abs(xy),initial=0)>2**52:raise ValueError('Polygon coordinates outside safe range')
                 xy=xy.astype(np.int64);xy=xy[np.any(xy!=np.roll(xy,1,axis=0),axis=1)]
-                if len(xy)<3:raise ValueError('Polygon collapses at output DBU')
+                # User-authorized removal of fragments with no area on the
+                # actual output grid. Python integers avoid shoelace overflow
+                # and cancellation at large absolute layout coordinates.
+                area2=sum(int(a[0])*int(b[1])-int(a[1])*int(b[0]) for a,b in zip(xy,np.roll(xy,-1,axis=0))) if len(xy)>=3 else 0
+                if not area2:
+                    if stats is not None:stats['discarded_subgrid_fragments']=stats.get('discarded_subgrid_fragments',0)+1
+                    continue
                 out.extend(b'\x15\x3b'+uint(layer)+uint(datatype)+b'\x04'+uint(len(xy)-1))
                 for x,y in np.diff(xy,axis=0):out.extend(uint((abs(int(x))<<2)|(3 if x<0 else 1))+sint(int(y)))
                 out.extend(sint(int(xy[0,0]))+sint(int(xy[0,1])))
@@ -83,7 +89,7 @@ class Store:
     """
     def __init__(self,directory,dbu,memory_bytes=64*1024**2,checkpoint_destination=None,*,error_layer=None):
         if not math.isfinite(dbu) or dbu<=0:raise ValueError('Output DBU must be finite and positive')
-        self.error_layer=error_layer;self.error_rectangles=0;self.error_packages=0
+        self.error_layer=error_layer;self.error_rectangles=0;self.error_packages=0;self.discarded_subgrid_fragments=0
         self.checkpoint_count=0;self.checkpoint_destination=Path(checkpoint_destination) if checkpoint_destination else None
         self.temp=tempfile.TemporaryDirectory(prefix='.dsa-batch-',dir=directory)
         self.db=sqlite3.connect(str(Path(self.temp.name)/'cells.sqlite'),check_same_thread=False)
@@ -103,7 +109,7 @@ class Store:
         if not name or len(name)>120 or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-' for c in name):raise ValueError('Cell name must be 1–120 ASCII letters/digits/_/-')
         if name=='TopCell' or name.startswith('G_'):raise ValueError('Reserved cell name')
         if name in self.pending_names or self.db.execute('select 1 from packages where name=?',(name,)).fetchone():raise ValueError('Duplicate package Cell: '+name)
-        children=[];cells=[];marker_count=0
+        children=[];cells=[];marker_count=0;stats={}
         # Reuse canonical source features, not just whole layers. Changing one
         # trace must not duplicate all unchanged traces in the same fixed layer.
         for key,blobs in sorted(layers.items()):
@@ -111,7 +117,7 @@ class Store:
                 g=shapely.from_wkb(blob)
                 if g.is_empty:continue
                 origin=np.rint(np.asarray(g.bounds[:2])/self.dbu)*self.dbu
-                body=polygons({key:[blob]},self.dbu,origin)
+                body=polygons({key:[blob]},self.dbu,origin,stats=stats)
                 if not body:continue
                 child='G_'+hashlib.sha256(body).hexdigest();cells.append((child,body))
                 children.append(placement(child,origin,dbu=self.dbu))
@@ -132,9 +138,9 @@ class Store:
         body=b''.join(children);shift=np.asarray(position,dtype=float)-np.asarray(board_origin)
         if shift.shape!=(2,) or not np.isfinite(shift).all():raise ValueError('Package origin must have two finite coordinates')
         self.pending.append((name,cells,body,tuple(shift)));self.pending_names.add(name);self.bytes+=sum(len(b) for _,b in cells)+len(body)
-        self.count+=1;self.error_rectangles+=marker_count;self.error_packages+=bool(marker_count)
+        self.count+=1;self.discarded_subgrid_fragments+=stats.get('discarded_subgrid_fragments',0);self.error_rectangles+=marker_count;self.error_packages+=bool(marker_count)
         if self.bytes>=self.limit:self.flush()
-        return dict(error_rectangles=marker_count,error_layer=(dict(layer=self.error_layer[0],datatype=self.error_layer[1],name='ERROR') if self.error_layer else None))
+        return dict(error_rectangles=marker_count,discarded_subgrid_fragments=stats.get('discarded_subgrid_fragments',0),error_layer=(dict(layer=self.error_layer[0],datatype=self.error_layer[1],name='ERROR') if self.error_layer else None))
     def emit(self,data):
         self.stream.write(data);self.crc=zlib.crc32(data,self.crc)
     def cell(self,name,body):
@@ -186,7 +192,7 @@ class Store:
         self.stream.flush();os.fsync(self.stream.fileno());self.stream.close();self.finished=True
         if not verify_crc(self.stage):raise ValueError('OAS checksum validation failed')
         cancel_check();os.replace(self.stage,destination)
-        return dict(path=str(destination.resolve()),cells=self.count,unique_geometry_cells=total-self.count,bytes=destination.stat().st_size,dbu_um=self.dbu,top_cell='TopCell',error_layer=(dict(layer=self.error_layer[0],datatype=self.error_layer[1],name='ERROR') if self.error_layer else None),error_rectangles=self.error_rectangles,error_packages=self.error_packages)
+        return dict(path=str(destination.resolve()),cells=self.count,unique_geometry_cells=total-self.count,bytes=destination.stat().st_size,dbu_um=self.dbu,top_cell='TopCell',error_layer=(dict(layer=self.error_layer[0],datatype=self.error_layer[1],name='ERROR') if self.error_layer else None),error_rectangles=self.error_rectangles,error_packages=self.error_packages,discarded_subgrid_fragments=self.discarded_subgrid_fragments)
     def close(self):
         if not self.stream.closed:self.stream.close()
         self.db.close();self.temp.cleanup()
