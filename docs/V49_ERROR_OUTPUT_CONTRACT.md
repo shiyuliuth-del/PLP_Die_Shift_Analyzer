@@ -1,4 +1,4 @@
-# V49 联合接口约定（开发中）
+# V49 联合接口约定
 
 最新用户要求优先：批量封装存在无法正确生成的连接时，只移除问题线路的失败位置，保留正常部分并继续后续封装。DRC违规需要矩形标记，不因尺寸规则问题删除正常生成的铜。软件异常、无效几何、错误输入和磁盘故障不伪装成可完成的连接问题，仍走有界恢复。
 
@@ -12,4 +12,4 @@
 
 客户端接线已提交：协商策略不匹配拒绝启动新批次；回执需要fixed_rdl_drc_checked=true，连接失败还须partial_output=true且omitted_region_count>0，有问题须有error_rectangles。逐项计数与batch.end汇总相等才发布。每包记录区分committed/committed_with_issues，全部输入仍有最终Cell，计划顺序照常继续。
 
-GD55默认Ordinary60为180组独立XYZ，Stress42包括3个严格模式已复现的异网端孔碰接，FailureRecovery6夹有正常前后项；所有新表均已用实际Excel解析器验证。运行层接口已与另一窗口正常merge，完整端到端当前仍在排查裁剪导致的DBU退化片，不能提前宣称联合完成。
+GD55默认Ordinary60为180组独立XYZ，Stress42包括3个严格模式已复现的异网端孔碰接，FailureRecovery6夹有正常前后项；所有新表均已用实际Excel解析器验证。运行层接口已联合合并。已修复裁剪后的DBU退化片，真实客户端Ordinary60、Stress42全量端到端通过；目录资源关闭与Windows最终验收见V49_CLIENT_VALIDATION。

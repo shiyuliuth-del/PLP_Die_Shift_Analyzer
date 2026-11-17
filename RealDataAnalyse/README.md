@@ -24,11 +24,11 @@
 
 SQLite WAL/FULL保存输入摘要/源行号、任务状态、回执及事件；输入按文件并行、封装在磁盘关联，提交Future有界，界面每页200条。日志8MiB轮转保留8份备份。停止在安全点取消自己的批次，不强杀几何线程。
 
-崩溃后先核对PID创建时间和冻结工程身份，确认服务已退出才重启；仍存活而无响应时停止并保留任务。未最终提交的批次完整重放；不能按computed计数跳过已丢失几何。新OAS完成计数、CRC、摘要及旧目标保护检查后才原子替换。几何硬失败不通过allow_failed绕过。批量跳过完整显示DRC与概率，输出成功不等于生产签核。
+崩溃后先核对PID创建时间和冻结工程身份，确认服务已退出才重启；仍存活而无响应时停止并保留任务。未最终提交的批次完整重放；不能按computed计数跳过已丢失几何。新OAS完成计数、CRC、摘要及旧目标保护检查后才原子替换。无法解释的几何错误不通过allow_failed绕过。每个指定姿态检查完整实际铜DRC与连接，不计算无关姿态或概率；已定位的连接失败仅在明确的局部输出策略下移除，输出成功不等于生产签核。
 
 ## 手动IPC与自动化
 
-第二页保留15个命令及JSON参数编辑：ping、info、app.start、project.open、project.close、session.prepare、output.configure、preview.submit、export.gds、batch.begin、batch.submit、batch.end、task.get、compute.cancel、app.shutdown。支持异步等待，批次ID/任务ID自动填入模板；项目和输出目录仍限定在所选文件夹。app.start使用同目录启动规则。
+第二页保留16个命令及JSON参数编辑：ping、info、app.start、project.open、project.close、session.prepare、output.configure、preview.submit、export.gds、batch.begin、batch.submit、batch.end、task.get、task.issues、compute.cancel、app.shutdown。支持异步等待，批次ID/任务ID自动填入模板；项目和输出目录仍限定在所选文件夹。app.start使用同目录启动规则。
 
 自动化兼容原有入口：`python RealDataAnalyse/main.py --import-data import.json --result imported.json`，导入JSON字段为paths、database、die_count、workers及可选profile、profiles（文件绝对路径到独立映射的字典）；随后 `--run config.json --result result.json`，运行JSON字段为database、endpoint、project、output及workers、memory_mb、retries、timeout。EXE接受相同参数。这些无界面接口保持兼容已有完整路径配置。
 

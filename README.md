@@ -1,6 +1,6 @@
 # Die Shift Analyze V49
 
-本轮同时更新主程序测量/尺寸容差/DRC分页、重构失败诊断与规则排序，以及实测完整问题目录、RealDataAnalyse的ERROR矩形输出和GD55扩展案例。联合验证仍在进行，见[V49说明](docs/V49_使用说明.md)。
+本轮同时更新主程序测量/尺寸容差/DRC分页、重构失败诊断与规则排序，以及实测完整问题目录、RealDataAnalyse的ERROR矩形输出和GD55扩展案例。实现与操作见[V49说明](docs/V49_使用说明.md)。
 
 保留V46的圆点拖动稳定性、边界显示修复和按源复用重构路径；重点/全部组合统一控制实际评估与良率范围。工程采用独立Jobs目录，实测OAS增加阶段文件；与[RealDataAnalyse](RealDataAnalyse/README.md)及[GD55案例](Jobs/GD55/README.md)同包发布。实际验证与限制见[V49记录](docs/V49_VALIDATION.md)。
 

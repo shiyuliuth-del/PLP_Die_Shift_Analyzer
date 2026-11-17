@@ -1,4 +1,4 @@
-# V49 软件交接（验证中）
+# V49 软件交接
 
 新增入口：`ruler.py/measurement_data.py`测量和纯数据持久化；`manual_regions.py`严格旋转框；`parallel_zones.py`自动方向与相邻截面；`drc_rules.py`有效规则/生成余量/冲突严重度；`reconstruction_diagnostic.py`失败局部及双侧虚线；`measured_issues.py`完整SQLite问题目录；`partial_output.py`明确局部删铜及量化核验；`oas_errors.py`逐DIE ERROR矩形。`current_drc.locations`是画布、表格和IPC的统一问题组件目录。
 

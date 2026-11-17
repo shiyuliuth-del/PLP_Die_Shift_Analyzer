@@ -48,6 +48,45 @@ class ErrorContracts(unittest.TestCase):
  def test_drc_only_keeps_copper_without_requiring_partial_deletion(self):
   Runner.validate_pose(dict(cell='P',fixed_rdl_drc_checked=True,drc_count=3,error_rectangles=2),'P')
 
+ def test_catalogue_timeout_replays_all_packages_without_duplicate_output(self):
+  from RealDataAnalyse.transport import RemoteError
+  class LockOnce(FakeService):
+   def request(self,command,args=None,**kwargs):
+    response=super().request(command,args,**kwargs)
+    if command=='batch.submit' and self.begin_count==1 and args['cell'].endswith('001'):
+     self.tasks[response['task_id']]=RemoteError(dict(status='error',error=dict(type='TimeoutError',message='diagnostic catalogue remained busy')))
+    return response
+  with tempfile.TemporaryDirectory() as name:
+   root=Path(name).resolve();files=generate_example(root,count=3,die_count=2);db=root/'run.sqlite'
+   import_files(files,db,2,2,threading.Event());service=LockOnce(root)
+   out=root/'Output'/'final.oas';out.parent.mkdir();out.write_bytes(b'previous verified output')
+   result=Runner(db,root/'ipc.json',root/'case.json',out,retries=1,transport=service).run()
+   self.assertEqual(result['state'],'completed');self.assertEqual(service.begin_count,2);self.assertEqual(service.launched,0)
+   with closing(Ledger(db)) as ledger:
+    self.assertEqual(ledger.get('attempt'),2);self.assertEqual(ledger.counts(),{'committed':3})
+    self.assertTrue(ledger.db.execute("select 1 from events where message like '%等待后补算整批%'").fetchone())
+   import gdstk
+   self.assertEqual(len(gdstk.read_oas(out).top_level()[0].references),3)
+   self.assertEqual(list(out.parent.iterdir()),[out])
+   self.assertTrue(any(p.is_file() and p.read_bytes()==b'previous verified output' for p in (root/'Cache'/'History').rglob('*')))
+
+ def test_non_lock_catalogue_failure_preserves_old_output_without_retry(self):
+  from RealDataAnalyse.transport import RemoteError
+  class DiskFailure(FakeService):
+   def request(self,command,args=None,**kwargs):
+    response=super().request(command,args,**kwargs)
+    if command=='batch.submit':
+     self.tasks[response['task_id']]=RemoteError(dict(status='error',error=dict(type='OperationalError',message='disk I/O error')))
+    return response
+  with tempfile.TemporaryDirectory() as name:
+   root=Path(name).resolve();files=generate_example(root,count=3,die_count=2);db=root/'run.sqlite'
+   import_files(files,db,2,2,threading.Event());service=DiskFailure(root);out=root/'final.oas';out.write_bytes(b'old output')
+   with self.assertRaises(RemoteError):Runner(db,root/'ipc.json',root/'case.json',out,retries=2,transport=service).run()
+   self.assertEqual(out.read_bytes(),b'old output');self.assertEqual(service.begin_count,1)
+   with closing(Ledger(db)) as ledger:
+    self.assertEqual(ledger.get('state'),'blocked')
+    self.assertTrue(ledger.db.execute("select 1 from events where level='ERROR'").fetchone())
+
  def test_plan_warning_message_preserves_numeric_progress(self):
   from unittest.mock import Mock,patch
   from RealDataAnalyse.plans import Plans,PlanRunner,capture

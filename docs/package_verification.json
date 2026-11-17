@@ -1,11 +1,11 @@
 {
-  "version": "V48",
+  "version": "V49",
   "status": "PASS",
-  "tested_at_utc": "2026-11-17T04:19:14.329441+00:00",
+  "tested_at_utc": "2026-11-17T07:25:06.606232+00:00",
   "scope": "Clean source checkout, local platform. Windows executable verification is recorded separately.",
   "platform": "linux",
-  "verified_runtime_sha256": "0f7029b52165ea81b6fef1532725b195368e36753fab03bd69dc0e5fc126691f",
-  "gui_suites": 35,
+  "verified_runtime_sha256": "40f9b09204a739ca800e69ca98d6863d4e22a56259c365cdc419784b7585ac31",
+  "gui_suites": 38,
   "runs": [
     {
       "args": [
@@ -21,7 +21,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "Ran 451 tests in 54.173s",
+        "Ran 477 tests in 157.008s",
         "",
         "OK (skipped=2)"
       ]
@@ -95,7 +95,7 @@
       "summary": [
         "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
         "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
-        "GUI_V26_PASS 729-state pagination, frozen DIE, cache depth, clearing and exact footprint visibility/Job restore."
+        "GUI_V26_PASS 729-state pagination, frozen DIE, cache reuse independent of rule colour, clearing and exact footprint visibility/Job restore."
       ]
     },
     {
@@ -320,7 +320,7 @@
       "status": "PASS",
       "summary": [
         "This plugin does not support propagateSizeHints()",
-        "GUI_V44_PASS: all 15 commands, 403 rows/3 pages, worker gating and clean close"
+        "GUI_V44_PASS: all IPC command templates, 403 rows/3 pages, worker gating and clean close"
       ]
     },
     {
@@ -354,7 +354,7 @@
       "summary": [
         "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
         "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
-        "GUI_BRANCH_INTEGRATION_PASS: preserved controls, real bidirectional region events, edit retention, cache refresh, save/reopen, clear all"
+        "GUI_BRANCH_INTEGRATION_PASS: current controls, strict rectangular region events, edit retention, cache refresh, save/reopen, clear all"
       ]
     },
     {
@@ -407,6 +407,30 @@
     },
     {
       "args": [
+        "tests/gui_v49.py"
+      ],
+      "env": {},
+      "status": "PASS",
+      "summary": [
+        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
+        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
+        "GUI_V49_PASS rulers/shortcuts/project restoration, rotated exact box and paged DRC source identities"
+      ]
+    },
+    {
+      "args": [
+        "tests/gui_v49_gd55.py"
+      ],
+      "env": {},
+      "status": "PASS",
+      "summary": [
+        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
+        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
+        "GUI_V49_GD55_PASS both reported source routes follow actual bar direction; both independent handles drag and wheel-refresh"
+      ]
+    },
+    {
+      "args": [
         "tests/gui_realdata_plans.py"
       ],
       "env": {},
@@ -435,6 +459,16 @@
       "status": "PASS",
       "summary": [
         "REALDATA_INSTANCES_PASS: three simultaneous servers, unique default endpoints, exact binding, ambiguous selection rejected, no retarget/duplicate jobs, clean exits"
+      ]
+    },
+    {
+      "args": [
+        "tests/gui_realdata_errors.py"
+      ],
+      "env": {},
+      "status": "PASS",
+      "summary": [
+        "{\"status\": \"REALDATA_ERROR_OUTPUT_PASS\", \"sheet\": \"FailureRecovery\", \"packages\": 6, \"connection_failure_packages\": [\"RECOVERY_002\", \"RECOVERY_004\", \"RECOVERY_005\"], \"issue_packages\": 6, \"error_rectangles\": 2528, \"scope\": \"Actual GD55, complete catalogue vs ERROR rectangles and DIE cells, zero replay copper XOR, source unchanged\"}"
       ]
     },
     {
