@@ -41,6 +41,7 @@ class Contracts(unittest.TestCase):
         (output/'old-cache').mkdir(); (output/'old-cache/data').write_bytes(b'data')
         runner=self.runner(); runner.run()
         self.assertEqual([p.name for p in output.iterdir()],['final.oas'])
+        self.assertFalse(Path(str(runner.database)+'.lock').exists())
         with closing(Ledger(runner.database)) as ledger:
             record=ledger.get('publish')
             self.assertTrue(Path(record['stage']).is_relative_to(self.root/'Cache'))

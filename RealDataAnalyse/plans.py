@@ -152,21 +152,13 @@ class Plans:
             if 'status' in fields:
                 db.execute('insert into plan_events values(?,?,?,?)', (time.time(), plan_id, fields['status'], fields.get('message', '')))
 
-    def edit_output(self, plan_id, output):
-        row = self.get(plan_id)
-        if row['status'] not in ('pending', 'blocked'):
-            raise ValueError('只可修改尚未执行的计划输出')
-        path = inside(row['snapshot']['folder'], output)
-        with Lease(str(self.path)+'.execution'), closing(self.db()) as db, db:
-            db.execute('update plans set output=?,output_key=? where id=?', (str(path), os.path.normcase(str(path)), plan_id))
-        self.recheck()
-
     def remove(self, plan_id):
-        if self.get(plan_id)['status'] == 'running':
-            raise ValueError('不能删除运行中的计划')
-        with Lease(str(self.path)+'.execution'), closing(self.db()) as db, db:
-            db.execute('delete from plans where id=?', (plan_id,))
-        self.recheck()
+        with Lease(str(self.path)+'.execution'):
+            if self.get(plan_id)['status'] == 'running':
+                raise ValueError('不能删除运行中的计划')
+            with closing(self.db()) as db, db:
+                db.execute('delete from plans where id=?', (plan_id,))
+            self._recheck()
 
     def check(self, plan_id):
         row = self.get(plan_id)
@@ -197,11 +189,10 @@ class Plans:
             self.check(plan_id)
 
     def retry(self, plan_id):
-        row = self.get(plan_id)
-        if row['status'] not in ('error', 'paused'):
-            raise ValueError('只可重试失败或暂停的计划')
-        # Existing run journals retain their exact input/output binding.
         with Lease(str(self.path)+'.execution'):
+            row = self.get(plan_id)
+            if row['status'] not in ('error', 'paused'):
+                raise ValueError('只可重试失败或暂停的计划')
             self.update(plan_id, status='pending', severity='', message='等待继续', ended=None)
 
 

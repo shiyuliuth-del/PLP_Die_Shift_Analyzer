@@ -36,7 +36,6 @@ class PlanPanel(W.QDialog):
         self.start.clicked.connect(owner.start_plans); self.stop.clicked.connect(owner.stop_work)
         self.remove.clicked.connect(lambda:self.act('remove')); self.retry.clicked.connect(lambda:self.act('retry'))
         self.check.clicked.connect(lambda:owner.execute(lambda stop,progress:plans.recheck(), operation='检查计划任务'))
-        self.table.itemChanged.connect(self.changed)
         previous.clicked.connect(lambda:self.turn(-1)); following.clicked.connect(lambda:self.turn(1))
         self.timer=QtCore.QTimer(self); self.timer.setInterval(750); self.timer.timeout.connect(self.refresh); self.timer.start()
         self.refresh()
@@ -53,13 +52,6 @@ class PlanPanel(W.QDialog):
         def change(stop,progress):
             for plan_id in ids:getattr(self.plans,action)(plan_id)
         self.owner.execute(change, operation='更新计划任务')
-
-    def changed(self, item):
-        if item.column()!=1:return
-        role=getattr(QtCore.Qt,'ItemDataRole',QtCore.Qt).UserRole
-        plan_id=self.table.item(item.row(),0).data(role)
-        value=item.text()
-        self.owner.execute(lambda stop,progress:self.plans.edit_output(plan_id,value), operation='修改计划输出')
 
     def refresh(self):
         if not self.isVisible() and self.table.rowCount():return

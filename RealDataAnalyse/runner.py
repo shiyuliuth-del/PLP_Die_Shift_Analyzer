@@ -80,6 +80,8 @@ class Runner:
         old = self.ledger.get('session_identity')
         if old and old != identity:
             raise ValueError('工程几何、参数或软件版本已改变；禁止将旧任务混入新工程，请新建任务')
+        if self.managed_output and Path(info.get('source') or '').resolve().is_relative_to(self.output.parent):
+            raise ValueError('服务图纸位于Output内，拒绝移动输入；请重新组织项目输入')
         if self.output == Path(info.get('source') or '').resolve():
             raise ValueError('输出不得覆盖源图纸')
         self.ledger.set('session_identity', identity)
@@ -302,7 +304,11 @@ class Runner:
         locks.mkdir(parents=True, exist_ok=True)
         key = str(self.output.parent if self.managed_output else self.output)
         lock = locks / hashlib.sha256(os.path.normcase(key).encode()).hexdigest()
-        with Lease(self.database), Lease(lock):
+        task_root = next((parent.parent for parent in self.database.parents if parent.name == 'Tasks'), self.database.parent)
+        task_locks = task_root / 'Cache' / 'Locks'
+        task_locks.mkdir(parents=True, exist_ok=True)
+        task_lock = task_locks / ('task-' + hashlib.sha256(os.path.normcase(str(self.database)).encode()).hexdigest())
+        with Lease(task_lock), Lease(lock):
             self.ledger = Ledger(self.database)
             ledger = self.ledger
             try:

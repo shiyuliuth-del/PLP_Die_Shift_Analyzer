@@ -20,6 +20,7 @@ on:
       - 'tests/test_v44.py'
       - 'tests/test_realdata_plans.py'
       - 'tests/gui_realdata_plans*.py'
+      - 'tests/gui_realdata_instances.py'
       - 'tests/gui_v44*.py'
       - 'tools/package_release.py'
       - 'tools/windows_acceptance.py'
@@ -245,6 +246,8 @@ jobs:
           "%DIE_SHIFT_PYTHON%" tests/gui_realdata_plans.py
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" tests/gui_realdata_plans_process.py
+          if errorlevel 1 exit /b 1
+          "%DIE_SHIFT_PYTHON%" tests/gui_realdata_instances.py
       - name: Exercise the one-click BUILD.bat from the extracted source
         shell: cmd
         run: call "%DSA_TEST_SOURCE%\BUILD.bat"
