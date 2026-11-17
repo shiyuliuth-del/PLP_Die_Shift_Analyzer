@@ -132,7 +132,7 @@ try:
  assert not w.remote_locked and w.run_button.isEnabled() and not (folder/'endpoint.json').exists()
  assert not errors,errors
  assert '未处理异常' not in w.runtime_view.toPlainText(),w.runtime_view.toPlainText()[-3000:]
- print('GUI_V43_PASS: authenticated local IPC, assessment-first, locks, pivots, GDS, concurrent OAS cells, cancel, project switching and release')
+ print('GUI_V43_PASS: authenticated local IPC, lazy engineering freeze, locks, pivots, GDS, concurrent OAS cells, cancel, project switching and release')
 finally:
  if w.measured_output.active():w.measured_output.toggle.setChecked(False)
  until(lambda:not w.measured_output.running and not w.measured_output.stopping)

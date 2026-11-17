@@ -32,10 +32,10 @@ try:
        layer_order=['6/0','5/0','4/0','3/0','128/0','127/0'],parameters=asdict(p),settings={'animation_enabled':False,'reconstruction_grid_nodes':3},overlays={})))
  wait();w.load_project(job);wait();assert w.view_settings.evaluation_scope=='focus'
  assert not w.setting_fields['reconstruction_grid_nodes'].isEnabled()
- w.run_evaluation();wait();assert w.result['extreme_factors']['package_states']==7
+ w.run_evaluation();wait();assert w.result['extreme_factors']['package_states']==3
  w.width_toggle.setChecked(True);w.reconstruction_toggle.setChecked(True);wait()
- assert w.reconstruction_yield.bank['method']=='focus';assert w.reconstruction_yield.bank['total']==7
- assert w.width_yield.bank['method']=='focus';assert w._width_grid_summary['package_states']==7
+ assert w.reconstruction_yield.bank['method']=='focus';assert w.reconstruction_yield.bank['total']==3
+ assert w.width_yield.bank['method']=='focus';assert w._width_grid_summary['package_states']==3
  assert '重点组合' in w.width_yield.label.text()
  w.grid_mode.setCurrentIndex(0);wait()
  assert w.view_settings.evaluation_scope=='all';assert w.setting_fields['reconstruction_grid_nodes'].isEnabled();assert w.result['extreme_factors']['package_states']==9
@@ -63,5 +63,5 @@ try:
  saved=root/'Jobs'/'saved'/'saved.dshift.json';w.write_project(saved);w.load_project(saved);wait()
  assert w.grid_mode.currentIndex()==1 and w.view_settings.evaluation_scope=='focus'
  assert not errors,errors
- print('GUI_EVALUATION_SCOPE_PASS focus 7 / all 9, reconstruction/DRC/width/cache/saved mode')
+ print('GUI_EVALUATION_SCOPE_PASS focus 3 / all 9, reconstruction/DRC/width/cache/saved mode')
 finally:close_window(app,w);tmp.cleanup()

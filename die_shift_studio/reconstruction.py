@@ -212,7 +212,7 @@ class Reconstructor:
         from .width_grid import WidthGrid
         from dataclasses import replace
         probability_parameters=replace(self.p,target_nsigma=0)
-        priority_grid=WidthGrid(probability_parameters,len(self.model.bound.centers),3)
+        priority_grid=None if getattr(self,'measured_only',False) else WidthGrid(probability_parameters,len(self.model.bound.centers),3)
         from .reconstruction_enclosure import enclosure_certificate
         groups=[]
         def classify(item):
@@ -220,8 +220,9 @@ class Reconstructor:
             if ref in self.settings.reconstruction_forced:return ref,[],None,None
             source=self.model.cache.layers[ref[0]]['geometry'][ref[1]]
             if any(layer==ref[0] and source.intersects(shapely.box(*bounds)) for layer,bounds,mode in self.settings.reconstruction_regions):return ref,[],None,None
-            safe=[v for v in vias if enclosure_certificate(self.model,self.p,source,[v])]
-            cert=enclosure_certificate(self.model,self.p,source,vias) if len(safe)==len(vias) else None
+            certificates=[enclosure_certificate(self.model,self.p,source,[v]) for v in vias]
+            safe=[v for v,proof in zip(vias,certificates) if proof]
+            cert=dict(certificates[0],interfaces=len(vias),minimum_margin_um=min(q['minimum_margin_um'] for q in certificates)) if vias and all(certificates) else None
             from .ignored_motion import fixed_enclosures_safe,complex_mode
             if ref in self.settings.reconstruction_following and not fixed_enclosures_safe(self,ref,vias):cert=None;safe=[]
             manual=ref in self.settings.reconstruction_ignored or any(row[:2]==ref for row in self.settings.reconstruction_intervals)
@@ -275,8 +276,11 @@ class Reconstructor:
             fixed.extend(landing(v) for v in all_vias if v['owner']!=owner)
             if not seam.is_empty:fixed.append(seam)
             fixed=[g for g in fixed if not g.is_empty]
+            disjoint=[g for g in fixed if g.intersection(land).area<=self.tol*self.tol]
+            if disjoint:fixed=disjoint
             from .reconstruction_clusters import anchor_clusters,inward_routes
             fixed=anchor_clusters(source,fixed,land,self._rule_width,self.tol)
+            land_all=land
             base=dict(layer=layer,index=index,owner=owner,refs=refs,source=original_source,land=land,net=net,mine=mine,anchors=fixed)
             def build_source(source,land,fixed,moving=None,pair_route=False):
                 moving=mine if moving is None else moving
@@ -312,6 +316,7 @@ class Reconstructor:
                     mu,bounds=mean_and_bounds(self.p.for_die(owner),len(self.model.bound.centers))
                     radius=float(np.linalg.norm(shapely.get_coordinates(source)-self.model.bound.centers[owner],axis=1).max())
                     travel=float(np.linalg.norm(np.abs(mu[:2])+bounds[:2])+2*radius*np.sin(min(np.pi,abs(mu[2])+bounds[2])/2))
+                    if pair_route:plan.preferred_land=land_all
                     partition=plan.choose(travel)
                     if partition is not None:candidates.append((not bool(plan.warning),partition['b']-partition['a'],plan))
                 if not candidates:
@@ -319,7 +324,7 @@ class Reconstructor:
                     alternative=candidate(local_base,traced,self)
                     if alternative is not None:return alternative
                     return dict(local_base,plan=None,orphan=False,warning='拓扑无法分出相连的动/静/平移区；保留原图')
-                if pair_route:
+                if pair_route or getattr(self,'measured_only',False):
                     # Individual pair copper is discarded by branch assembly.
                     # Native DRC on every pair checked a fictitious full net and
                     # repeated it for all poses. Select a nominal section here;
@@ -421,7 +426,7 @@ class Reconstructor:
         # Route construction is pose-independent and reused after every handle edit.
         from .session_cache import logical_fingerprint
         base_key=logical_fingerprint((self.model.data.geometry_id,self.model.roles,self.model.connections.order,
-                                'source-routes-v46',self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
+                                'source-routes-v47',bool(getattr(self,'measured_only',False)),self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
         # Forcing/editing one source must not rebuild every source path. Mine
         # membership includes enclosure filtering; all-via ownership controls
         # allocation. Existing path identities survive later manual edits.

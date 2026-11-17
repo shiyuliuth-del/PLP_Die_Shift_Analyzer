@@ -1,4 +1,4 @@
-# 实测输出本地 IPC 接口（V43，协议 1）
+# 实测输出本地 IPC 接口（V47，协议 1）
 
 用于其他 Python 程序控制 **已经打开的 Die Shift Analyze 窗口**，或启动一个新窗口。输入长度及坐标单位为 **μm**，接口角度为 **度**。所有请求/响应均为 JSON；不用网络端口、HTTP、pickle、远程代码或 shell 指令。
 
@@ -6,11 +6,11 @@
 
 1. 打开 GDS/OAS 和工程，设置用途、层序、工艺、旋转中心及共用动区。
 2. 输出 → 实测输出：设置输出目录、最大内存 MB、最大线程（两者默认0，表示自动）。
-3. 勾选“实测输出”。先自动保存当前工程；未命名工程在 Jobs 自动命名。保存失败不开接口。随后完成缺失/过期的方案评估并准备共用动区。
+3. 勾选“实测输出”。先自动保存当前工程；未命名工程在 Jobs 自动命名。保存失败不开接口。只建立连接快照并等待指令，不运行完整方案评估、良率或重构预演。未打开工程也可开启；计算中开关置灰，任务结束后自动启用。
 4. 界面显示本地入口 JSON 的路径。默认在用户私有配置目录；Linux 使用 Unix domain socket，Windows 使用命名管道，均以随机 HMAC 密钥认证。此 JSON 含密钥，**不要提交 Git、分享或放到多人可读目录**。不对外监听 TCP。
 5. 开启期间图层用途、工艺、偏移、动区拖动/Q 编辑等受锁定。滚动画布查看不改变冻结参数。关闭后等待安全取消完成，恢复工程参数和零位预览，重新允许人工编辑。开关状态不会随工程自动开启。
 
-`info.result.ready=true` 后才可提交姿态；preparing_task给出准备任务，last_error说明准备失败原因。命令都在同一 GUI 所属上下文执行；Qt/Matplotlib 仅在主线程更新。工程切换需要先结束/取消批次。保存输出配置时保留普通工程的叠加开关和有效历史结果，不把临时实测旋转中心/姿态写成普通评估缓存。
+`info.result.ready=true` 仅表示有效工程已冻结，路径在首指令懒建（并发共享），不表示全姿态或尺寸DRC已通过。之后才可提交姿态；preparing_task给出准备任务，last_error说明准备失败原因。命令都在同一 GUI 所属上下文执行；Qt/Matplotlib 仅在主线程更新。工程切换需要先结束/取消批次。保存输出配置时保留普通工程的叠加开关和有效历史结果，不把临时实测旋转中心/姿态写成普通评估缓存。
 
 自动启动或切换工程时必须明确TopCell，多个顶层且工程未保存选择会返回错误，不弹出等待人工操作的选择框。读取失败可查询last_error，再project.close或project.open恢复；不要继续对ready=false的工程发送姿态。关闭实测输出后恢复普通手动TopCell选择。
 
@@ -56,9 +56,9 @@ python -m die_shift_studio.ipc_client --endpoint C:\work\endpoint.json output.co
 |---|---|---|
 | `ping` | `{}` | 协议、开启状态、ready |
 | `info` | `{}` | 当前工程、源图纸、TopCell、DIE数量/中心/边框、封装边框、用途、工艺、当前实测姿态/中心、输出配置及正在运行任务 |
-| `project.open` | `{"path":"工程绝对路径.dshift.json"}` | 自动保存当前工程，打开/切换目标，完成评估和准备；异步任务 |
+| `project.open` | `{"path":"工程绝对路径.dshift.json"}` | 自动保存当前工程，打开/切换目标，冻结参数和连接快照；异步任务 |
 | `project.close` | `{}` | 保存并关闭工程，保留 IPC；无工程不能提交姿态 |
-| `session.prepare` | `{}` | 重新确认/准备当前工程；异步任务 |
+| `session.prepare` | `{}` | 显式准备名义路径（可选预热，不做评估/良率）；异步任务 |
 | `output.configure` | `{"output_directory":"已有目录","max_threads":4,"max_memory_mb":1024}` | 修改/记住输出配置并保存工程；同一开启会话内跨工程保持目录/限额，任务/批次运行时禁止更改 |
 | `preview.submit` | `{"dies":[...]}` | 单姿态重构完成并在窗口显示；返回连接失败明细与规则检查范围 |
 | `export.gds` | `{"filename":"sample.gds"}` | 输出最近完成的实测姿态；目录沿用配置，无需重复输入 |
@@ -143,3 +143,7 @@ max_threads=0及max_memory_mb=0均表示自动（默认）。自动内存预算�
 ## V46阶段文件
 
 每批次生成独立的`<输出名>.<批次随机ID>.partial.oas`。首个成功封装、每64个封装及内存刷写阶段均原子发布带TopCell/CRC的完整阶段文件；失败或取消不会删除该文件，也不替换最终目标。batch.submit回执含checkpoint和checkpoint_cells，后者才是已落盘数量，不能把正在运行或排队数当作已落盘。阶段文件可直接读取，RealDataAnalyse现有重启逻辑仍完整重放未提交批次，不假装支持自动从阶段几何续接。
+
+### V47按需执行
+
+`main.py --measured-output --ipc-endpoint <文件>`及`app.start`允许省略project；接口开启后等待project.open。带project启动也不自动评估或预演。preview.submit与batch.submit只执行指定姿态的铜生成和连通/拓扑/隔离/禁布区检查，不启动全局尺寸DRC、概率或良率，返回fixed_rdl_drc_checked=false。禁布区允许共边，不能正面积进入；不可修复时错误回执并保留旧输出。先前调用方式和协议1兼容。

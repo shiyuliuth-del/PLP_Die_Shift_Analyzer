@@ -1,3 +1,13 @@
+# V47开发增量
+
+measured_ui在空闲启用/忙时pending、冻结工程及单指令之间区分状态；不能从tick调用run_evaluation。set_data在requested_measured/remote_locked时不恢复结果侧车或自动叠加。Session.ensure_plans只首任务追溯，线程私有求解器共享克隆的名义plan_pool；measured_only路径规划不调用概率candidate_mass。普通交互仍执行完整选定范围。
+
+representatives只生成max(n_i)条同步非零状态，不引入静止活动DIE；零位由调用方加一次。不要把该条件良率说成全输入良率。新增layout高度schema5可选字段layer_table_height；实测设置展开状态用expanded_settings。
+
+GD55两处根因：近重合固定/运动端产生0.37μm虚短路径；多运动孔的逐对候选缺少共用刚体侧偏好。重叠端孔仅从运动学锚点过滤（有其他分离锚点时），不删实际via/FixedRules/topology终端；RoutePlan.choose临时优先共同land，之后恢复单路径land及弧长边界，保持手工跨叉自由。topology_routing最终铜必须避开禁布区，允许共边。
+
+当前验收见[V47验证](V47_VALIDATION.md)。下文保留V46基础代码地图；冲突以V47及最新用户要求为准。
+
 # V46 开发交接
 
 V46最新范围合同：extreme_view.mode经GUI同步到ViewSettings.evaluation_scope；重点不是纯显示。evaluation_scope.py统一所选目录、代表单元权重与条件概率，零位包含在内。focused_reconstruction绕过全联合网格准备，复用直接姿态求解；width的汇总和两项良率共享focus bundle；原铜DRC保存显式已检查姿态，未访问状态必须checked=False。范围加入评估/重构/宽度缓存；切换触发代次更新。全部模式仍是原完整输入算法。

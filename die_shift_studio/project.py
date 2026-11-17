@@ -61,6 +61,9 @@ def normalize_project(project):
                 or not isinstance(saved.get('refs'),list) or any(not isinstance(r,(list,tuple)) or len(r)!=2
                 or not isinstance(r[0],str) or type(r[1]) is not int or r[1]<0 for r in saved['refs'])):
                 raise ValueError('忽略线路须绑定源 GDS、顶层 Cell 及有效的图层和图形编号')
+    height=p.get('layer_table_height',300)
+    if type(height) is not int or not 110<=height<=10000:raise ValueError('图层表高度须为110～10000像素')
+    p['layer_table_height']=height
     sections=p.setdefault('expanded_settings',[])
     if not isinstance(sections,list) or any(not isinstance(title,str) for title in sections):
         raise ValueError('工程设置栏目列表必须由标题字符串组成')

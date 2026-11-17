@@ -13,7 +13,6 @@ if __name__=='__main__':
         parser.add_argument('--project');parser.add_argument('--measured-output',action='store_true');parser.add_argument('--ipc-endpoint');parser.add_argument('--smoke-test',help=argparse.SUPPRESS)
         parser.add_argument('--gpu-info',metavar='FILE',help='write offline GPU self-test results to a JSON file')
         args=parser.parse_args()
-        if args.measured_output and not args.project:parser.error('--measured-output requires --project')
         if args.gpu_info:
             import json
             from pathlib import Path

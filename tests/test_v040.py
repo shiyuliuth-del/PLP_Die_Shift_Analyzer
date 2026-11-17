@@ -81,14 +81,13 @@ class Revision040Tests(unittest.TestCase):
             new=check_frame(bound,self.roles,self.p,r,z,fast,scheme)
             self.assertEqual(old['problem_percent'],new['problem_percent']);self.assertEqual(normalized(old),normalized(new))
     def test_compact_extremes_cover_all_dies_with_valid_joint_states(self):
-        p=replace(self.p,rho_xy=.4);items=RepresentativeExtremes(self.case,p);self.assertLessEqual(items.total,items.full.total);self.assertGreaterEqual(items.total,52)
+        p=replace(self.p,rho_xy=.4);items=RepresentativeExtremes(self.case,p);self.assertLessEqual(items.total,items.full.total);self.assertEqual(items.total,26)
         mu,cov,k=statistical_state(p,2)
         for e in items:
             from die_shift_studio.statistics import mean_and_bounds
             _,bounds=mean_and_bounds(p,2)
             self.assertTrue(np.all(np.abs(e['states']-mu)<=bounds+1e-12))
-        joint=[e for e in items if '最不利' in e['name']]
-        # Support directions coinciding with an existing corner are deduplicated.
-        self.assertTrue(any(np.all(np.linalg.norm(e['states'],axis=1)>0) for e in items))
-        self.assertTrue(all(len({tuple(e['states'][i]) for e in items})==27 for i in range(2)))
+        # V47 keeps the zero state separately; all other focused rows move every active DIE.
+        self.assertTrue(all(np.all(np.linalg.norm(e['states'],axis=1)>0) for e in items))
+        self.assertTrue(all(len({tuple(e['states'][i]) for e in items})==26 for i in range(2)))
 if __name__=='__main__':unittest.main()
