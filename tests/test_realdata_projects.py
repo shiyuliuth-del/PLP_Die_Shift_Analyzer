@@ -15,7 +15,7 @@ class Projects(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.folder = self.root / '项目 空格'
         shutil.copytree(ROOT / 'Jobs/GD55', self.folder)
 

@@ -26,7 +26,7 @@ def wait(window, timeout=240):
     app.processEvents()
 
 with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
-    root = Path(temp)
+    root = Path(temp).resolve()
     folder = root/'Jobs'/'GD55 项目'
     shutil.copytree(ROOT/'Jobs/GD55', folder)
     before = sha256(folder/'GD55_1105.gds')
