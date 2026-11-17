@@ -7,12 +7,12 @@ os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 ROOT=Path(__file__).resolve().parents[1];sys.path[:0]=[str(ROOT),str(ROOT/'tests')]
 import numpy as np,gdstk,shapely
 from die_shift_studio.gui import MainWindow,W
-from die_shift_studio.qt_compat import QtCore,Qt
+from die_shift_studio.qt_compat import QtCore,Qt,BINDING
 from matplotlib.backend_bases import MouseEvent
 from qt_shutdown import close_window
 from test_v49_reconstruction import V49ReconstructionTests
-try:from PySide6.QtTest import QTest
-except ImportError:from PyQt5.QtTest import QTest
+if BINDING=='PyQt6':from PyQt6.QtTest import QTest
+else:from PyQt5.QtTest import QTest
 app=W.QApplication([]);tmp=tempfile.TemporaryDirectory();folder=Path(tmp.name)
 w=MainWindow(jobs_dir=folder/'Jobs');w.resize(1600,1000);w.show();errors=[];w.error=lambda x:errors.append(str(x))
 def wait(limit=120):
