@@ -46,9 +46,9 @@ class BoundGeometry:
         self.centers=rotation_centers(case,parameters)
         for key in self.keys:
             q=cache.layers[key];mode=default_motion(case.get('roles',{}).get(key));n=len(q['centers'])
-            if mode=='fixed':own=np.full(n,-1,np.int32)
-            elif case.get('roles',{}).get(key)=='芯片边框':
+            if case.get('roles',{}).get(key)=='芯片边框':
                 own=np.array([next(i for i,d in enumerate(case['dies']) if d.equals(poly)) for poly in q['geometry']],np.int32)
+            elif mode=='fixed':own=np.full(n,-1,np.int32)
             elif key in case.get('ownership',{}):
                 own=np.asarray(case['ownership'][key],np.int32).copy()
             else:
@@ -160,7 +160,7 @@ class PreviewEngine:
         self.bound.acceleration=self.contact.bound.acceleration=settings.acceleration
         self.deformer=None;self.deformation_key=(False,'retired-v38')
     def configure_drc(self,enabled,settings):
-        key=(bool(enabled),settings.drc_min_angle_deg,settings.drc_tolerance_um)
+        key=(bool(enabled),settings.drc_min_angle_deg,settings.drc_tolerance_um,settings.drc_checks)
         if enabled and not hasattr(self,'global_drc'):
             from .drc import GlobalDRC
             self.global_drc=GlobalDRC(self.contact,self.p)

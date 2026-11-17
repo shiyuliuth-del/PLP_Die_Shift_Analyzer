@@ -131,6 +131,9 @@ class ReconstructionOverlay:
         level=math.inf if level_text=='∞' else float(level_text)
         stamp=(id(data),id(bank),vis,w.view_bounds,order,nominal,level,w.show_issues.isChecked(),repr(w.layer_styles))
         if stamp==self.stamp:self.draw_labels();return
+        if self.stamp is not None and self.stamp[0]!=id(data) and getattr(getattr(w,'cut_drag',None),'state',None) is None:
+            if self.hover is not None:self.hover.set_visible(False)
+            self.pulse_timer.stop();self.hover_key=None;w.scene_renderer.feedback_background=None
         self.stamp=stamp;paths={};colors={};first=[];second=[];dots=[];far_dots=[];warnings=[];region_groups={};red=[];markers={}
         old_unions=self.union_cache;self.union_cache={};old_cache=self.path_cache;self.path_cache={};self.zone_views={}
         def patch(g):
@@ -318,8 +321,9 @@ class CutDrag:
         point=np.array([event.xdata,event.ydata])-self.state['handle_offset']
         nominal=inverse_geometry(shapely.Point(point),frame['rotation_centers'][owner],frame['states'][owner]*piece.get('endpoint_weights',(1.,0.))[side])
         plan=piece['route_plan'];origin=np.asarray(plan.route.interpolate(piece['interval'][side]).coords[0])
-        self.state['press_projection']=float(np.clip(piece['interval'][side]+(np.asarray(nominal.coords[0])-origin)@plan.tangent(piece['interval'][side]),0.,plan.length))
-        self.state['projection_cursor']=np.asarray(nominal.coords[0]);self.state['projection']=self.state['press_projection']
+        self.state['drag_offset']=origin-np.asarray(nominal.coords[0])
+        self.state['press_projection']=piece['interval'][side]
+        self.state['projection_cursor']=origin.copy();self.state['projection']=piece['interval'][side]
         self.state['press_interval']=piece['interval'][side]
         self.state['accepted_settings']=w.view_settings;self.state['accepted_part']=None
         self.state['companions']=[]
@@ -328,7 +332,7 @@ class CutDrag:
             if other is plan:continue
             origin=np.asarray(other.route.interpolate(member['interval'][side]).coords[0])
             mark=float(np.clip(member['interval'][side]+(np.asarray(nominal.coords[0])-origin)@other.tangent(member['interval'][side]),0.,other.length))
-            self.state['companions'].append(dict(piece=member,press=mark,projection=mark,cursor=np.asarray(nominal.coords[0])))
+            self.state['companions'].append(dict(piece=member,press=member['interval'][side],projection=member['interval'][side],cursor=origin.copy(),offset=origin-np.asarray(nominal.coords[0])))
         w.canvas.reconstruction_drag_active=True
         self.latest=None;self.timer.start();overlay.highlight(picked)
         w.statusBar().showMessage('拖动共用动区边界；另一端保持不动，松开后更新所有工况。')
@@ -351,9 +355,10 @@ class CutDrag:
             plan=piece.get('route_plan')
             if plan is not None:
                 which=1 if state['kind']=='extra' else 0
-                projection=plan.drag_projection(cursor,state['projection'],state['projection_cursor'])
-                state['projection']=projection;state['projection_cursor']=cursor.copy()
-                part,clamped=plan.edit_pose(*piece['interval'],which,state['press_interval']+projection-state['press_projection'],frame['rotation_centers'][owner],frame['states'][owner],self.w.view_settings.reconstruction_style,cursor=cursor)
+                route_cursor=cursor+state['drag_offset']
+                projection=plan.drag_projection(route_cursor,state['projection'],state['projection_cursor'])
+                state['projection']=projection;state['projection_cursor']=route_cursor.copy()
+                part,clamped=plan.edit_pose(*piece['interval'],which,state['press_interval']+projection-state['press_projection'],frame['rotation_centers'][owner],frame['states'][owner],self.w.view_settings.reconstruction_style,cursor=route_cursor)
                 if part is not None:
                     from .reconstruction_edits import apply_angles
                     part=apply_angles(state['updated'],plan,part)
@@ -362,10 +367,11 @@ class CutDrag:
                     rows.append((*plan.key,plan.identity,part['a'],part['b']))
                     for companion in state['companions']:
                         member=companion['piece'];other=member['route_plan']
-                        mark=other.drag_projection(cursor,companion['projection'],companion['cursor'])
-                        companion.update(projection=mark,cursor=cursor.copy())
+                        companion_cursor=cursor+companion['offset']
+                        mark=other.drag_projection(companion_cursor,companion['projection'],companion['cursor'])
+                        companion.update(projection=mark,cursor=companion_cursor.copy())
                         target=member['interval'][which]+mark-companion['press']
-                        extra,_=other.edit_pose(*member['interval'],which,target,frame['rotation_centers'][owner],frame['states'][owner],self.w.view_settings.reconstruction_style,cursor=cursor)
+                        extra,_=other.edit_pose(*member['interval'],which,target,frame['rotation_centers'][owner],frame['states'][owner],self.w.view_settings.reconstruction_style,cursor=companion_cursor)
                         if extra is not None:
                             rows=[row for row in rows if row[:5]!=(*other.key,other.identity)]
                             rows.append((*other.key,other.identity,extra['a'],extra['b']))
@@ -374,7 +380,7 @@ class CutDrag:
                     near=transform(part['near'],frame['rotation_centers'][owner],frame['states'][owner]*weights[0])
                     far=transform(part['far'],frame['rotation_centers'][owner],frame['states'][owner]*weights[1])
                     line=far if which else near
-                    if self.w.view_settings.reconstruction_live:self._live(part)
+                    if self.w.view_settings.reconstruction_live and self.w.view_settings.reconstruction_auto:self._live(part)
                     view_piece=dict(piece,moved_cut=near,extra_cut=far)
                     handles=self.w.reconstruction_overlay.handles if self.w.view_settings.reconstruction_live else self.w.reconstruction_overlay.handle_geometries([view_piece])
                     handle=handles.get((self.w.reconstruction_overlay._key(piece),state['kind']))
@@ -397,7 +403,7 @@ class CutDrag:
         if angled is None:
             self.w.statusBar().showMessage('该角度无法分离原始连接端，已保留上一个有效角度');return
         state.update(updated=updated,part=angled,moved=True,rotated_only=True)
-        if self.w.view_settings.reconstruction_live:self._live(angled)
+        if self.w.view_settings.reconstruction_live and self.w.view_settings.reconstruction_auto:self._live(angled)
         overlay=self.w.reconstruction_overlay;overlay.stamp=None;overlay.draw()
         actual=state['part'] or angled;weight=piece.get('endpoint_weights',(1.,0.))[side]
         line=transform(actual['far' if side else 'near'],state['frame']['rotation_centers'][piece['die']],state['frame']['states'][piece['die']]*weight)
@@ -408,6 +414,7 @@ class CutDrag:
         self.w.statusBar().showMessage(f"边界旋转 {math.degrees(angled['angles'][side]):.1f}°；右键可撤销旋转")
 
     def _live(self,part):
+        if not self.w.view_settings.reconstruction_auto:return
         from .reconstruction_route import warp,failed_connection,missing_area
         state=self.state;old=state['frame'];piece=state['piece'];plan=piece['route_plan']
         from .reconstruction_route import part_key
@@ -462,7 +469,7 @@ class CutDrag:
         if self.state is None:return
         if event.xdata is not None and event.ydata is not None and self.state['moved'] and not self.state.get('rotated_only'):self.latest=np.array([event.xdata,event.ydata])
         self._tick();state=self.state
-        if state.get('part') is not None:self._live(state['part'])
+        if state.get('part') is not None and self.w.view_settings.reconstruction_auto:self._live(state['part'])
         self.w.canvas.reconstruction_drag_active=False
         self.state=None;self.latest=None;self.timer.stop()
         self.w.reconstruction_overlay.clear_hover()

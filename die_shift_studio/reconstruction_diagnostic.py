@@ -12,7 +12,7 @@ def display(result,centers,states):
     failed={tuple(ref) for ref,_ in result['hard_failures']};pieces=[];holes={};segments=[]
     for source in result.get('pieces',()):
         q=dict(source,regions=dict(source['regions']))
-        if (q['layer'],q['index']) not in failed:
+        if (q['layer'],q['index']) not in failed or not q.get('connection_failed'):
             pieces.append(q);continue
         q.update(connection_failed=True,valid=False,diagnostic=True)
         active=q['regions'].get('A',shapely.Polygon())
@@ -47,7 +47,7 @@ def display(result,centers,states):
 def markers(result,dbu):
     out=[]
     for ref,reason in result.get('hard_failures',()):
-        parts=[q.get('missing_region',q['regions']['A']) for q in result.get('pieces',()) if (q['layer'],q['index'])==tuple(ref)]
+        parts=[q.get('missing_region',q['regions']['A']) for q in result.get('pieces',()) if (q['layer'],q['index'])==tuple(ref) and q.get('connection_failed')]
         shape=shapely.union_all(parts)
         if shape.is_empty:
             shape=shapely.union_all([r['geometry'] for r in result.get('replacements',{}).get(ref[0],()) if ref[1] in r['indices']])

@@ -12,14 +12,17 @@ from die_shift_studio.representatives import RepresentativeExtremes
 from die_shift_studio.statistics import ExtremeCatalog
 
 class V47Tests(unittest.TestCase):
- def test_compact_focus_covers_every_die_without_parked_active_dies(self):
+ def test_focus_covers_complete_die_pairs_including_approach_and_separation(self):
   case={'dies':[None]*4};p=Parameters(per_die_enabled=True,die_bounds=[[35,35,1],[25,0,1],[0,0,0],[35,0,0]])
   grid=ExtremeCatalog(case,p);focus=RepresentativeExtremes(case,p,grid)
-  self.assertEqual(len(focus),26)
+  self.assertGreater(len(focus),26)
   for owner,local in enumerate(grid.locals):
    digits={grid.choices(i)[owner] for i in focus.indices}
-   self.assertEqual(digits,set(range(1,len(local))) if len(local)>1 else {0})
-  self.assertEqual(len(set(focus.indices)),26)
+   self.assertEqual(digits,set(range(len(local))))
+  self.assertEqual(len(set(focus.indices)),len(focus))
+  from itertools import combinations,product
+  choices=[[0]*grid.count,*[grid.choices(i) for i in focus.indices]]
+  for i,j in combinations(range(grid.count),2):self.assertEqual({(d[i],d[j]) for d in choices},set(product(range(grid.radices[i]),range(grid.radices[j]))))
  def engine(self,source,moving,fixed,keepout=None):
   shapes={'127/0':[shapely.box(-200,-200,700,500)],'128/0':[shapely.box(-60,-70,160,270)],
     '3/0':[g.buffer(4) for g in moving],'4/0':moving,'5/0':[source],'6/0':fixed}

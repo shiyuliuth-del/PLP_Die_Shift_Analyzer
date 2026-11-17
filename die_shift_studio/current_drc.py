@@ -20,6 +20,8 @@ def _matrix(model,owner,states):
 
 
 def frame(checker,states,replacements,settings,progress,owners=None,scopes=None):
+    from .drc_policy import enabled,ALL
+    if not getattr(settings,'drc_checks',ALL):progress(100,'所有尺寸DRC类别均未启用');return []
     from .drc import separation_region
     from .drc_rules import effective_clearances
     m=checker.model;p=checker.p;clearances=effective_clearances(p,settings);dbu=m.data.dbu_um;states=np.asarray(states,float)
@@ -77,7 +79,7 @@ def frame(checker,states,replacements,settings,progress,owners=None,scopes=None)
             # Different declared rules on the same physical net are tested on
             # its complete copper, so artificial role seams are not DRC edges.
             region=shapely.union_all([r['node']['poly'] if rigid else r['geometry'] for r in rows if r['role']==role])
-            for kind,g in checker.cached(original if rigid else actual,width,space,getattr(settings,'drc_min_angle_deg',0)):
+            for kind,g in checker.cached(original if rigid else actual,width if enabled(settings,'width') else 0.,space if enabled(settings,'space') else 0.,getattr(settings,'drc_min_angle_deg',0) if enabled(settings,'angle') else 0.):
                 if len(rules)>1 and not g.intersects(region):continue
                 world=m.moved(g,owner,states) if rigid else g;identity=kind,world.wkb
                 if identity in seen:continue
@@ -85,9 +87,9 @@ def frame(checker,states,replacements,settings,progress,owners=None,scopes=None)
                 required=width if kind=='线宽不足' else space if kind=='线距不足' else getattr(settings,'drc_min_angle_deg',0)
                 items.append(dict(layer=layers[0],layers=layers,geometry=world,kind=kind,net=key[1],refs=refs,
                                   owner=deps[0] if len(deps)==1 else -1,dependencies=deps,required_um=required if kind!='最小内角不足' else None,
-                                  required_deg=required if kind=='最小内角不足' else None))
+                                  required_deg=required if kind=='最小内角不足' else None,_measurement_copper=actual))
     tree=shapely.STRtree([n['geometry'] for n in nets]);maximum=max((n['space'] for n in nets),default=0.)
-    for i,a in enumerate(nets):
+    for i,a in enumerate(nets if enabled(settings,'space') else ()):
         cancel_check()
         for j in tree.query(a['geometry'],predicate='dwithin',distance=maximum):
             b=nets[int(j)]
@@ -106,7 +108,7 @@ def frame(checker,states,replacements,settings,progress,owners=None,scopes=None)
             if not bad.is_empty:
                 layers=tuple(sorted(set(a['layers']+b['layers'])))
                 items.append(dict(layer=layers[0],layers=layers,geometry=bad,kind='异网短接 / 线距不足',
-                                  nets=(a['key'][1],b['key'][1]),refs=a['refs']+b['refs'],required_um=space,dependencies=deps,owner=deps[0] if len(deps)==1 else -1))
+                                  nets=(a['key'][1],b['key'][1]),refs=a['refs']+b['refs'],required_um=space,_measurement_pair=(a['geometry'],b['geometry']),dependencies=deps,owner=deps[0] if len(deps)==1 else -1))
     if not hasattr(checker,'enclosures'):
         catalogue={}
         for link in getattr(m.connections,'links',()):
@@ -120,7 +122,7 @@ def frame(checker,states,replacements,settings,progress,owners=None,scopes=None)
                 catalogue.setdefault(((record['key'],record['index']),ref[0].split('/')[0],'固定RDL'),set()).add(tuple(ref))
         checker.enclosures=catalogue
     catalogue=checker.enclosures
-    for (ref,plane,role),receivers in catalogue.items():
+    for (ref,plane,role),receivers in (catalogue.items() if enabled(settings,'enclosure') else ()):
         cancel_check();node=m.nodes[m.ids[ref]];owner=node['owner']
         deps=dependencies({owner,*[m.nodes[m.ids[target]]['owner'] for target in receivers]})
         if not wanted(deps):continue
@@ -139,10 +141,10 @@ def frame(checker,states,replacements,settings,progress,owners=None,scopes=None)
             layers=tuple(sorted({k for k,i in receivers}))
             items.append(dict(layer=layers[0],layers=layers,geometry=missing,kind='孔盘包围不足',owner=deps[0] if len(deps)==1 else -1,dependencies=deps,rdl_role=role,
                               source_layer=ref[0],source_index=ref[1],refs=(ref,*sorted(receivers)),
-                              origin=list(m.moved(node['poly'],owner,states).centroid.coords[0]),required_um=enclosure))
+                              origin=list(m.moved(node['poly'],owner,states).centroid.coords[0]),required_um=enclosure,_measurement_enclosure=(m.moved(node['poly'],owner,states),shapely.union_all([m.moved(g,owner,states) for g in target]) if same else shapely.union_all(target))))
     from .edge_clearance import edge_violations
     from .width_keepout import violations as keepout_violations
-    for row in [*edge_violations(m,states,p,settings,replacements,owners),*keepout_violations(m,states,replacements)]:
+    for row in [*(edge_violations(m,states,p,settings,replacements,owners) if enabled(settings,'board') else ()),*(keepout_violations(m,states,replacements) if enabled(settings,'keepout') else ())]:
         refs=[(row['layer'],i) for i in row.get('indices',(row.get('index',0),))]
         deps=dependencies({m.nodes[m.ids[ref]]['owner'] for ref in refs if ref in m.ids})
         if wanted(deps):items.append(dict(row,dependencies=deps,owner=deps[0] if len(deps)==1 else -1))
@@ -151,21 +153,21 @@ def frame(checker,states,replacements,settings,progress,owners=None,scopes=None)
     moved=[m.moved(d,i,states) for i,d in enumerate(getattr(m,'case',{}).get('dies',()))]
     board=getattr(m,'case',{}).get('board');guard=max(dbu*1.e-6,1.e-9)
     for i,die in enumerate(moved):
-        if wanted((i,)):
+        if wanted((i,)) and enabled(settings,'die_edge'):
             required=clearances.min_package_clearance_um
             bad=die.difference(board.buffer(-required))
             if not bad.is_empty:
-                items.append(dict(layer='',layers=(),geometry=bad,kind='芯片到封装机械净距不足',owner=i,dependencies=(i,),refs=(),required_um=required))
+                items.append(dict(layer='',layers=(),geometry=bad,kind='芯片到封装机械净距不足',owner=i,dependencies=(i,),refs=(),required_um=required,actual_um=die.distance(board.boundary) if board.covers(die) else -die.difference(board).hausdorff_distance(board.boundary)))
         for j in range(i):
             deps=(j,i)
-            if not wanted(deps):continue
+            if not wanted(deps) or not enabled(settings,'die_gap'):continue
             required=clearances.min_die_gap_um
             if die.distance(moved[j])<required-guard or die.intersects(moved[j]):
                 bad=shapely.union_all([die.intersection(moved[j].buffer(required+guard)),moved[j].intersection(die.buffer(required+guard))])
                 if bad.is_empty:
                     from shapely.ops import nearest_points
                     bad=shapely.LineString(nearest_points(die,moved[j])).buffer(dbu)
-                items.append(dict(layer='',layers=(),geometry=bad,kind='芯片间机械净距不足',owner=-1,dependencies=deps,refs=(),required_um=required))
+                items.append(dict(layer='',layers=(),geometry=bad,kind='芯片间机械净距不足',owner=-1,dependencies=deps,refs=(),required_um=required,actual_um=die.distance(moved[j])))
     progress(100,f'当前图形 DRC 完成 · {len(items)} 组违规')
     return items
 
@@ -182,7 +184,9 @@ def locations(items):
                 pending.extend(geometry.geoms);continue
             key=(tuple(sorted(item.get('layers',(item.get('layer',''),)))),item['kind'],geometry.normalize().wkb)
             if key in seen:continue
-            seen.add(key);rows.append(dict(item,geometry=geometry,point=list(geometry.representative_point().coords[0])))
+            seen.add(key)
+            from .drc_actual import measured
+            rows.append(dict({k:v for k,v in item.items() if not k.startswith('_measurement')},**measured(item,geometry),geometry=geometry,point=list(geometry.representative_point().coords[0])))
     return sorted(rows,key=lambda q:(q.get('layer',''),q['kind'],tuple(q['point'])))
 
 

@@ -1,4 +1,6 @@
-# Die Shift Analyze V49
+# Die Shift Analyze V50
+
+V50：芯片对重点组合、分叉边界修正、当前姿态GDS/OAS与旋转ERROR输出、手动重构计算、分类DRC与吸附标尺。详见[使用说明](docs/V50_使用说明.md)。按本轮要求只进行一轮集中检查；失败项仅检查受影响部分。
 
 本轮同时更新主程序测量/尺寸容差/DRC分页、重构失败诊断与规则排序，以及实测完整问题目录、RealDataAnalyse的ERROR矩形输出和GD55扩展案例。实现与操作见[V49说明](docs/V49_使用说明.md)。
 

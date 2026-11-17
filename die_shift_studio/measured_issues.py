@@ -41,6 +41,8 @@ def catalogue(frame,case,model=None):
     if model is not None:
         for node in model.nodes:
             if node['owner']>=0:owners_by_net.setdefault(node['net'],set()).add(int(node['owner'])+1)
+    import shapely,math
+    from shapely.affinity import rotate
     rows=[];origin=np.asarray(case['board'].bounds[:2])
     for i,q in enumerate(locations(frame.get('drc',()))):
         bounds=list(map(float,q['geometry'].bounds));point=list(map(float,q['point']))
@@ -49,9 +51,23 @@ def catalogue(frame,case,model=None):
         if model is not None:
             for ref in q.get('refs',()):
                 if tuple(ref) in model.ids:dies.update(owners_by_net.get(model.nodes[model.ids[tuple(ref)]]['net'],()))
+        # Construct around the actual witness. Single-owner markers align with
+        # its current DIE orientation; shared-net witnesses use their own MRR.
+        poses=frame.get('states')
+        angle=float(poses[next(iter(dies))-1,2]) if len(dies)==1 and poses is not None and next(iter(dies))<=len(poses) else 0.
+        witness=q['geometry'];margin=max(float(getattr(model.data,'dbu_um',.001)) if model is not None else .001,1e-6)
+        if len(dies)==1:
+            local=rotate(witness,-angle,origin=(0,0),use_radians=True)
+            lo=np.asarray(local.bounds[:2])-margin;hi=np.asarray(local.bounds[2:])+margin
+            rectangle=rotate(shapely.box(*lo,*hi),angle,origin=(0,0),use_radians=True)
+        else:
+            rectangle=witness.minimum_rotated_rectangle
+            if rectangle.geom_type!='Polygon':rectangle=witness.buffer(margin).minimum_rotated_rectangle
+            edge=np.diff(np.asarray(rectangle.exterior.coords),axis=0)[0];angle=math.atan2(edge[1],edge[0])
+        corners=np.asarray(rectangle.exterior.coords)[:4].tolist()
         rows.append(dict(die_ids=sorted(dies) or [0],number=i+1,kind=q['kind'],layers=list(q.get('layers',(q.get('layer',''),))),
-                         bounds_um=bounds,point_um=point,package_relative_bounds_um=(np.asarray(bounds)-np.tile(origin,2)).tolist(),
-                         required_um=q.get('required_um'),required_deg=q.get('required_deg'),
+                         bounds_um=bounds,point_um=point,marker_corners_um=corners,marker_angle_deg=math.degrees(angle),package_relative_bounds_um=(np.asarray(bounds)-np.tile(origin,2)).tolist(),
+                         required_um=q.get('required_um'),required_deg=q.get('required_deg'),actual_um=q.get('actual_um'),actual_deg=q.get('actual_deg'),
                          refs=[list(v) for v in q.get('refs',())],connection_failure=bool(q.get('connection_failure'))))
     return rows
 
@@ -59,7 +75,7 @@ def catalogue(frame,case,model=None):
 def place(details,position):
     if not details.get('drc_issues'):return details
     xy=np.asarray(position,float)
-    return dict(details,drc_issues=[dict(q,top_cell_bounds_um=(np.asarray(q['package_relative_bounds_um'])+np.tile(xy,2)).tolist()) for q in details['drc_issues']])
+    return dict(details,drc_issues=[dict(q,top_cell_marker_corners_um=(np.asarray(q['marker_corners_um'])-np.asarray(q['bounds_um'][:2])+np.asarray(q['package_relative_bounds_um'][:2])+xy).tolist() if 'marker_corners_um' in q else None,top_cell_bounds_um=(np.asarray(q['package_relative_bounds_um'])+np.tile(xy,2)).tolist()) for q in details['drc_issues']])
 
 
 def write(path,task_id,details):

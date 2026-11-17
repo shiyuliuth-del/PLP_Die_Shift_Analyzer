@@ -31,14 +31,19 @@ class RepresentativeExtremes:
             index=grid.index(digits)
             if index>=0 and index not in self.names:
                 self.indices.append(index);self.names[index]=title
-        # One synchronous sweep covers every nonzero local state. Only the
-        # separate nominal row parks all DIEs; a movable DIE is never held at
-        # zero while another moves. Permanently zero-amplitude DIEs stay zero.
-        active=[list(range(1,len(local))) for local in grid.locals]
-        count=max((len(v) for v in active),default=0)
-        for ordinal in range(count):
-            digits=[v[ordinal%len(v)] if v else 0 for v in active]
-            add(digits,'同步重点 · '+str(ordinal+1))
+        # Pairwise DIE coverage, not same-sign axis sweeps. The GF(3^m)
+        # orthogonal array contains every ordered local pose pair exactly once
+        # when both DIEs have q states; projections also cover reduced axes.
+        active=[i for i,n in enumerate(grid.radices) if n>1]
+        if len(active)==1:
+            for d in range(grid.radices[active[0]]):
+                digits=[0]*n;digits[active[0]]=d;add(digits,'单芯片重点')
+        elif active:
+            from .focus_cover import pair_cover
+            for ordinal,local in enumerate(pair_cover([grid.radices[i] for i in active])):
+                digits=[0]*n
+                for owner,digit in zip(active,local):digits[owner]=digit
+                add(digits,'芯片对重点 · '+str(ordinal+1))
         self.pairs=set()
         self.total=len(self.indices)
 

@@ -21,17 +21,29 @@ def partition(plan,polygon):
     active=plan.source.intersection(polygon)
     if active.is_empty or active.area<=plan.tolerance**2:return None
     marks=shapely.line_locate_point(plan.route,shapely.points(shapely.get_coordinates(plan.route.intersection(polygon))))
-    if not len(marks):return None
+    route_crosses=bool(len(marks))
+    if not len(marks):marks=shapely.line_locate_point(plan.route,shapely.points(shapely.get_coordinates(active)))
     a,b=float(marks.min()),float(marks.max())
-    moving=[];fixed=[];ambiguous=False;anchors=shapely.union_all(plan.anchors)
+    moving=[];fixed=[];ambiguous=not route_crosses;terminals=getattr(plan,'terminal_vias',((plan.land,),tuple(plan.anchors)))
+    moving_terminal=shapely.union_all(terminals[0]);anchors=shapely.union_all(terminals[1])
     for g in parts(plan.source.difference(active)):
-        m=g.intersection(plan.land).area>plan.tolerance**2;f=g.intersection(anchors).area>plan.tolerance**2
+        m=g.intersection(moving_terminal).area>plan.tolerance**2;f=g.intersection(anchors).area>plan.tolerance**2
         if m and f:ambiguous=True
         if m or (not f and plan.route.project(g.representative_point())<(a+b)/2):moving.append(g)
         else:fixed.append(g)
     c=shapely.union_all(moving);d=shapely.union_all(fixed)
-    near=shapely.line_merge(active.boundary.intersection(c.boundary)) if not c.is_empty else shapely.LineString()
-    far=shapely.line_merge(active.boundary.intersection(d.boundary)) if not d.is_empty else shapely.LineString()
+    # Rectangular box edges are the authoritative cut lines. Never line-merge
+    # different box sides into an L-shaped or zig-zag reconstruction boundary.
+    def seam(material):
+        edges=[]
+        segments=[(u,v) for part in shapely.get_parts(polygon) if part.geom_type=='Polygon' for xy in [np.asarray(part.exterior.coords)] for u,v in zip(xy[:-1],xy[1:])]
+        for u,v in segments:
+            edge=shapely.LineString([u,v]);hit=edge.intersection(plan.source)
+            for line in shapely.get_parts(hit):
+                if line.geom_type=='LineString' and line.length>plan.tolerance and line.distance(material)<=plan.tolerance*4:edges.append(line)
+        return shapely.MultiLineString(edges) if len(edges)>1 else edges[0] if edges else shapely.LineString()
+    near=seam(c) if not c.is_empty else shapely.LineString()
+    far=seam(d) if not d.is_empty else shapely.LineString()
     if near.is_empty:near=shapely.Point(plan.route.coords[0]);a=0.
     if far.is_empty:far=shapely.Point(plan.route.coords[-1]);b=plan.length
     angles=[]

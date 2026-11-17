@@ -25,6 +25,9 @@ on:
       - 'tests/test_realdata_errors.py'
       - 'tests/test_oas_errors.py'
       - 'tests/test_gd55_cases.py'
+      - 'tests/test_v50.py'
+      - 'tests/gui_v50.py'
+      - 'tests/test_oriented_oas_errors.py'
       - 'tests/test_v49_reconstruction.py'
       - 'tests/test_measured_issue_concurrency.py'
       - 'tests/gui_v49.py'
@@ -152,6 +155,15 @@ jobs:
           "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_gd55_cases.py -v
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" tests/gui_realdata_errors.py
+      - name: Verify V50 output, pair coverage, DRC policy and interaction contracts
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests -p test_v50.py -v
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -m unittest discover -s tests -p test_oriented_oas_errors.py -v
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python tests/gui_v50.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Verify V49 reconstruction rules, ruler and GD55 interactions
         shell: cmd
         run: |

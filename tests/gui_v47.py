@@ -65,7 +65,7 @@ try:
  w.layer_split.setSizes([180,500]);app.processEvents();height=w.layer_split.sizes()[0]
  w.measured_output.settings_header.setChecked(True);w.write_project(project)
  saved=json.loads(project.read_text());assert saved['layer_table_height']==height
- assert '实测输出设置' in saved['expanded_settings']
+ assert '实测输出参数' in saved['expanded_settings']
  w.load_project(project);idle();assert w.measured_output.settings_header.isChecked()
  assert abs(w.layer_split.sizes()[0]-height)<12,(w.layer_split.sizes(),height)
  assert not errors,errors

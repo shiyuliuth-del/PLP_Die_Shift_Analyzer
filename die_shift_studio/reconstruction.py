@@ -75,7 +75,7 @@ def _compose_feature(source,ps,tolerance,moving):
                 owner['bridge_area_um2']=owner['bridge'].area
         if repairs:geometry=shapely.union_all([geometry,*repairs])
     mismatch=(len(parts(geometry))!=len(parts(source)) or sum(len(q.interiors) for q in parts(geometry))!=sum(len(q.interiors) for q in parts(source)))
-    if not geometry.is_valid or (mismatch and not any(q.get('connection_failed') for q in ps)):
+    if not geometry.is_valid:
         for q in ps:
             if q.get('fallback_regions') is not None:
                 regions=dict(q['fallback_regions']);regions['B']=fixed
@@ -172,6 +172,7 @@ class Reconstructor:
         self.plan_pool=plan_pool if plan_pool is not None else {}
         self._last_raw_frames={}
         self.geometry_pool=geometry_pool if geometry_pool is not None else EphemeralCache(budget=64*1024**2,max_entries=4096)
+        self.box_refs={(layer,i) for layer,points in settings.reconstruction_boxes for i,g in enumerate(model.cache.layers[layer]['geometry']) if g.intersects(shapely.Polygon(points))} 
         self.cuts={(str(l),int(i),normalize_via_refs(v)):(nx,ny,x,y) for l,i,v,nx,ny,x,y in settings.reconstruction_cuts}
         self.extra_cuts={(str(l),int(i),normalize_via_refs(v)):(nx,ny,x,y) for l,i,v,nx,ny,x,y in settings.reconstruction_extra_cuts}
         self.second_cuts=settings.reconstruction_second_cuts
@@ -230,7 +231,8 @@ class Reconstructor:
             if ref in self.settings.reconstruction_following and not fixed_enclosures_safe(self,ref,vias):cert=None;safe=[]
             manual=ref in self.settings.reconstruction_ignored or any(row[:2]==ref for row in self.settings.reconstruction_intervals)
             mode=None if manual else complex_mode(self,ref,vias,cert)
-            if mode is not None:cert=dict(certified=True,scope='完整输入盒刚体包围及邻网/封装空间证明',following=mode)
+            if mode is not None:cert=dict(certified=True,scope='完整输入盒刚体包围及邻网/封装空间比较',following=mode)
+            elif not manual:cert=None;safe=[]
             return ref,safe,cert,mode
         for ref,safe,cert,mode in parallel_map(classify,list(self.vias_by_target.items())):
             self.safe_vias[ref]=safe
@@ -468,13 +470,12 @@ class Reconstructor:
         self._base_plans=[entry for key in keys for entry in self.plan_pool[key]]
         from .parallel_zones import coordinate
         coordinate(self,self._base_plans)
-        self._plans=expand(self,[e for e in self._base_plans if (e['layer'],e['index']) not in self.settings.reconstruction_ignored])
+        self._plans=expand(self,[e for e in self._base_plans if (e['layer'],e['index']) not in self.settings.reconstruction_ignored or (e['layer'],e['index']) in self.box_refs])
         from .ignored_motion import entries as ignored_entries
         self._plans.extend(ignored_entries(self))
         return self._plans
 
     def interval(self,entry):
-        if 'merged_part' in entry:return entry['merged_part'],True
         plan=entry['plan']
         if plan is None:return None,False
         boxes=[shapely.Polygon(points) for layer,points in self.settings.reconstruction_boxes if layer==plan.layer and plan.source.intersects(shapely.Polygon(points))]
@@ -482,6 +483,7 @@ class Reconstructor:
             from .manual_regions import partition as exact_box_partition
             part=exact_box_partition(plan,shapely.union_all(boxes))
             if part is not None:return part,True
+        if 'merged_part' in entry:return entry['merged_part'],True
         a,b=plan.nominal_first,plan.nominal_second;manual=False
         for l,i,owner,refs,identity,left,right in self.settings.reconstruction_intervals:
             if (l,i,owner,normalize_via_refs(refs))==plan.key and identity==plan.identity:
@@ -641,7 +643,7 @@ class Reconstructor:
 
             layer,index,owner=entry['layer'],entry['index'],entry['owner'];source=entry['source'];plan=entry['plan']
             if selected is not None and (layer,index) not in selected:continue
-            if self._cover_lookup(self.dropped,None,layer,index,entry['refs']):continue
+            if (layer,index) not in self.box_refs and self._cover_lookup(self.dropped,None,layer,index,entry['refs']):continue
             part,manual,regions,error,warning=prepared;valid=True;fallback=None
             if part is not None:
                 fallback=dict(A=EMPTY,B=part['B'],C=transform(part['C'],self.model.bound.centers[owner],states[owner])) if part.get('strict_box') is not None or entry.get('graph_branch') or getattr(plan,'plane_domain',False) else failed_connection(part,plan,self.model.bound.centers[owner],states[owner])
