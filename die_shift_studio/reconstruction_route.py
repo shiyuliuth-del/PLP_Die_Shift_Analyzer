@@ -30,7 +30,7 @@ def clean_overlay(g,tolerance):
 
 
 def part_key(part):
-    return (part['a'],part['b'],*part.get('angles',(0.,0.)))
+    return (part['a'],part['b'],*part.get('angles',(0.,0.)),part['strict_box'].wkb if part.get('strict_box') is not None else None)
 
 
 def parts(g):

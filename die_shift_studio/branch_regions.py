@@ -48,7 +48,7 @@ def assemble(r,source,rows,states):
     active=shapely.union_all([q['nominal_regions']['A'] for q in rows]);rigid=[];known={}
     for g in parts(source.difference(active)):
         m=g.intersection(moving).area>r.tol*r.tol;f=g.intersection(fixed).area>r.tol*r.tol
-        if m and f:active=shapely.union_all([active,g]);continue
+        if m and f and not any(q.get('strict_box') is not None for q in rows):active=shapely.union_all([active,g]);continue
         index=len(rigid);rigid.append(g)
         if m or f:known[index]=float(m)
     domains=sorted(parts(clean_overlay(active,r.tol)),key=lambda g:g.bounds);physical_count=len(rigid)
@@ -107,6 +107,7 @@ def assemble(r,source,rows,states):
                 physical=[i for i in ids if i<physical_count]
                 if physical:alternative,flow_steps=domain(group,[rigid[i] for i in physical],[values[i] for i in physical],center,pose,r._rule_width,r.tol)
             if alternative is not None:posed=alternative;valid=True
+        if any(q.get('box_invalid') for q in members):valid=False
         if not valid:posed=shapely.Polygon()
         high=max(values[i] for i in ids);low=min(values[i] for i in ids)
         def face(weight,side):

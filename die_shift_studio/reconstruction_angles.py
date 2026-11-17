@@ -77,7 +77,7 @@ def solve(r,plan,base,center,pose,quick=False,native_check=True):
         if mode=='balanced':goal*=.5
         angles=[goal,goal*.5,goal*1.5,np.array([goal[0],0.]),np.array([0.,goal[1]])]
         for delta in (() if quick else (-math.pi/12,math.pi/12)):angles.append(np.clip(goal+delta,-math.pi/3,math.pi/3))
-        for values in (() if mode=='perpendicular' else angles[:1] if quick else angles):
+        for values in (() if mode=='perpendicular' or base.get('strict_box') is not None else angles[:1] if quick else angles):
             cancel_check()
             values=np.clip(np.asarray(values,float),-math.pi/3,math.pi/3)
             for side,locked in enumerate(base.get('manual_angles',(False,False))):

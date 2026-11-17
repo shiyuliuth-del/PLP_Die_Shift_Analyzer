@@ -90,7 +90,9 @@ class BoundGeometry:
         return frames[self.workers]
 
 
-def check_frame(bound,roles,p,result,states,layers,scheme,connections=None,check_interfaces=True,include_pairs=True,active_owners=None):
+def check_frame(bound,roles,p,result,states,layers,scheme,connections=None,check_interfaces=True,include_pairs=True,active_owners=None,settings=None):
+    from .drc_rules import effective_clearances
+    p=effective_clearances(p,settings)
     case=bound.case;tol=max(1e-9,bound.cache.data.dbu_um*1e-6);failures=[]
     def fail(kind,points,owners=None):
         points=np.asarray(points).reshape(-1,2)
@@ -234,7 +236,7 @@ class PreviewEngine:
         current=self.contact.current(states,self.p)
         deformation=None
         if deformation and deformation['replacements']:current=self.contact.current(states,self.p,deformation['replacements'])
-        mechanical=check_frame(self.bound,self.roles,self.p,self.result,states,layers,1,self.connections,False)
+        mechanical=check_frame(self.bound,self.roles,self.p,self.result,states,layers,1,self.connections,False,settings=getattr(self,'drc_settings',None) or getattr(getattr(self,'reconstructor',None),'settings',None))
         checks={s:dict(mechanical,failures=list(mechanical['failures'])) for s in (1,2,3)}
         for s,check in checks.items():
             check['failures'] += [dict(kind=q['kind'],point=q['point']) for q in current['issues'] if q['scheme']==s]
@@ -247,8 +249,9 @@ class PreviewEngine:
             # so the plot and the piece table share its accepted display geometry.
             frame['reconstruction']=self.reconstructor.frame(states,deformation,progress,quick=quick)
             if frame['reconstruction'].get('hard_failures'):
-                from .topology_routing import failure_message
-                raise ValueError(failure_message(frame['reconstruction']['hard_failures']))
+                from .reconstruction_diagnostic import display
+                frame['reconstruction']=display(frame['reconstruction'],frame['rotation_centers'],states)
+                frame['diagnostic_only']=True
             current=self.contact.current(states,self.p,frame['reconstruction']['replacements']);frame['contact']=current
             for scheme,check in checks.items():
                 check['failures']=list(mechanical['failures'])+[dict(kind=q['kind'],point=q['point']) for q in current['issues'] if q['scheme']==scheme]
@@ -256,6 +259,8 @@ class PreviewEngine:
         if getattr(self,'drc_enabled',False):
             frame['drc']=self.global_drc.frame(states,frame.get('reconstruction',{}).get('replacements'),settings=self.drc_settings,progress=progress)
             from .current_drc import locations
+            from .reconstruction_diagnostic import markers
+            frame['drc'].extend(markers(frame.get('reconstruction',{}),self.cache.data.dbu_um) if hasattr(self,'cache') else markers(frame.get('reconstruction',{}),self.bound.cache.data.dbu_um))
             frame['drc_locations']=locations(frame['drc'])
         if deformation is not None or getattr(self,'drc_enabled',False):
             from .drc_rules import effective_rules

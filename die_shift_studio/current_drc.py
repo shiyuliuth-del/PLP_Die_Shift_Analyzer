@@ -21,7 +21,8 @@ def _matrix(model,owner,states):
 
 def frame(checker,states,replacements,settings,progress,owners=None,scopes=None):
     from .drc import separation_region
-    m=checker.model;p=checker.p;dbu=m.data.dbu_um;states=np.asarray(states,float)
+    from .drc_rules import effective_clearances
+    m=checker.model;p=checker.p;clearances=effective_clearances(p,settings);dbu=m.data.dbu_um;states=np.asarray(states,float)
     def dependencies(values):return tuple(sorted(v for v in values if v>=0))
     def wanted(deps):return (scopes is None or deps in scopes) and (owners is None or bool(set(deps).intersection(owners)))
     replacements=replacements or {};overrides={};groups=defaultdict(list);items=[]
@@ -124,7 +125,7 @@ def frame(checker,states,replacements,settings,progress,owners=None,scopes=None)
         deps=dependencies({owner,*[m.nodes[m.ids[target]]['owner'] for target in receivers]})
         if not wanted(deps):continue
         same=all((target not in overrides or target in proved) and proved.get(target,m.nodes[m.ids[target]]['owner'])==owner for target in receivers)
-        enclosure=p.moving_annulus_um if role=='运动RDL' else p.annulus_um
+        enclosure=clearances.moving_annulus_um if role=='运动RDL' else clearances.annulus_um
         # Buffer BEFORE the rigid transform: rotating the tessellation after
         # buffering preserves a common motion exactly, unlike re-buffering it.
         required=node['poly'].buffer(enclosure/math.cos(math.pi/128),quad_segs=32)

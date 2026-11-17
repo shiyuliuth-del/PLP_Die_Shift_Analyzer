@@ -168,8 +168,9 @@ class ConstraintFeedback:
             data,drc,locations=value
             if data.get('hard_failures'):
                 from .topology_routing import failure_message
-                w.statusBar().showMessage(failure_message(data['hard_failures']))
-                return
+                w.log_bus.emit(failure_message(data['hard_failures']),'ERROR')
+                from .reconstruction_diagnostic import display
+                data=display(data,frame['rotation_centers'],frame['states'])
             violations=data['violations']
             from .reconstruction import decorate_problems
             decorate_problems(data)

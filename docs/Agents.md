@@ -172,3 +172,9 @@ V47发布完成：PR37合并e51df6e，标签V47。最终18d9104的437核心（2�
 V48最终验收：功能代码0e59a09，运行摘要0f7029b52165ea81b6fef1532725b195368e36753fab03bd69dc0e5fc126691f。451核心（2项原始外部图纸另验）、35GUI/进程、两后端、17工程，共55命令退出0。7be169d的Windows44016068299 clean/with-cupy全部通过，含双EXE两项目计划/三实例和GD55 OAS。首次Windows失败为测试8.3路径及日志句柄清理，修正后完整重跑；不降低断言。源码163文件、2119979字节，SHA aadace500c667c0d1a621b78472d41f11148b45e8e13d59b8aa51ee0c01a6c56。后续仅验收文档，正式资产发布后回下载复核，不改旧tag。
 
 V48发布回下载完成：PR39合并main为8536446d86c2329e743eade38a951488c11734d2，标签V48。实际Release ZIP/SHA、自动ZIP/tar、独立API MD/PY逐文件匹配标签，CRC/SHA/7-Zip通过；163文件、2119979字节，SHA aadace500c667c0d1a621b78472d41f11148b45e8e13d59b8aa51ee0c01a6c56。验证记录见V48_RELEASE_VERIFICATION.json。PR34的1c3b859与V47 c62287f均为V48祖先，双方历史已保留；本提交只有发布审计，不改标签或运行代码。
+
+## V49联合开发（2026-11-17，尚未验收/发布）
+
+本窗口基于main30224fb，分支codex/v49-drc-rulers-reconstruction，进行用户14项测量/尺寸容差/失败诊断/分页/严格旋转框选/自动截面及并行排线选区。另一窗口已发布V48，标签不改写。当前7项新核心针对性回归通过；全量回归出现旧合同断言，正迁移并补GUI，不能宣称完成。GD55两处原因为中心到代表点的方向偏置与分叉独立斜切；轴向/沿源边界选路和真实固定孔中心优先后两处已生成正确方向的相对截面，实图全交互仍待验收。
+
+直接读取另一聊天用户原文确认“允许直接同步并协调合并”。双方V49文件归属：本窗口measured_core.py/measured_ui.py/measured_issues.py/partial_output.py及其测试；另一窗口oas_stream.py/oas_errors.py/RealDataAnalyse/Jobs/GD55。批量显式output_policy=omit_failed_regions保留未失败铜，partial_output/omitted_region_count记录真实局部删除；严格默认保留。DRC条目bounds_um为当前GDS坐标，die_ids为1起编号，无归属静态[0]；package_relative_bounds_um以名义封装左下角为原点，批量有top_cell_bounds_um。task.get首128条+issue_catalog，task.issues(offset,limit≤512)读全部SQLite持久目录；不按2MB消息上限截断结果。待接口提交后对方只merge已提交历史，双方共同通过最终Linux/Windows/真实压力用例再发布。

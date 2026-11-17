@@ -13,7 +13,7 @@ def fixed_enclosures_safe(r,ref,vias):
     radius=np.linalg.norm(shapely.get_coordinates(source)-r.model.bound.centers[owner],axis=1).max()
     reach=np.linalg.norm(abs(mu[:2])+b[:2])+2*radius*np.sin(min(np.pi,abs(mu[2])+b[2])/2)
     inner=source.buffer(-reach-4*r.tol)
-    return all(inner.covers(v['poly'].buffer(r.p.annulus_um)) for v in r.stays
+    return all(inner.covers(v['poly'].buffer(r.rules.p.annulus_um)) for v in r.stays
                if v['net']==vias[0]['net'] and source.intersects(v['poly']))
 
 
@@ -51,12 +51,12 @@ def complex_mode(r,ref,vias,stationary_certificate):
             values.append(np.linalg.norm(abs(mu[:2])+b[:2])+2*radius*np.sin(min(np.pi,abs(mu[2])+b[2])/2))
         return max(values)
     owner_set={v['owner'] for v in vias if v['owner']>=0};choices=[]
-    following=len(owner_set)==1 and fixed_enclosures_safe(r,ref,vias) and all(source.covers(v['poly'].buffer(r.p.annulus_um+2*r.tol)) for v in vias)
+    following=len(owner_set)==1 and fixed_enclosures_safe(r,ref,vias) and all(source.covers(v['poly'].buffer(r.rules.p.annulus_um+2*r.tol)) for v in vias)
     for mode,valid in ((False,bool(stationary_certificate)),(True,following)):
         if not valid:continue
         amount=reach(source,owner_set) if mode else 0.
         swept=source.buffer(amount+2*r.tol)
-        board=r.model.case['board'].buffer(-r.p.package_clearance_um)
+        board=r.model.case['board'].buffer(-r.rules.p.package_clearance_um)
         if not board.covers(swept):continue
         margin=board.boundary.distance(swept);safe=True
         for node in r.model.nodes:

@@ -311,7 +311,9 @@ class WidthAnalyzer:
         self.model = model
         self.settings = settings
         self.width, self.space = effective_rules(parameters,settings)
-        self.annulus = parameters.annulus_um;self.border=parameters.package_clearance_um
+        from .drc_rules import effective_clearances
+        clearances=effective_clearances(parameters,settings)
+        self.annulus = clearances.annulus_um;self.border=clearances.package_clearance_um
         self.tol = max(1e-9,model.data.dbu_um*1e-5)
         self.board = model.case['board']
         self.inside = self.board.buffer(self.tol)

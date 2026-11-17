@@ -16,7 +16,7 @@ def signature(g):return len(parts(g)),sum(len(p.interiors) for p in parts(g))
 
 def failure_message(rows):
     details='；'.join(f'{layer} #{index+1}：{reason}' for (layer,index),reason in rows[:8])
-    return '当前姿态无法生成保持电连接、原拓扑且无异网接触的图形，未提交该结果；保留上一完成状态。'+details
+    return '当前姿态无法生成保持电连接、原拓扑且无异网接触的完整图形，未提交该结果为完整制造图；诊断预览显示失败位置。'+details
 
 
 def covers_ports(g,ports,tol):
@@ -196,7 +196,7 @@ def resolve(r,replacements,pieces,states):
     def enters_keepout(g):return not r.rules.keepout.is_empty and shapely.relate_pattern(g,r.rules.keepout,'T********')
     def valid(ref,g):return g.is_valid and signature(g)==signature(original[ref]) and covers_ports(g,ports[ref],r.tol)
     def attempt(ref,reason):
-        if ref not in mutable:return None
+        if ref not in mutable or any(q.get('box_invalid') for q in by_ref.get(ref,())):return None
         foreign=obstacles(ref)
         for space in dict.fromkeys((r.rule_space,r.rule_space*.5,0.)):
             candidate=connected_candidate(original[ref],objects[ref],ports[ref],foreign,r.rules.board,r._rule_width,r.tol,space)
@@ -242,6 +242,7 @@ def resolve(r,replacements,pieces,states):
             _,ref,g,reason=min(candidates,key=lambda item:(item[0],item[1]));objects[ref]=g;changed.add(ref);_adopt(by_ref[ref],g,r.tol,reason);progressed=True
         if not progressed:break
     for ref in sorted(objects):
+        if any(q.get('box_invalid') for q in by_ref.get(ref,())):blocked.append((ref,'框选动区没有切断运动—固定连接路径，严格区域不能完成适配'))
         if not valid(ref,objects[ref]):blocked.append((ref,'无法获得包含全部过孔且保持原拓扑的连通铜'))
         if enters_keepout(objects[ref]):blocked.append((ref,'固定RDL进入禁布区，无法在保持电连接的同时避让'))
         if foreign_hits(ref,objects[ref]):blocked.append((ref,'固定RDL仍接触其他网络的实际过孔或同层金属'))
