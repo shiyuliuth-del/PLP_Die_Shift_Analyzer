@@ -30,7 +30,7 @@ def clean_overlay(g,tolerance):
 
 
 def part_key(part):
-    return (part['a'],part['b'],*part.get('angles',(0.,0.)))
+    return (part['a'],part['b'],*part.get('angles',(0.,0.)),part['strict_box'].wkb if part.get('strict_box') is not None else None)
 
 
 def parts(g):
@@ -65,6 +65,13 @@ def trace(poly,start,end,width):
     # Prepared GEOS indexes are lazily mutated. Never attach one to a
     # source polygon shared by foreground and background reconstruction.
     poly=shapely.from_wkb(poly.wkb)
+    endpoints=shapely.MultiPoint([start,end])
+    # A path certified by exact covers cannot begin outside its domain or
+    # cross disconnected components. Reject before constructing large graphs.
+    if not poly.covers(endpoints):return None
+    if poly.geom_type=='MultiPolygon':
+        poly=next((g for g in poly.geoms if g.covers(endpoints)),None)
+        if poly is None:return None
     shapely.prepare(poly)
     start,end=np.asarray(start,float),np.asarray(end,float)
     if np.linalg.norm(end-start)<1e-8:return None

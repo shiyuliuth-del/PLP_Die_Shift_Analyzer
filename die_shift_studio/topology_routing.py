@@ -16,7 +16,7 @@ def signature(g):return len(parts(g)),sum(len(p.interiors) for p in parts(g))
 
 def failure_message(rows):
     details='；'.join(f'{layer} #{index+1}：{reason}' for (layer,index),reason in rows[:8])
-    return '当前姿态无法生成保持电连接、原拓扑且无异网接触的图形，未提交该结果；保留上一完成状态。'+details
+    return '当前姿态无法生成保持电连接、原拓扑且无异网接触的完整图形，未提交该结果为完整制造图；诊断预览显示失败位置。'+details
 
 
 def covers_ports(g,ports,tol):
@@ -122,6 +122,24 @@ def connected_candidate(source,current,ports,obstacles,board,width,tol,space=0.)
     return None
 
 
+def cached_connection(r,source,current,ports,obstacles,board,width,tol,space):
+    """Repeat local scenes across package combinations without re-routing.
+
+    Actual posed obstacles and every physical terminal are part of the key;
+    reuse never substitutes nominal neighbours for a changed neighbour.
+    """
+    cancel_check()
+    blobs=(source.wkb,current.wkb,tuple(p.wkb for p in ports),obstacles.wkb,None if board is None else board.wkb)
+    key=('electrical-local-repair-v49',*blobs,float(width),float(tol),float(space))
+    value=r.geometry_pool.get(key)
+    if value is not None:return None if value[0] is None else shapely.from_wkb(value[0])
+    result=connected_candidate(source,current,ports,obstacles,board,width,tol,space)
+    blob=None if result is None else result.wkb
+    size=512+sum(len(b) for b in (blobs[0],blobs[1],*blobs[2],blobs[3],blobs[4] or b'',blob or b''))*2
+    r.geometry_pool.put(key,(blob,),size=size)
+    return result
+
+
 def _adopt(rows,geometry,tol,reason):
     """Keep material regions disjoint and attach compensation to its real A area."""
     def material(g):return shapely.union_all(parts(g))
@@ -150,7 +168,7 @@ def _adopt(rows,geometry,tol,reason):
                  warning=reason,compensation_region=before.symmetric_difference(geometry))
 
 
-def resolve(r,replacements,pieces,states):
+def resolve(r,replacements,pieces,states,progress=lambda *_:None):
     """Deterministic whole-pose collision resolution; immutable source identities."""
     out={k:[dict(v) for v in values] for k,values in replacements.items()}
     pieces=[dict(q,regions=dict(q['regions'])) for q in pieces];by_ref={};ports={}
@@ -176,6 +194,10 @@ def resolve(r,replacements,pieces,states):
             for i in row['indices']:objects[layer,i]=private(row['geometry'])
     mutable={ref for ref,rows in by_ref.items() if any(not q.get('ignored') for q in rows)}
     for ref in objects:ports[ref]=[private(r.model.moved(physical,owner,states)) for owner,physical in terminals[ref]]
+    manual_masks={ref:shapely.union_all([q['regions']['A'] for q in rows]) for ref,rows in by_ref.items() if any(q.get('strict_box') is not None for q in rows)}
+    manual_before={ref:objects[ref] for ref in manual_masks}
+    def preserves_box(ref,g):
+        return ref not in manual_masks or g.symmetric_difference(manual_before[ref]).difference(manual_masks[ref].buffer(r.tol*2)).area<=r.tol*r.tol
     changed=set();blocked=[];external={};immutable={}
     for ref,values in ports.items():
         external.setdefault(nets[ref][0],[]).extend((nets[ref],g) for g in values)
@@ -190,22 +212,35 @@ def resolve(r,replacements,pieces,states):
         values,tree=table
         return [values[int(i)][1] for i in tree.query(g,predicate='intersects') if values[int(i)][0]!=nets[ref]]
     def obstacles(ref):
-        b=shapely.union_all([original[ref],objects[ref]]).bounds;pad=r._rule_width*8+r.tol*32
+        b=shapely.union_all([original[ref],objects[ref]]).bounds;pad=r._rule_width*8+r.rule_space+r.tol*32
         box=shapely.box(b[0]-pad,b[1]-pad,b[2]+pad,b[3]+pad)
-        return shapely.union_all([g for other,g in objects.items() if nets[other][0]==nets[ref][0] and nets[other]!=nets[ref] and g.intersects(box)]+[r.rules.keepout.intersection(box),*foreign_hits(ref,box)])
+        # The search cannot leave its width*8 window; retain an extra
+        # spacing+DBU halo before clipping. Remote parts of a long neighbour
+        # then cannot invalidate an otherwise identical local repair cache.
+        return shapely.union_all([g.intersection(box) for other,g in objects.items() if nets[other][0]==nets[ref][0] and nets[other]!=nets[ref] and g.intersects(box)]+[r.rules.keepout.intersection(box),*[g.intersection(box) for g in foreign_hits(ref,box)]])
     def enters_keepout(g):return not r.rules.keepout.is_empty and shapely.relate_pattern(g,r.rules.keepout,'T********')
-    def valid(ref,g):return g.is_valid and signature(g)==signature(original[ref]) and covers_ports(g,ports[ref],r.tol)
+    def valid(ref,g):return g.is_valid and signature(g)==signature(original[ref]) and covers_ports(g,ports[ref],r.tol) and preserves_box(ref,g)
     def attempt(ref,reason):
-        if ref not in mutable:return None
+        if ref not in mutable or any(q.get('box_invalid') for q in by_ref.get(ref,())):return None
         foreign=obstacles(ref)
+        # Keep the spacing corridor first. Within that corridor try to retain
+        # enclosure before relaxing to electrical contact; width may narrow
+        # inside connected_candidate, while foreign copper remains forbidden.
+        enclosed=[p.buffer(r.rules.p.annulus_um/math.cos(math.pi/128),quad_segs=32) for p in ports[ref]]
         for space in dict.fromkeys((r.rule_space,r.rule_space*.5,0.)):
-            candidate=connected_candidate(original[ref],objects[ref],ports[ref],foreign,r.rules.board,r._rule_width,r.tol,space)
-            if candidate is not None:return candidate,reason
+            for targets in (enclosed,ports[ref]):
+                candidate=cached_connection(r,original[ref],objects[ref],targets,foreign,r.rules.board,r._rule_width,r.tol,space)
+                if candidate is None:continue
+                if targets is enclosed and not all(candidate.buffer(r.tol*.1).covers(g) for g in enclosed):continue
+                if any(q.get('strict_box') is not None for q in by_ref.get(ref,())):
+                    allowed=shapely.union_all([q['regions']['A'] for q in by_ref[ref]])
+                    if candidate.symmetric_difference(objects[ref]).difference(allowed.buffer(r.tol*2)).area>r.tol*r.tol:continue
+                return candidate,reason
         return None
     # Recover electrical discontinuities first; the actual posed foreign copper
     # is an obstacle even when full native DRC artwork was not requested.
-    for ref in sorted(mutable):
-        cancel_check()
+    for number,ref in enumerate(sorted(mutable)):
+        cancel_check();progress(round(40*number/max(1,len(mutable))),f'核验实际连接 {number+1}/{len(mutable)} · {ref[0]} #{ref[1]+1}')
         if valid(ref,objects[ref]) and not enters_keepout(objects[ref]) and not foreign_hits(ref,objects[ref]) and not any(q.get('connection_failed') for q in by_ref[ref]):continue
         candidate=attempt(ref,'保连通补偿：已调整连接轮廓，工艺规则另检')
         if candidate is not None:
@@ -213,8 +248,8 @@ def resolve(r,replacements,pieces,states):
     # Removing one side of an overlap cannot create a new foreign contact.
     # A rerouted candidate is checked against every current neighbour before use.
     refs=list(objects)
-    for _ in range(max(1,len(refs)*2)):
-        cancel_check();values=[objects[ref] for ref in refs];tree=shapely.STRtree(values);pairs=[]
+    for iteration in range(max(1,len(refs)*2)):
+        cancel_check();progress(40+round(30*iteration/max(1,len(refs)*2)),f'消除异网接触 · 第 {iteration+1} 轮');values=[objects[ref] for ref in refs];tree=shapely.STRtree(values);pairs=[]
         for i,a in enumerate(values):
             for j in tree.query(a,predicate='intersects'):
                 if j>i and nets[refs[i]][0]==nets[refs[int(j)]][0] and nets[refs[i]]!=nets[refs[int(j)]]:pairs.append((refs[i],refs[int(j)]))
@@ -228,7 +263,7 @@ def resolve(r,replacements,pieces,states):
                 divided=None
                 for space in dict.fromkeys((r.rule_space,r.rule_space*.5,0.)):
                     candidate=separate_pair(objects[left],objects[right],original[left],original[right],ports[left],ports[right],r.tol,space)
-                    if candidate is not None and all(not foreign_hits(ref,g) for ref,g in zip((left,right),candidate)):
+                    if candidate is not None and all(not foreign_hits(ref,g) and preserves_box(ref,g) for ref,g in zip((left,right),candidate)):
                         divided=candidate;break
                 if divided is not None:
                     for ref,g in zip((left,right),divided):
@@ -241,7 +276,9 @@ def resolve(r,replacements,pieces,states):
             if not candidates:continue
             _,ref,g,reason=min(candidates,key=lambda item:(item[0],item[1]));objects[ref]=g;changed.add(ref);_adopt(by_ref[ref],g,r.tol,reason);progressed=True
         if not progressed:break
-    for ref in sorted(objects):
+    for number,ref in enumerate(sorted(objects)):
+        progress(70+round(20*number/max(1,len(objects))),f'最终连接核验 {number+1}/{len(objects)}')
+        if any(q.get('box_invalid') for q in by_ref.get(ref,())):blocked.append((ref,'框选动区没有切断运动—固定连接路径，严格区域不能完成适配'))
         if not valid(ref,objects[ref]):blocked.append((ref,'无法获得包含全部过孔且保持原拓扑的连通铜'))
         if enters_keepout(objects[ref]):blocked.append((ref,'固定RDL进入禁布区，无法在保持电连接的同时避让'))
         if foreign_hits(ref,objects[ref]):blocked.append((ref,'固定RDL仍接触其他网络的实际过孔或同层金属'))
@@ -265,6 +302,7 @@ def resolve(r,replacements,pieces,states):
     for layer,rows in out.items():
         for row in rows:
             if len(row['indices'])==1:row['geometry']=objects[layer,row['indices'][0]]
+    progress(100,f'电连接核验完成 · {len(set(blocked))} 项未完成连接')
     return out,pieces,tuple(sorted(changed)),tuple(sorted(set(blocked)))
 
 

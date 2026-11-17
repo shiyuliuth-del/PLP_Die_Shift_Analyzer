@@ -25,9 +25,12 @@ with tempfile.TemporaryDirectory(prefix='rda-plans-gui-') as name:
     try:
         assert w.timeout.value()==0
         assert w.import_button.text()=='创建任务'
+        assert w.create_plan_button.geometry().left()>w.import_button.geometry().left()
+        assert w.plans_button.geometry().left()>w.start_button.geometry().left()
         assert not any(b.text()=='刷新记录' for b in w.findChildren(W.QPushButton))
         tabs=w.findChild(W.QTabWidget);assert [tabs.tabText(i) for i in range(tabs.count())][-2:]==['全部IPC命令调试','实时命令信息']
         w.open_folder(folder,link=False);wait(w)
+        assert w.sheet.text()=='Ordinary','bundled project must open ordinary independent poses by default'
         w.sheet.setText('Diagnostic');w.workers.setValue(2)
         w.create_plan_button.click();wait(w)
         w.sheet.setText('Measurements');w.workers.setValue(3)
@@ -64,6 +67,22 @@ with tempfile.TemporaryDirectory(prefix='rda-plans-gui-') as name:
         for _ in range(5):w.flush_conversation()
         assert w.conversation_view.document().blockCount()<=100
         assert '299' in w.conversation_view.toPlainText()
+        # The package table must not disguise partial output as a clean result.
+        import threading,json
+        from RealDataAnalyse.excel import import_files
+        from RealDataAnalyse.storage import Ledger
+        database=folder/'Tasks'/'table-check.sqlite'
+        import_files(sorted(folder.glob('*.xlsx')),database,3,3,threading.Event())
+        ledger=Ledger(database)
+        try:
+            with ledger.db:ledger.db.execute("update packages set state='committed_with_issues',result=? where seq=1",(json.dumps(dict(drc_count=3,connection_failure_count=1,error_rectangles=2,partial_output=True)),))
+        finally:ledger.close()
+        w.database.setText(str(database));w.refresh()
+        assert w.table.item(0,3).text()=='已输出（含问题）'
+        assert '连接失败 1项' in w.table.item(0,4).text() and 'ERROR矩形 2个' in w.table.item(0,4).text()
+        assert w.command.findText('task.issues')>=0
+        w.command.setCurrentText('batch.begin')
+        assert json.loads(w.args.toPlainText())['output_policy']=='omit_failed_regions'
         w.grab().save(str(Path(tempfile.gettempdir())/'RealDataAnalyse-v48.png'))
     finally:
         # Do not let tests persist changed production UI height preferences.

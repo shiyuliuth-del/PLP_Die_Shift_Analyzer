@@ -48,7 +48,7 @@ try:
   w.request_preview();w.run_evaluation();w.analysis.activate();idle()
   assert not m.session.instances
   details=done(m.command('preview.submit',{'dies':[dict(die=1,dx_um=2,dy_um=1,angle_deg=0)]}));idle()
-  assert not details['fixed_rdl_drc_checked'] and w.current_frame is not None
+  assert details['fixed_rdl_drc_checked'] and w.current_frame is not None
   assert w.result is None and w.reconstruction_yield.bank is None and w.width_yield.bank is None
   assert not m.command('info',{})['result']['running']
   m.command('project.close',{})

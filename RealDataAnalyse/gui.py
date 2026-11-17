@@ -25,9 +25,10 @@ COMMANDS = {
     'output.configure': {'output_directory': '', 'max_threads': 4, 'max_memory_mb': 2048},
     'preview.submit': {'dies': [{'die': 1, 'dx_um': 0, 'dy_um': 0, 'angle_deg': 0}]},
     'export.gds': {'filename': 'measured.gds'},
-    'batch.begin': {'filename': 'measured.oas'},
+    'batch.begin': {'filename': 'measured.oas', 'output_policy': 'omit_failed_regions'},
     'batch.submit': {'batch_id': '', 'cell': 'Package_000001', 'position_um': [0, 0], 'dies': []},
     'batch.end': {'batch_id': ''}, 'task.get': {'task_id': ''},
+    'task.issues': {'task_id': '', 'offset': 0, 'limit': 128},
     'compute.cancel': {}, 'app.shutdown': {},
 }
 
@@ -682,7 +683,7 @@ class Window(W.QMainWindow):
             args['dies'] = [dict(die=i + 1, dx_um=0, dy_um=0, angle_deg=0) for i in range(self.dies.value())]
         if command in ('batch.submit', 'batch.end'):
             args['batch_id'] = getattr(self, 'manual_batch', '')
-        if command == 'task.get':
+        if command in ('task.get','task.issues'):
             args['task_id'] = getattr(self, 'manual_task', '')
         self.args.setPlainText(json.dumps(args, ensure_ascii=False, indent=2))
 
@@ -717,7 +718,7 @@ class Window(W.QMainWindow):
         expected_project = self.project.text()
         def send(stop, progress):
             t = Transport(endpoint, trace=self.conversation, expected_instance=bound_instance)
-            if command not in ('ping', 'info', 'task.get'):
+            if command not in ('ping', 'info', 'task.get', 'task.issues'):
                 if not expected_project:
                     raise ValueError('请先选择项目文件夹')
                 info = t.request('info', stop=stop)['result']
@@ -769,6 +770,12 @@ class Window(W.QMainWindow):
                 poses = json.loads(payload).get('dies', [])
                 lines = [self.die_text(pose) for pose in poses]
                 preview = '; '.join(lines[:20]) + (f' … 共{len(lines)}颗DIE，双击展开' if len(lines)>20 else '')
+                state={'computed_with_issues':'已计算（含问题）','committed_with_issues':'已输出（含问题）','committed':'已输出'}.get(state,state)
+                try:
+                    receipt=json.loads(result)
+                    if isinstance(receipt,dict) and ('drc_count' in receipt or receipt.get('connection_failure_count')):
+                        result=f'DRC {receipt.get("drc_count",0)}项；连接失败 {receipt.get("connection_failure_count",0)}项；ERROR矩形 {receipt.get("error_rectangles",0)}个。'+ ('问题位置已移除，正常部分已保留。' if receipt.get('partial_output') else '')
+                except (ValueError,TypeError):pass
                 for j, value in enumerate((package, cell, preview, state, result)):
                     item = W.QTableWidgetItem(str(value)[:4000])
                     item.setToolTip(('\n'.join(lines) if j==2 else str(value))[:16000])

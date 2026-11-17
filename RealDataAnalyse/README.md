@@ -24,11 +24,11 @@
 
 SQLite WAL/FULL保存输入摘要/源行号、任务状态、回执及事件；输入按文件并行、封装在磁盘关联，提交Future有界，界面每页200条。日志8MiB轮转保留8份备份。停止在安全点取消自己的批次，不强杀几何线程。
 
-崩溃后先核对PID创建时间和冻结工程身份，确认服务已退出才重启；仍存活而无响应时停止并保留任务。未最终提交的批次完整重放；不能按computed计数跳过已丢失几何。新OAS完成计数、CRC、摘要及旧目标保护检查后才原子替换。几何硬失败不通过allow_failed绕过。批量跳过完整显示DRC与概率，输出成功不等于生产签核。
+崩溃后先核对PID创建时间和冻结工程身份，确认服务已退出才重启；仍存活而无响应时停止并保留任务。未最终提交的批次完整重放；不能按computed计数跳过已丢失几何。新OAS完成计数、CRC、摘要及旧目标保护检查后才原子替换。无法解释的几何错误不通过allow_failed绕过。每个指定姿态检查完整实际铜DRC与连接，不计算无关姿态或概率；已定位的连接失败仅在明确的局部输出策略下移除，输出成功不等于生产签核。
 
 ## 手动IPC与自动化
 
-第二页保留15个命令及JSON参数编辑：ping、info、app.start、project.open、project.close、session.prepare、output.configure、preview.submit、export.gds、batch.begin、batch.submit、batch.end、task.get、compute.cancel、app.shutdown。支持异步等待，批次ID/任务ID自动填入模板；项目和输出目录仍限定在所选文件夹。app.start使用同目录启动规则。
+第二页保留16个命令及JSON参数编辑：ping、info、app.start、project.open、project.close、session.prepare、output.configure、preview.submit、export.gds、batch.begin、batch.submit、batch.end、task.get、task.issues、compute.cancel、app.shutdown。支持异步等待，批次ID/任务ID自动填入模板；项目和输出目录仍限定在所选文件夹。app.start使用同目录启动规则。
 
 自动化兼容原有入口：`python RealDataAnalyse/main.py --import-data import.json --result imported.json`，导入JSON字段为paths、database、die_count、workers及可选profile、profiles（文件绝对路径到独立映射的字典）；随后 `--run config.json --result result.json`，运行JSON字段为database、endpoint、project、output及workers、memory_mb、retries、timeout。EXE接受相同参数。这些无界面接口保持兼容已有完整路径配置。
 
@@ -39,3 +39,13 @@ SQLite WAL/FULL保存输入摘要/源行号、任务状态、回执及事件；�
 成功后项目Output只保留一个最终OAS；中间OAS、partial、锁及导入暂存均位于Cache。旧结果和旧Output附属文件归档Cache/History，失败保留旧输出。每个表格下缘双线支持拖动高度，左侧行标题编号；封装记录实时刷新并展示各DIE偏移，长内容双击查看。
 
 “实时命令信息”显示真实双向请求/回复和异常，默认2000行，可设100–10000。完整脱敏会话日志16MiB轮转保留5份；界面队列1000条，单条界面内容有上限。任务超时0不限制计算，连接仍有限超时。计划自动启动实例会安全关闭，用户已有实例保留。支持`--run-plans plans.sqlite --result result.json`执行相同队列。
+
+## 问题封装继续与ERROR标记（V49）
+
+批量明确请求配套预演软件的`omit_failed_regions`策略。无法重构的局部位置移除后，其他正常铜和后续封装继续输出；存在尺寸DRC但能够正常生成的铜保留并标记。客户端核对完整DRC检查、局部移除回执和实际标记计数，不把服务异常或缺失回执当成功。通信、磁盘或无法表示的非法几何仍保留任务进入恢复流程。
+
+OAS内有实际名称为ERROR的数值层，默认从65535/0向下选择未占用层，不覆盖原图层。每个封装内的G_ERROR_封装名_DIE_编号子Cell直接保存对应DIE的矩形标记；跨DIE问题在相关DIE分别标注，无唯一DIE归属的公共问题在DIE_0。标记使用当前姿态坐标并随封装TopCell引用摆放。正常制造层保留原层号，ERROR为诊断层，输出完成不代表工艺通过。
+
+完成记录显示“已输出（含问题）”及DRC、连接失败、ERROR矩形数；计划完成信息也保留问题计数。完整问题目录保存在项目Cache，`task.issues`可在IPC调试页分页查询，每页最多512项；单条回执仅附前128项，不代表目录截断。
+
+新随包GD55默认选择Ordinary表：60个位置、每位置3颗DIE各自独立XYZ值，共180组姿态；另有Stress42、FailureRecovery6及原有两个12项基线表。切换表须重新创建任务。已有用户项目不会被BUILD覆盖，验证新版案例请使用新源码包中的Jobs/GD55。

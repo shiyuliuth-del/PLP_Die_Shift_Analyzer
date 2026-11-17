@@ -1,6 +1,8 @@
 """Green is reserved for completely checked states, never absence of markers."""
 
 def frame_status(frame):
+    connection_failures=len(frame.get('reconstruction',{}).get('hard_failures',()))
+    if connection_failures:return dict(safe=False,contact=0,failures=connection_failures,drc=len(frame.get('drc',())),unadapted=connection_failures,connection_failures=connection_failures,checked=True)
     checks=frame.get('checks',{})
     failures=sum(len(q.get('failures',[])) for q in checks.values())
     contact=len(frame.get('contact',{}).get('issues',[]))
@@ -50,7 +52,7 @@ def evaluate_states(engine,catalog,settings,progress=lambda *_:None):
         counts=np.zeros((n+1,4),int)  # contacts, scheme failures, DRC markers; last row is static
         counts[:n,0]=model.current(z,p,counts_only=True,owners=owners)
         layers=bound.transform(z,workers=1) if obstacles else {}
-        checks=check_frame(bound,engine.roles,p,None,z,layers,1,model.connections,False,include_pairs=False,active_owners=owners)
+        checks=check_frame(bound,engine.roles,p,None,z,layers,1,model.connections,False,include_pairs=False,active_owners=owners,settings=settings)
         for q in checks['failures']:counts[max(-1,q['owner']),1]+=3
         scopes={(),*((i,) for i in range(n))}
         for q in engine.global_drc.frame(z,settings=settings,owners=owners,scopes=scopes):
@@ -70,7 +72,8 @@ def evaluate_states(engine,catalog,settings,progress=lambda *_:None):
     # Exact distance on the full local grid; the envelope test only discards
     # pairs whose bounding boxes are disjoint by MORE than the minimum gap.
     from .representatives import pair_tables
-    pairs=pair_tables(bound.case,p,grid,tol)
+    from .drc_rules import effective_clearances
+    pairs=pair_tables(bound.case,effective_clearances(p,settings),grid,tol)
     pair_checks=sum(grid.radices[q['owners'][0]]*grid.radices[q['owners'][1]] for q in pairs)
     from .current_drc import coupled_scopes
     import itertools
@@ -110,5 +113,12 @@ def status_for(factors,digits):
         count=factor['counts']
         for owner in factor['owners']:count=count[digits[owner]]
         drc+=int(count)
+    moving=int(factors.get('moving_drc_base',0))
+    for i,rows in enumerate(factors.get('moving_drc_local',())):moving+=int(rows[digits[i]])
+    for factor in factors.get('drc_factors',()):
+        count=factor.get('moving_counts')
+        if count is not None:
+            for owner in factor['owners']:count=count[digits[owner]]
+            moving+=int(count)
     if any(digits):failures+=3*factors['unknown']
-    return dict(safe=not (failures or drc or contact),checked=True,contact=contact,failures=failures,drc=drc,unadapted=0,width_failures=0)
+    return dict(safe=not (failures or drc or contact),checked=True,moving_drc=moving,contact=contact,failures=failures,drc=drc,unadapted=0,width_failures=0)

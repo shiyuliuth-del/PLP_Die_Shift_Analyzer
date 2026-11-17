@@ -1,4 +1,4 @@
-"""Full-grid paging, cache-aware colours, discrete overlay and old/new Jobs."""
+"""Full-grid paging, rule-state colours, discrete overlay and old/new Jobs."""
 import json,os,sys,tempfile,time
 from pathlib import Path
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
@@ -24,22 +24,25 @@ def wait():
     assert '未处理异常' not in w.runtime_view.toPlainText(),w.runtime_view.toPlainText()[-2500:]
 def row_info(row):
     w.refresh_extreme_colors(w.current_frame)
-    item=w.extreme_table.item(row,0);tip=item.toolTip();n=int(tip.split('可复用缓存 ')[-1].split(' 项')[0])
-    return n,item.background().color().lightness()
+    w._cache_colors_changed()
+    item=w.extreme_table.item(row,0);pose=w.page_items[row-1][1]['states']
+    n=w._cached_pose_counts.get(pose.tobytes(),0)
+    assert '可复用缓存' not in item.toolTip()
+    return n,item.background().color().name()
 name='示例O_运动网络三线路通道';src=ROOT/'Jobs'/(name+'.dshift.json')
 w.load_project(src);wait();w.setting_fields['animation_enabled'].setChecked(False);w.width_toggle.setChecked(False);wait()
 w.run_evaluation();wait();assert w.extremes.total+1==729 and w.grid_mode.currentText()=='重点组合'
 w.problem_filter.setChecked(False);wait()
 assert w.extreme_table.rowCount()==w.focus_extremes.total+1
 w.grid_mode.setCurrentIndex(0);wait();assert w.extreme_table.rowCount()==257
-assert w.result['extreme_factors']['checked'] and all(w.extreme_table.item(0,j).text()=='' for j in range(5))
+assert w.result['extreme_factors']['checked'] and all(w.extreme_table.item(0,j).text()=='' for j in range(w.extreme_table.columnCount()))
 w.page_edit.setText('3');QTest.keyClick(w.page_edit,getattr(Qt,'Key',Qt).Key_Return);wait()
 assert w.preview_page==2 and len(w.page_items)==216 and not w.page_next.isEnabled()
 index=w.page_items[-1][0];assert index==727
 last=w.extreme_table.rowCount()-1;n0,_=row_info(last);assert n0==0
 w.extreme_table.setCurrentCell(last,0);wait();n1,l1=row_info(last);assert n1>=1
 assert w.active_preview==index and (w.shown_states==w.extremes[index]['states']).all()
-w.width_toggle.setChecked(True);wait();n2,l2=row_info(last);assert n2>n1 and l2<l1,(n1,n2,l1,l2)
+w.width_toggle.setChecked(True);wait();n2,l2=row_info(last);assert n2>n1 and l2==l1,(n1,n2,l1,l2)
 before=list(w.cache_group.recent);w.refresh_extreme_colors();assert before==list(w.cache_group.recent)
 w.grid_mode.setCurrentIndex(1);wait();assert w.active_preview is None
 w.grid_mode.setCurrentIndex(0);wait()
@@ -62,4 +65,4 @@ deadline=time.monotonic()+15
 while w.cache_clear_worker is not None and time.monotonic()<deadline:app.processEvents();time.sleep(.005)
 assert row_info(1)[0]==0
 close_window(app,w);tmp.cleanup()
-print('GUI_V26_PASS 729-state pagination, frozen DIE, cache depth, clearing and exact footprint visibility/Job restore.')
+print('GUI_V26_PASS 729-state pagination, frozen DIE, cache reuse independent of rule colour, clearing and exact footprint visibility/Job restore.')

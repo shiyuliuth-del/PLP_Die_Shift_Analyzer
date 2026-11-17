@@ -24,7 +24,9 @@ class MouseDieMode:
         if ok:self.enter(names.index(value))
         w.canvas.setFocus()
     def enter(self,owner):
-        w=self.w;self.cancel_pending();w.stop_animation();self.owner=owner;self.drag=None
+        w=self.w
+        if hasattr(w,'rulers'):w.rulers.exit()
+        self.cancel_pending();w.stop_animation();self.owner=owner;self.drag=None
         w.preview_ticket+=1;w.preview_pending=None
         if w.preview_worker is not None:w.preview_worker.cancelled.set()
         w.canvas.die_move_active=True

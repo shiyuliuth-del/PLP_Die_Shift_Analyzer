@@ -56,6 +56,7 @@ def candidate(base,lines,r):
 
 
 def live_part(r,plan,part,center,pose):
+    if part.get('strict_box') is not None:return part
     mode=r.settings.reconstruction_boundary_mode
     if mode=='perpendicular':return part
     from .reconstruction import transform

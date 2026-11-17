@@ -99,9 +99,8 @@ y=table.rowViewportPosition(2);h=table.rowHeight(2);last=min(view.width(),sum(ta
 assert all(ink(x,y+1) and ink(x,y+h-1) for x in (8,table.columnWidth(0),last-7))
 assert ink(1,y+h//2) and ink(last-1,y+h//2)
 assert not ink(8,table.rowViewportPosition(1)+1)
-for safe in (True,False):
-    values=[w.cache_row_color(n,safe).lightness() for n in (0,1,4,20,2000)]
-    assert values==sorted(values,reverse=True) and min(values)>225 and values[1]>values[2]
+# V49 row colours are rule-state colours, independent of cache population.
+assert all(table.item(i,0).background().color().name() in ('#eaf5ed','#fff3d9','#fbe7e7','#000000') for i in range(table.rowCount()))
 name='示例P_单点PATH与相邻孔盘';q=json.loads((ROOT/'examples'/(name+'.json')).read_text())
 q['gds_path']=str(ROOT/'examples'/q['gds_path']);q['parameters'].update(target_nsigma='Infinity')
 q.setdefault('settings',{}).update(animation_enabled=False);q['overlays']={'width':True}

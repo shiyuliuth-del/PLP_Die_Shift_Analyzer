@@ -11,12 +11,13 @@ from die_shift_studio.core import Parameters
 from die_shift_studio.reconstruction import transform
 
 class V42Tests(unittest.TestCase):
- def test_border_is_independent_of_space_and_tolerance(self):
+ def test_border_is_independent_of_space_but_uses_signed_tolerance(self):
   from die_shift_studio.edge_clearance import edge_violations
   e,_,_=fixture()
   try:
    g=box(-194,-100,-185,100);rep={'5/0':[dict(indices=(0,),geometry=g)]};z=np.zeros((1,3))
-   self.assertTrue(edge_violations(e.contact,z,replace(e.p,package_clearance_um=10),ViewSettings(drc_tolerance_um=4),rep))
+   self.assertFalse(edge_violations(e.contact,z,replace(e.p,package_clearance_um=10),ViewSettings(drc_tolerance_um=4),rep))
+   self.assertTrue(edge_violations(e.contact,z,replace(e.p,package_clearance_um=10),ViewSettings(drc_tolerance_um=-4),rep))
    self.assertFalse(edge_violations(e.contact,z,replace(e.p,package_clearance_um=5),ViewSettings(),rep))
    self.assertFalse(edge_violations(e.contact,z,replace(e.p,package_clearance_um=0),ViewSettings(),rep))
   finally:e.close()
@@ -31,7 +32,10 @@ class V42Tests(unittest.TestCase):
    self.assertIsNone(error);self.assertEqual(score[0],0)
    strict=FixedRules(r.model,replace(e.p,package_clearance_um=20),r.settings)
    _,error,score=strict.best_regions(plan,part,e.bound.centers[0],np.zeros(3),'linear')
-   self.assertGreater(score[0],0)
+   self.assertEqual(score[1],0) # rigid-pad-only margin does not rank the A region
+   stricter=FixedRules(r.model,replace(e.p,package_clearance_um=30),r.settings)
+   _,error,score=stricter.best_regions(plan,part,e.bound.centers[0],np.zeros(3),'linear')
+   self.assertGreater(score[1],0)
   finally:e.close()
  def test_ignored_copper_moves_and_fixed_via_enclosure_is_checked(self):
   e,_,_=fixture()

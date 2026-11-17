@@ -122,12 +122,18 @@ def main():
         shutil.copy2(source/'dist'/client.name,client)
         normal_launch(client,cwd,'RealDataAnalyse '+__version__)
         paired_env=dict(ipc_env,REALDATA_TEST_EXE=str(client))
-        subprocess.run([sys.executable,str(ROOT/'tests/gui_v44_process.py')],cwd=ROOT,env=paired_env,check=True,timeout=600)
-        print('FROZEN_REALDATA_PASS: both sibling EXEs, named pipe, Excel join, OAS and sibling restart',flush=True)
+        # Repeat fresh processes/lots: a previous Windows-only invocation exited
+        # unsuccessfully without a captured receipt. Every run must pass; this
+        # is a lifecycle regression, never a retry that hides an earlier failure.
+        for iteration in range(6):
+            subprocess.run([sys.executable,str(ROOT/'tests/gui_v44_process.py')],cwd=ROOT,env=paired_env,check=True,timeout=600)
+            print(f'FROZEN_REALDATA_CYCLE_PASS {iteration+1}/6',flush=True)
+        print('FROZEN_REALDATA_PASS: both sibling EXEs, six fresh two-lot cycles, named pipe, Excel join, OAS and sibling restart',flush=True)
         gd55_env=dict(paired_env,REALDATA_TEST_CASE=str(source/'Jobs/GD55'))
         subprocess.run([sys.executable,str(ROOT/'tests/gui_v44_gd55.py')],cwd=ROOT,env=gd55_env,check=True,timeout=1350)
         subprocess.run([sys.executable,str(ROOT/'tests/gui_realdata_plans_process.py')],cwd=ROOT,env=gd55_env,check=True,timeout=900)
         subprocess.run([sys.executable,str(ROOT/'tests/gui_realdata_instances.py')],cwd=ROOT,env=gd55_env,check=True,timeout=600)
+        subprocess.run([sys.executable,str(ROOT/'tests/gui_realdata_errors.py')],cwd=ROOT,env=gd55_env,check=True,timeout=2400)
         print('FROZEN_GD55_XLSX_PASS: actual packaged Excel parser, paired EXEs and bundled case',flush=True)
     print('WINDOWS_SOURCE_BUILD_PASS',__version__,platform.platform(),
           f'normal window {elapsed:.2f}s, {icons} icon sizes, source BAT and isolated EXE verified; no binary published',flush=True)

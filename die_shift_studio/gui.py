@@ -226,6 +226,8 @@ class MainWindow(W.QMainWindow):
         self.reconstruction_overlay=ReconstructionOverlay(self)
         self.cut_drag=CutDrag(self)
         self.region_select=RegionSelect(self)
+        from .ruler import Rulers
+        self.rulers=Rulers(self)
         from .reconstruction_status import ReconstructionYieldDisplay,ConstraintFeedback
         self.reconstruction_yield=ReconstructionYieldDisplay(self);self.constraint_feedback=ConstraintFeedback(self)
         self.canvas.mpl_connect('key_press_event',lambda e:self.exit_region_mode() if str(e.key).lower()=='m' else None)
@@ -367,16 +369,18 @@ class MainWindow(W.QMainWindow):
         self.page_prev.clicked.connect(lambda:self.show_extreme_page(self.preview_page-1))
         self.page_next.clicked.connect(lambda:self.show_extreme_page(self.preview_page+1))
         self.page_edit.returnPressed.connect(self.jump_extreme_page)
-        self.extreme_table=table(['极端情况','DX / μm','DY / μm','转角 / °','极值定义'],ExtremeTable);self.extreme_table.setRowCount(1)
+        self.extreme_table=table(['DX / μm','DY / μm','转角 / °','极值定义'],ExtremeTable);self.extreme_table.setRowCount(1);self.extreme_table.verticalHeader().setVisible(True)
         self.extreme_table.setItemDelegate(ExtremeRowDelegate(self.extreme_table))
         self.extreme_table.currentCellChanged.connect(self.select_preview);ep.addWidget(self.extreme_table)
         from .manual_preview import ManualPreview
         self.manual_preview=ManualPreview(self);self.restore_button=self.manual_preview.restore_button
         self.state_table=table(['芯片','DX / μm','DY / μm','转角 / °','组合方向'])
         issue_page=W.QWidget();iv=W.QVBoxLayout(issue_page);iv.setContentsMargins(0,0,0,0);ir=W.QHBoxLayout()
-        self.show_issues=W.QCheckBox('显示接触位置');self.show_issues.setChecked(False)
-        ir.addWidget(self.show_issues);self.issue_summary=label('');ir.addWidget(self.issue_summary,1);iv.addLayout(ir)
-        self.issue_table=table(['规则问题','图层','要求','X / μm','Y / μm']);iv.addWidget(self.issue_table)
+        self.show_issues=W.QCheckBox('显示DRC问题');self.show_issues.setChecked(False)
+        ir.addWidget(self.show_issues);self.issue_prev=W.QPushButton('上一页');self.issue_next=W.QPushButton('下一页');ir.addWidget(self.issue_prev);ir.addWidget(self.issue_next);self.issue_summary=label('第 1/1 页');ir.addWidget(self.issue_summary,1);iv.addLayout(ir)
+        self.issue_page=0;self.issue_page_size=256
+        self.issue_prev.clicked.connect(lambda:self.show_issue_page(self.issue_page-1));self.issue_next.clicked.connect(lambda:self.show_issue_page(self.issue_page+1))
+        self.issue_table=table(['规则问题','图层','要求','X / μm','Y / μm']);self.issue_table.verticalHeader().setVisible(True);iv.addWidget(self.issue_table)
         for col,width in enumerate((142,76,90,100,100)):self.issue_table.setColumnWidth(col,width)
         self.issue_table.horizontalHeader().setStretchLastSection(True)
         self.issue_table.currentCellChanged.connect(self.issue_row_changed);self.issue_table.cellClicked.connect(lambda *_:self.issue_navigation.start())
@@ -531,25 +535,15 @@ class MainWindow(W.QMainWindow):
         drc_group=group('DRC')
         spin(drc_group,'drc_min_angle_deg','最小铜图形内角 / °',1,179,1)
         spin(drc_group,'drc_tolerance_um','尺寸容差 ± / μm',-10000,10000,3)
-        self.setting_fields['drc_tolerance_um'].setToolTip('有效最小值 = 工艺值 − 容差。正值放宽，负值收紧；默认0.1 μm。只影响DRC与型变验收，不改变包围量或概率。')
+        self.setting_fields['drc_tolerance_um'].setToolTip('有效最小值 = 工艺值 − 容差。正值放宽，负值收紧；默认0.1 μm。线宽、线距、包围量、机械净距和图形距边框共用；实体偏移分布不变。')
         recon=group('重构预演')
         row=W.QWidget();rv=W.QHBoxLayout(row);rv.setContentsMargins(0,0,0,0)
         self.region_move=W.QPushButton('框选动区');self.region_move.setCheckable(True)
-        self.region_stay=W.QPushButton('框选静区');self.region_stay.setCheckable(True)
-        for button,mode in ((self.region_move,'move'),(self.region_stay,'stay')):
-            button.toggled.connect(lambda on,mode=mode:self.region_mode(mode,on))
-            button.setToolTip('在当前重构的固定RDL图层上框选区域；框内按所属 DIE 设置动区或静区。')
-        self.clear_regions=W.QPushButton('清除全部手动区域');self.clear_regions.clicked.connect(self.clear_manual_regions)
-        self.cut_left=W.QPushButton('◀ 切口');self.cut_right=W.QPushButton('切口 ▶')
-        self.cut_left.clicked.connect(lambda:self.nudge_selected_cut(-5.))
-        self.cut_right.clicked.connect(lambda:self.nudge_selected_cut(5.))
-        for button in (self.cut_left,self.cut_right):button.setToolTip('选中切口沿法向微调 5 μm，保留另一刀的位置。')
-        region_row=W.QHBoxLayout()
-        for button in (self.region_move,self.region_stay,self.clear_regions,self.cut_left,self.cut_right):region_row.addWidget(button)
-        recon.addRow(region_row)
-        clear_cuts=W.QPushButton('清除全部手动切口');clear_cuts.setToolTip('把图上拖动固定过的切口全部恢复成软件自动搜索的位置。');clear_cuts.clicked.connect(self.clear_manual_cuts)
-        delete_cut=W.QPushButton('删除切口');delete_cut.setToolTip('删除选中那一行（那串）的手动切口与第二切口，恢复自动搜索；也可以直接右键/双击图上的切口线。');delete_cut.clicked.connect(self.delete_selected_cut)
-        for button in (clear_cuts, delete_cut): rv.addWidget(button)
+        self.region_move.toggled.connect(lambda on:self.region_mode('move',on))
+        self.region_move.setToolTip('在名义图形上严格框选动区；按住左键滚轮旋转，Esc退出。')
+        clear_cuts=W.QPushButton('清除全部手动切口');clear_cuts.clicked.connect(self.clear_manual_cuts)
+        delete_cut=W.QPushButton('删除切口');delete_cut.clicked.connect(self.delete_selected_cut)
+        for button in (self.region_move,clear_cuts,delete_cut):rv.addWidget(button)
         recon.addRow(row)
 
         choices['reconstruction_style']=[('直线','linear'),('一阶','c1'),('二阶','c2'),('圆弧','arc')]
@@ -563,7 +557,7 @@ class MainWindow(W.QMainWindow):
         spin(recon,'reconstruction_corner_guard_um','拐角吸附预留 / μm',0,1000,2)
         recon.addRow(label('动区沿原图追溯路径定义，所有姿态共用。两端蓝色边界分别拖动；圆点表示对应孔盘纳入动区。'))
         drawing=group('接触标记');
-        markers=W.QCheckBox('显示接触位置');self.setting_fields['show_contact_markers']=markers;drawing.addRow(markers);markers.toggled.connect(self.settings_changed)
+        markers=W.QCheckBox('显示DRC问题');self.setting_fields['show_contact_markers']=markers;drawing.addRow(markers);markers.toggled.connect(self.settings_changed)
         spin(drawing,'intrusion_alpha','侵入面积不透明度',.05,.85,2)
         for _,key,title,_,_ in RANGES:
             check=W.QCheckBox('显示'+title+'虚线');self.setting_fields[key]=check;drawing.addRow(check)
@@ -1053,6 +1047,7 @@ class MainWindow(W.QMainWindow):
             else:
                 try:self.case=build_case(data,self.roles(),layer_order=self.ordered_layers())
                 except ValueError:pass
+            if hasattr(self,'rulers'):self.rulers.restore(project.get('rulers',[]))
             self.enable_settings();self.apply_automatic();self.per_die_changed();self.manual_preview.restore_fields(project.get('manual_preview'))
         finally:self.loading=False
         if self.remote_locked or getattr(self,'requested_measured',False):
@@ -1166,7 +1161,7 @@ class MainWindow(W.QMainWindow):
         duration,steps=motion_timing(self.view_settings,distance,float(max(start_size)),True)
         self.transition.start(duration,steps,update,complete)
     def show_frame_status(self,frame):
-        message=('预演已更新' if frame is not None else '名义位置')+f' · 当前 DRC {len(self.filtered_issues)} 处违规'
+        message=('预演已更新' if frame is not None else '名义位置')+f' · 当前 DRC {len(getattr(self,"display_issues",self.filtered_issues))} 处违规'
         if frame is not None:
             from .statistics import mean_and_bounds
             params=self.params();mu,_=mean_and_bounds(params,len(frame['states']));bounds=np.array([mean_and_bounds(params.for_die(i),len(frame['states']))[1] for i in range(len(frame['states']))])
@@ -1188,6 +1183,9 @@ class MainWindow(W.QMainWindow):
         self.statusBar().showMessage(message)
         self.refresh_extreme_colors(frame)
     def present_frame(self,frame):
+        if frame and frame.get('diagnostic_only'):
+            from .topology_routing import failure_message
+            self.log_bus.emit(failure_message(frame['reconstruction']['hard_failures']),'ERROR')
         self.stop_animation()
         self._motion_intent=('frame',frame)
         def complete():
@@ -1275,8 +1273,8 @@ class MainWindow(W.QMainWindow):
                 else:self.toolbar.zoom()
             self.tabs.setCurrentIndex(0)
             if not self.reconstruction_toggle.isChecked():self.reconstruction_toggle.setChecked(True)
-            other=self.region_stay if mode=='move' else self.region_move
-            other.blockSignals(True);other.setChecked(False);other.blockSignals(False)
+            self.rulers.exit()
+            if self.shown_states is not None and np.any(self.shown_states):self.manual_preview.restore()
             self.region_select.set_mode(mode)
             self.statusBar().showMessage('拖动方框设置手动区域；按 Escape 退出')
         else:self.region_select.set_mode(None)
@@ -1284,7 +1282,7 @@ class MainWindow(W.QMainWindow):
     def exit_region_mode(self):
         if not hasattr(self,'region_select'):return
         self.region_select.set_mode(None)
-        for button in (self.region_move,self.region_stay):
+        for button in (self.region_move,):
             button.blockSignals(True);button.setChecked(False);button.blockSignals(False)
 
     def invalidate_reconstruction_edit(self):
@@ -1318,12 +1316,12 @@ class MainWindow(W.QMainWindow):
     def clear_manual_cuts(self,*_):
         extras=getattr(self.view_settings,'reconstruction_extra_cuts',())
         dropped=getattr(self.view_settings,'reconstruction_dropped_cuts',())
-        if not any((self.view_settings.reconstruction_cuts,extras,dropped,self.view_settings.reconstruction_second_cuts,self.view_settings.reconstruction_intervals,self.view_settings.reconstruction_angles,self.view_settings.reconstruction_deleted,self.view_settings.reconstruction_added)):return
+        if not any((self.view_settings.reconstruction_cuts,extras,dropped,self.view_settings.reconstruction_second_cuts,self.view_settings.reconstruction_intervals,self.view_settings.reconstruction_angles,self.view_settings.reconstruction_deleted,self.view_settings.reconstruction_added,self.view_settings.reconstruction_boxes)):return
         from dataclasses import replace
         # Also restores the automatic cuts that were deleted, so one button undoes
         # every hand edit of the cut lines.
         self.view_settings=replace(self.view_settings,reconstruction_cuts=(),
-                                   reconstruction_extra_cuts=(),reconstruction_second_cuts=(),reconstruction_dropped_cuts=(),reconstruction_intervals=(),reconstruction_angles=(),reconstruction_deleted=(),reconstruction_added=(),reconstruction_forced=())
+                                   reconstruction_extra_cuts=(),reconstruction_second_cuts=(),reconstruction_dropped_cuts=(),reconstruction_intervals=(),reconstruction_angles=(),reconstruction_deleted=(),reconstruction_added=(),reconstruction_forced=(),reconstruction_boxes=())
         self.invalidate_reconstruction_edit()
         self.statusBar().showMessage('已清除全部手动切口，并恢复被删除的自动切口')
         self.request_preview()
@@ -1374,6 +1372,7 @@ class MainWindow(W.QMainWindow):
             if self.result is not None:self.request_preview()
             else:self.plot_layout(preserve=True)
     def escape_action(self):
+        if hasattr(self,'rulers') and self.rulers.exit():return
         if hasattr(self,'cut_drag') and self.cut_drag.cancel():return
         self.exit_region_mode()
         if hasattr(self,'navigation'):self.navigation.cancel_zoom()
@@ -1550,6 +1549,9 @@ class MainWindow(W.QMainWindow):
                 self.role_boxes[key].setToolTip(roles[key])
         if hasattr(self,'selection'):self.selection.draw(redraw=False)
         if hasattr(self,'mouse_die'):self.mouse_die.update_text()
+        from .matplotlib_diagnostic import draw as draw_diagnostic
+        draw_diagnostic(self)
+        if hasattr(self,'rulers'):self.rulers.draw(redraw=False)
         self.render_scene()
     def render_scene(self):
         if hasattr(self,'scene_renderer'):
@@ -2243,15 +2245,12 @@ class MainWindow(W.QMainWindow):
         pages=max(1,(catalogue.total+EXTREME_PAGE_SIZE-1)//EXTREME_PAGE_SIZE);page=max(0,min(page,pages-1))
         self.preview_page=page;self.page_items=catalogue.page(page,EXTREME_PAGE_SIZE);self.active_preview=None;self._extreme_paint={};self._paint_pass=None
         self.page_edit.setText(str(page+1));self.page_prev.setEnabled(page>0);self.page_next.setEnabled(page+1<pages)
-        count=f'共 {catalogue.total+1:,} 种'
-        if waiting:count='筛选待重新评估' if self.dirty else '筛选未完成' if self._coupled_error else '筛选待计算'
-        if catalogue is not self.extremes:count+=f' / 整包 {self.extremes.total+1:,}'
-        self.page_summary.setText(f'{count} · 第 {page+1:,}/{pages:,} 页')
-        self.page_summary.setToolTip(self.page_summary.text()+'\n种数均含全包零位；每页最多 256 个非零姿态。绿色为通过，其他已缓存行为蓝色。')
+        self.page_summary.setText(f'第 {page+1:,}/{pages:,} 页 · 共 {source.total+1:,} 行')
+        self.page_summary.setToolTip('总行数按所选重点/全部范围计，含零位；过滤只改变可见行。')
         self.extreme_table.blockSignals(True);self.extreme_table.clearContents();self.extreme_table.setRowCount(len(self.page_items)+1)
         for col in range(self.extreme_table.columnCount()):self.extreme_table.setItem(0,col,W.QTableWidgetItem(''))
         for i,(index,e) in enumerate(self.page_items,1):
-            states=e['states'];values=[e['name']]
+            states=e['states'];values=[]
             for j in range(3):
                 x=np.rad2deg(states[:,j]) if j==2 else states[:,j]
                 values.append(fmt(x[0],5) if np.allclose(x,x[0]) else f'{fmt(min(x),5)} ～ {fmt(max(x),5)}')
@@ -2259,6 +2258,7 @@ class MainWindow(W.QMainWindow):
             detail='\n'.join(f'DIE {j+1}: DX={state[0]:.6g} μm, DY={state[1]:.6g} μm, θ={math.degrees(state[2]):.6g}°' for j,state in enumerate(states))
             for j,value in enumerate(values):
                 item=W.QTableWidgetItem(value);item.setToolTip(detail);self.extreme_table.setItem(i,j,item)
+        self.extreme_table.setVerticalHeaderLabels(['0',*[str(page*EXTREME_PAGE_SIZE+i) for i in range(1,len(self.page_items)+1)]])
         self.extreme_table.setCurrentCell(0,0);self.extreme_table.blockSignals(False)
         for j,width in enumerate([99,94,94,81]):self.extreme_table.setColumnWidth(j,width)
         self.extreme_table.horizontalHeader().setStretchLastSection(True);self.state_table.setRowCount(0)
@@ -2269,43 +2269,45 @@ class MainWindow(W.QMainWindow):
         from .extreme_validation import status_for
         factors=(self.result or {}).get('extreme_factors') if not self.dirty else None
         if self.extremes is None:return
-        self._cache_colors_changed()
         rows=[(0,None),*[(i,item) for i,(_,item) in enumerate(self.page_items,1)]]
-        current_key=(frame['states'].tobytes() if frame is not None and not frame.get('nominal_global') else None)
+        current_key=(frame['states'].tobytes() if frame is not None else None)
         current=frame_status(frame) if current_key is not None else {}
-        version=(id(self.reconstruction_yield.evidence),self._cache_color_context,self._cache_color_epoch,id(self.result),self.dirty,current_key,tuple(current.items()))
+        version=(id(self.reconstruction_yield.evidence),id(self.result),self.dirty,current_key,tuple(current.items()),self.reconstruction_toggle.isChecked(),self.preview_page)
         if getattr(self,'_paint_pass',None)==version:return
         self._paint_pass=version
         for row,item in rows:
             key=item['states'].tobytes() if item else bytes(24*len(self.extremes.locals))
-            status=status_for(factors,item['choices']) if item else {}
-            known=self._cached_row_checks.get(key) if item else None
+            status=status_for(factors,item['choices'] if item else [0]*len(self.extremes.locals))
+            known=getattr(self,'_cached_row_checks',{}).get(key) if item else None
             if known and (known['checked'] or known['safe'] is False or known.get('width_pending') or False or self.dirty):status=known
-            if item and key==current_key:
+            if key==current_key:
                 if current.get('checked') or current.get('safe') is False:status=current
                 elif current.get('width_pending') or False or self.dirty:status=current
+            moving_drc=status.get('moving_drc',0)
             if item and self.reconstruction_toggle.isChecked():
                 evidence=self.reconstruction_yield.evidence
                 if evidence and evidence.get('complete'):
                     from .extreme_filter import ProblemIndex
                     if getattr(self,'_reconstruction_row_bank',None) is not evidence:
-                        self._reconstruction_row_bank=evidence;self._reconstruction_row_index=ProblemIndex(self.extremes,evidence['red_factors'])
-                    status=dict(checked=True,safe=not self._reconstruction_row_index.matches(item['choices']),reason='按实际重构规则检查')
+                        self._reconstruction_row_bank=evidence;self._reconstruction_row_index=ProblemIndex(self.extremes,evidence['red_factors']);self._reconstruction_connection_index=ProblemIndex(self.extremes,evidence.get('connection_factors',()))
+                    status=dict(checked=True,safe=not (moving_drc or self._reconstruction_row_index.matches(item['choices'])),connection_failures=self._reconstruction_connection_index.matches(item['choices']),reason='按实际重构规则检查')
                 else:status=dict(checked=False,safe=None,reason='重构极端核验中')
                 if item and key==current_key and frame and frame.get('reconstruction',{}).get('constraints_complete'):
                     from .reconstruction_events import scene_failure
-                    status=dict(checked=True,safe=not scene_failure(frame['reconstruction']),reason='按当前重构几何检查')
-            count=self._cached_pose_counts.get(key,0);safe=status.get('safe') is True
+                    status=dict(checked=True,safe=not (frame.get('drc') or frame['reconstruction'].get('hard_failures')),drc=len(frame.get('drc',())),connection_failures=len(frame['reconstruction'].get('hard_failures',())),reason='按当前实际铜DRC和连接检查')
+            safe=status.get('safe') is True
+            if status.get('checked') and 'drc' in status:safe=status['drc']==0 and not status.get('connection_failures')
             check=('通过已检查规则' if safe else '存在已检查的问题' if status.get('safe') is False else '未作完整校验') if item else '名义位置 / 全局判定'
             if not item:
                 zero=(self.result or {}).get('nominal_discrete_check',{}) if not self.dirty else {}
                 if zero.get('checked'):check+=' · 零位几何'+('通过' if zero['safe'] else '存在问题')
             if status.get('reason'):check+=' · '+status['reason']
-            signature=(check,count,safe)
+            failed=bool(status.get('connection_failures'));known=bool(status.get('checked'))
+            signature=(check,safe,failed,known)
             if self._extreme_paint.get(row)==signature:continue
             self._extreme_paint[row]=signature
-            brush=QtGui.QBrush() if not count and not safe else QtGui.QBrush(self.cache_row_color(count,safe))
-            detail=f'{check}；当前工程同一评估输入下可复用缓存 {count} 项。绿色表示通过，蓝色表示其他已有缓存；颜色越深，缓存越多。'
+            brush=QtGui.QBrush(QtGui.QColor('#fbe7e7' if failed else '#eaf5ed' if safe else '#fff3d9')) if known or failed else QtGui.QBrush()
+            detail=f'{check}；浅绿：已检查无问题；浅黄：尺寸DRC违规但连通；浅红：重构连接失败。未检查行不着色。'
             for col in range(self.extreme_table.columnCount()):
                 cell=self.extreme_table.item(row,col)
                 if cell is not None:
@@ -2313,12 +2315,7 @@ class MainWindow(W.QMainWindow):
                     old=cell.toolTip().split('\n校验：')[0];tip=old+'\n校验：'+detail
                     if cell.toolTip()!=tip:cell.setToolTip(tip)
 
-    @staticmethod
-    def cache_row_color(count,safe):
-        light=(248,252,249) if safe else (248,251,254)
-        dark=(223,238,228) if safe else (226,238,248)
-        level=count/(count+6.) if count else 0.
-        return QtGui.QColor(*(round(a+(b-a)*level) for a,b in zip(light,dark)))
+
     def restore_preview(self):
         if self.data is None:return
         # Manual preview may have no selection; selecting an already current
@@ -2358,15 +2355,19 @@ class MainWindow(W.QMainWindow):
     def fill_issues(self):
         entries=self.contact_entries(self.current_frame)
         if id(entries)==self._issue_table_stamp:return
-        self._issue_table_stamp=id(entries);self.filtered_issues=entries;self.display_issues=entries
-        self.issue_table.blockSignals(True);self.issue_table.setRowCount(len(entries))
-        for i,row in enumerate(entries):
+        self._issue_table_stamp=id(entries);self.display_issues=entries
+        self.show_issue_page(self.issue_page)
+    def show_issue_page(self,page):
+        entries=getattr(self,'display_issues',[]);size=self.issue_page_size
+        pages=max(1,(len(entries)+size-1)//size);self.issue_page=max(0,min(int(page),pages-1));start=self.issue_page*size
+        self.filtered_issues=entries[start:start+size];self.issue_table.blockSignals(True);self.issue_table.setRowCount(len(self.filtered_issues))
+        for i,row in enumerate(self.filtered_issues):
             required=(f"{row['required_deg']:g}°" if row.get('required_deg') is not None else f"{row['required_um']:g} μm" if row.get('required_um') is not None else '—')
             values=[row['kind'],'、'.join(row.get('layers',(row['layer'],))),required,*[fmt(v) for v in row['point']]]
             for j,value in enumerate(values):
-                item=W.QTableWidgetItem(str(value));item.setToolTip('当前姿态实际铜的二值DRC；显隐不影响检查。');self.issue_table.setItem(i,j,item)
-        self.issue_table.blockSignals(False)
-        self.issue_summary.setText('当前 DRC：检查中…' if (self.current_frame or {}).get('drc_pending') else f'当前 DRC：{len(entries)} 处' if self.current_frame is not None else '方案评估后检查当前图形')
+                item=W.QTableWidgetItem(str(value));item.setToolTip('当前姿态实际铜的DRC；显隐不影响检查。');self.issue_table.setItem(i,j,item)
+        self.issue_table.setVerticalHeaderLabels([str(start+i+1) for i in range(len(self.filtered_issues))]);self.issue_table.blockSignals(False)
+        self.issue_summary.setText(f'第 {self.issue_page+1}/{pages} 页');self.issue_prev.setEnabled(self.issue_page>0);self.issue_next.setEnabled(self.issue_page+1<pages)
     def contact_markers_changed(self,enabled):
         self.view_settings=replace(self.view_settings,show_contact_markers=bool(enabled))
         field=self.setting_fields.get('show_contact_markers')
@@ -2409,7 +2410,7 @@ class MainWindow(W.QMainWindow):
         try:self.write_project(path);self.refresh_jobs();self.statusBar().showMessage('工程已保存：'+Path(path).stem)
         except Exception as exc:self.error(exc)
     def project_settings(self):
-        return dict(schema_version=5,app_version=__version__,sha256=self.data.sha256,top_cell=self.data.top_name,
+        return dict(schema_version=5,app_version=__version__,rulers=self.rulers.rows,sha256=self.data.sha256,top_cell=self.data.top_name,
                     roles=self.roles(),parameters=asdict(self.params()),settings=asdict(self.view_settings),node_edits=list(self.data.node_edits),
                     geometry_indexing=getattr(self.data,'geometry_indexing','legacy'),legacy_node_edits=list(getattr(self.data,'legacy_node_edits',[])),
                     dxf_directory=self.dxf_directory,dxf_options=asdict(self.dxf_settings),measured_output=self.measured_output.configuration(),

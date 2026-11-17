@@ -9,7 +9,7 @@ from itertools import product
 import math
 import numpy as np
 import shapely
-from .resources import cancel_check,parallel_map,native_phase_profile
+from .resources import cancel_check,parallel_map
 from .extreme_filter import PoseClause,ProblemIndex
 
 
@@ -98,7 +98,10 @@ def scene(r,grid,bundles,digits,diagnostics=True):
     if blocked:
         # The interactive path can also try its bounded quick angle candidate.
         # Statistics must use exactly the same completed copper in that case.
-        alternate=r.frame(states,diagnostics=diagnostics)
+        alternate=r.frame(states,diagnostics=False)
+        if diagnostics:
+            alternate=dict(alternate,violations=r.rules.check(alternate['replacements'],states),original_violations=r.rules.nominal_check(),constraints_complete=True)
+            decorate_problems(alternate)
         return states,alternate
     frame=dict(replacements=out,pieces=pieces,violations=r.rules.check(out,states) if diagnostics else [],original_violations=r.rules.nominal_check() if diagnostics else (),dbu_um=r.tol,
                repair_refs=repaired,hard_failures=blocked,electrically_valid=not bool(blocked))
@@ -125,21 +128,29 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
     from .width_summary import strongest
     from .width_witness import edge_witness
     from .width_analysis import BLOCKED
-    records=defaultdict(set);reasons=defaultdict(set);locations=defaultdict(dict);witnesses={};zones_seen=set();scene_records=set()
+    records=defaultdict(set);reasons=defaultdict(set);locations=defaultdict(dict);witnesses={};zones_seen=set();scene_records=set();connection_records=set()
     routing_lines={};routing_witnesses={};routing_factors=[];binary=r.p.target_nsigma in (0.,math.inf);repairs=0
     from .evaluation_scope import digits_for
     visits=(digits_for(grid,i) for i in indices) if indices is not None else product(*(range(n) for n in grid.radices))
     total=len(indices) if indices is not None else grid.total+1
-    for number,digits in enumerate(visits):
+    def evaluate(digits):
         cancel_check()
         if indices is None:states,frame=scene(r,grid,bundles,digits)
         else:
             states=np.asarray([v[d] for v,d in zip(grid.locals,digits)])
             frame=r.frame(states)
+        return digits,states,frame
+    # Stream scenes without retaining their whole package cross product.
+    # One solver owns GEOS/plan caches; never concurrently mutate that solver.
+    # Independent source preparation remains parallel and repairs are cached.
+    values=map(evaluate,visits)
+    for number,(digits,states,frame) in enumerate(values):
+        cancel_check()
         repairs+=bool(frame['repair_refs'])
         remember(r,states,frame)
         clause=PoseClause(tuple((o,(int(d),)) for o,d in enumerate(digits)));index=grid.index(digits)
         if frame['violations'] or frame['hard_failures'] or current_failures(frame):scene_records.add(clause)
+        if frame['hard_failures'] or any(q.get('connection_failed') for q in frame['pieces']):connection_records.add(clause)
         for q in frame['pieces']:
             key=zone_key(q);zones_seen.add(key);rows=q.get('rule_witnesses',())
             if not rows and not q.get('connection_failed'):continue
@@ -160,7 +171,7 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
                         probability=dict(lower=0.,upper=1.,certified=False,reason='有限离散极端不能证明连续概率上界'))
     return dict(complete=True,grid=grid,grid_key=tuple(v.tobytes() for v in grid.locals),zones=zones,
                 routing_summary=dict(lines=routing_lines,witnesses=routing_witnesses,red_factors=routing_factors),
-                red_factors=tuple(sorted(scene_records,key=lambda q:q.allowed)),package_states=total,selected_indices=tuple(indices) if indices is not None else None,
+                connection_factors=tuple(sorted(connection_records,key=lambda q:q.allowed)),red_factors=tuple(sorted(scene_records,key=lambda q:q.allowed)),package_states=total,selected_indices=tuple(indices) if indices is not None else None,
                 geometry_checks=sum(len(b['values']) for b in bundles.values()) if bundles is not None else total,local_checks=total,pair_checks=total,
                 joint_repaired_states=repairs,scope='全部离散极端；按电连接补偿后的实际铜联合核验。连续概率另给界限。')
 

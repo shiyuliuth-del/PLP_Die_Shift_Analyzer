@@ -21,6 +21,14 @@ on:
       - 'tests/test_realdata_plans.py'
       - 'tests/gui_realdata_plans*.py'
       - 'tests/gui_realdata_instances.py'
+      - 'tests/gui_realdata_errors.py'
+      - 'tests/test_realdata_errors.py'
+      - 'tests/test_oas_errors.py'
+      - 'tests/test_gd55_cases.py'
+      - 'tests/test_v49_reconstruction.py'
+      - 'tests/test_measured_issue_concurrency.py'
+      - 'tests/gui_v49.py'
+      - 'tests/gui_v49_gd55.py'
       - 'tests/gui_v44*.py'
       - 'tools/package_release.py'
       - 'tools/windows_acceptance.py'
@@ -67,7 +75,7 @@ jobs:
       fail-fast: false
       matrix:
         environment: [clean, with-cupy]
-    timeout-minutes: 35
+    timeout-minutes: 50
     env:
       PYTHONUTF8: '1'
       OPENBLAS_NUM_THREADS: '1'
@@ -131,6 +139,28 @@ jobs:
           "%DIE_SHIFT_PYTHON%" tests/gui_realdata_plans_process.py
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" tests/gui_realdata_instances.py
+      - name: Verify partial measured output, ERROR layer and expanded GD55
+        shell: cmd
+        run: |
+          set PYTHONPATH=.;tests
+          "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_oas_errors.py -v
+          if errorlevel 1 exit /b 1
+          "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_measured_issue_concurrency.py -v
+          if errorlevel 1 exit /b 1
+          "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_realdata_errors.py -v
+          if errorlevel 1 exit /b 1
+          "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_gd55_cases.py -v
+          if errorlevel 1 exit /b 1
+          "%DIE_SHIFT_PYTHON%" tests/gui_realdata_errors.py
+      - name: Verify V49 reconstruction rules, ruler and GD55 interactions
+        shell: cmd
+        run: |
+          set PYTHONPATH=.;tests
+          "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_v49_reconstruction.py -v
+          if errorlevel 1 exit /b 1
+          "%DIE_SHIFT_PYTHON%" tests/gui_v49.py
+          if errorlevel 1 exit /b 1
+          "%DIE_SHIFT_PYTHON%" tests/gui_v49_gd55.py
       - name: Locate the Windows C++ compiler for the interface test
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"

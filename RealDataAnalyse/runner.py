@@ -135,9 +135,22 @@ class Runner:
             result = self.transport.wait_task(task, stop, self.timeout, progress=report)
         else:
             result = self.transport.wait_task(task, stop, self.timeout)
-        if result.get('cell') != payload['cell'] or result.get('connection_failure_count', 0):
-            raise RemoteError(dict(error=dict(type='GeometryFailure', message='封装结果不匹配或存在未连接动区'), result=result))
+        self.validate_pose(result, payload['cell'])
         return task, result
+
+    @staticmethod
+    def validate_pose(result, cell):
+        if result.get('cell') != cell:
+            raise ValueError('封装回执名称不匹配')
+        for key in ('connection_failure_count', 'drc_count', 'error_rectangles', 'omitted_region_count'):
+            value=result.get(key,0)
+            if type(value) is not int or value<0:raise ValueError('问题回执计数无效：'+key)
+        if result.get('fixed_rdl_drc_checked') is not True:
+            raise ValueError('服务未完成当前姿态DRC，不能把未知问题数当作零')
+        if result.get('connection_failure_count',0) and (result.get('partial_output') is not True or not result.get('omitted_region_count')):
+            raise ValueError('连接失败但未确认移除失败位置，保留记录等待正确服务回执')
+        if (result.get('drc_count',0) or result.get('connection_failure_count',0)) and not result.get('error_rectangles'):
+            raise ValueError('存在DRC或连接问题但没有ERROR矩形，拒绝静默遗漏')
 
     def batch(self, attempt):
         ledger, t = self.ledger, self.transport
@@ -151,10 +164,14 @@ class Runner:
             raise FileExistsError('批次暂存名已经存在，拒绝覆盖')
         ledger.set('stage', str(stage))
         t.request('output.configure', {'output_directory': str(directory), 'max_threads': self.workers, 'max_memory_mb': self.memory_mb}, stop=self.stop)
-        begin = t.request('batch.begin', {'filename': stage_name, 'client_id': run}, request_id=uuid.uuid5(uuid.UUID(run), f'begin:{attempt}').hex, stop=self.stop)['result']
+        begin = t.request('batch.begin', {'filename': stage_name, 'client_id': run, 'output_policy': 'omit_failed_regions'}, request_id=uuid.uuid5(uuid.UUID(run), f'begin:{attempt}').hex, stop=self.stop)['result']
         batch = begin['batch_id']
         lanes = max(1, min(self.workers, int(begin['threads'])))
         ledger.set('batch', batch)
+        if begin.get('output_policy') != 'omit_failed_regions':
+            raise ValueError('预演软件不支持局部问题输出与ERROR层，请使用配套新版本')
+        ledger.set('issue_packages', 0)
+        ledger.set('error_rectangles', 0)
         # A second client could open another project after prepare() but before
         # batch.begin. Once the batch owns the service, project switching is
         # locked: verify that frozen identity again before submitting any copper.
@@ -213,8 +230,13 @@ class Runner:
                         completed += 1
                         self.completed_count = completed
                         self.progress(dict(text=f'批次{attempt} · 完成{completed}/{self.total} · 待回执{len(pending)} · 尚未最终提交', current=completed, total=self.total))
+                        has_issues=bool(result.get('drc_count',0) or result.get('connection_failure_count',0))
                         with ledger.db:
-                            ledger.db.execute("update packages set state='computed',task=?,result=? where seq=?", (task, dumps(result), seq))
+                            ledger.db.execute("update packages set state=?,task=?,result=? where seq=?", ('computed_with_issues' if has_issues else 'computed', task, dumps(result), seq))
+                        if has_issues:
+                            ledger.set('issue_packages',ledger.get('issue_packages',0)+1)
+                            ledger.set('error_rectangles',ledger.get('error_rectangles',0)+result['error_rectangles'])
+                            self.note(f'封装{seq}保留正常部分：DRC {result.get("drc_count",0)}项，连接失败 {result.get("connection_failure_count",0)}项；ERROR矩形 {result["error_rectangles"]}个', 'WARNING')
                         if completed == 1 or completed % 20 == 0 or completed == ledger.get('count'):
                             self.note(f'计算完成 {completed}/{ledger.get("count")}；等待整批文件提交')
         if self.stop.is_set():
@@ -229,6 +251,10 @@ class Runner:
             receipt = t.wait_task(reply['task_id'], self.stop, self.timeout)
         if receipt.get('cells') != ledger.get('count') or Path(receipt['path']).resolve() != stage:
             raise ValueError('OAS完成回执与请求数量或路径不符')
+        if not isinstance(receipt.get('error_layer'),dict) or receipt['error_layer'].get('name') != 'ERROR':
+            raise ValueError('OAS完成回执没有ERROR命名层')
+        if receipt.get('error_packages',0) != ledger.get('issue_packages',0) or receipt.get('error_rectangles',0) != ledger.get('error_rectangles',0):
+            raise ValueError('OAS的ERROR标记数量与逐封装回执不一致')
         from die_shift_studio.oas_validation import verify_crc
         self.progress(dict(text='OAS验证 · 流式CRC校验', current=0, total=1))
         if not verify_crc(stage, stop=self.stop):
@@ -290,10 +316,10 @@ class Runner:
                 os.replace(extra, destination)
                 self.note(f'旧Output附属文件归档：{extra.name} → {destination}')
         with ledger.db:
-            ledger.db.execute("update packages set state='committed'")
+            ledger.db.execute("update packages set state=case when state in ('computed_with_issues','committed_with_issues') then 'committed_with_issues' else 'committed' end")
         ledger.set('state', 'completed')
         self.note(f'完成：{ledger.get("count")}封装，{self.output}，SHA-256 {digest}')
-        self.progress(dict(text=f'完成 · {ledger.get("count")}封装 · OAS已校验并提交', current=1, total=1))
+        self.progress(dict(text=f'完成 · {ledger.get("count")}封装 · 含问题{ledger.get("issue_packages",0)}封装 · ERROR矩形{ledger.get("error_rectangles",0)}个 · OAS已提交', current=1, total=1))
         return True
 
     def run(self):
@@ -334,7 +360,7 @@ class Runner:
                     # during the previous-file hash must leave this retryable.
                     ledger.set('config', config)
                 if self.publish():
-                    return {'state': 'completed', 'output': str(self.output)}
+                    return {'state': 'completed', 'output': str(self.output), 'issue_packages': ledger.get('issue_packages',0), 'error_rectangles': ledger.get('error_rectangles',0)}
                 for retry in range(self.retries + 1):
                     if self.stop.is_set():
                         raise InterruptedError('用户停止')
@@ -343,7 +369,7 @@ class Runner:
                     try:
                         self.prepare()
                         self.batch(attempt)
-                        return {'state': 'completed', 'output': str(self.output)}
+                        return {'state': 'completed', 'output': str(self.output), 'issue_packages': ledger.get('issue_packages',0), 'error_rectangles': ledger.get('error_rectangles',0)}
                     except InterruptedError:
                         raise
                     except (OSError, EOFError, TimeoutError, RemoteError) as exc:

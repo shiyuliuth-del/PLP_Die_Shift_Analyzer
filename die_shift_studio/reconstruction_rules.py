@@ -25,6 +25,8 @@ def intrinsic(wkb,width,space,dbu):
 
 class FixedRules:
     def __init__(self,model,p,cfg):
+        from .drc_rules import effective_clearances
+        p=effective_clearances(p,cfg)
         self.model=model;self.p=p;self.cfg=cfg;self.width,self.space=effective_rules(p,cfg)
         self.dbu=max(model.data.dbu_um,1e-6);self.nets={};self.refnet={};self.vias=defaultdict(list)
         for node in model.nodes:
@@ -51,7 +53,7 @@ class FixedRules:
         self.keepout=forbidden(model)
         self.contexts={};self.hard_memo={};self._nominal_rows=None;self._nominal_lock=threading.Lock()
         from .session_cache import logical_fingerprint
-        self.identity=logical_fingerprint((model.data.geometry_id,model.roles,model.connections.order,self.width,self.space,p.annulus_um,p.package_clearance_um))
+        self.identity=logical_fingerprint((model.data.geometry_id,model.roles,model.connections.order,self.width,self.space,p.annulus_um,p.package_clearance_um,getattr(cfg,'drc_min_angle_deg',0)))
 
     def nominal_check(self):
         if self._nominal_rows is None:
@@ -70,6 +72,9 @@ class FixedRules:
 
     def local(self,key,g,states,vias=None):
         out=list(intrinsic(g.wkb,self.width,self.space,self.dbu))
+        from .geometry_rules import angle_regions
+        angle=angle_regions(g,getattr(self.cfg,'drc_min_angle_deg',0),self.dbu)
+        if not angle.is_empty:out.append(('最小内角不足',angle))
         for ref,owner,required in (self.vias[key] if vias is None else vias):
             target=self.model.moved(required,owner,states)
             missing=target.difference(g)
@@ -119,21 +124,26 @@ class FixedRules:
         key,rest,vias,others,tree=self.context(plan)
         states=np.zeros((len(self.model.bound.centers),3));states[plan.owner]=pose
         copper=shapely.union_all([rest,*candidate.values()]);kinds=set();amount=0.
+        active=candidate['A'].buffer(self.dbu*2)
         for op,value in (('width',self.width),('space',self.space)):
-            if any_violation(op,copper.wkb,self.dbu,value):kinds.add(op)
+            if any_violation(op,copper.wkb,self.dbu,value) and rule_region(copper,value,self.dbu,op).intersects(active):kinds.add(op)
         for ref,owner,required in vias:
-            missing=self.model.moved(required,owner,states).difference(copper).area
+            missing=self.model.moved(required,owner,states).difference(copper).intersection(active).area
             if missing>self.dbu*self.dbu:kinds.add('enclosure');amount+=missing/max(self.width*self.space,1e-12)
-        if self.board is not None and (not self.board.covers(copper) or copper.distance(self.board.boundary)<self.border-self.dbu*.001):
+        if self.board is not None and not copper.difference(self.inside).intersection(active).is_empty:
             kinds.add('board');amount+=copper.difference(self.inside).area/max(self.width*self.space,1e-12)
-        if not self.keepout.is_empty and shapely.relate_pattern(copper,self.keepout,'T********'):
+        if not self.keepout.is_empty and shapely.relate_pattern(copper.intersection(active),self.keepout,'T********'):
             kinds.add('keepout');amount+=copper.intersection(self.keepout).area/max(self.width*self.space,1e-12)
         for j in tree.query(copper,predicate='dwithin',distance=self.space):
             other=others[int(j)]
-            if self.pair_fails(copper,other):
+            if self.pair_fails(copper,other) and self.pair(copper,other).intersects(active):
                 kinds.add('foreign');gap=copper.distance(other)
+                if copper.intersects(other):kinds.add('short')
                 amount+=(self.space-gap)/max(self.space,1e-12)+(copper.intersection(other).area/max(self.width*self.space,1e-12) if gap==0 else 0)
-        return len(kinds),amount
+        from .geometry_rules import angle_regions
+        if not angle_regions(copper,getattr(self.cfg,'drc_min_angle_deg',0),self.dbu).intersection(active).is_empty:kinds.add('angle')
+        from .drc_rules import violation_priority
+        return (*violation_priority(kinds),amount)
 
     def best_regions(self,plan,part,center,pose,style):
         """Keep endpoints fixed; compare finite style-preserving curve candidates.
@@ -161,13 +171,13 @@ class FixedRules:
                     if not bad.is_empty and bad.distance(seam)>max(self.width,self.space)*2:permanent=True
             self.hard_memo[hard_key]=permanent
         permanent=self.hard_memo[hard_key]
-        if score[0] and style!='linear' and np.any(pose) and not permanent:
+        if any(score[:-1]) and style!='linear' and np.any(pose) and not permanent:
             for v in (-1,*range(1,len(VARIANTS)+1)):
                 cancel_check();alternate,reason=warp(part,plan,center,pose,style,v)
                 if reason:continue
                 candidate_score=quality(alternate)
                 if candidate_score<best_score:best,best_score=alternate,candidate_score
-                if best_score[0]==0:break
+                if not any(best_score[:-1]):break
         size=sum(int(shapely.get_num_coordinates(g))*24 for g in best.values())+512
         if size<=plan.memo_budget:
             plan.pose_memo[token]=((dict(best),None,best_score),None,size);plan.memo_bytes+=size
@@ -214,7 +224,7 @@ class FixedRules:
                 # A strict violation in rigid copper, far from every seam,
                 # cannot be cured by any transition shape or sampled pose.
                 return 1.,len(grid.locals[plan.owner])
-            bad=bool(error) or score[0]>0
+            bad=bool(error) or any(score[:-1])
             if bad:failure+=float(weights[i]);count+=1
             if failure>limit+1e-15:break
         return float(failure),count

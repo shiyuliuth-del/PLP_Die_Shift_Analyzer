@@ -247,13 +247,15 @@ class PlanRunner:
         owned_pid = row.get('owned_pid'); owned_birth = row.get('owned_birth')
         batch_owner = None
         last_update = [0.]
+        last_number = [0.]
         def report(value, base=25, span=60):
             if isinstance(value, dict):
                 text = value.get('text','')
                 fraction = value.get('current',0)/max(1,value.get('total',1))
-            else: text, fraction = str(value), 0
+            else: text, fraction = str(value), None
             if text.startswith(('OAS', '最终提交')): base, span = 85, 14
-            number = min(99., base + span*max(0., min(1.,fraction)))
+            number = last_number[0] if fraction is None else min(99., base + span*max(0., min(1.,fraction)))
+            last_number[0] = number
             now = time.monotonic()
             if now-last_update[0] >= .2:
                 last_update[0] = now
@@ -269,8 +271,7 @@ class PlanRunner:
                     meta = {k: json.loads(v) for k,v in db.execute('select key,value from meta')}
                 record = meta.get('publish')
                 if record and Path(row['output']).is_file() and sha256(row['output'], self.stop) == record['sha256']:
-                    Runner(database, meta['config']['endpoint'], meta['config']['project'], row['output'], stop=self.stop, trace=self.trace).run()
-                    return
+                    return Runner(database, meta['config']['endpoint'], meta['config']['project'], row['output'], stop=self.stop, trace=self.trace).run()
             validate(snapshot, row['output'], check_hash=True, stop=self.stop)
             configure_logging(Path(snapshot['folder']))
             if self.trace: self.trace.set_root(snapshot['folder'])
@@ -298,7 +299,7 @@ class PlanRunner:
                                                  controls['timeout'], self.trace, exact=True, on_launch=launched_callback)
             if launched or transport.owns_descriptor(owned_pid, owned_birth):
                 owned = info['instance_id']; self.plans.update(plan_id, owned_instance=owned)
-            Runner(database, endpoint, project, row['output'], controls['workers'], controls['memory'], controls['retries'],
+            return Runner(database, endpoint, project, row['output'], controls['workers'], controls['memory'], controls['retries'],
                    controls['timeout'], self.stop, report, transport=transport, trace=self.trace).run()
         finally:
             if transport is not None and (owned or owned_pid):
@@ -363,7 +364,7 @@ class PlanRunner:
                 if row['status'] == 'error' or row['severity'] == 'error':
                     totals['skipped'] += 1; continue
                 try:
-                    self.run_one(row)
+                    summary=self.run_one(row) or {}
                     self.reconcile_archives(row)
                 except InterruptedError as exc:
                     self.plans.update(plan_id, status='paused', severity='warning', ended=time.time(), message=str(exc))
@@ -374,7 +375,7 @@ class PlanRunner:
                     self.progress(str(exc))
                     if '队列停止' in str(exc): break
                 else:
-                    self.plans.update(plan_id, status='completed', severity='', progress=100, ended=time.time(), message='OAS已校验并提交')
+                    self.plans.update(plan_id, status='completed', severity='', progress=100, ended=time.time(), message=f'OAS已校验并提交；含问题{summary.get("issue_packages",0)}封装，ERROR矩形{summary.get("error_rectangles",0)}个')
                     totals['completed'] += 1
         state = 'paused' if self.stop.is_set() else ('completed_with_errors' if totals['failed'] or totals['skipped'] else 'completed')
         return dict(state=state, **totals)

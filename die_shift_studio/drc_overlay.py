@@ -14,8 +14,9 @@ class DRCOverlay:
             self.links=LineCollection([],colors='#9299a0',linestyles=(0,(3,3)),linewidths=.7,alpha=.55,zorder=10.1);w.ax.add_collection(self.links)
         show=w.show_issues.isChecked();visible={k for k,box in w.visible_boxes.items() if box.isChecked()}
         x0,y0,x1,y1=w.view_bounds;rows=[]
-        for row in w.filtered_issues:
-            if not visible.intersection(row.get('layers',(row['layer'],))):continue
+        for row in getattr(w,'display_issues',w.filtered_issues):
+            layers=row.get('layers',(row['layer'],))
+            if layers and not visible.intersection(layers):continue
             a,b,c,d=row['geometry'].bounds
             if c>=x0 and a<=x1 and d>=y0 and b<=y1:rows.append(row)
         color=w.view_settings.contact_marker_color

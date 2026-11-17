@@ -172,3 +172,31 @@ V47发布完成：PR37合并e51df6e，标签V47。最终18d9104的437核心（2�
 V48最终验收：功能代码0e59a09，运行摘要0f7029b52165ea81b6fef1532725b195368e36753fab03bd69dc0e5fc126691f。451核心（2项原始外部图纸另验）、35GUI/进程、两后端、17工程，共55命令退出0。7be169d的Windows44016068299 clean/with-cupy全部通过，含双EXE两项目计划/三实例和GD55 OAS。首次Windows失败为测试8.3路径及日志句柄清理，修正后完整重跑；不降低断言。源码163文件、2119979字节，SHA aadace500c667c0d1a621b78472d41f11148b45e8e13d59b8aa51ee0c01a6c56。后续仅验收文档，正式资产发布后回下载复核，不改旧tag。
 
 V48发布回下载完成：PR39合并main为8536446d86c2329e743eade38a951488c11734d2，标签V48。实际Release ZIP/SHA、自动ZIP/tar、独立API MD/PY逐文件匹配标签，CRC/SHA/7-Zip通过；163文件、2119979字节，SHA aadace500c667c0d1a621b78472d41f11148b45e8e13d59b8aa51ee0c01a6c56。验证记录见V48_RELEASE_VERIFICATION.json。PR34的1c3b859与V47 c62287f均为V48祖先，双方历史已保留；本提交只有发布审计，不改标签或运行代码。
+
+## V49联合开发（2026-11-17，尚未验收/发布）
+
+本窗口基于main30224fb，分支codex/v49-drc-rulers-reconstruction，进行用户14项测量/尺寸容差/失败诊断/分页/严格旋转框选/自动截面及并行排线选区。另一窗口已发布V48，标签不改写。当前7项新核心针对性回归通过；全量回归出现旧合同断言，正迁移并补GUI，不能宣称完成。GD55两处原因为中心到代表点的方向偏置与分叉独立斜切；轴向/沿源边界选路和真实固定孔中心优先后两处已生成正确方向的相对截面，实图全交互仍待验收。
+
+直接读取另一聊天用户原文确认“允许直接同步并协调合并”。双方V49文件归属：本窗口measured_core.py/measured_ui.py/measured_issues.py/partial_output.py及其测试；另一窗口oas_stream.py/oas_errors.py/RealDataAnalyse/Jobs/GD55。批量显式output_policy=omit_failed_regions保留未失败铜，partial_output/omitted_region_count记录真实局部删除；严格默认保留。DRC条目bounds_um为当前GDS坐标，die_ids为1起编号，无归属静态[0]；package_relative_bounds_um以名义封装左下角为原点，批量有top_cell_bounds_um。task.get首128条+issue_catalog，task.issues(offset,limit≤512)读全部SQLite持久目录；不按2MB消息上限截断结果。待接口提交后对方只merge已提交历史，双方共同通过最终Linux/Windows/真实压力用例再发布。
+## 2026-11-17 V49 RealDataAnalyse问题标记协作
+
+用户授权两窗口直接同步并协调合并。客户端窗口分支codex/v49-realdata-error-output负责oas_stream/oas_errors、RealDataAnalyse和GD55扩展案例；预演窗口负责完整实测DRC/连接问题目录、明确DIE归属和移除失败位置后的可输出快照。已向该窗口发送具体接口约定，正式发布共同用V49，不能改V48。本轮旧严格门禁须保留默认；客户端明确请求output_policy=omit_failed_regions，不能把allow_failed当成成功绕过。Store的可选error_layer及add(errors,die_count)已通过KLayout/gdstk双读者验证，完整应用接线及联合验收仍待完成。
+
+V49客户端/案例进展：Store.add返回逐封装ERROR矩形数，客户端显式协商omit_failed_regions，检查完整DRC/已裁剪证据及逐项与最终标记计数，只把完成的局部输出列为“已输出（含问题）”，不吞通信/磁盘异常。27项旧客户端契约、3项新续跑契约、3项双读者OAS标记检查通过。用户补充普通偏移后，三份GD55 Excel新增Ordinary60（180个独立DIE XYZ）、Stress42和FailureRecovery6，原Measurements/Diagnostic值、样式、格式和窗格逐项相同；实际解析器核对所有表/坐标/中心。三组ForeignPadContact在V48严格模式真实失败，参数及复现步骤见Jobs/GD55/README；未提前把尚待联合实测的新接口说成已通过。
+
+V49主程序补验：旧合同断言已迁移至当前尺寸容差/完整实测DRC/失败可见诊断，不删除有效边界。修复未configure的PreviewEngine与开宽度后的默认容差差异；机械净距进入完整DRC及跨DIE因子，远端包络证明独立以免额外笛卡尔积。DRC分页保留完整画布目录。实际GD55两点源方向和两端独立拖动/滚轮已Qt通过。有限候选native严重度只比较动区/接缝，不把固定端原有不可修规则误当成每个候选都失败；全层DRC仍检查全部铜。实测共享有界64MB几何缓存；联合场景有界流式并行，失败回退不写完整分析帧磁盘缓存。完整468核心候选和追加47联合专项通过，长GUI/Windows尚未最终验收。另一窗口负责最后PR/双Windows/联合V49 Release，必须等待双方明确可冻结。
+
+V49客户端补充验收：候选Ordinary60实际客户端完整通过，180组独立XYZ、60个摆放坐标和20971个ERROR矩形逐项匹配全部问题分页与DIE子Cell，无连接失败，源图不变。Stress候选40/42已计算，035/036（DIE2/3的100,-100,3°）拓扑求解耗时较长，保留全部案例交主程序优化，不删除慢例。为避免晚导入版本混用，用受管v49-final-integration检出、codex/v49-joint-release分支合入后续主程序；原规范检出中的候选压力进程保留运行。最新RDA真实Qt再次验证默认Ordinary及八项清单，尚待主程序冻结与完整最终验收。
+V49性能追加：STRESS035/036旧候选长时间停在拓扑修复。cProfile定位visibility回退；实际端点在域外或分属不连通域时仍构造大量边，新增严格covers/分量的数学提前拒绝；有效域仍以原图覆盖核验。可见邻接图改为按需A*校验边，不预先穷查所有远边。STRESS035在开启cProfile及并行机器负载下63.879秒完成，DRC554/连接失败4，部分输出明确保留失败事实；DIE3仍验证。共享求解器联合scene并发已撤回，避免新原生风险，逐源并行保持；拓扑检查增加阶段进度。68针对性测试通过。两次带异步线程栈采样的退出139原因尚未最终确认，停用异步采样后须以正常运行重复验收，不能把无重现等同根因已修复。
+
+V49主程序d0d4397已确认功能冻结：476核心（2外部另验），gui39原600秒限时内正常退出0；新GUI/实图两点及38/40/41/42/42_branches/45/47专项通过。STRESS035/036新算法完整完成，约64/61秒含cProfile；不删除慢案例。联合集成窗口接管最终干净聚合/全实图/双Windows/PR/Release，冻结后本窗口仅补文档；最终失败才解冻修复。
+
+V49最终GUI旧合同迁移（仅测试）：gui_v26改为从独立缓存清单验证缓存仍复用/清除，取消旧tooltip数量和渐深色断言，实际行色不受缓存数量影响；四列及729状态分页/锁定DIE/足迹工程恢复保留。gui_branch_integration按已删除静区/清空/左右按钮验证其不存在，保留真实框选、工程保存、清除手工切口和派生证据失效断言。两套真实Qt均PASS且正常退出，运行代码仍d0d4397。
+
+V49冻结生命周期追加：f901c56 Windows clean双EXE全通过，但with-cupy一次客户端批量返回1，旧用例未保留错误回执，根因未知。ac11a6c增加失败result.json/项目日志，独立附件去掉无效allow_failed示例并通过GD55八姿态。验收驱动再增加六轮全新两批次/关闭/同目录重启，任一轮失败即整体失败，不能以重试通过掩盖先前失败；运行代码保持冻结，待Windows证据后决定后续修复。
+
+V49六轮复现：44040022940 with-cupy通过，clean第6轮抓到OperationalError: database is locked，batch.submit进度38。根因范围已收窄到共享问题目录首次初始化/并发短写；主程序窗口负责目录锁等待/事务/取消测试，本窗口新增客户端TimeoutError整批无重复补算与非锁磁盘错误保护旧输出回归。正式发布继续等待实际修复后的完整重验，不能以另一环境成功代替本环境失败。
+
+V49再次解冻仅目录并发：强化六轮真实Windows在clean第6轮复现SQLITE_BUSY，旧write本机30×8首次写入复现4次并定位journal_mode=WAL。采用按路径短事务门控、已WAL不重设、跨进程锁有界且可取消等待、原子回滚/显式关闭；非锁错误保持错误。export.gds须复用预览完整catalog，不能把首128行二次持久化为全部。19项专项及GUI43通过，窗口间配合补客户端TimeoutError恢复与非锁磁盘错误保护。后续必须跑新完整源码及双Windows，不以先前PASS覆盖该已复现缺陷。
+
+V49发布决定：用户明确要求停止检查/复核并直接发布。最终功能头b0299ad，目录锁竞争已修并通过240次首次并发写入、19目录相关专项及真实GD55导出347条完整分页；485核心（2外部另验）、38 GUI/进程、两后端、17工程，共58条干净源命令正常退出0。向最终Windows44045057121发出取消请求，不将其宣称完成；按用户决定不做发布后回下载。保留此前失败、修复及已完成Windows候选记录，联合PR41正常合并发布，双方提交完整保留。

@@ -1,6 +1,6 @@
 # Agent 自动入口
 
-源码、GitHub与发布只在本规范检出工作。先读 [Agent.md](Agent.md)、[AI交接](docs/AI_HANDOFF.md)、[现行合同](docs/DESIGN_REQUIREMENTS.md)、[已知问题](docs/KNOWN_ISSUES.md) 和 [轮次记录](docs/Agents.md)。当前说明：[V48使用说明](docs/V48_使用说明.md)。
+源码、GitHub与发布只在本规范检出工作。先读 [Agent.md](Agent.md)、[AI交接](docs/AI_HANDOFF.md)、[现行合同](docs/DESIGN_REQUIREMENTS.md)、[已知问题](docs/KNOWN_ISSUES.md) 和 [轮次记录](docs/Agents.md)。当前说明：[V49使用说明](docs/V49_使用说明.md)。
 
 唯一长期主线是main；最新用户要求优先。保留其他Agent的在途分支，不重写历史tag，不把研究目录整体提交。每轮同步主线、补有意义的回归、记录工程兼容与实际验收，通过PR提交GitHub。正式Release仅源码与校验值，保留RUN.bat及BUILD.bat两个入口。
 
@@ -16,4 +16,6 @@ V45：报告和底部宽度/重构表退役；结果分析所有计算仅在主�
 
 V47最新：实测模式豁免完整方案评估前置，启用只冻结工程/等待命令；无工程可开、忙时排队。指令只生成指定铜并校验连通/隔离/禁布区，不计算良率/全局尺寸DRC。重点仅同步覆盖各DIE非零局部状态（锁定DIE除外）加全零首行，权重仍条件归一化。自动共用主干选择不可把手工分支拖动锁死；近重合端孔不生成虚短路由，但实体端孔规则必须保留。
 
-V48：客户端顺序计划使用不可变配置/输入摘要、独立记录与专用实例。Output仅保留最终OAS，暂存/锁/旧结果归档Cache，失败保留旧目标。回归多实例对应、重复队列不重算、发布中断恢复、表格拖动及有界IPC会话。
+V49：客户端顺序计划使用不可变配置/输入摘要、独立记录与专用实例。Output仅保留最终OAS，暂存/锁/旧结果归档Cache，失败保留旧目标。回归多实例对应、重复队列不重算、发布中断恢复、表格拖动及有界IPC会话。
+
+V49进行中：测量标尺是工程注释，不进入铜/DRC/导出。尺寸容差扩展到两种包围量、机械净距及图形距边框。失败姿态允许诊断显示/红色双虚线，严格制造导出仍拒绝；用户已跨聊天明确授权批量output_policy=omit_failed_regions，只局部删除失败铜后继续并用ERROR层标记。通信/磁盘/非法几何不伪装成功。实测每姿态必须输出全部DRC/连接问题范围与DIE归属，task.issues分页及持久目录不截断。核心窗口负责measured_ui/core/issues、裁剪与主GUI；RealDataAnalyse窗口负责oas_stream/oas_errors、客户端和GD55案例，只合入已提交历史，共同验收后才发布。

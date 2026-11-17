@@ -43,7 +43,7 @@ def main():
             assert w.setting_fields['width_yield_method'].currentData()=='grid'
             assert w.setting_fields['acceleration'].findData('cuda')>=0
             assert hasattr(w,'width_yield') and hasattr(w,'problem_filter')
-            assert hasattr(w,'cut_left') and hasattr(w,'cut_right')
+            assert not any(hasattr(w,k) for k in ('cut_left','cut_right','region_stay','clear_regions'))
             w.load_project(ROOT/'Jobs/示例F_逐芯片幅度与迭代窗口.dshift.json');settle()
             w.tabs.setCurrentIndex(next(i for i in range(w.tabs.count()) if w.tabs.tabText(i)=='结果图形'));app.processEvents();w.canvas.draw()
             w.ax.set_xlim(0,100);w.ax.set_ylim(0,100);w.canvas.draw()
@@ -56,12 +56,9 @@ def main():
                 w.reconstruction_toggle.blockSignals(True);w.reconstruction_toggle.setChecked(True);w.reconstruction_toggle.blockSignals(False)
                 w.region_move.click();assert w.region_select.mode=='move'
                 mouse('button_press_event',40,40);mouse('motion_notify_event',50,50);mouse('button_release_event',50,50)
-                assert len(w.view_settings.reconstruction_regions)==1
-                w.region_stay.click();assert not w.region_move.isChecked()
-                mouse('button_press_event',60,60);mouse('motion_notify_event',55,55);mouse('button_release_event',55,55)
-                assert [r[2] for r in w.view_settings.reconstruction_regions]==['move','stay']
+                assert len(w.view_settings.reconstruction_boxes)==1
                 assert preview.called
-                saved_regions=w.view_settings.reconstruction_regions
+                saved_regions=w.view_settings.reconstruction_boxes
                 plane=(next(k for k,r in w.roles().items() if r=='固定RDL'),0,tuple(sorted((k,0) for k,r in w.roles().items() if r in ('运动过孔','固定过孔'))),1.,0.,12.,14.)
                 w.view_settings=replace(w.view_settings,reconstruction_cuts=(plane,),
                     reconstruction_second_cuts=(plane,),reconstruction_extra_cuts=(plane,),
@@ -74,7 +71,7 @@ def main():
                 w.setting_fields['reconstruction_corner_guard_um'].setValue(w.view_settings.reconstruction_corner_guard_um+1)
                 assert preview.call_count>before
                 assert not w.dirty and w._coupled_key is None and w._coupled_data is None
-                assert w.view_settings.reconstruction_regions==saved_regions
+                assert w.view_settings.reconstruction_boxes==saved_regions
                 project=Path(tmp)/'integration.dshift.json';w.write_project(project)
                 raw=json.loads(project.read_text())
                 assert 'dxf_options' in raw and raw['settings']['width_yield_method']=='grid'
@@ -82,16 +79,11 @@ def main():
                 w.dirty=False;clear.click();assert not w.dirty
                 for key in ('reconstruction_cuts','reconstruction_second_cuts','reconstruction_extra_cuts','reconstruction_dropped_cuts'):
                     assert not getattr(w.view_settings,key),key
-                w.dirty=False;w.clear_regions.click();assert not w.dirty
-                assert not w.view_settings.reconstruction_regions
-                assert w.region_select.mode is None
-                # V40 keeps the original assessment usable; only reconstructed evidence
-                # are invalidated. Verify these GUI edit routes
-                # invalidate the same stale evidence even without mouse dragging.
-                changed=replace(w.view_settings,reconstruction_second_cuts=(plane,))
-                with patch.object(w,'_selected_reconstruction_piece',return_value={}), \
-                     patch('die_shift_studio.reconstruction_overlay.nudge_cut',return_value=changed):
-                    w.dirty=False;w.nudge_selected_cut(5);assert not w.dirty
+                assert not w.view_settings.reconstruction_boxes
+                w.exit_region_mode();assert w.region_select.mode is None
+                # Selected-cut deletion still invalidates derived evidence,
+                # although the removed +/- and static-box controls stay absent.
+                w.view_settings=replace(w.view_settings,reconstruction_second_cuts=(plane,))
                 previous=w.current_frame
                 w.current_frame={'reconstruction':{'pieces':[{'layer':plane[0],'index':plane[1],'die':0,'vias':plane[2]}]}}
                 with patch.object(w,'_selected_reconstruction_piece',return_value=w.current_frame['reconstruction']['pieces'][0]):
@@ -104,12 +96,12 @@ def main():
                 w.show_frame_status(status_frame)
                 assert '2 处手动动区归属不明确，未应用' in w.statusBar().currentMessage()
             w.load_project(project);settle()
-            assert w.view_settings.reconstruction_regions==saved_regions
+            assert w.view_settings.reconstruction_boxes==saved_regions
             assert w.view_settings.reconstruction_second_cuts==(plane,),(w.view_settings.reconstruction_second_cuts,plane)
             assert w.view_settings.reconstruction_dropped_cuts==(plane[:3],)
             assert w.view_settings.width_yield_decimals==4
-            assert w.region_select.mode is None and not w.region_move.isChecked() and not w.region_stay.isChecked()
-            print('GUI_BRANCH_INTEGRATION_PASS: preserved controls, real bidirectional region events, edit retention, cache refresh, save/reopen, clear all')
+            assert w.region_select.mode is None and not w.region_move.isChecked()
+            print('GUI_BRANCH_INTEGRATION_PASS: current controls, strict rectangular region events, edit retention, cache refresh, save/reopen, clear all')
         finally:close_window(app,w)
 
 if __name__=='__main__':main()

@@ -1,0 +1,56 @@
+"""Display-only broken copper. Never certify or manufacture this snapshot."""
+import numpy as np
+import shapely
+
+
+class DiagnosticFailure(ValueError):
+    def __init__(self,message,frame,details=None):super().__init__(message);self.frame=frame;self.details=details or {}
+
+
+def display(result,centers,states):
+    if not result.get('hard_failures'):return result
+    failed={tuple(ref) for ref,_ in result['hard_failures']};pieces=[];holes={};segments=[]
+    for source in result.get('pieces',()):
+        q=dict(source,regions=dict(source['regions']))
+        if (q['layer'],q['index']) not in failed:
+            pieces.append(q);continue
+        q.update(connection_failed=True,valid=False,diagnostic=True)
+        active=q['regions'].get('A',shapely.Polygon())
+        holes.setdefault((q['layer'],q['index']),[]).append(active)
+        q['missing_region']=active if not active.is_empty else q.get('missing_region',active)
+        q['regions']['A']=shapely.Polygon();q['bridge']=shapely.Polygon();q['bridge_area_um2']=0.
+        for member in q.get('graph_members',(q,)):
+            plan=member.get('route_plan')
+            if plan is None:continue
+            if member.get('strict_box') is not None:
+                from .manual_regions import partition
+                part=partition(plan,member['strict_box'])
+            else:part=plan.partition(*member['interval'],member.get('boundary_angles',(0.,0.)))
+            if part is None:continue
+            try:
+                from .connection_curves import connection_data
+                _,_,_,_,near,far,*_=connection_data(part,plan,centers[q['die']],states[q['die']])
+                for a,b in zip(near,far):segments.append(dict(layer=q['layer'],points=np.asarray([a,b],float)))
+            except (ValueError,shapely.errors.GEOSException):continue
+        pieces.append(q)
+    overrides={}
+    for layer,rows in result.get('replacements',{}).items():
+        out=[]
+        for row in rows:
+            holes_here=[g for index in row['indices'] for g in holes.get((layer,index),())]
+            g=row['geometry'].difference(shapely.union_all(holes_here)) if holes_here else row['geometry']
+            out.append(dict(row,geometry=g))
+        overrides[layer]=out
+    return dict(result,pieces=pieces,replacements=overrides,diagnostic_only=True,failed_segments=segments)
+
+
+def markers(result,dbu):
+    out=[]
+    for ref,reason in result.get('hard_failures',()):
+        parts=[q.get('missing_region',q['regions']['A']) for q in result.get('pieces',()) if (q['layer'],q['index'])==tuple(ref)]
+        shape=shapely.union_all(parts)
+        if shape.is_empty:
+            shape=shapely.union_all([r['geometry'] for r in result.get('replacements',{}).get(ref[0],()) if ref[1] in r['indices']])
+        if shape.is_empty:continue
+        out.append(dict(layer=ref[0],layers=(ref[0],),refs=(tuple(ref),),kind='重构连接失败：'+reason,geometry=shape,connection_failure=True))
+    return out

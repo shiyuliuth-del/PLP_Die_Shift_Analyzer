@@ -12,7 +12,8 @@ def check_source():
     """Stage a clean test checkout. Test helpers and projects do not enter the release."""
     gui=['gui_smoke','gui_v14','gui_scheduler_v20',
          'gui_v24','gui_v25','gui_v26','gui_v27','gui_v28','gui_v29','gui_v30','gui_v32','gui_v33','gui_v34','gui_v35','gui_v36','gui_v38','gui_v39','gui_v40','gui_v41','gui_v42','gui_v42_branches','gui_v42_saved_process','gui_v43','gui_v43_process','gui_v44','gui_v44_process','gui_v44_gd55','gui_branch_integration','gui_v45','gui_realdata_projects','gui_evaluation_scope','gui_v47']
-    gui.extend(['gui_realdata_plans','gui_realdata_plans_process','gui_realdata_instances'])
+    gui.extend(['gui_v49','gui_v49_gd55'])
+    gui.extend(['gui_realdata_plans','gui_realdata_plans_process','gui_realdata_instances','gui_realdata_errors'])
     env=dict(os.environ,QT_QPA_PLATFORM='offscreen',OPENBLAS_NUM_THREADS='1',PYTHONUTF8='1',PYTHONFAULTHANDLER='1')
     subprocess.run([sys.executable,'tools/check_contribution.py'],cwd=ROOT,env=env,check=True)
     records=[]
@@ -60,7 +61,7 @@ def tagged_sources(ref):
     kernels={'die_shift_studio/cuda_kernels.cu','die_shift_studio/cuda_kernels.ptx'}
     root_files={name for name in files if '/' not in name}
     client_files={'RealDataAnalyse/'+n for n in ('__init__.py','main.py','gui.py','excel.py','runner.py','storage.py','transport.py','projects.py','conversation.py','instances.py','plans.py','plan_ui.py','widgets.py','RUN.bat','BUILD.bat','RealDataAnalyse.spec','requirements.txt','README.md')}
-    case_files={'Jobs/GD55/'+n for n in ('GD55_1105.gds','GD55.dshift.json','GD55_SYNTHETIC_DIE1.xlsx','GD55_SYNTHETIC_DIE2.xlsx','GD55_SYNTHETIC_DIE3.xlsx','README.md')}
+    case_files={'Jobs/GD55/'+n for n in ('GD55_1105.gds','GD55.dshift.json','GD55_SYNTHETIC_DIE1.xlsx','GD55_SYNTHETIC_DIE2.xlsx','GD55_SYNTHETIC_DIE3.xlsx','README.md','RealDataAnalyse.project.json')}
     if root_files!=SOURCE_FILES or any(
             name not in SOURCE_FILES|kernels|client_files|case_files and not (name.startswith('die_shift_studio/') and name.endswith('.py'))
             for name in files):

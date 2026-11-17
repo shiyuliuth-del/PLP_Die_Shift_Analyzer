@@ -210,7 +210,7 @@ def scan(r,grid,progress=lambda *_:None,source_cache=None):
             term=PoseClause(((owner,(all_digits[owner],)),) if owner>=0 else ())
             routing_factors.append(term)
             strongest(routing_lines,[(row['layer'],i) for i in row['indices']],BLOCKED,None,binary,routing_witnesses,edge_witness(row,grid.index(all_digits),r.model,states))
-    records=defaultdict(set);witnesses={};locations=defaultdict(dict);reasons=defaultdict(set);zone_defs={};scene_records=set();record_lock=threading.Lock()
+    records=defaultdict(set);witnesses={};locations=defaultdict(dict);reasons=defaultdict(set);zone_defs={};scene_records=set();connection_records=set();record_lock=threading.Lock()
     for bundle in bundles.values():
         for v in bundle['values'].values():
             for q in v['pieces']:zone_defs.setdefault(zone_key(q),q)
@@ -220,6 +220,8 @@ def scan(r,grid,progress=lambda *_:None,source_cache=None):
         index=grid.index(all_digits);term=PoseClause(tuple((i,(int(d),)) for i,d in zip(axes,digits)))
         if all_bad or any(rows.values()):
             with record_lock:scene_records.add(term)
+        if any(q.get('connection_failed') for q in pieces):
+            with record_lock:connection_records.add(term)
         for q in pieces:
             key=zone_key(q);issues=rows.get(key,())
             if not issues:continue
@@ -309,5 +311,5 @@ def scan(r,grid,progress=lambda *_:None,source_cache=None):
                         probability=dict(lower=0.,upper=1.,certified=False,reason='有限离散极端不能证明连续概率上界'))
     progress(100,'全部离散重构极端已核验')
     return dict(complete=True,routing_summary=dict(lines=routing_lines,witnesses=routing_witnesses,red_factors=routing_factors),grid_key=tuple(v.tobytes() for v in grid.locals),grid=grid,zones=zones,
-                red_factors=clauses,package_states=grid.total+1,geometry_checks=sum(len(b['values']) for b in bundles.values()),
+                connection_factors=tuple(sorted(connection_records,key=lambda c:c.allowed)),red_factors=clauses,package_states=grid.total+1,geometry_checks=sum(len(b['values']) for b in bundles.values()),
                 local_checks=calls,pair_checks=pair_checks,scope='全部离散极端；实际重构宽度、间距、包围量、边距、禁布区与连接。连续概率另行给出界限。')

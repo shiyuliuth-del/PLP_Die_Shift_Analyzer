@@ -36,6 +36,16 @@ def project_fixture(folder):
     return project
 
 
+def frozen_run(command, result, folder, **kwargs):
+    completed = subprocess.run(command, timeout=300, **kwargs)
+    if completed.returncode:
+        evidence = []
+        for path in [result, *sorted((folder / 'logs').glob('*.log'))]:
+            if path.is_file():
+                evidence.append(path.name + '\n' + path.read_text(encoding='utf8', errors='replace')[-16000:])
+        raise AssertionError(f'Frozen client exited {completed.returncode}\n' + '\n'.join(evidence))
+
+
 def main():
     with tempfile.TemporaryDirectory() as temp:
         folder = Path(temp)
@@ -68,7 +78,7 @@ def main():
                 config = folder / 'run.json'
                 config.write_text(json.dumps(kwargs), encoding='utf8')
                 result = folder / 'result.json'
-                subprocess.run([os.environ['REALDATA_TEST_EXE'], '--run', str(config), '--result', str(result)], check=True, timeout=300)
+                frozen_run([os.environ['REALDATA_TEST_EXE'], '--run', str(config), '--result', str(result)], result, folder)
                 assert json.loads(result.read_text(encoding='utf8'))['state'] == 'completed'
             else:
                 Runner(**kwargs, transport=t).run()
@@ -113,7 +123,7 @@ def main():
                 # Frozen client must find the sibling server, regardless of cwd.
                 kwargs.update(database=str(database2), output=str(folder / 'restart.oas'))
                 config.write_text(json.dumps(kwargs), encoding='utf8')
-                subprocess.run([os.environ['REALDATA_TEST_EXE'], '--run', str(config), '--result', str(result)], cwd=folder, check=True, timeout=300)
+                frozen_run([os.environ['REALDATA_TEST_EXE'], '--run', str(config), '--result', str(result)], result, folder, cwd=folder)
                 assert len(gdstk.read_oas(folder / 'restart.oas').top_level()[0].references) == 5
                 # app.shutdown acknowledges cancellation, not process exit.
                 # Wait for both onefile processes before removing their EXEs/logs.

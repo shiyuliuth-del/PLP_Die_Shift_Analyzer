@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "profile": {
+    "sheet": "Ordinary",
+    "header_row": 1,
+    "columns": {
+      "package_id": "package_id",
+      "die": "die",
+      "dx_um": "dx_um",
+      "dy_um": "dy_um",
+      "angle_deg": "angle_deg",
+      "package_x_um": "package_x_um",
+      "package_y_um": "package_y_um",
+      "center_x_um": "center_x_um",
+      "center_y_um": "center_y_um"
+    }
+  },
+  "shared_mapping": true,
+  "controls": {
+    "dies": 3,
+    "workers": 4,
+    "memory": 2048,
+    "retries": 3,
+    "timeout": 0
+  }
+}
