@@ -23,14 +23,21 @@ def main():
         try:
             config = json.loads(Path(args.run or args.import_data).read_text(encoding='utf8'))
             if args.import_data:
+                log_root = Path(config['database']).resolve().parent
+                if log_root.name == 'Tasks':
+                    log_root = log_root.parent
+                logger = configure_logging(log_root)
                 import threading
                 from RealDataAnalyse.excel import import_files
-                result = import_files(**config, stop=threading.Event())
+                result = import_files(**config, stop=threading.Event(), progress=lambda update: logger.info('%s', update))
             else:
+                configure_logging(Path(config['project']).resolve().parent)
                 from RealDataAnalyse.runner import Runner
                 result = Runner(**config).run()
             code = 0
         except Exception as exc:
+            import logging
+            logging.getLogger('RealDataAnalyse').exception('自动化任务失败')
             result, code = dict(state='error', message=str(exc)), 1
         if args.result:
             Path(args.result).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf8')
