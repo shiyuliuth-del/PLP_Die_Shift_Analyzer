@@ -15,7 +15,8 @@ class ErrorOutputTests(unittest.TestCase):
    try:
     copper=shapely.box(0,0,20,10)
     issues=[dict(bounds_um=[1,2,3,4],die_ids=[1]),dict(bounds_um=[-4,0,-4,2],die_ids=[2,3]),dict(bounds_um=[7,8,9,10],die_ids=[0])]
-    s.add('P',{'1/0':[copper.wkb]},(1000,2000),(10,20),errors=issues,die_count=3)
+    pose=s.add('P',{'1/0':[copper.wkb]},(1000,2000),(10,20),errors=issues,die_count=3)
+    self.assertEqual(pose['error_rectangles'],4)
     s.flush();self.assertTrue(verify_crc(checkpoint));result=s.write(target)
    finally:s.close()
    self.assertEqual(result['error_rectangles'],4)

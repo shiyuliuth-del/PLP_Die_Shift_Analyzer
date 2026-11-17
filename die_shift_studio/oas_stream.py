@@ -103,7 +103,7 @@ class Store:
         if not name or len(name)>120 or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-' for c in name):raise ValueError('Cell name must be 1–120 ASCII letters/digits/_/-')
         if name=='TopCell' or name.startswith('G_'):raise ValueError('Reserved cell name')
         if name in self.pending_names or self.db.execute('select 1 from packages where name=?',(name,)).fetchone():raise ValueError('Duplicate package Cell: '+name)
-        children=[];cells=[]
+        children=[];cells=[];marker_count=0
         # Reuse canonical source features, not just whole layers. Changing one
         # trace must not duplicate all unchanged traces in the same fixed layer.
         for key,blobs in sorted(layers.items()):
@@ -125,16 +125,16 @@ class Store:
                 if not blobs and die==0:continue
                 # Package cell names are reserved separately from generated G_
                 # geometry names; include a hash to avoid user-name collisions.
-                child='G_ERROR_'+hashlib.sha256(name.encode('ascii')).hexdigest()+f'_DIE_{die}'
+                child='G_ERROR_'+name+f'_DIE_{die}'
                 cells.append((child,polygons({f'{self.error_layer[0]}/{self.error_layer[1]}':blobs},self.dbu)))
                 children.append(placement(child,dbu=self.dbu))
-            self.error_rectangles+=sum(map(len,markers.values()))
-            self.error_packages+=bool(markers)
+            marker_count=sum(map(len,markers.values()))
         body=b''.join(children);shift=np.asarray(position,dtype=float)-np.asarray(board_origin)
         if shift.shape!=(2,) or not np.isfinite(shift).all():raise ValueError('Package origin must have two finite coordinates')
         self.pending.append((name,cells,body,tuple(shift)));self.pending_names.add(name);self.bytes+=sum(len(b) for _,b in cells)+len(body)
-        self.count+=1
+        self.count+=1;self.error_rectangles+=marker_count;self.error_packages+=bool(marker_count)
         if self.bytes>=self.limit:self.flush()
+        return dict(error_rectangles=marker_count,error_layer=(dict(layer=self.error_layer[0],datatype=self.error_layer[1],name='ERROR') if self.error_layer else None))
     def emit(self,data):
         self.stream.write(data);self.crc=zlib.crc32(data,self.crc)
     def cell(self,name,body):
