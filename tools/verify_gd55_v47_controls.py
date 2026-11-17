@@ -26,6 +26,10 @@ w.constraint_feedback.request=lambda *_:None;w.reconstruction_yield.refresh=lamb
 try:
  rows=frame['reconstruction']['pieces'];branch=next(q for q in rows if (q['layer'],q['index'])==refs[1])
  assert branch['moved_cut'].bounds[2]<-1980,branch['moved_cut'].wkt
+ from die_shift_studio.branch_regions import editable_piece
+ for t in (.15,.5,.85):
+  clicked=branch['moved_cut'].interpolate(t,normalized=True).coords[0]
+  assert len(editable_piece(branch,clicked,'moved')['drag_members'])==2,'shared trunk left one branch pinned'
  for q in branch.get('graph_members',[branch]):
   assert q['nominal_regions']['C'].covers(q['moving_nominal']) if 'moving_nominal' in q else True
  target=next(q for q in rows if (q['layer'],q['index'])==refs[0]);plan=target['route_plan']
@@ -45,6 +49,17 @@ try:
  event('motion_notify_event',destination);w.cut_drag._tick()
  assert w.cut_drag.state['part']['near'].geom_type=='LineString',w.cut_drag.state['part']
  assert w.cut_drag.state['part']['a']>plan.land_end+10
+ event('button_release_event',destination)
+ # Drag the composed common-trunk seam; both contributors must move, while
+ # the opposite endpoint stays fixed. This used to leave an invisible old cut.
+ w.ax.set_xlim(-2400,-1800);w.ax.set_ylim(900,1450);w.plot_layout(preserve=True);w.canvas.draw()
+ q=next(q for q in w.current_frame['reconstruction']['pieces'] if (q['layer'],q['index'])==refs[1])
+ original_cut=q['moved_cut'];original_far=q['extra_cut'];start=np.asarray(original_cut.interpolate(.85,normalized=True).coords[0])
+ event('button_press_event',start);assert w.cut_drag.state is not None and len(w.cut_drag.state['companions'])==1
+ destination=start+[-35.,0.];event('motion_notify_event',destination);w.cut_drag._tick()
+ updated=next(q for q in w.current_frame['reconstruction']['pieces'] if (q['layer'],q['index'])==refs[1])
+ assert updated['moved_cut'].bounds[2]<original_cut.bounds[2]-20,(original_cut.wkt,updated['moved_cut'].wkt)
+ assert updated['extra_cut'].hausdorff_distance(original_far)<.01
  event('button_release_event',destination)
  assert not errors,errors
  print(json.dumps(dict(status='PASS',source_sha256=d.sha256,refs=refs,scope='real Qt zero pose line-to-point-to-line; common moving trunk; actual copper connectivity'),ensure_ascii=False))

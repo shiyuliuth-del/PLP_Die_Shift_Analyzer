@@ -30,6 +30,20 @@ class V47Tests(unittest.TestCase):
   p=Parameters(single_bound_x_um=25,single_bound_y_um=25,bound_angle_deg=1,line_width_um=10,line_space_um=10,annulus_um=8,moving_annulus_um=4)
   e=PreviewEngine(GeometryCache(data),case,roles,{},p,None,case['connections']);e.configure_reconstruction(True,ViewSettings())
   return e,data,case
+ def test_common_skew_seam_drags_both_contributors_not_a_separate_fork(self):
+  from types import SimpleNamespace
+  from die_shift_studio.branch_regions import editable_piece
+  def member(cut,y=0):
+   plan=SimpleNamespace(route=shapely.LineString([(0,y),(100,y)]),length=100.,tolerance=.001)
+   return dict(route_plan=plan,interval=(30.,80.),moved_cut=cut,extra_cut=shapely.LineString([(80,y-10),(80,y+10)]),moving_terminals=shapely.Point(0,y).buffer(3))
+  a=member(shapely.LineString([(30,-10),(30,10)]));b=member(shapely.LineString([(29.9,-10),(30.1,10)]))
+  separate=member(shapely.LineString([(30,90),(30,110)]),100)
+  seam=shapely.LineString([(30,-10),(30,0),(30.1,10)])
+  piece=dict(a,graph_members=(a,b,separate),endpoint_weights=(1.,0.),moved_cut=shapely.MultiLineString([seam,separate['moved_cut']]))
+  for t in (.15,.85):
+   picked=editable_piece(piece,seam.interpolate(t,normalized=True).coords[0],'moved')
+   self.assertEqual({id(q['route_plan']) for q in picked['drag_members']},{id(a['route_plan']),id(b['route_plan'])})
+  picked=editable_piece(piece,(30,100),'moved');self.assertEqual(len(picked['drag_members']),1)
  def test_overlapping_fixed_port_does_not_create_spurious_short_route(self):
   e,_,_=self.engine(shapely.box(-30,-30,330,30),[shapely.Point(0,0).buffer(5)],[shapely.Point(0,.3).buffer(5),shapely.Point(300,0).buffer(5)])
   try:
