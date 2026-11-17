@@ -25,7 +25,7 @@ COMMANDS = {
     'output.configure': {'output_directory': '', 'max_threads': 4, 'max_memory_mb': 2048},
     'preview.submit': {'dies': [{'die': 1, 'dx_um': 0, 'dy_um': 0, 'angle_deg': 0}]},
     'export.gds': {'filename': 'measured.gds'},
-    'batch.begin': {'filename': 'measured.oas'},
+    'batch.begin': {'filename': 'measured.oas', 'output_policy': 'omit_failed_regions'},
     'batch.submit': {'batch_id': '', 'cell': 'Package_000001', 'position_um': [0, 0], 'dies': []},
     'batch.end': {'batch_id': ''}, 'task.get': {'task_id': ''},
     'task.issues': {'task_id': '', 'offset': 0, 'limit': 128},

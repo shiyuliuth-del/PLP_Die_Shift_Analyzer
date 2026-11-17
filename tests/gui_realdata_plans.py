@@ -81,6 +81,8 @@ with tempfile.TemporaryDirectory(prefix='rda-plans-gui-') as name:
         assert w.table.item(0,3).text()=='已输出（含问题）'
         assert '连接失败 1项' in w.table.item(0,4).text() and 'ERROR矩形 2个' in w.table.item(0,4).text()
         assert w.command.findText('task.issues')>=0
+        w.command.setCurrentText('batch.begin')
+        assert json.loads(w.args.toPlainText())['output_policy']=='omit_failed_regions'
         w.grab().save(str(Path(tempfile.gettempdir())/'RealDataAnalyse-v48.png'))
     finally:
         # Do not let tests persist changed production UI height preferences.
