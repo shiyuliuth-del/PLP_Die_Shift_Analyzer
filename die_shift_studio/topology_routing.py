@@ -165,18 +165,23 @@ def resolve(r,replacements,pieces,states):
                     physical=r.model.nodes[r.model.ids[via]]['poly']
                     if original[ref].intersection(physical).area>r.tol*r.tol:terminals[ref].append((owner,physical))
         r._topology_inputs=inputs=(original,nets,terminals)
-    original,nets,terminals=inputs;objects=dict(original)
+    original,nets,terminals=inputs
+    # GEOS prepared predicates have mutable native indexes. Frame geometries
+    # can also have been prepared by a different overlay/worker; keep native
+    # query operands private to this invocation, including nominal copper.
+    def private(g):return shapely.from_wkb(g.wkb)
+    objects={ref:private(g) for ref,g in original.items()}
     for layer,rows in out.items():
         for row in rows:
-            for i in row['indices']:objects[layer,i]=row['geometry']
+            for i in row['indices']:objects[layer,i]=private(row['geometry'])
     mutable={ref for ref,rows in by_ref.items() if any(not q.get('ignored') for q in rows)}
-    for ref in objects:ports[ref]=[r.model.moved(physical,owner,states) for owner,physical in terminals[ref]]
+    for ref in objects:ports[ref]=[private(r.model.moved(physical,owner,states)) for owner,physical in terminals[ref]]
     changed=set();blocked=[];external={};immutable={}
     for ref,values in ports.items():
         external.setdefault(nets[ref][0],[]).extend((nets[ref],g) for g in values)
     for node in r.model.nodes:
         if r.model.roles[node['key']]=='固定RDL':continue
-        key=(node['key'].split('/')[0],node['net']);g=r.model.moved(node['poly'],node['owner'],states)
+        key=(node['key'].split('/')[0],node['net']);g=private(r.model.moved(node['poly'],node['owner'],states))
         external.setdefault(key[0],[]).append((key,g));immutable.setdefault(key[0],[]).append((node,g))
     external={plane:(values,shapely.STRtree([g for net,g in values])) for plane,values in external.items()}
     def foreign_hits(ref,g):
