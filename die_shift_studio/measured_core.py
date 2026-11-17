@@ -93,10 +93,10 @@ class Session:
     def run(self,rows,progress=lambda *_:None,*,preview=True,diagnostic=False,output_policy='strict'):
         if output_policy not in ('strict','omit_failed_regions'):raise ValueError('未知实测输出策略')
         states,p=pose_parameters(self.case,self.p,rows);model,r=self.model(p)
-        self.ensure_plans(r,progress)
+        self.ensure_plans(r,lambda n,t:progress(round(n*.2),t))
         # Measured commands check their own actual-copper DRC; no other poses,
         # probability, width analysis or yield work is started.
-        result=r.frame(states,progress=progress,diagnostics=preview)
+        result=r.frame(states,progress=lambda n,t:progress(20+round(n*.5),t),diagnostics=preview)
         bound=self.cache.bind(self.case,self.motions,list(self.cache.layers),p)
         bound.acceleration=self.settings.acceleration
         layers=bound.transform(states)
@@ -109,14 +109,14 @@ class Session:
         from .measured_issues import catalogue
         from .reconstruction_diagnostic import markers
         if not hasattr(r,'display_drc'):r.display_drc=GlobalDRC(model,p)
-        frame['drc']=r.display_drc.frame(states,result['replacements'],self.settings,progress)
+        frame['drc']=r.display_drc.frame(states,result['replacements'],self.settings,lambda n,t:progress(70+round(n*.15),t))
         frame['drc'].extend(markers(result,self.data.dbu_um));frame['drc_locations']=locations(frame['drc'])
         issues=catalogue(frame,self.case,model)
         original_failures=tuple(result.get('hard_failures',()));omissions=[]
         if original_failures and output_policy=='omit_failed_regions':
             from .partial_output import omit
             frame,omissions=omit(model,frame)
-            frame['drc'].extend(r.display_drc.frame(states,frame['reconstruction']['replacements'],self.settings,progress))
+            frame['drc'].extend(r.display_drc.frame(states,frame['reconstruction']['replacements'],self.settings,lambda n,t:progress(85+round(n*.1),t)))
             for q in omissions:
                 if q.get('quantization'):frame['drc'].append(dict(layer=q['layer'],layers=(q['layer'],),refs=((q['layer'],q['index']),),kind=q['reason'],geometry=shapely.box(*q['bounds_um']),connection_failure=True))
             frame['drc_locations']=locations(frame['drc']);issues=catalogue(frame,self.case,model)
@@ -130,7 +130,7 @@ class Session:
             raise DiagnosticFailure(failure_message(result['hard_failures']),frame,details)
         failures=[dict(layer=q['layer'],index=q['index'],reason=q.get('warning','无法连接')) for q in result['pieces'] if q.get('connection_failed')]
         from .dxf_export import snapshot
-        frozen=snapshot(self.data,self.cache,frame,reconstruction=True,progress=progress,allow_partial=bool(frame.get('partial_output_validated')))
+        frozen=snapshot(self.data,self.cache,frame,reconstruction=True,progress=lambda n,t:progress(95+round(n*.04),t),allow_partial=bool(frame.get('partial_output_validated')))
         for blobs in frozen.layers.values():
             for b in blobs:
                 g=shapely.from_wkb(b)

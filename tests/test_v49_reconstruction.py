@@ -54,6 +54,25 @@ class V49ReconstructionTests(unittest.TestCase):
    endpoints=[sorted([plan.route.interpolate(s).x for s in (plan.nominal_first,plan.nominal_second)]) for plan in plans]
    np.testing.assert_allclose(endpoints[0],endpoints[1],atol=.01)
   finally:e.close()
+ def test_impossible_endpoints_skip_graph_without_changing_valid_routes(self):
+  from die_shift_studio.reconstruction_route import trace
+  source=shapely.box(0,0,100,10);split=source.union(shapely.box(200,0,300,10))
+  with patch('die_shift_studio.reconstruction_route.medial_graph',side_effect=AssertionError('provably impossible graph')):
+   self.assertIsNone(trace(source,[0,-.000001],[50,5],10))
+   self.assertIsNone(trace(split,[50,5],[250,5],10))
+   line=trace(split,[5,5],[95,5],10)
+   self.assertTrue(source.covers(line));self.assertEqual(line.length,90)
+ def test_visibility_search_checks_only_reached_edges_around_dense_hole(self):
+  from die_shift_studio.reconstruction_visibility import trace
+  poly=shapely.box(-100,-50,100,50).difference(shapely.Point(0,0).buffer(35,quad_segs=128))
+  calls=[0];original=shapely.covers
+  def counted(a,b,*args,**kwargs):
+   calls[0]+=int(np.size(b))
+   return original(a,b,*args,**kwargs)
+  with patch('shapely.covers',side_effect=counted):path=trace(poly,np.array([-90.,0.]),np.array([90.,0.]),2.)
+  self.assertIsNotNone(path);self.assertTrue(poly.covers(path))
+  np.testing.assert_allclose([path.coords[0],path.coords[-1]],[[-90,0],[90,0]])
+  self.assertLess(path.length,230);self.assertLess(calls[0],4000)
  def test_electrical_repair_cache_depends_on_actual_obstacles(self):
   from die_shift_studio.topology_routing import cached_connection
   from die_shift_studio.session_cache import EphemeralCache
