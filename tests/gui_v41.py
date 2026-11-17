@@ -49,8 +49,11 @@ try:
  w.invalidate_reconstruction_edit();w.request_preview();wait();w.fit_plot();w.plot_layout(preserve=True);w.canvas.draw()
  q=w.current_frame['reconstruction']['pieces'][0];point=q['moved_cut'].centroid.coords[0]
  limits=(w.ax.get_xlim(),w.ax.get_ylim());w.region_mode('move',True);event('button_press_event',point)
- assert w.region_select.mode is None, 'A boundary press must escape lingering box mode'
- assert w.cut_drag.state is not None
+ # V49: explicit strict-box mode owns its starting point, even on a cut.
+ assert w.region_select.mode=='move' and w.region_select.state is not None
+ assert w.cut_drag.state is None
+ w.escape_action();app.processEvents();assert w.region_select.mode is None
+ event('button_press_event',point);assert w.cut_drag.state is not None
  before=w.reconstruction_overlay.cuts.get_segments()
  event('scroll_event',point,'down',-1)
  # No mouse motion: the new geometry and frame buffer must already be present.
