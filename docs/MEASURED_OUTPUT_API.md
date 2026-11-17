@@ -147,3 +147,11 @@ max_threads=0及max_memory_mb=0均表示自动（默认）。自动内存预算�
 ### V47按需执行
 
 `main.py --measured-output --ipc-endpoint <文件>`及`app.start`允许省略project；接口开启后等待project.open。带project启动也不自动评估或预演。preview.submit与batch.submit只执行指定姿态的铜生成和连通/拓扑/隔离/禁布区检查，不启动全局尺寸DRC、概率或良率，返回fixed_rdl_drc_checked=false。禁布区允许共边，不能正面积进入；不可修复时错误回执并保留旧输出。先前调用方式和协议1兼容。
+
+## V48 多实例与客户端记录
+
+多个预演窗口手动开启实测输出时，首个使用默认endpoint.json；该入口被占用时，后续窗口在同一私有IPC目录创建带进程ID/随机标识的独立入口，并在窗口显示实际路径。显式指定--ipc-endpoint仍要求唯一，不覆盖别的实例。
+
+RealDataAnalyse以工程路径和info.instance_id匹配实例，计划使用独立入口；多实例下不能只按“第一个进程”发送命令。新“实时命令信息”展示该客户端实际的请求、回复、轮询与异常，界面和队列有上限，完整脱敏报文按项目轮转记录。客户端任务超时默认0表示无计算超时，连接/认证仍有限时和有界恢复。
+
+RealDataAnalyse生产批次将output.configure指向项目Cache/Batches；OAS完整数量、CRC与SHA验证完成后发布到Output。Output仅保留一个最终OAS，旧结果和旧附属文件归档Cache/History。手动调试默认使用Cache/Manual；服务协议的显式输出目录参数仍有效。

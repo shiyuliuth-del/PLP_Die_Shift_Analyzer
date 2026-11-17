@@ -2,7 +2,7 @@
 
 本轮增加RealDataAnalyse顺序计划任务、实时IPC会话、可拖动表格和逐DIE偏移详情。项目Output只保留最终OAS，中间文件及历史结果归档Cache；见[V48说明](docs/V48_使用说明.md)。V47预演与按需实测功能完整保留。
 
-保留V46的圆点拖动稳定性、边界显示修复和按源复用重构路径；重点/全部组合统一控制实际评估与良率范围。工程采用独立Jobs目录，实测OAS增加阶段文件；与[RealDataAnalyse](RealDataAnalyse/README.md)及[GD55案例](Jobs/GD55/README.md)同包发布。实际验证与限制见[V47记录](docs/V47_VALIDATION.md)。
+保留V46的圆点拖动稳定性、边界显示修复和按源复用重构路径；重点/全部组合统一控制实际评估与良率范围。工程采用独立Jobs目录，实测OAS增加阶段文件；与[RealDataAnalyse](RealDataAnalyse/README.md)及[GD55案例](Jobs/GD55/README.md)同包发布。实际验证与限制见[V48记录](docs/V48_VALIDATION.md)。
 
 软件分析Die-first封装的DIE平移与旋转，提供三方案初筛、实体覆盖与极端足迹、通道宽度风险、重构动区编辑、规则/联合模型良率、工程结果保存、GDS/OAS导入、实测IPC及批量OAS输出。长度均为μm，GDS/OAS只读，工程节点可编辑。
 
