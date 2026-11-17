@@ -9,4 +9,3 @@ def normalize(rows):
         if xy.shape!=(2,2) or not np.isfinite(xy).all() or np.max(abs(xy))>1e12:raise ValueError('标尺端点须为有限XY坐标')
         out.append(xy.tolist())
     return out
-

@@ -168,10 +168,10 @@ class V38Tests(unittest.TestCase):
             marks=GlobalDRC(e.contact,changed).frame(np.zeros((1,3)),settings=ViewSettings())
             missing=[q for q in marks if q['kind']=='孔盘包围不足']
             self.assertTrue(missing)
-            self.assertTrue(all(q['rdl_role']=='运动RDL' and q['required_um']==30 for q in missing))
+            self.assertTrue(all(q['rdl_role']=='运动RDL' and q['required_um']==29.9 for q in missing))
             fixed=replace(e.p,annulus_um=40)
             marks=GlobalDRC(e.contact,fixed).frame(np.zeros((1,3)),settings=ViewSettings())
-            self.assertTrue(any(q.get('rdl_role')=='固定RDL' and q['required_um']==40 for q in marks))
+            self.assertTrue(any(q.get('rdl_role')=='固定RDL' and q['required_um']==39.9 for q in marks))
             old=e.contact.current(np.array([[20,0,0]]),e.p)
             new=e.contact.current(np.array([[20,0,0]]),changed)
             self.assertEqual(old['issues'],new['issues'])

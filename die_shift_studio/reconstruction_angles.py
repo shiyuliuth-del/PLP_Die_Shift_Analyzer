@@ -101,7 +101,24 @@ def solve(r,plan,base,center,pose,quick=False,native_check=True):
             rank=(-width,-least,-mean) if mode in ('wide','perpendicular') else (-least,-mean,-width)
             ranked.append((rank,part,geometry))
     if quick or not native_check:
-        if ranked:_,part,regions=min(ranked,key=lambda q:q[0]);answer=(part,regions,None,None)
+        if ranked:
+            ordered=sorted(ranked,key=lambda q:q[0])
+            if quick:
+                _,part,regions=ordered[0];quality=None
+            else:
+                # Finite cached native checks rank actual style-preserving
+                # copper. Spacing > enclosure > width > angle; no short trade.
+                # Only three distinct geometric finalists need edge checks.
+                best=None;seen=set()
+                for geometric,part0,copper in ordered:
+                    identity=shapely.union_all(list(copper.values())).wkb
+                    if identity in seen:continue
+                    seen.add(identity);score=r.rules.quality(plan,copper,pose)
+                    candidate=(*score,*geometric)
+                    if best is None or candidate<best[0]:best=(candidate,part0,copper,score)
+                    if not any(score[:-1]) or len(seen)>=3:break
+                _,part,regions,quality=best
+            answer=(part,regions,None,quality)
         else:
             regions,error=warp(base,plan,center,pose,style);answer=(base,regions,error,None)
         if len(plan.cache)>512:plan.cache.clear()

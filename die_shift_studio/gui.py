@@ -1161,7 +1161,7 @@ class MainWindow(W.QMainWindow):
         duration,steps=motion_timing(self.view_settings,distance,float(max(start_size)),True)
         self.transition.start(duration,steps,update,complete)
     def show_frame_status(self,frame):
-        message=('预演已更新' if frame is not None else '名义位置')+f' · 当前 DRC {len(self.filtered_issues)} 处违规'
+        message=('预演已更新' if frame is not None else '名义位置')+f' · 当前 DRC {len(getattr(self,"display_issues",self.filtered_issues))} 处违规'
         if frame is not None:
             from .statistics import mean_and_bounds
             params=self.params();mu,_=mean_and_bounds(params,len(frame['states']));bounds=np.array([mean_and_bounds(params.for_die(i),len(frame['states']))[1] for i in range(len(frame['states']))])
@@ -2269,33 +2269,33 @@ class MainWindow(W.QMainWindow):
         from .extreme_validation import status_for
         factors=(self.result or {}).get('extreme_factors') if not self.dirty else None
         if self.extremes is None:return
-        self._cache_colors_changed()
         rows=[(0,None),*[(i,item) for i,(_,item) in enumerate(self.page_items,1)]]
-        current_key=(frame['states'].tobytes() if frame is not None and not frame.get('nominal_global') else None)
+        current_key=(frame['states'].tobytes() if frame is not None else None)
         current=frame_status(frame) if current_key is not None else {}
-        version=(id(self.reconstruction_yield.evidence),self._cache_color_context,self._cache_color_epoch,id(self.result),self.dirty,current_key,tuple(current.items()))
+        version=(id(self.reconstruction_yield.evidence),id(self.result),self.dirty,current_key,tuple(current.items()),self.reconstruction_toggle.isChecked(),self.preview_page)
         if getattr(self,'_paint_pass',None)==version:return
         self._paint_pass=version
         for row,item in rows:
             key=item['states'].tobytes() if item else bytes(24*len(self.extremes.locals))
             status=status_for(factors,item['choices'] if item else [0]*len(self.extremes.locals))
-            known=self._cached_row_checks.get(key) if item else None
+            known=getattr(self,'_cached_row_checks',{}).get(key) if item else None
             if known and (known['checked'] or known['safe'] is False or known.get('width_pending') or False or self.dirty):status=known
-            if item and key==current_key:
+            if key==current_key:
                 if current.get('checked') or current.get('safe') is False:status=current
                 elif current.get('width_pending') or False or self.dirty:status=current
+            moving_drc=status.get('moving_drc',0)
             if item and self.reconstruction_toggle.isChecked():
                 evidence=self.reconstruction_yield.evidence
                 if evidence and evidence.get('complete'):
                     from .extreme_filter import ProblemIndex
                     if getattr(self,'_reconstruction_row_bank',None) is not evidence:
                         self._reconstruction_row_bank=evidence;self._reconstruction_row_index=ProblemIndex(self.extremes,evidence['red_factors']);self._reconstruction_connection_index=ProblemIndex(self.extremes,evidence.get('connection_factors',()))
-                    status=dict(checked=True,safe=not self._reconstruction_row_index.matches(item['choices']),connection_failures=self._reconstruction_connection_index.matches(item['choices']),reason='按实际重构规则检查')
+                    status=dict(checked=True,safe=not (moving_drc or self._reconstruction_row_index.matches(item['choices'])),connection_failures=self._reconstruction_connection_index.matches(item['choices']),reason='按实际重构规则检查')
                 else:status=dict(checked=False,safe=None,reason='重构极端核验中')
                 if item and key==current_key and frame and frame.get('reconstruction',{}).get('constraints_complete'):
                     from .reconstruction_events import scene_failure
-                    status=dict(checked=True,safe=not scene_failure(frame['reconstruction']),connection_failures=len(frame['reconstruction'].get('hard_failures',())),reason='按当前重构几何检查')
-            count=self._cached_pose_counts.get(key,0);safe=status.get('safe') is True
+                    status=dict(checked=True,safe=not (frame.get('drc') or frame['reconstruction'].get('hard_failures')),drc=len(frame.get('drc',())),connection_failures=len(frame['reconstruction'].get('hard_failures',())),reason='按当前实际铜DRC和连接检查')
+            safe=status.get('safe') is True
             if status.get('checked') and 'drc' in status:safe=status['drc']==0 and not status.get('connection_failures')
             check=('通过已检查规则' if safe else '存在已检查的问题' if status.get('safe') is False else '未作完整校验') if item else '名义位置 / 全局判定'
             if not item:
@@ -2315,12 +2315,7 @@ class MainWindow(W.QMainWindow):
                     old=cell.toolTip().split('\n校验：')[0];tip=old+'\n校验：'+detail
                     if cell.toolTip()!=tip:cell.setToolTip(tip)
 
-    @staticmethod
-    def cache_row_color(count,safe):
-        light=(248,252,249) if safe else (248,251,254)
-        dark=(223,238,228) if safe else (226,238,248)
-        level=count/(count+6.) if count else 0.
-        return QtGui.QColor(*(round(a+(b-a)*level) for a,b in zip(light,dark)))
+
     def restore_preview(self):
         if self.data is None:return
         # Manual preview may have no selection; selecting an already current

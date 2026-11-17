@@ -119,7 +119,7 @@ class ChannelTests(unittest.TestCase):
             cut=np.array([[[-40,0],[40,0]]])
             self.assertEqual(len(_crossings(cut,plane,1.e-8)[0]),n)
 
-    def test_tolerance_and_enclosure_are_independent(self):
+    def test_tolerance_applies_to_width_space_and_enclosure(self):
         d,q,c,p,e=example(CASE)
         e.close()
         p=replace(p,annulus_um=25)
@@ -127,9 +127,9 @@ class ChannelTests(unittest.TestCase):
         try:
             e.configure_width(True,ViewSettings(drc_tolerance_um=3))
             a=frame_at(e)
-            self.assertEqual(a['parameters'],dict(width_um=12,space_um=12,enclosure_um=25))
+            self.assertEqual(a['parameters'],dict(width_um=12,space_um=12,enclosure_um=22))
             r=central(a)[0]
-            self.assertEqual((r['nominal_gap_um'],r['original'],r['required']),(90,3,3))
+            self.assertEqual((r['nominal_gap_um'],r['original'],r['required']),(96,3,3))
         finally:e.close()
 
     def test_external_pad_owner_and_custom_pivot_match_display(self):

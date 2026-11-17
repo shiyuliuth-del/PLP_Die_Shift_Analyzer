@@ -146,6 +146,26 @@ def frame(checker,states,replacements,settings,progress,owners=None,scopes=None)
         refs=[(row['layer'],i) for i in row.get('indices',(row.get('index',0),))]
         deps=dependencies({m.nodes[m.ids[ref]]['owner'] for ref in refs if ref in m.ids})
         if wanted(deps):items.append(dict(row,dependencies=deps,owner=deps[0] if len(deps)==1 else -1))
+    # Mechanical clearances use the same signed dimensional tolerance and
+    # report local witnesses rather than a whole DIE-sized error rectangle.
+    moved=[m.moved(d,i,states) for i,d in enumerate(getattr(m,'case',{}).get('dies',()))]
+    board=getattr(m,'case',{}).get('board');guard=max(dbu*1.e-6,1.e-9)
+    for i,die in enumerate(moved):
+        if wanted((i,)):
+            required=clearances.min_package_clearance_um
+            bad=die.difference(board.buffer(-required))
+            if not bad.is_empty:
+                items.append(dict(layer='',layers=(),geometry=bad,kind='芯片到封装机械净距不足',owner=i,dependencies=(i,),refs=(),required_um=required))
+        for j in range(i):
+            deps=(j,i)
+            if not wanted(deps):continue
+            required=clearances.min_die_gap_um
+            if die.distance(moved[j])<required-guard or die.intersects(moved[j]):
+                bad=shapely.union_all([die.intersection(moved[j].buffer(required+guard)),moved[j].intersection(die.buffer(required+guard))])
+                if bad.is_empty:
+                    from shapely.ops import nearest_points
+                    bad=shapely.LineString(nearest_points(die,moved[j])).buffer(dbu)
+                items.append(dict(layer='',layers=(),geometry=bad,kind='芯片间机械净距不足',owner=-1,dependencies=deps,refs=(),required_um=required))
     progress(100,f'当前图形 DRC 完成 · {len(items)} 组违规')
     return items
 
@@ -173,7 +193,19 @@ def coupled_scopes(model,parameters,settings):
     for node in model.nodes:
         if model.roles[node['key']] in ('运动RDL','固定RDL'):
             groups[node['key'].split('/')[0],node['net']].append(node)
-    nets=[];scopes=set();count=len(model.case['dies'])
+    nets=[];count=len(model.case['dies']);scopes=set()
+    # Prove remote mechanical pairs independent before building cross products.
+    from .drc_rules import effective_clearances
+    mechanical=effective_clearances(parameters,settings);envelopes=[]
+    for i,die in enumerate(model.case['dies']):
+        mean,bound=mean_and_bounds(parameters.for_die(i),count)
+        radius=np.max(np.linalg.norm(shapely.get_coordinates(die)-model.bound.centers[i],axis=1))
+        reach=np.linalg.norm(abs(mean[:2])+bound[:2])+2*radius*min(1.,(abs(mean[2])+bound[2])/2)
+        x0,y0,x1,y1=die.bounds;envelopes.append(shapely.box(x0-reach,y0-reach,x1+reach,y1+reach))
+    mechanical_tree=shapely.STRtree(envelopes)
+    for i,g in enumerate(envelopes):
+        for j in mechanical_tree.query(g,predicate='dwithin',distance=mechanical.min_die_gap_um+model.data.dbu_um):
+            if j>i:scopes.add((i,int(j)))
     for (plane,net),nodes in groups.items():
         deps=tuple(sorted({n['owner'] for n in nodes if n['owner']>=0}))
         if len(deps)>1:scopes.add(deps)

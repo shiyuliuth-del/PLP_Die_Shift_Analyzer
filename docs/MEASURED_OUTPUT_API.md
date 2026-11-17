@@ -64,11 +64,12 @@ python -m die_shift_studio.ipc_client --endpoint C:\work\endpoint.json output.co
 | `export.gds` | `{"filename":"sample.gds"}` | 输出最近完成的实测姿态；目录沿用配置，无需重复输入 |
 | `compute.cancel` | `{}` | 确认收到全计算取消请求；原生调用在安全返回点退出，查询 info.running 直到清空 |
 | `app.shutdown` | `{}` | 确认收到关闭请求；取消并等待安全退出；客户端可观察入口消失/进程退出 |
+| `task.issues` | `{"task_id":"...","offset":0,"limit":128}` | 完整问题目录分页，limit为1～512；items/total/next_offset/complete |
 | `task.get` | `{"task_id":"..."}` | 查询一个任务的状态、进度、结果或错误 |
 
 `preview.submit` 必须提供全部 DIE，每颗恰好一次，编号从1起。每行必须有 die、dx_um、dy_um、angle_deg；rotation_center_um 可省略，省略时使用工程旋转中心，提供时为**绝对中心坐标**，并非相对芯片中心。不同姿态/中心使用不同计算身份，不得复用另一中心的型变。手动指定的实测偏移可超过工程概率范围；此时是给定姿态几何结果，不代表原工艺包络已验证。
 
-V44 在姿态生成阶段检查真实铜的连通、端孔接触和异网隔离。无法通过时任务报错并保留上一完成状态/旧输出；`allow_failed:true` 不再绕过此电连接门禁。尺寸规则不足可保留连通补偿铜并返回诊断，警告图形不作为金属输出。规则违规与连接失败是不同概念；文件不是生产签核。输入文件只读，禁止覆盖源图纸，写出/校验后才原子替换目标。GDS坐标必须落在32位DBU范围，图层/Datatype必须在0～65535；超出则报错并保留旧文件，不能静默截断，可改用批量OAS。
+当前姿态生成检查真实铜的连通、端孔接触、异网隔离和完整尺寸DRC。严格策略连接失败时返回错误与完整问题目录，窗口显示诊断姿态，旧输出不覆盖；`allow_failed:true` 不再绕过此电连接门禁。尺寸规则不足可保留连通补偿铜并返回诊断，警告图形不作为金属输出。规则违规与连接失败是不同概念；文件不是生产签核。输入文件只读，禁止覆盖源图纸，写出/校验后才原子替换目标。GDS坐标必须落在32位DBU范围，图层/Datatype必须在0～65535；超出则报错并保留旧文件，不能静默截断，可改用批量OAS。
 
 ### 启动与退出
 
@@ -106,8 +107,8 @@ result = wait(endpoint, end["task_id"])
 
 - batch.begin 返回 batch_id、实际线程、内存预算、队列容量。并发接收不等于无限启动计算；活动任务受硬件、用户上限及每任务内存估计共同限制，内层不再套线程池。
 - batch.submit 和 batch.end 必须带 begin 返回的 batch_id，防止取消后旧请求混入下一批次。batch.submit 还必须有唯一 cell、封装 position_um=[x,y]、全部 dies。Cell 名为1～120个ASCII字母/数字/下划线/短横线；TopCell 与 G_ 前缀保留。坐标以**名义封装边框外接矩形的左下角**为放置基准：从info.board_bounds_um取xmin、ymin，实例平移为(position_x−xmin, position_y−ymin)。TopCell 将每个封装 Cell 放到给定位置；芯片自己的偏移相对封装独立计算。
-- 每个封装不刷新窗口，不计算整包概率、宽度分析或完整 DRC 标记。使用同一连接样式/边界设置的几何求解器，仍验证几何与连接；返回 `fixed_rdl_drc_checked=false`。不能把快速结果当成完整 DRC 验收。
-- V44 任何未连接、拓扑改变或未消除异网接触的姿态均失败。`allow_failed` 保留旧客户端字段兼容，但不能放过电连接或无效多边形。批量仍跳过完整尺寸DRC，连通通过不代表工艺签核。
+- 每个封装不刷新窗口，不计算其他姿态、概率或宽度良率；检查该姿态全部实际铜的DRC并返回 `fixed_rdl_drc_checked=true`、`drc_count`、完整目录。尺寸违规允许带问题标记输出，不等同工艺签核。
+- `batch.begin` 默认 `output_policy="strict"`；连接失败拒绝制造输出。显式 `output_policy="omit_failed_regions"` 时删除失败局部、保留正常铜并继续批次，返回 `partial_output`、`omitted_region_count`及位置明细。再次检查实际输出格点异网隔离。`allow_failed` 不能绕过连接门禁。低于输出格点的退化碎片直接删除，不修改源文件。
 - batch.end 停止接收新任务，等已接收任务结束。若任何项失败/取消，最终文件不替换；先查错误，修正后新开批次。不要重复使用已经占用的 Cell 名试图覆盖失败项。
 - 内存MB按2²⁰字节计。最大内存是**批量计算的增量预算**，不含程序/原工程的基础占用。估算控制并发；进度安全点检查 RSS，超预算先暂存并报错。原生函数单次调用可能短暂超过预算，Python 不能安全强杀它；不是操作系统硬内存隔离。
 - 几何结果按块流式写入同一个临时 OAS，达到预算时刷盘；私有 SQLite 仅保存去重索引与封装位置。结束时补齐 TopCell 和校验尾记录，而非逐姿态重复写整个图纸。相同的量化图形（含平移等价图形）复用内容寻址 Cell，避免重复不动铜/孔盘。这里复用的是物理几何，不保留原设计的 Cell 名称、文本、属性或历史层级。
@@ -134,11 +135,11 @@ OAS基本记录编码参考 [gdstk OAS写入实现](https://github.com/heitzmann
 
 info新增instance_id、session_identity、batch_owner；冻结身份包括软件版本/源几何与Q节点/TopCell/层序用途/运动归属/参数设置。batch.begin可提供32位小写十六进制client_id，info返回以辨认恢复归属。不提供时保持原协议行为。入口JSON新增process_created与instance_id，不得记录token；PID重用不能当旧服务仍在。session.prepare在任何批次存续期间拒绝。
 
-客户端故障恢复只处理自己的批次；原临时几何在服务进程崩溃后不可靠，完整重放未提交批次。正常结果不allow_failed；超限内存可降低并发重试。服务存活但无响应时不强杀/不启动重复实例。当前客户端不会扫描其他安装路径。此扩展不改变批量跳过完整DRC的范围。
+客户端故障恢复只处理自己的批次；原临时几何在服务进程崩溃后不可靠，完整重放未提交批次。正常结果不allow_failed；超限内存可降低并发重试。服务存活但无响应时不强杀/不启动重复实例。当前客户端不会扫描其他安装路径。当前每包均返回实际铜完整DRC目录。
 
 ## V45资源与交互DRC
 
-max_threads=0及max_memory_mb=0均表示自动（默认）。自动内存预算取当前可用内存35%，下限128 MB；显式预算不高于该可用内存预算。V47起preview.submit与batch.submit均为按指令的快速铜生成，保留连通/拓扑/异网隔离/禁布区门禁，不计算完整显示DRC或概率良率；普通交互的“显示接触位置”仍执行当前实际铜全层规则检查。
+max_threads=0及max_memory_mb=0均表示自动（默认）。自动内存预算取当前可用内存35%，下限128 MB；显式预算不高于该可用内存预算。preview.submit与batch.submit均为按指令的铜生成，保留连通/拓扑/异网隔离/禁布区门禁并计算该姿态全层DRC，不计算无关姿态或概率良率；普通交互“显示DRC问题”使用同一实际铜目录。
 
 ## V46阶段文件
 
@@ -146,7 +147,7 @@ max_threads=0及max_memory_mb=0均表示自动（默认）。自动内存预算�
 
 ### V47按需执行
 
-`main.py --measured-output --ipc-endpoint <文件>`及`app.start`允许省略project；接口开启后等待project.open。带project启动也不自动评估或预演。preview.submit与batch.submit只执行指定姿态的铜生成和连通/拓扑/隔离/禁布区检查，不启动全局尺寸DRC、概率或良率，返回fixed_rdl_drc_checked=false。禁布区允许共边，不能正面积进入；不可修复时错误回执并保留旧输出。先前调用方式和协议1兼容。
+`main.py --measured-output --ipc-endpoint <文件>`及`app.start`允许省略project；接口开启后等待project.open。带project启动也不自动评估或预演。preview.submit与batch.submit只执行指定姿态的铜生成、连通/拓扑/隔离/禁布区及完整尺寸DRC检查，不启动其他姿态、概率或良率，返回fixed_rdl_drc_checked=true。禁布区允许共边，不能正面积进入；不可修复时错误回执并保留旧输出。先前调用方式和协议1兼容。
 
 ## V48 多实例与客户端记录
 
@@ -155,3 +156,11 @@ max_threads=0及max_memory_mb=0均表示自动（默认）。自动内存预算�
 RealDataAnalyse以工程路径和info.instance_id匹配实例，计划使用独立入口；多实例下不能只按“第一个进程”发送命令。新“实时命令信息”展示该客户端实际的请求、回复、轮询与异常，界面和队列有上限，完整脱敏报文按项目轮转记录。客户端任务超时默认0表示无计算超时，连接/认证仍有限时和有界恢复。
 
 RealDataAnalyse生产批次将output.configure指向项目Cache/Batches；OAS完整数量、CRC与SHA验证完成后发布到Output。Output仅保留一个最终OAS，旧结果和旧附属文件归档Cache/History。手动调试默认使用Cache/Manual；服务协议的显式输出目录参数仍有效。
+
+## 完整问题位置与ERROR层（V49）
+
+回执`drc_issues`包含前128条，`issue_catalog`指向工程Cache中的纯数据SQLite目录。`issues_complete=false`时使用task.issues继续读取，不能把首屏条数当作全部问题。每条包括kind、layers、refs、die_ids（1起，公共静态为0）、point_um、bounds_um=[xmin,ymin,xmax,ymax]、required_um/required_deg和connection_failure。`bounds_um`为当前姿态GDS顶层μm坐标；`package_relative_bounds_um`以名义封装左下角为零点；批量增加`top_cell_bounds_um`，已加用户指定封装坐标。
+
+批量在未占用数字层写名为ERROR的矩形，按相关DIE分子Cell，范围向外取整且至少1DBU。同一矩形归属多个DIE时各标记一次，同DIE相同矩形去重，因此error_rectangles与drc_count不必相等。每包回执含error_rectangles，batch.end包含总数。完整目录不受IPC消息大小限制截断。
+
+显式部分输出中的小于格点碎片直接删除；其范围、归属和删除原因也进入目录与ERROR层。完整输出依然保留原始连接失败事实，不将已裁剪的封装标为电连接成功。通信、无效几何或磁盘错误保持任务失败，不能用部分输出策略掩盖。

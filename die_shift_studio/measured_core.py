@@ -61,6 +61,8 @@ class Session:
         from . import __version__
         self.identity=logical_fingerprint((__version__,data.geometry_id,data.top_name,self.roles,list(cache.layers),self.motions,asdict(self.p),asdict(self.settings)))
         self.lock=threading.Lock();self.plan_lock=threading.Lock();self.local=threading.local();self.instances=[]
+        from .session_cache import EphemeralCache
+        self.geometry_pool=EphemeralCache(budget=64*1024**2,max_entries=4096)
     def model(self,p):
         from .contact import ContactModel
         from .reconstruction import Reconstructor
@@ -73,7 +75,7 @@ class Session:
         model=ContactModel(self.data,self.case,self.roles,self.case['connections'],self.cache,self.motions,p)
         model.bound.acceleration=self.settings.acceleration
         with self.lock:plans=clone_plan_pool(self.plan_pool)
-        r=Reconstructor(model,p,self.settings,plan_pool=plans);r.measured_only=True
+        r=Reconstructor(model,p,self.settings,plan_pool=plans,geometry_pool=self.geometry_pool);r.measured_only=True
         self.local.model=(key,model,r)
         with self.lock:self.instances.append(r)
         return model,r
@@ -135,13 +137,13 @@ class Session:
                 if not g.is_valid or not np.isfinite(shapely.get_coordinates(g)).all():raise ValueError('重构结果无效，拒绝输出')
         # Keep the last interactive pose only; batch cannot fill the GUI LRU.
         if not preview:
-            r.cache.clear();r.geometry_pool.clear();r.block_cache.clear()
+            r.cache.clear()  # retain bounded, immutable per-source and nominal DRC caches
         return frame,frozen,dict(output_policy=output_policy,partial_output=bool(original_failures),omitted_regions=omissions,omitted_region_count=len(omissions),connection_failures=failures,connection_failure_count=max(len(failures),len(original_failures)),
                                 fixed_rdl_drc_checked=True,drc_issues=issues,drc_count=len(issues),drc_passed=not issues,coordinate_frame='GDS顶层坐标，单位μm；package_relative_bounds_um以名义封装左下角为原点',rule_groups=len(result.get('violations',())),
                                 scope='当前实测姿态的实际铜DRC及连接检查；不计算其他姿态、概率或良率，不代表工艺签核')
     def close(self):
         for r in self.instances:r.close()
-        self.instances.clear();self.local=threading.local()
+        self.instances.clear();self.geometry_pool.clear();self.local=threading.local()
 
 
 def write_gds(snapshot,destination,dbu):
@@ -150,7 +152,7 @@ def write_gds(snapshot,destination,dbu):
     path=Path(destination).resolve()
     if path.suffix.lower() not in ('.gds','.gdsii'):raise ValueError('单姿态输出须使用.gds后缀')
     if not path.parent.is_dir():raise ValueError('输出目录不存在')
-    lib=gdstk.Library(unit=1e-6,precision=dbu*1e-6);top=lib.new_cell('MeasuredPackage')
+    lib=gdstk.Library(unit=1e-6,precision=dbu*1e-6);top=lib.new_cell('MeasuredPackage');discarded=0
     for key,blobs in snapshot.layers.items():
         layer,datatype=map(int,key.split('/'))
         if not (0<=layer<=65535 and 0<=datatype<=65535):raise ValueError('图层或Datatype超过GDS 16位范围，请使用OAS输出')
@@ -161,12 +163,16 @@ def write_gds(snapshot,destination,dbu):
                     points=winding_outline(g);scaled=points/dbu
                     quantized=np.sign(scaled)*np.floor(np.abs(scaled)+.5)
                     if np.any(quantized<-(2**31)) or np.any(quantized>2**31-1):raise ValueError('GDS坐标超过32位DBU范围，拒绝溢出输出；请减小坐标或使用OAS')
+                    integer=quantized.astype(np.int64)
+                    integer=integer[np.any(integer!=np.roll(integer,1,axis=0),axis=1)]
+                    area2=sum(int(a[0])*int(b[1])-int(a[1])*int(b[0]) for a,b in zip(integer,np.roll(integer,-1,axis=0)))
+                    if len(integer)<3 or area2==0:discarded+=1;continue
                     top.add(gdstk.Polygon(points,layer=layer,datatype=datatype))
     fd,temp=tempfile.mkstemp(prefix='.dsa-measured-',suffix='.gds',dir=path.parent);os.close(fd)
     try:
         lib.write_gds(temp,max_points=8190);check=gdstk.read_gds(temp)
         if not check.top_level() or not check.top_level()[0].get_polygons():raise ValueError('GDS回读无有效图形')
         cancel_check();os.replace(temp,path)
-        return dict(path=str(path),bytes=path.stat().st_size,dbu_um=dbu)
+        return dict(path=str(path),bytes=path.stat().st_size,dbu_um=dbu,discarded_subgrid_fragments=discarded)
     finally:
         if os.path.exists(temp):os.unlink(temp)

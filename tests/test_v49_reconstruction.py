@@ -54,6 +54,43 @@ class V49ReconstructionTests(unittest.TestCase):
    endpoints=[sorted([plan.route.interpolate(s).x for s in (plan.nominal_first,plan.nominal_second)]) for plan in plans]
    np.testing.assert_allclose(endpoints[0],endpoints[1],atol=.01)
   finally:e.close()
+ def test_electrical_repair_cache_depends_on_actual_obstacles(self):
+  from die_shift_studio.topology_routing import cached_connection
+  from die_shift_studio.session_cache import EphemeralCache
+  from types import SimpleNamespace
+  r=SimpleNamespace(geometry_pool=EphemeralCache());g=shapely.box(0,0,100,10);ports=[shapely.box(1,1,2,2)];empty=shapely.Polygon()
+  with patch('die_shift_studio.topology_routing.connected_candidate',return_value=g) as search:
+   a=cached_connection(r,g,g,ports,empty,None,10,.001,5)
+   b=cached_connection(r,g,g,ports,empty,None,10,.001,5)
+   self.assertTrue(a.equals_exact(b,0));self.assertEqual(search.call_count,1)
+   cached_connection(r,g,g,ports,shapely.box(30,30,40,40),None,10,.001,5)
+   self.assertEqual(search.call_count,2)
+ def test_measured_geometry_cache_reuses_identical_pose_across_workers(self):
+  from die_shift_studio.measured_core import Session
+  from concurrent.futures import ThreadPoolExecutor
+  e,data,case=self.fixture();session=Session(data,case,e.roles,{},e.p,e.reconstructor.settings,e.contact.cache)
+  rows=[dict(die=1,dx_um=2.,dy_um=1.,angle_deg=0.)]
+  try:
+   first=session.run(rows,preview=False)
+   self.assertGreater(session.geometry_pool.used,0)
+   with patch('die_shift_studio.reconstruction_angles.solve',side_effect=AssertionError('same local pose rebuilt')):
+    with ThreadPoolExecutor(1) as pool:second=pool.submit(session.run,rows,preview=False).result()
+   self.assertEqual(first[1].layers,second[1].layers)
+   self.assertEqual(first[2]['drc_issues'],second[2]['drc_issues'])
+   self.assertLessEqual(session.geometry_pool.used,session.geometry_pool.budget)
+  finally:session.close();e.close()
+  self.assertEqual(session.geometry_pool.used,0)
+ def test_gds_drops_only_unrepresentable_fragments(self):
+  from die_shift_studio.measured_core import write_gds
+  from die_shift_studio.dxf_export import Snapshot
+  import gdstk
+  good=shapely.box(1,2,11,12);tiny=shapely.box(.0001,.0001,.0002,.0002)
+  frozen=Snapshot({'5/0':(good.wkb,tiny.wkb)},'TOP',None,0)
+  with tempfile.TemporaryDirectory() as tmp:
+   target=Path(tmp)/'test.gds';result=write_gds(frozen,target,.001)
+   self.assertEqual(result['discarded_subgrid_fragments'],1)
+   values=gdstk.read_gds(target).top_level()[0].get_polygons()
+   self.assertEqual(len(values),1);self.assertLess(shapely.Polygon(values[0].points).symmetric_difference(good).area,1e-12)
  def test_complete_issue_pages_and_top_cell_coordinates(self):
   from die_shift_studio.measured_issues import catalogue,place,write,page
   rows=[dict(kind='线宽不足',geometry=shapely.box(i,0,i+.2,1),layer='5/0',refs=(),owner=0,dependencies=(0,)) for i in range(1025)]

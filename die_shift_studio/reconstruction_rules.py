@@ -53,7 +53,7 @@ class FixedRules:
         self.keepout=forbidden(model)
         self.contexts={};self.hard_memo={};self._nominal_rows=None;self._nominal_lock=threading.Lock()
         from .session_cache import logical_fingerprint
-        self.identity=logical_fingerprint((model.data.geometry_id,model.roles,model.connections.order,self.width,self.space,p.annulus_um,p.package_clearance_um))
+        self.identity=logical_fingerprint((model.data.geometry_id,model.roles,model.connections.order,self.width,self.space,p.annulus_um,p.package_clearance_um,getattr(cfg,'drc_min_angle_deg',0)))
 
     def nominal_check(self):
         if self._nominal_rows is None:
@@ -124,23 +124,24 @@ class FixedRules:
         key,rest,vias,others,tree=self.context(plan)
         states=np.zeros((len(self.model.bound.centers),3));states[plan.owner]=pose
         copper=shapely.union_all([rest,*candidate.values()]);kinds=set();amount=0.
+        active=candidate['A'].buffer(self.dbu*2)
         for op,value in (('width',self.width),('space',self.space)):
-            if any_violation(op,copper.wkb,self.dbu,value):kinds.add(op)
+            if any_violation(op,copper.wkb,self.dbu,value) and rule_region(copper,value,self.dbu,op).intersects(active):kinds.add(op)
         for ref,owner,required in vias:
-            missing=self.model.moved(required,owner,states).difference(copper).area
+            missing=self.model.moved(required,owner,states).difference(copper).intersection(active).area
             if missing>self.dbu*self.dbu:kinds.add('enclosure');amount+=missing/max(self.width*self.space,1e-12)
-        if self.board is not None and (not self.board.covers(copper) or copper.distance(self.board.boundary)<self.border-self.dbu*.001):
+        if self.board is not None and not copper.difference(self.inside).intersection(active).is_empty:
             kinds.add('board');amount+=copper.difference(self.inside).area/max(self.width*self.space,1e-12)
-        if not self.keepout.is_empty and shapely.relate_pattern(copper,self.keepout,'T********'):
+        if not self.keepout.is_empty and shapely.relate_pattern(copper.intersection(active),self.keepout,'T********'):
             kinds.add('keepout');amount+=copper.intersection(self.keepout).area/max(self.width*self.space,1e-12)
         for j in tree.query(copper,predicate='dwithin',distance=self.space):
             other=others[int(j)]
-            if self.pair_fails(copper,other):
+            if self.pair_fails(copper,other) and self.pair(copper,other).intersects(active):
                 kinds.add('foreign');gap=copper.distance(other)
                 if copper.intersects(other):kinds.add('short')
                 amount+=(self.space-gap)/max(self.space,1e-12)+(copper.intersection(other).area/max(self.width*self.space,1e-12) if gap==0 else 0)
         from .geometry_rules import angle_regions
-        if not angle_regions(copper,getattr(self.cfg,'drc_min_angle_deg',0),self.dbu).is_empty:kinds.add('angle')
+        if not angle_regions(copper,getattr(self.cfg,'drc_min_angle_deg',0),self.dbu).intersection(active).is_empty:kinds.add('angle')
         from .drc_rules import violation_priority
         return (*violation_priority(kinds),amount)
 
