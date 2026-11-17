@@ -133,13 +133,14 @@ class Transport:
         except psutil.NoSuchProcess:return False
         except psutil.AccessDenied:return True
 
-    def owns_descriptor(self, pid=None):
+    def owns_descriptor(self, pid=None, birth=None):
         import psutil
         pid = pid or (self.process.pid if self.process is not None else None)
         if not pid or not self.descriptor:return False
         try:
             process = psutil.Process(self.descriptor['pid'])
-            return process.pid == pid or process.ppid() == pid
+            owner = process if process.pid == pid else process.parent()
+            return bool(owner and owner.pid == pid and (birth is None or abs(owner.create_time()-birth)<.01))
         except (psutil.Error, KeyError):return False
 
     def alive(self):

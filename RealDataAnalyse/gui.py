@@ -432,7 +432,7 @@ class Window(W.QMainWindow):
     def linked_project(self, endpoint, project, stop, progress, timeout, output=None):
         transport, info, launched = connect_instance(project, endpoint, stop, progress, timeout, self.conversation)
         if output is not None and not info.get('batch') and not info.get('running'):
-            directory = Path(output).parent
+            directory = Path(output).parent.parent / "Cache" / "Manual"
             directory.mkdir(parents=True, exist_ok=True)
             transport.request('output.configure', {'output_directory': str(directory)}, stop=stop)
         return dict(info, endpoint=str(transport.endpoint))
@@ -677,7 +677,7 @@ class Window(W.QMainWindow):
         if command == 'project.open':
             args['path'] = self.project.text()
         if command == 'output.configure':
-            args.update(output_directory=str(Path(self.output.text()).parent), max_threads=self.workers.value(), max_memory_mb=self.memory.value())
+            args.update(output_directory=str(Path(self.output.text()).parent.parent / 'Cache' / 'Manual'), max_threads=self.workers.value(), max_memory_mb=self.memory.value())
         if command in ('preview.submit', 'batch.submit'):
             args['dies'] = [dict(die=i + 1, dx_um=0, dy_um=0, angle_deg=0) for i in range(self.dies.value())]
         if command in ('batch.submit', 'batch.end'):
@@ -721,7 +721,7 @@ class Window(W.QMainWindow):
                 if not expected_project:
                     raise ValueError('请先选择项目文件夹')
                 info = t.request('info', stop=stop)['result']
-                if not project_matches(info, expected_project):
+                if not project_matches(info, expected_project) and not (command == 'project.open' and not info.get('project')):
                     raise ValueError('实例工程已变化，未发送命令')
                 t.expected_instance = info.get('instance_id')
             response = t.request(command, args, stop=stop)

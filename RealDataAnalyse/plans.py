@@ -102,6 +102,8 @@ class Plans:
                 create index if not exists plan_output on plans(output_key);
                 create table if not exists plan_events(created real,id text,status text,message text);
             ''')
+            if 'owned_birth' not in {r[1] for r in db.execute('pragma table_info(plans)')}:
+                db.execute('alter table plans add column owned_birth real')
             version = db.execute('select version from plan_meta').fetchone()
             if version and version[0] != 1:
                 raise ValueError('不支持的计划任务数据库版本')
@@ -120,10 +122,11 @@ class Plans:
         root = Path(snapshot.get('folder') or self.path.parent).resolve()
         output = root/'Output'/f'{root.name}.oas'
         database = root/'Tasks'/'Plans'/plan_id/'run.sqlite'
-        with Lease(str(self.path)+'.execution'), closing(self.db()) as db, db:
-            db.execute('insert into plans(id,folder,snapshot,output,output_key,database_path) values(?,?,?,?,?,?)',
+        with Lease(str(self.path)+'.execution'):
+            with closing(self.db()) as db, db:
+                db.execute('insert into plans(id,folder,snapshot,output,output_key,database_path) values(?,?,?,?,?,?)',
                        (plan_id, str(root), json.dumps(snapshot, ensure_ascii=False, allow_nan=False), str(output), os.path.normcase(str(output)), str(database)))
-        self.recheck()
+            self._recheck()
         return plan_id
 
     def get(self, plan_id):
@@ -141,7 +144,7 @@ class Plans:
         return count, rows
 
     def update(self, plan_id, **fields):
-        allowed = {'status','progress','started','ended','message','severity','owned_instance','owned_pid'}
+        allowed = {'status','progress','started','ended','message','severity','owned_instance','owned_pid','owned_birth'}
         if set(fields) - allowed:
             raise ValueError('未知计划字段')
         with closing(self.db()) as db, db:
@@ -250,7 +253,7 @@ class PlanRunner:
     def run_one(self, row):
         snapshot = row['snapshot']; plan_id = row['id']; controls = snapshot['controls']
         project = None; transport = None; owned = row.get('owned_instance')
-        owned_pid = row.get('owned_pid')
+        owned_pid = row.get('owned_pid'); owned_birth = row.get('owned_birth')
         batch_owner = None
         last_update = [0.]
         def report(value, base=25, span=60):
@@ -290,12 +293,14 @@ class PlanRunner:
                 batch_owner = json.loads(db.execute("select value from meta where key='run_id'").fetchone()[0])
             endpoint = default_endpoint().parent/('endpoint-plan-'+plan_id+'.json')
             def launched_callback(value):
-                nonlocal transport, owned_pid
+                nonlocal transport, owned_pid, owned_birth
+                import psutil
                 transport = value; owned_pid = value.process.pid
-                self.plans.update(plan_id, owned_pid=owned_pid)
+                owned_birth = __import__('psutil').Process(owned_pid).create_time()
+                self.plans.update(plan_id, owned_pid=owned_pid, owned_birth=owned_birth)
             transport, info, launched = connect(project, endpoint, self.stop, lambda message: report(message,15,10),
                                                  controls['timeout'], self.trace, exact=True, on_launch=launched_callback)
-            if launched or transport.owns_descriptor(owned_pid):
+            if launched or transport.owns_descriptor(owned_pid, owned_birth):
                 owned = info['instance_id']; self.plans.update(plan_id, owned_instance=owned)
             Runner(database, endpoint, project, row['output'], controls['workers'], controls['memory'], controls['retries'],
                    controls['timeout'], self.stop, report, transport=transport, trace=self.trace).run()
@@ -312,7 +317,7 @@ class PlanRunner:
                             break
                         if not transport.alive():break
                         time.sleep(.2)
-                if info and ((owned and info.get('instance_id') == owned) or transport.owns_descriptor(owned_pid)):
+                if info and (info.get('instance_id') == owned if owned else (owned_birth is not None and transport.owns_descriptor(owned_pid, owned_birth))):
                     if info.get('batch') and info.get('batch_owner') != batch_owner:
                         raise RuntimeError('实例有其他客户端批次，计划队列停止，未关闭实例')
                     if info.get('running') and not info.get('batch') and not info.get('preparing_task'):
@@ -324,6 +329,24 @@ class PlanRunner:
                     if transport.alive():raise RuntimeError('自动实例尚未安全退出，计划队列停止，未强杀进程')
                 elif transport.alive():
                     raise RuntimeError('自动实例启动或归属未确认，计划队列停止，未发送关闭指令')
+
+    def reconcile_archives(self, row):
+        from .storage import Ledger
+        with closing(Ledger(row['database_path'])) as ledger:
+            archives = (ledger.get('publish') or {}).get('archived_outputs', {})
+        if not archives:
+            return
+        with closing(self.plans.db()) as db:
+            previous = [dict(item) for item in db.execute("select id,output,database_path from plans where status='completed' and id<>?", (row['id'],))]
+        for item in previous:
+            archived = archives.get(item['output'])
+            if not archived or not Path(item['database_path']).is_file():
+                continue
+            with closing(Ledger(item['database_path'])) as ledger:
+                digest = (ledger.get('publish') or {}).get('sha256')
+            if digest == archived['sha256']:
+                with closing(self.plans.db()) as db, db:
+                    db.execute('update plans set output=?,message=? where id=?', (archived['path'], '历史结果已归档Cache；Output保留最新结果', item['id']))
 
     def run(self):
         totals = dict(completed=0, failed=0, skipped=0)
@@ -345,6 +368,7 @@ class PlanRunner:
                     totals['skipped'] += 1; continue
                 try:
                     self.run_one(row)
+                    self.reconcile_archives(row)
                 except InterruptedError as exc:
                     self.plans.update(plan_id, status='paused', severity='warning', ended=time.time(), message=str(exc))
                     break

@@ -144,3 +144,7 @@ A颜色仅由A自身型变前/后的见证决定。两侧铜默认图层颜色�
 `reconstruction_joint.py`在跨网络补偿会耦合几何时，复用局部原始形状并联合执行与画布相同的补偿/检查。扫描和良率复用完成判定；不能继续乘单网边际概率。无耦合时保留原有因子分解。可用`tools/verify_reconstruction_continuity.py <工程> --all --output <JSON>`验证完整离散目录，`tools/verify_nu_handles.py <nu17123工程>`复验真实鼠标。外部图纸不会写入报告。
 
 V45用户清单单独排期：必须先完成V44双方联合发布，再做新的UI精简/统一当前态DRC/按需结果分析等改动。不得提前更改V44缺省值。
+
+## V48 RealDataAnalyse后续入口
+
+计划持久化/捕获/执行见plans.py，独立面板plan_ui.py；实例匹配instances.py，传输身份/追踪transport.py，脱敏有界会话conversation.py，可调表格widgets.py。Runner将批次定向Cache，发布前CRC/SHA与旧目标保护，Output唯一最终文件。发布后恢复使用write-ahead记录；旧结果归档映射同步计划行。新单元测试test_realdata_plans、Qt测试gui_realdata_plans与真实进程gui_realdata_plans_process进入聚合/Windows双EXE验收。

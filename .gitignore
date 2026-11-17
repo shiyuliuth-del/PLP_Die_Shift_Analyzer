@@ -48,3 +48,5 @@ Jobs/**/Cache/
 Jobs/**/Tasks/
 Jobs/**/Output/
 Jobs/**/RealDataAnalyse.project.json
+
+Jobs/.RealDataAnalyse/
