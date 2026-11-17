@@ -3,7 +3,7 @@
   "status": "PASS_SCOPED",
   "scope": "One concentrated local round; failed items fixed and only affected checks repeated. Not a repeated 58-command full source driver.",
   "platform": "linux",
-  "verified_runtime_sha256": "3a70a7201575e1e653fee58a1a4640ca7268db22107a727f60ca4bf482b455c3",
+  "verified_runtime_sha256": "d5d8aa640f0d1b2083a2c932528e0ca194033da1321688d8451c4b375ceb62cf",
   "core_initial": {
     "tests": 497,
     "skipped_external": 2,
@@ -41,8 +41,19 @@
     "gd55_error_rectangles": 2424
   },
   "notes": [
-    "V50_VALIDATION.md records initial failures and bounded acceptance.",
-    "Two label/suffix-only UI edits after local checks; no geometry changes.",
-    "Windows run 44059517126 pending; GPU not physically tested."
-  ]
+    "V50_VALIDATION.md records initial failures and scoped corrections.",
+    "Two original external GDS tests skipped; user nul case verified separately, not shipped.",
+    "No physical GPU or factory Windows acceptance."
+  ],
+  "windows": {
+    "initial": 44059517126,
+    "resume": 44062813104,
+    "tail": 44064547813,
+    "tail_status": {
+      "clean": "success",
+      "with-cupy": "success"
+    },
+    "tested_code": "7165f62",
+    "scope": "One concentrated sequence; passed sections skipped on continuation. Final pure-data panel persistence checked locally; geometry and IPC unchanged."
+  }
 }

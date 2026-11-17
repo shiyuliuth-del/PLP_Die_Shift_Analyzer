@@ -157,5 +157,7 @@ class V50Tests(unittest.TestCase):
   self.assertTrue(q['settings']['reconstruction_auto']);self.assertEqual(len(q['settings']['drc_checks']),8)
   self.assertEqual(q['expanded_settings'],['DXF输出参数','实测输出参数','结果分析'])
   q['settings']['drc_checks']=['width'];q['layout_output']['dbu_um']=.01
+  q['expanded_settings'].append('DRC');q['expanded_process']=['DRC']
   again=normalize_project(q);self.assertEqual(again['settings']['drc_checks'],('width',));self.assertEqual(again['layout_output']['dbu_um'],.01)
+  self.assertIn('DRC',again['expanded_settings']);self.assertEqual(again['expanded_process'],['DRC'])
 if __name__=='__main__':unittest.main()

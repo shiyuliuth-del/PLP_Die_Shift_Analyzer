@@ -77,7 +77,10 @@ def normalize_project(project):
     process=p.get('expanded_process',[title for title in p['expanded_settings'] if title=='DRC'])
     if not isinstance(process,list) or any(not isinstance(v,str) for v in process):raise ValueError('工艺栏目列表必须由标题字符串组成')
     p['expanded_process']=list(dict.fromkeys(process))
-    p['expanded_settings']=[v for v in p['expanded_settings'] if v!='DRC']
+    # V50 has a separate DRC category panel in Settings as well as process
+    # dimensions. Only legacy projects relocate the old single DRC panel.
+    if not any(k in p.get('settings',{}) for k in ('drc_checks','drc_visible')):
+        p['expanded_settings']=[v for v in p['expanded_settings'] if v!='DRC']
     from .measured_core import Options
     p['measured_output']=asdict(Options.from_dict(p.get('measured_output')))
     from .layout_export import OutputOptions

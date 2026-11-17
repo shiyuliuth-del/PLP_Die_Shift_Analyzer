@@ -1,3 +1,7 @@
+V50续检优化：extreme_validation把大重点目录按真实DIE依赖分解，只投影所选行；不构造729份带表格量测的显示帧。检查类别也用于旧机械/接口状态计数，不能仅从新DRC表隐藏。实际值量测仅交互显示，measured_core批量保留全部规则/见证但不量表格尺寸。完整删空铜的boundary可为None，partial_output先判断差集为空。
+
+nul7123复现入口：tools/verify_v50_nul.py与tools/verify_v50_nul_mouse.py，均传入用户外部工程JSON；不附私人图纸。具体本轮证据和首次失败保留于V50_VALIDATION，不为发布而循环扩大检查。
+
 # V50 增量交接
 
 本轮以V50_使用说明为准，旧版同步重点组合已替代。focus_cover.py使用GF(3^m)覆盖完整DIE状态配对；不是仅两条轴的覆盖。branch_regions.transition_domains按全截面分割实体，再依据真实端孔分类；避免包围掩膜亚格点重叠吞并分支。topology_checks.py只并行私有WKB解码后的只读核验，联合改线仍确定性串行；不可再共享原生prepared查询对象并发修改。local_failures.py按真实断口/接触见证定位失败动区，正常动区不连带染色。

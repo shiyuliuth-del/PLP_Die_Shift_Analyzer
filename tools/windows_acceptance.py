@@ -127,7 +127,7 @@ def main():
         # is a lifecycle regression, never a retry that hides an earlier failure.
         for iteration in range(1):
             subprocess.run([sys.executable,str(ROOT/'tests/gui_v44_process.py')],cwd=ROOT,env=paired_env,check=True,timeout=600)
-            print(f'FROZEN_REALDATA_CYCLE_PASS {iteration+1}/6',flush=True)
+            print(f'FROZEN_REALDATA_CYCLE_PASS {iteration+1}/1',flush=True)
         print('FROZEN_REALDATA_PASS: both sibling EXEs, one fresh two-lot cycle, named pipe, Excel join, OAS and sibling restart',flush=True)
         gd55_env=dict(paired_env,REALDATA_TEST_CASE=str(source/'Jobs/GD55'))
         subprocess.run([sys.executable,str(ROOT/'tests/gui_v44_gd55.py')],cwd=ROOT,env=gd55_env,check=True,timeout=1350)
