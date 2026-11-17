@@ -134,7 +134,7 @@ class ConstraintFeedback:
                     if not changed:return rebuilt.frame(frame['states'],progress=progress)
                     if local_pool is not None:
                         from .reconstruction_zones import expand
-                        rebuilt.auto_ignored=dict(current.auto_ignored);rebuilt.safe_vias=dict(current.safe_vias)
+                        rebuilt.auto_following=set(current.auto_following);rebuilt.auto_ignored=dict(current.auto_ignored);rebuilt.safe_vias=dict(current.safe_vias)
                         rebuilt._envelopes=current._envelopes;rebuilt._plans=expand(rebuilt,local_pool['local'])
                     local=rebuilt.frame(frame['states'],targets=changed,diagnostics=False,progress=progress,_raw=True)
                     frame_data=frame['reconstruction'];refs=set(changed)

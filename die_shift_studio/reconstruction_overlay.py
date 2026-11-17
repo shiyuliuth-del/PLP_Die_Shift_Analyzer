@@ -408,6 +408,12 @@ class CutDrag:
     def _live(self,part):
         from .reconstruction_route import warp,failed_connection,missing_area
         state=self.state;old=state['frame'];piece=state['piece'];plan=piece['route_plan']
+        from .reconstruction_route import part_key
+        live_key=(state['updated'].reconstruction_key(),part_key(part))
+        # A snapped point may receive dozens of mouse moves with identical
+        # geometry. Reuse the accepted preview and its running checks.
+        if state.get('live_key')==live_key:return
+        state['live_key']=live_key
         if piece.get('graph_edit') or piece.get('endpoint_weights',(1.,0.))!=(1.,0.):
             from .reconstruction_zones import live_serial
             proposed=live_serial(self.w,state['updated'],old,(piece['layer'],piece['index']))
@@ -458,7 +464,9 @@ class CutDrag:
         self.w.reconstruction_overlay.clear_hover()
         if not state['moved']:return
         from .reconstruction_edits import commit_merges
-        self.w.view_settings=commit_merges(state['updated'],self.w.current_frame)
+        updated=commit_merges(state['updated'],self.w.current_frame)
+        if updated.reconstruction_key()==self.w.view_settings.reconstruction_key():return
+        self.w.view_settings=updated
         self.w.invalidate_reconstruction_edit();self.w.request_preview(quiet=True)
     def cancel(self):
         if self.state is None:return False

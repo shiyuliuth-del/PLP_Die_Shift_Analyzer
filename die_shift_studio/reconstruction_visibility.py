@@ -11,6 +11,9 @@ from .resources import cancel_check
 def trace(poly,start,end,width):
     # Thousands of visibility edges query the SAME polygon. Preparing its
     # segment index once avoids repeatedly scanning every foreign-net ring.
+    # Prepared GEOS indexes are lazily mutated. Never attach one to a
+    # source polygon shared by foreground and background reconstruction.
+    poly=shapely.from_wkb(poly.wkb)
     shapely.prepare(poly)
     for margin in (width*.25,width*.05,0.):
         cancel_check();core=poly.buffer(-margin,join_style=2) if margin else poly

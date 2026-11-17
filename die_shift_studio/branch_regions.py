@@ -26,6 +26,21 @@ def terminal_tree(moving,fixed):
     return result
 
 
+def interior_interfaces(source,domain,rigid,tolerance):
+    """Only material-to-material seams are controls, never source perimeter.
+
+    Snapped Boolean operations can leave sub-DBU slivers along the exterior.
+    Buffering a domain to recover coincident seams otherwise picks the whole
+    sliver contour and transforms it into a long, detached drag handle.
+    This display-only trim leaves copper partitions and exported seams intact.
+    """
+    exterior=source.boundary.buffer(tolerance*4)
+    interfaces=[g.boundary.intersection(domain.buffer(tolerance*.05)).difference(exterior) for g in rigid]
+    lines=[line for g in interfaces for line in shapely.get_parts(g)
+           if line.geom_type=='LineString' and line.length>tolerance*8]
+    return shapely.line_merge(shapely.union_all(lines))
+
+
 def assemble(r,source,rows,states):
     from .reconstruction import transform
     owner=rows[0]['die'];pose=states[owner];center=r.model.bound.centers[owner]
@@ -98,9 +113,8 @@ def assemble(r,source,rows,states):
             # Difference/union can leave ulp-different seam coordinates. A
             # display-only sub-DBU neighbourhood recovers the real line; isolated
             # touch points are NOT whole-pad controls.
-            interfaces=[rigid[i].boundary.intersection(group.buffer(r.tol*.05)) for i in ids if i<physical_count and abs(values[i]-weight)<1e-10]
-            lines=[line for g in interfaces for line in shapely.get_parts(g) if line.geom_type=='LineString' and line.length>r.tol*8]
-            if lines:return shapely.line_merge(shapely.union_all(lines))
+            seam=interior_interfaces(source,group,[rigid[i] for i in ids if i<physical_count and abs(values[i]-weight)<1e-10],r.tol)
+            if not seam.is_empty:return seam
             terminals=[]
             for member in members:
                 plan=member['route_plan'];s=member['interval'][side]
@@ -137,7 +151,7 @@ def consolidate(r,pieces,states):
         else:other.append(q)
     for rows in groups.values():
         source=rows[0]['route_plan'].source
-        cache_key=('branch-assembly-continuity',r.rules.identity,r.settings.reconstruction_style,
+        cache_key=('branch-assembly-interior-seams-v46',r.rules.identity,r.settings.reconstruction_style,
                    tuple(r.model.bound.centers[rows[0]['die']]),states[rows[0]['die']].tobytes(),
                    tuple((q['route_identity'],q['interval'],q['boundary_angles'],tuple(q['nominal_regions'][k].wkb for k in 'ABC')) for q in rows))
         cached=r.geometry_pool.get(cache_key)

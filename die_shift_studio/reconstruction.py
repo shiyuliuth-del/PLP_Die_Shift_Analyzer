@@ -677,7 +677,7 @@ class Reconstructor:
             def measure(item):
                 idx,net=item;tree,others=trees[net]
                 if not others:return idx,None
-                probe=replaced[idx]
+                probe=shapely.from_wkb(replaced[idx].wkb)
                 # Actual overlaps need no nearest-boundary search. Preparing the
                 # one probe amortises the batched predicate over candidate nets.
                 nearby=tree.query(probe)

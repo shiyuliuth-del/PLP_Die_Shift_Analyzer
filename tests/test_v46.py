@@ -4,6 +4,43 @@ import shapely,gdstk
 from die_shift_studio.jobs import job_path,list_jobs,local_source,atomic_save
 from die_shift_studio.oas_stream import Store,verify_crc
 class V46Tests(unittest.TestCase):
+ def test_branch_handle_excludes_exterior_sliver(self):
+  from die_shift_studio.branch_regions import interior_interfaces
+  source=shapely.box(0,0,100,30);domain=shapely.box(50,0,100,30)
+  rigid=shapely.union_all([shapely.box(0,0,50,30),shapely.box(50,0,100,.00001)])
+  seam=interior_interfaces(source,domain,[rigid],.001)
+  self.assertLess(seam.length,30.01)
+  self.assertLess(seam.hausdorff_distance(shapely.LineString([(50,0),(50,30)])),.005)
+ def test_trace_does_not_prepare_shared_source(self):
+  from die_shift_studio.reconstruction_route import trace
+  source=shapely.box(0,0,100,30)
+  self.assertIsNotNone(trace(source,(10,15),(90,15),10))
+  self.assertFalse(shapely.is_prepared(source))
+ def test_topology_queries_do_not_reuse_prepared_frame_geometry(self):
+  import numpy as np
+  from unittest.mock import patch
+  from test_v40 import make_engine
+  from die_shift_studio.core import Parameters
+  from die_shift_studio.settings import ViewSettings
+  from die_shift_studio.topology_routing import resolve
+  shapes={'127/0':[shapely.box(-100,-100,300,100)],'128/0':[shapely.box(-15,-15,15,15)],
+          '3/0':[shapely.box(-10,-10,10,10)],'4/0':[shapely.Point(0,0).buffer(3)],
+          '5/0':[shapely.box(-10,-10,210,10)],'6/0':[shapely.Point(200,0).buffer(3)]}
+  e,_,_=make_engine(shapes,Parameters(single_bound_x_um=5,single_bound_y_um=5,bound_angle_deg=0,annulus_um=3),ViewSettings())
+  try:
+   r=e.reconstructor;states=np.zeros((1,3));frame=r.frame(states,diagnostics=False,_raw=True)
+   for node in r.model.nodes:shapely.prepare(node['poly'])
+   for rows in frame['replacements'].values():
+    for row in rows:shapely.prepare(row['geometry'])
+   original=shapely.STRtree.query;seen=[]
+   def query(tree,geometry,*args,**kwargs):
+    if kwargs.get('predicate')=='intersects':
+     seen.append(True);self.assertFalse(np.any(shapely.is_prepared(geometry)))
+    return original(tree,geometry,*args,**kwargs)
+   with patch.object(shapely.STRtree,'query',query):
+    result=resolve(r,frame['replacements'],frame['pieces'],states)
+   self.assertTrue(seen);self.assertFalse(result[-1])
+  finally:e.close()
  def test_project_folder_and_legacy_discovery(self):
   with tempfile.TemporaryDirectory() as t:
    root=Path(t);source=root/'input.gds';source.write_bytes(b'original')
