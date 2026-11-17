@@ -285,6 +285,7 @@ class CutDrag:
     def _tolerance(self):
         t=self.w.ax.transData.inverted();return float(np.linalg.norm(t.transform((12,0))-t.transform((0,0))))
     def press(self,event):
+        if getattr(self.w.canvas,"ruler_active",False):return
         if getattr(self.w,"remote_locked",False):return
         w=self.w
         if not w.reconstruction_toggle.isChecked() or event.inaxes is not w.ax or event.xdata is None or getattr(w.canvas,'die_move_active',False):return
@@ -452,8 +453,10 @@ class CutDrag:
     def _accept_live(self,frame):
         failures=frame['reconstruction'].get('hard_failures',())
         if failures:
-            self.state['updated']=self.state['accepted_settings'];self.state['part']=self.state['accepted_part']
-            self.w.statusBar().showMessage('该位置尚无连通且无异网接触的解，保留上一个有效边界。');return False
+            from .reconstruction_diagnostic import display
+            from .topology_routing import failure_message
+            frame=dict(frame,reconstruction=display(frame['reconstruction'],frame['rotation_centers'],frame['states']),diagnostic_only=True)
+            self.w.log_bus.emit(failure_message(failures),'ERROR')
         frame=dict(frame,drc=[],drc_locations=[],drc_pending=True)
         self.w.current_frame=frame;self.w.fill_issues();self.w.drc_overlay.draw();self.state['accepted_settings']=self.state['updated'];self.state['accepted_part']=self.state['part'];return True
     def release(self,event):
@@ -510,128 +513,58 @@ def nudge_cut(settings,piece,step,kind='cut'):
     value=piece['interval'][1 if kind=='extra' else 0]+step
     return _store_cut(settings,piece,None,plan.route.interpolate(max(0.,min(plan.length,value))).coords[0],kind)
 class RegionSelect:
-    """Box-select a 动区 (movable) or 静区 (stays put) on the reconstruction page.
-
-    The rectangles are stored per fixed-RDL layer in
-    ``view_settings.reconstruction_regions`` and applied after the automatic
-    split, so the software's guess stays visible wherever the user has not
-    overridden it. Commit re-runs the preview quietly, like the cut drag.
-    """
-
-    def __init__(self, window):
-        self.w = window
-        self.mode = None
-        self.state = None
-        self.rect = None
-        for name, fn in [('button_press_event', self.press),
-                         ('motion_notify_event', self.move),
-                         ('button_release_event', self.release)]:
-            window.canvas.mpl_connect(name, fn)
-
-    def set_mode(self, mode):
-        """'move', 'stay' or None (off)."""
-        self.mode = mode
-        if mode is None:
-            self._drop()
-            self.w.statusBar().showMessage('已退出手动区域框选')
-
+    """A rotated rectangle clips the nominal copper exactly, without auto growth."""
+    def __init__(self,window):
+        self.w=window;self.mode=None;self.state=None;self.rect=None
+        for name,fn in [('button_press_event',self.press),('motion_notify_event',self.move),('button_release_event',self.release),('scroll_event',self.scroll)]:window.canvas.mpl_connect(name,fn)
+    def set_mode(self,mode):
+        self.mode=mode
+        if mode is None:self._drop()
     def _drop(self):
+        self.w.canvas.region_rotating=False
         if self.rect is not None:
-            try:
-                self.rect.remove()
-            except Exception:
-                pass
-            self.rect = None
-        self.state = None
-
-    def _point(self, event):
-        if event.xdata is None or event.ydata is None:
-            return None
-        return float(event.xdata), float(event.ydata)
-
-    def press(self, event):
-        if self.mode is None or event.button != 1 or event.inaxes is not self.w.ax:
-            return
-        point = self._point(event)
-        if point is None:
-            return
-        if not self.w.reconstruction_toggle.isChecked():return
-        # The canvas rubber band and the cut drag listen to the same press.
-        selection = getattr(self.w, 'selection', None)
+            try:self.rect.remove()
+            except ValueError:pass
+        self.rect=None;self.state=None
+    def _point(self,event):
+        return np.array([event.xdata,event.ydata],float) if event.xdata is not None and event.ydata is not None else None
+    def vertices(self):
+        s=self.state;c,t=np.cos(s['angle']),np.sin(s['angle']);rotation=np.array([[c,-t],[t,c]])
+        x,y=(s['current']-s['anchor'])@rotation
+        return s['anchor']+np.array([[0,0],[x,0],[x,y],[0,y]])@rotation.T
+    def draw(self):
+        self.rect.set_xy(self.vertices());self.w.scene_renderer.external_draw(None);self.w.canvas.draw_idle()
+    def press(self,event):
+        if self.mode is None or event.button!=1 or event.inaxes is not self.w.ax or getattr(event,'reconstruction_cut_handled',False):return
+        if getattr(self.w,'remote_locked',False) or getattr(self.w.canvas,'ruler_active',False):return
+        if self.w.shown_states is not None and np.any(self.w.shown_states):
+            self.w.statusBar().showMessage('请等待名义零位复原后框选动区');return
+        point=self._point(event)
+        if point is None or not self.w.reconstruction_toggle.isChecked():return
+        selection=getattr(self.w,'selection',None)
         if selection is not None:
-            selection.press = None
-            if getattr(selection, 'rubber', None) is not None:
-                try:
-                    selection.rubber.remove()
-                except Exception:
-                    pass
-                selection.rubber = None
-        self.state = {'start': point, 'current': point}
-        colour = REGION_COLORS.get(self.mode, '#555555')
-        self.rect = Rectangle(point, 0., 0., facecolor=colour, alpha=.12,
-                              edgecolor=colour, lw=1.5, linestyle=(0, (5, 3)),
-                              zorder=12.2)
-        self.w.ax.add_patch(self.rect)
-        self.w.statusBar().showMessage(f'框选{REGION_LABELS[self.mode]}：松开鼠标即写入')
-        return True
-
-    def move(self, event):
-        if self.state is None or self.rect is None or event.button != 1:
-            return
-        point = self._point(event)
-        if point is None:
-            return
-        self.state['current'] = point
-        self.w.canvas.draw_idle()
-        x0, y0 = self.state['start']
-        x1, y1 = point
-        self.rect.set_xy((min(x0, x1), min(y0, y1)))
-        self.rect.set_width(abs(x1 - x0))
-        self.rect.set_height(abs(y1 - y0))
-        return True
-
-    def release(self, event):
-        if self.state is None:
-            return
-        state = self.state
-        self.state = None
-        if self.rect is not None:
-            try:
-                self.rect.remove()
-            except Exception:
-                pass
-            self.rect = None
-        self.w.canvas.draw_idle()
-        if event.inaxes is not self.w.ax or self._point(event) is None:return True
-        state['current']=self._point(event)
-        x0, y0 = state['start']
-        x1, y1 = state['current']
-        if abs(x1 - x0) <= 0. or abs(y1 - y0) <= 0.:
-            self.w.statusBar().showMessage('框选太小，没有写入')
-            return True
-        layers = self._layers()
-        if not layers:
-            self.w.statusBar().showMessage('当前没有可划分的固定RDL，先勾选“重构预演”')
-            return True
-        bounds = (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
-        from dataclasses import replace
-        regions = list(getattr(self.w.view_settings, 'reconstruction_regions', ()) or ())
-        for layer in layers:
-            regions.append((layer, bounds, self.mode))
-        self.w.view_settings = replace(self.w.view_settings, reconstruction_regions=tuple(regions))
-        self.w.invalidate_reconstruction_edit()
-        self.w.statusBar().showMessage(
-            f'已写入 {len(layers)} 个图层的{REGION_LABELS[self.mode]}；可继续框选，或点“清除全部手动区域”恢复')
-        self.w.request_preview(quiet=True)
-        return True
-
+            selection.press=None
+            if selection.rubber is not None:selection.rubber.remove();selection.rubber=None
+        self.state=dict(anchor=point,current=point,angle=0.);self.w.canvas.region_rotating=True
+        from matplotlib.patches import Polygon
+        self.rect=Polygon(np.repeat(point[None,:],4,axis=0),facecolor='#6ca5ce',edgecolor='#287bb2',alpha=.25,lw=1,linestyle='--',zorder=20)
+        self.w.ax.add_patch(self.rect);self.draw()
+    def move(self,event):
+        if self.state is not None and self._point(event) is not None:self.state['current']=self._point(event);self.draw()
+    def scroll(self,event):
+        if self.state is None or self._point(event) is None:return
+        point=self._point(event);delta=-math.radians(2)*event.step;c,t=math.cos(delta),math.sin(delta)
+        self.state['anchor']=point+np.array([[c,-t],[t,c]])@(self.state['anchor']-point)
+        self.state['current']=point;self.state['angle']+=delta;self.draw()
+    def release(self,event):
+        if self.state is None:return
+        if self._point(event) is not None:self.state['current']=self._point(event)
+        vertices=self.vertices();layers=self._layers();self._drop()
+        if abs(shapely.Polygon(vertices).area)<1e-12 or not layers:return
+        rows=list(self.w.view_settings.reconstruction_boxes)
+        rows.extend((layer,tuple(tuple(map(float,v)) for v in vertices)) for layer in layers)
+        self.w.view_settings=replace(self.w.view_settings,reconstruction_boxes=tuple(rows))
+        self.w.invalidate_reconstruction_edit();self.w.request_preview(quiet=True)
+        self.w.statusBar().showMessage('已按实际选框生成动区；框外不扩展，无法分离端点时显示连接问题')
     def _layers(self):
-        try:
-            data = self.w.reconstruction_overlay.data()
-        except Exception:
-            data = None
-        layers = sorted({q['layer'] for q in (data or {}).get('pieces', [])
-                         if q['layer'] in self.w.visible_boxes and self.w.visible_boxes[q['layer']].isChecked()})
-        if layers:
-            return layers
-        return []
+        return sorted(k for k,role in self.w.roles().items() if role=='固定RDL' and self.w.visible_boxes[k].isChecked())

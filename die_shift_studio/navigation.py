@@ -31,6 +31,7 @@ class Navigation:
         toolbar=getattr(self.canvas,'toolbar',None)
         if toolbar:toolbar.push_current()
     def scroll(self,e):
+        if getattr(self.canvas,'region_rotating',False):return
         if getattr(self.canvas,'reconstruction_drag_active',False) or getattr(e,'reconstruction_cut_handled',False):return
         if getattr(self.canvas,'die_move_active',False) and not control_held(e):return
         if self.drag or self.zoom is not None or e.inaxes is not self.ax or e.xdata is None or e.ydata is None:return
@@ -44,6 +45,7 @@ class Navigation:
         self.history();self.ax.set_xlim(limits[0]);self.ax.set_ylim(limits[1]);self.history()
         if not getattr(self.canvas,'_managed_viewport',False):self.canvas.draw_idle()
     def press(self,e):
+        if getattr(self.canvas,'ruler_active',False):return
         if getattr(e,'reconstruction_cut_handled',False) or e.inaxes is not self.ax or self.busy():return
         if e.button==MouseButton.MIDDLE:
             self.history();self.drag=(e.x,e.y,self.ax.get_xlim(),self.ax.get_ylim(),self.ax.transData.inverted().frozen())

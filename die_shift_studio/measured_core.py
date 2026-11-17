@@ -88,33 +88,45 @@ class Session:
             with self.lock:r.plan_pool.update(clone_plan_pool(self.plan_pool))
             r._plans_for_all_poses(progress)
             with self.lock:self.plan_pool.update(clone_plan_pool(r.plan_pool))
-    def run(self,rows,progress=lambda *_:None,*,preview=True):
+    def run(self,rows,progress=lambda *_:None,*,preview=True,diagnostic=False,output_policy='strict'):
+        if output_policy not in ('strict','omit_failed_regions'):raise ValueError('未知实测输出策略')
         states,p=pose_parameters(self.case,self.p,rows);model,r=self.model(p)
         self.ensure_plans(r,progress)
-        # Batch omits global probability, width analysis, UI artwork and complete
-        # DRC marker scans. The same curve solver still rejects invalid geometry.
+        # Measured commands check their own actual-copper DRC; no other poses,
+        # probability, width analysis or yield work is started.
         result=r.frame(states,progress=progress,diagnostics=preview)
-        if result.get('hard_failures'):
-            from .topology_routing import failure_message
-            raise ValueError(failure_message(result['hard_failures']))
         bound=self.cache.bind(self.case,self.motions,list(self.cache.layers),p)
         bound.acceleration=self.settings.acceleration
         layers=bound.transform(states)
         frame=dict(states=states,layers=layers,rotation_centers=model.bound.centers.copy(),reconstruction=result,
                    checks={i:dict(failures=[],problem_percent=0) for i in (1,2,3)},contact={'issues':[],'regions':[]},motion_issues=[])
-        if preview:
-            from .fast_preview import check_frame
-            frame['contact']=model.current(states,p,result['replacements'])
-            from .drc import GlobalDRC
-            from .current_drc import locations
-            if not hasattr(r,'display_drc'):r.display_drc=GlobalDRC(model,p)
-            frame['drc']=r.display_drc.frame(states,result['replacements'],self.settings,progress)
-            frame['drc_locations']=locations(frame['drc'])
-            mechanical=check_frame(bound,self.roles,p,None,states,layers,1,self.case['connections'],False)
-            frame['checks']={i:dict(mechanical,failures=list(mechanical['failures'])+[dict(kind=q['kind'],point=q['point']) for q in frame['contact']['issues'] if q['scheme']==i]) for i in (1,2,3)}
+        # These per-pose rules are part of the measured command itself.
+        # No catalogue of other poses, probability grid or yield is launched.
+        from .drc import GlobalDRC
+        from .current_drc import locations
+        from .measured_issues import catalogue
+        from .reconstruction_diagnostic import markers
+        if not hasattr(r,'display_drc'):r.display_drc=GlobalDRC(model,p)
+        frame['drc']=r.display_drc.frame(states,result['replacements'],self.settings,progress)
+        frame['drc'].extend(markers(result,self.data.dbu_um));frame['drc_locations']=locations(frame['drc'])
+        issues=catalogue(frame,self.case,model)
+        original_failures=tuple(result.get('hard_failures',()));omissions=[]
+        if original_failures and output_policy=='omit_failed_regions':
+            from .partial_output import omit
+            frame,omissions=omit(model,frame)
+            frame['drc'].extend(r.display_drc.frame(states,frame['reconstruction']['replacements'],self.settings,progress))
+            frame['drc_locations']=locations(frame['drc']);issues=catalogue(frame,self.case,model)
+        if result.get('hard_failures') and output_policy=='strict':
+            from .reconstruction_diagnostic import display,DiagnosticFailure
+            from .topology_routing import failure_message
+            frame['reconstruction']=display(result,frame['rotation_centers'],states);frame['diagnostic_only']=True
+            details=dict(connection_failure_count=len(result['hard_failures']),connection_failures=[dict(layer=ref[0],index=ref[1],reason=reason) for ref,reason in result['hard_failures']],fixed_rdl_drc_checked=True,diagnostic_only=True,
+                         drc_issues=issues,drc_count=len(issues),drc_passed=False,coordinate_frame='GDS顶层坐标，单位μm；package_relative_bounds_um以名义封装左下角为原点')
+            if diagnostic:return frame,None,details
+            raise DiagnosticFailure(failure_message(result['hard_failures']),frame,details)
         failures=[dict(layer=q['layer'],index=q['index'],reason=q.get('warning','无法连接')) for q in result['pieces'] if q.get('connection_failed')]
         from .dxf_export import snapshot
-        frozen=snapshot(self.data,self.cache,frame,reconstruction=True,progress=progress)
+        frozen=snapshot(self.data,self.cache,frame,reconstruction=True,progress=progress,allow_partial=bool(frame.get('partial_output_validated')))
         for blobs in frozen.layers.values():
             for b in blobs:
                 g=shapely.from_wkb(b)
@@ -122,9 +134,9 @@ class Session:
         # Keep the last interactive pose only; batch cannot fill the GUI LRU.
         if not preview:
             r.cache.clear();r.geometry_pool.clear();r.block_cache.clear()
-        return frame,frozen,dict(connection_failures=failures,connection_failure_count=len(failures),
-                                fixed_rdl_drc_checked=bool(preview),rule_groups=len(result.get('violations',())),
-                                scope='当前实际铜；已检查当前金属线宽、线距、孔盘包围与封装边距，不代表工艺签核' if preview else '当前实测铜；只核验电连接、异网隔离和禁布区；不计算全局尺寸DRC、概率或良率')
+        return frame,frozen,dict(output_policy=output_policy,partial_output=bool(original_failures),omitted_regions=omissions,omitted_region_count=len(omissions),connection_failures=failures,connection_failure_count=max(len(failures),len(original_failures)),
+                                fixed_rdl_drc_checked=True,drc_issues=issues,drc_count=len(issues),drc_passed=not issues,coordinate_frame='GDS顶层坐标，单位μm；package_relative_bounds_um以名义封装左下角为原点',rule_groups=len(result.get('violations',())),
+                                scope='当前实测姿态的实际铜DRC及连接检查；不计算其他姿态、概率或良率，不代表工艺签核')
     def close(self):
         for r in self.instances:r.close()
         self.instances.clear();self.local=threading.local()

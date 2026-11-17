@@ -64,6 +64,8 @@ def normalize_project(project):
     height=p.get('layer_table_height',300)
     if type(height) is not int or not 110<=height<=10000:raise ValueError('图层表高度须为110～10000像素')
     p['layer_table_height']=height
+    from .measurement_data import normalize as ruler_rows
+    p['rulers']=ruler_rows(p.get('rulers',[]))
     sections=p.setdefault('expanded_settings',[])
     if not isinstance(sections,list) or any(not isinstance(title,str) for title in sections):
         raise ValueError('工程设置栏目列表必须由标题字符串组成')

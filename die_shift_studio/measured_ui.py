@@ -94,6 +94,7 @@ class MeasuredOutput(QtCore.QObject):
     def submit(self,command,fn,kind='',job=None):
         if not self.running and not self.w._tasks:self.w.task_control.checkpoint()
         key=job or self.new_job(command);event=threading.Event();gen=self.generation
+        issue_path=(self.w.project_path.parent if self.w.project_path else self.w.jobs_dir)/'Cache'/'MeasuredDiagnostics.sqlite'
         self.running[key]=(event,gen,kind);self.jobs[key]['status']='running'
         def work():
             try:
@@ -103,8 +104,19 @@ class MeasuredOutput(QtCore.QObject):
                         cancel_check();now=time.monotonic()
                         if now-last[0]>.1:last[0]=now;self.progressed.emit(key,int(n),str(text))
                     result=fn(progress);cancel_check()
+                    from .measured_issues import write
+                    if kind=='preview':
+                        product,engine=result;frame,snapshot,details=product;result=((frame,snapshot,write(issue_path,key,details)),engine)
+                    elif isinstance(result,dict):result=write(issue_path,key,result)
                 self.finished.emit(key,result,None)
-            except Exception as exc:self.finished.emit(key,None,(type(exc).__name__,str(exc)))
+            except Exception as exc:
+                payload=getattr(exc,'frame',None)
+                if payload is not None:
+                    from .measured_issues import write
+                    try:payload=dict(payload,ipc_details=write(issue_path,key,getattr(exc,'details',{})))
+                    except Exception as storage_error:
+                        payload=dict(payload,ipc_details=dict(drc_status='catalog_write_error',message=str(storage_error)))
+                self.finished.emit(key,payload,(type(exc).__name__,str(exc)))
         executor=self.batch['executor'] if kind=='batch.pose' and self.batch else self.pool
         executor.submit(work);return dict(status='accepted',task_id=key)
     def progress(self,key,n,message):
@@ -121,6 +133,8 @@ class MeasuredOutput(QtCore.QObject):
         elif error:
             job.update(status='error',error=dict(type=error[0],message=error[1]));self.w.log_bus.emit('实测输出 '+key+'：'+error[1],'ERROR')
             if kind=='prepare':self.ready=False;self.last_error=job['error']
+            if isinstance(result,dict) and result.get('diagnostic_only'):
+                job['result']=result.get('ipc_details',{});self.show_diagnostic(result)
         else:
             if kind=='prepare':
                 if self.session and self.session is not result:self.session.close()
@@ -133,7 +147,10 @@ class MeasuredOutput(QtCore.QObject):
                 w.reconstruction_toggle.blockSignals(True);w.reconstruction_toggle.setChecked(True);w.reconstruction_toggle.blockSignals(False)
                 w.statusBar().showMessage('实测预览完成；按指令的实际旋转中心计算，工程参数保持原值。')
                 w.reconstruction_yield.evidence=None;w.update_state_table(frame['states']);w.plot_layout(preserve=True);w.fill_issues();result=details
-            job.update(status='completed',progress=100,result=result,finished=time.time())
+            if isinstance(result,dict) and result.get('diagnostic_only'):
+                message='当前姿态存在无法重构的连接，已显示诊断断口，禁止制造输出'
+                self.w.log_bus.emit(message,'ERROR');job.update(status='error',progress=100,result=result,error=dict(type='ReconstructionFailure',message=message))
+            else:job.update(status='completed',progress=100,result=result,finished=time.time())
         if kind=='batch.pose' and self.batch:
             self.batch['inflight'].discard(key);self.batch['completed']+=1
             if job['status']!='completed':
@@ -143,6 +160,10 @@ class MeasuredOutput(QtCore.QObject):
             self.batch['executor'].shutdown(wait=False);self.batch['store'].close();self.batch=None
             if self.session:self.session.close() # release per-thread clones, keep shared nominal plans
         self.apply_lock()
+    def show_diagnostic(self,frame):
+        w=self.w;self.current=None;w.current_frame=frame;w.shown_states=frame['states'];w.manual_states=frame['states'];w.active_preview=None
+        w.reconstruction_toggle.blockSignals(True);w.reconstruction_toggle.setChecked(True);w.reconstruction_toggle.blockSignals(False)
+        w.plot_layout(preserve=True);w.fill_issues()
     def fail_transition(self,message):
         if self.transition:
             if self.w.data is self.transition.get('previous_data') and 'previous_overlays' in self.transition:self.saved_overlays=self.transition['previous_overlays']
@@ -208,12 +229,12 @@ class MeasuredOutput(QtCore.QObject):
         self.apply_lock()
     def dispatch(self,request,event,reply):
         try:
-            if request['id'] in self.requests:reply.update(self.requests[request['id']])
+            if request['id'] in self.requests and request['command'] not in ('info','ping','task.get','task.issues'):reply.update(self.requests[request['id']])
             else:reply.update(self.command(request['command'],request.get('args',{})))
         except Exception as exc:reply.update(status='error',error=dict(type=type(exc).__name__,message=str(exc)))
         finally:
             # Busy did not accept work. The same operation ID may retry later.
-            if reply.get('error',{}).get('type')!='Busy':self.requests[request['id']]=dict(reply)
+            if request['command'] not in ('info','ping','task.get','task.issues') and reply.get('error',{}).get('type')!='Busy':self.requests[request['id']]=dict(reply)
             while len(self.requests)>10000:self.requests.popitem(last=False)
             event.set()
     def command(self,command,args):
@@ -223,6 +244,11 @@ class MeasuredOutput(QtCore.QObject):
             key=args.get('task_id')
             if key not in self.jobs:raise ValueError('任务不存在或历史已过期')
             return dict(status='completed',result=dict(self.jobs[key]))
+        if command=='task.issues':
+            job=self.jobs.get(args.get('task_id'),{});catalog=job.get('result',{}).get('issue_catalog')
+            if not catalog:raise ValueError('该任务尚无完整问题目录；请先查询task.get')
+            from .measured_issues import page
+            return dict(status='completed',result=page(catalog,args.get('offset',0),args.get('limit',128)))
         if command=='info':
             return dict(status='completed',result=dict(ready=self.ready,last_error=self.last_error,preparing_task=self.transition['job'] if self.transition else next((key for key,v in self.running.items() if v[2]=='prepare'),None),project=str(w.project_path) if w.project_path else None,
                 source=w.data.path if w.data else None,top_cell=w.data.top_name if w.data else None,
@@ -275,7 +301,7 @@ class MeasuredOutput(QtCore.QObject):
             from .measured_core import pose_parameters
             pose_parameters(session.case,session.p,rows)
             def preview(progress):
-                product=session.run(rows,progress,preview=False);_,p=pose_parameters(session.case,session.p,rows)
+                product=session.run(rows,progress,preview=False,diagnostic=True);_,p=pose_parameters(session.case,session.p,rows)
                 model,reconstructor=session.model(p)
                 from .fast_preview import PreviewEngine
                 engine=PreviewEngine(session.cache,session.case,session.roles,session.motions,p,None,session.case['connections'],contact_model=model)
@@ -286,6 +312,7 @@ class MeasuredOutput(QtCore.QObject):
         if command=='export.gds':
             if self.running or self.current is None:raise RuntimeError('没有完成的实测预览，或任务尚未完成')
             _,snapshot,details=self.current
+            if snapshot is None or details.get('diagnostic_only'):raise ValueError('失败姿态仅用于诊断显示，不能输出制造图纸')
             if details['connection_failure_count'] and not args.get('allow_failed',False):raise ValueError('存在未连接动区，拒绝正常生产输出；可显式allow_failed仅输出诊断用实际铜')
             destination=self.destination(args.get('filename','measured.gds'),'.gds')
             return self.submit(command,lambda progress:dict(write_gds(snapshot,destination,self.session.data.dbu_um),**details),'export')
@@ -330,7 +357,15 @@ class MeasuredOutput(QtCore.QObject):
                             if psutil.Process().memory_info().rss-batch['baseline']>batch['memory_mb']*1024**2:
                                 with batch['lock']:batch['store'].flush()
                                 raise MemoryError('批次增量内存超过配置上限；已分段暂存，任务未输出，请降低并发或提高预算')
-                    with serial_scope():frame,snapshot,details=session.run(rows,bounded_progress,preview=False)
+                    try:
+                        with serial_scope():frame,snapshot,details=session.run(rows,bounded_progress,preview=False)
+                    except Exception as exc:
+                        if hasattr(exc,'details'):
+                            from .measured_issues import place
+                            exc.details=place(dict(exc.details,cell=name,position_um=position.tolist()),position)
+                        raise
+                    from .measured_issues import place
+                    details=place(details,position)
                     if details['connection_failure_count'] and not batch['allow_failed']:raise ValueError('存在未连接动区：'+json.dumps(details,ensure_ascii=False))
                     cancel_check()
                     with batch['lock']:

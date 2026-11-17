@@ -78,6 +78,7 @@ class ViewSettings:
     camera_speed:int=4
     contact_box_budget:int=2048
     reconstruction_regions:tuple=()
+    reconstruction_boxes:tuple=()
 
     # 重构预演初始参数
     # Manual cut planes, one per chain, written as
@@ -181,6 +182,8 @@ class ViewSettings:
         for key in ('reconstruction_extra_cuts','reconstruction_second_cuts'):
             if key in values:
                 values[key]=cls._normalize_cuts(values[key])
+        from .manual_regions import normalize as normalize_boxes
+        values['reconstruction_boxes']=normalize_boxes(values.get('reconstruction_boxes',()))
         values['reconstruction_regions']=cls._normalize_regions(values.get('reconstruction_regions',()))
         values['reconstruction_dropped_cuts']=cls._normalize_dropped(values.get('reconstruction_dropped_cuts',()))
         values['width_display']=normalize_display(values.get('width_display',{}))
@@ -234,10 +237,10 @@ class ViewSettings:
 
     def reconstruction_key(self):
         """Everything the reconstruction result depends on besides the pose."""
-        return (True,'nominal-route-continuity-v47',self.evaluation_scope,self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_pad_trigger_um,self.reconstruction_ignored,self.reconstruction_following,self.drc_tolerance_um,
+        return (True,'nominal-route-continuity-v48',self.evaluation_scope,self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_pad_trigger_um,self.reconstruction_ignored,self.reconstruction_following,self.drc_tolerance_um,
                 self.reconstruction_corner_guard_um,tuple(self.reconstruction_intervals),
                 self.reconstruction_forced,self.reconstruction_angles,self.reconstruction_deleted,self.reconstruction_added,
-                tuple(self.reconstruction_regions),tuple(self.reconstruction_cuts),
+                tuple(self.reconstruction_regions),tuple(self.reconstruction_boxes),tuple(self.reconstruction_cuts),
                 tuple(self.reconstruction_extra_cuts),tuple(self.reconstruction_second_cuts),
                 tuple(self.reconstruction_dropped_cuts))
     def deformation_key(self):

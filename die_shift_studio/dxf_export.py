@@ -18,7 +18,8 @@ class Snapshot:
     ignored_count: int
 
 
-def snapshot(data,cache,frame=None,*,deformation=False,reconstruction=False,progress=lambda *_:None):
+def snapshot(data,cache,frame=None,*,deformation=False,reconstruction=False,progress=lambda *_:None,allow_partial=False):
+    if frame and (frame.get('diagnostic_only') or frame.get('reconstruction',{}).get('hard_failures')) and not (allow_partial and frame.get('partial_output_validated')):raise ValueError('当前为重构失败诊断图，不能输出为制造图纸；请修正连接问题。')
     """Capture all layers, including hidden/unused ones, at one completed pose."""
     replacements={}
     if frame:

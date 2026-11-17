@@ -163,7 +163,9 @@ class Reconstructor:
         self.rules=FixedRules(model,parameters,settings)
         self.cache=SessionCache(group=cache_group)
         self.block_cache=EphemeralCache(budget=16*1024**2,max_entries=2048)
-        self.tol=max(1e-6,model.data.dbu_um);self._rule_width,self.rule_space=effective_rules(parameters,settings)
+        self.tol=max(1e-6,model.data.dbu_um)
+        from .drc_rules import construction_rules
+        self._rule_width,self.rule_space=construction_rules(parameters,settings,self.tol)
         self.overlap_um=parameters.annulus_um;self.length_um=self.width_um=self.extra_um=0.
         self.auto_ignored={};self.auto_following=set();self.safe_vias={}
         self.vias=[];self.stays=[];self.vias_by_target={};self._plans=None;self.manual_quality={};self.manual_masses={}
@@ -219,8 +221,9 @@ class Reconstructor:
             ref,vias=item
             if ref in self.settings.reconstruction_forced:return ref,[],None,None
             source=self.model.cache.layers[ref[0]]['geometry'][ref[1]]
+            if any(layer==ref[0] and source.intersects(shapely.Polygon(points)) for layer,points in self.settings.reconstruction_boxes):return ref,[],None,None
             if any(layer==ref[0] and source.intersects(shapely.box(*bounds)) for layer,bounds,mode in self.settings.reconstruction_regions):return ref,[],None,None
-            certificates=[enclosure_certificate(self.model,self.p,source,[v]) for v in vias]
+            certificates=[enclosure_certificate(self.model,self.rules.p,source,[v]) for v in vias]
             safe=[v for v,proof in zip(vias,certificates) if proof]
             cert=dict(certificates[0],interfaces=len(vias),minimum_margin_um=min(q['minimum_margin_um'] for q in certificates)) if vias and all(certificates) else None
             from .ignored_motion import fixed_enclosures_safe,complex_mode
@@ -287,15 +290,19 @@ class Reconstructor:
                 local_base=dict(base,routing_source=source,land=land,anchors=fixed,mine=moving,refs=normalize_via_refs((v['key'],v['index']) for v in moving))
                 if not fixed:return dict(local_base,plan=None,orphan=True,warning='无固定连接端，整块按所属DIE平移')
                 if land.is_empty:return dict(local_base,plan=None,orphan=False,warning='名义落盘无可用铜，保留原图')
-                stop=min(fixed,key=lambda g:g.distance(land));end=np.asarray(stop.representative_point().coords[0])
+                stop=min(fixed,key=lambda g:g.distance(land));legacy_end=np.asarray(stop.representative_point().coords[0])
+                ports=[v['center'] for v in self.stays if v['net']==net and stop.intersection(v['poly']).area>self.tol*self.tol]
+                center=np.mean(ports,axis=0) if ports else np.asarray(stop.centroid.coords[0])
+                end=center if source.covers(shapely.Point(center)) and stop.buffer(self.tol).covers(shapely.Point(center)) else legacy_end
                 candidates=[]
                 pairs=[(v['center'],end) for v in sorted(moving,key=lambda v:-np.linalg.norm(v['center']-end))[:8]]
+                if any(row[:2]==(layer,index) for name in ('reconstruction_intervals','reconstruction_angles','reconstruction_deleted','reconstruction_added') for row in getattr(self.settings,name,())):
+                    pairs.extend((v['center'],legacy_end) for v in moving[:8])
                 if len(moving)>1:
                     start=np.asarray(land.centroid.coords[0]);stop_all=shapely.union_all(fixed).centroid
                     if source.covers(shapely.Point(start)) and source.covers(stop_all):pairs.insert(0,(start,np.asarray(stop_all.coords[0])))
-                if not pair_route:
-                    if len(moving)>1:pairs=inward_routes(source,moving)+pairs
-                    else:pairs+=inward_routes(source,moving)
+                if len(moving)>1:pairs=inward_routes(source,moving)+pairs
+                else:pairs+=inward_routes(source,moving)
                 seen=set();traced=[]
                 for start,endpoint in pairs:
                     line=trace(source,start,endpoint,self._rule_width)
@@ -334,6 +341,10 @@ class Reconstructor:
                              if row[:2]==(layer,index) and len(row)>5 and row[5]!='seed')
                 saved=[q for q in candidates if q[2].identity in roots]
                 if saved:candidates=saved
+                else:
+                    from .parallel_zones import alignment
+                    aligned=[row for row in candidates if alignment(row[2])>=np.cos(np.deg2rad(5))]
+                    if aligned:candidates=aligned
                 if pair_route or getattr(self,'measured_only',False):
                     # Individual pair copper is discarded by branch assembly.
                     # Native DRC on every pair checked a fictitious full net and
@@ -342,7 +353,8 @@ class Reconstructor:
                     def branch_rank(row):
                         plan=row[2];a,b=plan.nominal_first,plan.nominal_second
                         variation=plan.width_variation(a,b)
-                        return (not row[0],variation>.05,variation if variation>.05 else 0.,-(b-a))
+                        part=plan.partition(a,b);common=part is not None and land_all.difference(part['C']).area<=self.tol*self.tol
+                        return (not common,not row[0],variation>.05,variation if variation>.05 else 0.,-(b-a))
                     plan=min(candidates,key=branch_rank)[2]
                     return dict(local_base,plan=plan,orphan=False,warning=plan.warning,
                                 extreme_checks=0,extreme_invalid=0,all_die_space_certified=False,priority_failure_mass=None)
@@ -436,7 +448,7 @@ class Reconstructor:
         # Route construction is pose-independent and reused after every handle edit.
         from .session_cache import logical_fingerprint
         base_key=logical_fingerprint((self.model.data.geometry_id,self.model.roles,self.model.connections.order,
-                                'source-routes-v47',bool(getattr(self,'measured_only',False)),self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
+                                'source-routes-v48',bool(getattr(self,'measured_only',False)),self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
         # Forcing/editing one source must not rebuild every source path. Mine
         # membership includes enclosure filtering; all-via ownership controls
         # allocation. Existing path identities survive later manual edits.
@@ -454,6 +466,8 @@ class Reconstructor:
             if old_key not in keep:self.plan_pool.pop(old_key,None)
         from .reconstruction_zones import expand
         self._base_plans=[entry for key in keys for entry in self.plan_pool[key]]
+        from .parallel_zones import coordinate
+        coordinate(self,self._base_plans)
         self._plans=expand(self,[e for e in self._base_plans if (e['layer'],e['index']) not in self.settings.reconstruction_ignored])
         from .ignored_motion import entries as ignored_entries
         self._plans.extend(ignored_entries(self))
@@ -463,6 +477,11 @@ class Reconstructor:
         if 'merged_part' in entry:return entry['merged_part'],True
         plan=entry['plan']
         if plan is None:return None,False
+        boxes=[shapely.Polygon(points) for layer,points in self.settings.reconstruction_boxes if layer==plan.layer and plan.source.intersects(shapely.Polygon(points))]
+        if boxes:
+            from .manual_regions import partition as exact_box_partition
+            part=exact_box_partition(plan,shapely.union_all(boxes))
+            if part is not None:return part,True
         a,b=plan.nominal_first,plan.nominal_second;manual=False
         for l,i,owner,refs,identity,left,right in self.settings.reconstruction_intervals:
             if (l,i,owner,normalize_via_refs(refs))==plan.key and identity==plan.identity:
@@ -599,7 +618,11 @@ class Reconstructor:
                 saved_part,saved_manual,saved_regions,saved_error,saved_warning=cached
                 return saved_part,saved_manual,None if saved_regions is None else dict(saved_regions),saved_error,saved_warning
             from .reconstruction_angles import solve
-            if not np.any(states[entry['owner']]) and 'serial_left' not in entry:
+            if part.get('box_invalid'):
+                regions=dict(A=EMPTY,B=part['B'],C=transform(part['C'],self.model.bound.centers[entry['owner']],states[entry['owner']]));error='框选区域未切断全部运动—固定路径，保留严格框选范围'
+            elif part.get('box_complex'):
+                regions=dict(A=part['A'],B=part['B'],C=transform(part['C'],self.model.bound.centers[entry['owner']],states[entry['owner']]));error=None
+            elif not np.any(states[entry['owner']]) and 'serial_left' not in entry:
                 regions={k:part[k] for k in 'ABC'};error=None
             elif entry.get('graph_branch') or getattr(entry['plan'],'plane_domain',False):
                 from .plane_route import live_part
@@ -621,7 +644,7 @@ class Reconstructor:
             if self._cover_lookup(self.dropped,None,layer,index,entry['refs']):continue
             part,manual,regions,error,warning=prepared;valid=True;fallback=None
             if part is not None:
-                fallback=dict(A=EMPTY,B=part['B'],C=transform(part['C'],self.model.bound.centers[owner],states[owner])) if entry.get('graph_branch') or getattr(plan,'plane_domain',False) else failed_connection(part,plan,self.model.bound.centers[owner],states[owner])
+                fallback=dict(A=EMPTY,B=part['B'],C=transform(part['C'],self.model.bound.centers[owner],states[owner])) if part.get('strict_box') is not None or entry.get('graph_branch') or getattr(plan,'plane_domain',False) else failed_connection(part,plan,self.model.bound.centers[owner],states[owner])
                 if 'serial_left' in entry:
                     fallback=dict(A=EMPTY,B=entry['serial_fixed'],C=transform(entry['serial_block'],self.model.bound.centers[owner],states[owner]*entry['serial_left']))
                 if error:regions=dict(fallback);warning=error+'；已取消连接段';valid=False
@@ -651,9 +674,9 @@ class Reconstructor:
                 near=far=moved_cut=None;a=b=0.;valid=False
             shift=float(np.linalg.norm(self.model.moved(shapely.Point(entry['mine'][0]['center']),owner,states).coords[0]-entry['mine'][0]['center']))
             feature=features.setdefault((layer,index),dict(source=source,pieces=[],net=entry['net']))
-            piece=dict(graph_branch=entry.get('graph_branch',False),moving_nominal=entry.get('moving_nominal'),fixed_nominal=entry.get('fixed_nominal'),ignored=entry.get('ignored',False),ignored_following=entry.get('following',False),die=owner,layer=layer,index=index,net=entry['net'],via_refs=entry['refs'],vias=[v[1] for v in entry['refs']],
+            piece=dict(strict_box=part.get('strict_box'),box_invalid=part.get('box_invalid',False),graph_branch=entry.get('graph_branch',False) or part.get('box_complex',False),moving_nominal=entry.get('moving_nominal') if not part.get('box_complex') else plan.land,fixed_nominal=entry.get('fixed_nominal') if not part.get('box_complex') else shapely.union_all(plan.anchors),ignored=entry.get('ignored',False),ignored_following=entry.get('following',False),die=owner,layer=layer,index=index,net=entry['net'],via_refs=entry['refs'],vias=[v[1] for v in entry['refs']],
                        fallback_regions=fallback if part.get('near') is not None else None,connection_failed=bool(error) or not valid,
-                       missing_region=part['A'] if getattr(plan,'plane_domain',False) else missing_area(part,plan,self.model.bound.centers[owner],states[owner]) if plan is not None and part.get('near') is not None else source,
+                       missing_region=part['A'] if part.get('strict_box') is not None or getattr(plan,'plane_domain',False) else missing_area(part,plan,self.model.bound.centers[owner],states[owner]) if plan is not None and part.get('near') is not None else source,
                        moving_terminals=shapely.union_all([self.model.moved(v['poly'],owner,states) for v in entry['mine']]),
                        source=source,source_scope_complete=bool(entry.get('routing_source',source) is source if plan is None else plan.source is source),endpoint_weights=(entry.get('serial_left',1.),entry.get('serial_right',0.)),branch=entry.get('branch',1),branch_count=entry.get('branch_count',1),route_plan=plan,interval=(a,b),boundary_angles=part.get('angles',(0.,0.)),route_identity=None if plan is None else plan.identity,
                        nominal_regions={k:part[k] for k in 'ABC'},regions=regions,

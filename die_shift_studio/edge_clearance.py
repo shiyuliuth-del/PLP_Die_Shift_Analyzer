@@ -13,7 +13,8 @@ def edge_violations(model,states,parameters,settings,replacements=None,owners=No
             continue
         if owners is not None and role=='固定RDL':continue
         if replacements_only and key not in replacements:continue
-        rule=parameters.package_clearance_um
+        from .drc_rules import clearance
+        rule=clearance(parameters.package_clearance_um,settings)
         if rule<0:
             raise ValueError(f'图层 {key} 的有效线距必须大于零')
         if not hasattr(model,'_edge_interiors'):model._edge_interiors={}
