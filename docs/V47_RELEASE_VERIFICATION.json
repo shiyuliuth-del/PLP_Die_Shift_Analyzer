@@ -1,0 +1,36 @@
+{
+  "version": "V47",
+  "status": "PASS",
+  "verified_at_utc": "2026-11-17T03:58:39.579135+00:00",
+  "release_url": "https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/releases/tag/V47",
+  "published_at": "2026-11-17T03:57:40Z",
+  "merge_commit": "e51df6ef795ffceb23c2343c8869cf2ac4175688",
+  "tested_head": "18d9104ab22e41e259b90d0b7338abf52c2c5357",
+  "runtime_sha256": "7b86407a7f327d32177b57622ee3b88063d8dfaa858d5d209e888c18ed052c6e",
+  "source_zip": "Die_Shift_Analyze_V47_Source.zip",
+  "source_bytes": 2097713,
+  "source_files": 158,
+  "source_sha256": "beb7c1813778e03ebf2cf09e156c2fb620928d7fbe0f8a821e20ec715d687cfb",
+  "windows_run": 44011582820,
+  "windows_environments": [
+    "clean",
+    "with-cupy"
+  ],
+  "source_commands": 52,
+  "core_tests": 437,
+  "gui_suites": 32,
+  "backends": 2,
+  "examples": 17,
+  "checks": [
+    "downloaded release CRC/SHA/7zip",
+    "all release source files equal V47 Git objects",
+    "GitHub automatic ZIP/tar equal V47 Git objects",
+    "standalone IPC MD/PY equal tag"
+  ],
+  "limitations": [
+    "No physical GPU or factory offline image acceptance",
+    "Focused yields condition on selected representative cells",
+    "Fast IPC omits complete dimensional DRC and probability",
+    "PR34 remains a separate draft"
+  ]
+}

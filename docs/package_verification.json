@@ -1,11 +1,11 @@
 {
-  "version": "V46",
+  "version": "V47",
   "status": "PASS",
-  "tested_at_utc": "2026-11-17T02:36:05.731517+00:00",
+  "tested_at_utc": "2026-11-17T03:48:45.521307+00:00",
   "scope": "Clean source checkout, local platform. Windows executable verification is recorded separately.",
   "platform": "linux",
-  "verified_runtime_sha256": "0f313ea3f678cbce7e16126d5f3efdb2fdcf747622856b1a9c4e75240c0162a9",
-  "gui_suites": 31,
+  "verified_runtime_sha256": "7b86407a7f327d32177b57622ee3b88063d8dfaa858d5d209e888c18ed052c6e",
+  "gui_suites": 32,
   "runs": [
     {
       "args": [
@@ -21,7 +21,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "Ran 430 tests in 123.637s",
+        "Ran 437 tests in 72.633s",
         "",
         "OK (skipped=2)"
       ]
@@ -299,7 +299,7 @@
       "summary": [
         "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
         "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
-        "GUI_V43_PASS: authenticated local IPC, assessment-first, locks, pivots, GDS, concurrent OAS cells, cancel, project switching and release"
+        "GUI_V43_PASS: authenticated local IPC, lazy engineering freeze, locks, pivots, GDS, concurrent OAS cells, cancel, project switching and release"
       ]
     },
     {
@@ -390,7 +390,19 @@
       "summary": [
         "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
         "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
-        "GUI_EVALUATION_SCOPE_PASS focus 7 / all 9, reconstruction/DRC/width/cache/saved mode"
+        "GUI_EVALUATION_SCOPE_PASS focus 3 / all 9, reconstruction/DRC/width/cache/saved mode"
+      ]
+    },
+    {
+      "args": [
+        "tests/gui_v47.py"
+      ],
+      "env": {},
+      "status": "PASS",
+      "summary": [
+        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
+        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
+        "GUI_V47_PASS: pending/empty IPC, lazy commands, no assessment/yield, saved overlays, splitter and collapse"
       ]
     },
     {
