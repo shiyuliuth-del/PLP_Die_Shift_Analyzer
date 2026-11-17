@@ -29,6 +29,8 @@ def main():
         w.request_preview();settle()
     q=json.loads((ROOT/'examples/示例R_禁布区贴边与联合良率.json').read_text(encoding='utf-8'))
     q['gds_path']=str(ROOT/'examples'/q['gds_path'])
+    # Preserve this suite's full-input probability / integration contract.
+    q['extreme_view']={'mode':'all','page':1}
     q['settings'].update(animation_enabled=False,yield_method='partition',yield_box_budget=256)
     w.set_data(read_gds(Path(q['gds_path'])),q);settle()
     label=w.width_yield.label

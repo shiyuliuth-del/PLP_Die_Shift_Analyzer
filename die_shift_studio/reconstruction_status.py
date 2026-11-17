@@ -25,7 +25,7 @@ class ReconstructionYieldDisplay:
         try:p=replace(w.params(),target_nsigma=0)
         except ValueError:self.reset();return
         cfg=settings or w.view_settings
-        token=('reconstruction-analysis-continuity',logical_fingerprint((w.data.geometry_id,w.data.top_name,w.roles(),w.ordered_layers(),asdict(p),cfg.reconstruction_key(),cfg.reconstruction_grid_nodes)))
+        token=('reconstruction-analysis-continuity',logical_fingerprint((w.data.geometry_id,w.data.top_name,w.roles(),w.ordered_layers(),asdict(p),cfg.reconstruction_key(),cfg.reconstruction_grid_nodes if cfg.evaluation_scope=='all' else 0)))
         key=(id(w.cache_group),token)
         if key==self.key:self.render();return
         self.reset();self.key=key

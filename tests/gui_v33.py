@@ -40,6 +40,8 @@ def main():
         app.processEvents()
     q=json.loads((ROOT/'examples/示例O_运动网络三线路通道.json').read_text())
     q['gds_path']=str(ROOT/'examples'/q['gds_path'])
+    # Preserve this suite's full-input probability / integration contract.
+    q['extreme_view']={'mode':'all','page':1}
     q.setdefault('settings',{})['width_yield_method']='importance'  # This suite checks sampling intervals.
     q.setdefault('settings',{}).update(animation_enabled=False,yield_sample_exponent=8)
     q['parameters'].update(target_nsigma=2,bound_angle_deg=0)

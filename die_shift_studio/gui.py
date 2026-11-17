@@ -604,8 +604,11 @@ class MainWindow(W.QMainWindow):
     def enable_settings(self):
         if not self.setting_fields:return
         grid=self.setting_fields['width_yield_method'].currentData()=='grid'
-        self.setting_fields['width_grid_nodes'].setEnabled(grid)
-        for key in ('width_yield_exponent','width_yield_seed'):self.setting_fields[key].setEnabled(not grid)
+        full=self.view_settings.evaluation_scope=='all'
+        self.setting_fields['width_yield_method'].setEnabled(full)
+        self.setting_fields['reconstruction_grid_nodes'].setEnabled(full)
+        self.setting_fields['width_grid_nodes'].setEnabled(full and grid)
+        for key in ('width_yield_exponent','width_yield_seed'):self.setting_fields[key].setEnabled(full and not grid)
         partition=self.setting_fields['yield_method'].currentData()=='partition'
         self.setting_fields['yield_sample_exponent'].setEnabled(not partition)
         for key in ('yield_box_budget','yield_tolerance'):self.setting_fields[key].setEnabled(partition)
@@ -2192,7 +2195,7 @@ class MainWindow(W.QMainWindow):
     def evaluation_scope_changed(self,*_):
         if self.loading:return
         self.view_settings=replace(self.view_settings,evaluation_scope='focus' if self.grid_mode.currentIndex() else 'all')
-        self.revision+=1;self.stop_animation();self.cancel_previews()
+        self.enable_settings();self.revision+=1;self.stop_animation();self.cancel_previews()
         self.width_yield.reset();self.reconstruction_yield.reset();self.constraint_feedback.cancel()
         self._width_grid_summary=None;self._coupled_data=None;self._problem_tag=None
         if self.result is not None or self._evaluation_requested:

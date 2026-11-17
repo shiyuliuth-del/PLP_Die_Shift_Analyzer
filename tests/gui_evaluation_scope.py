@@ -31,13 +31,14 @@ try:
  job=root/'case.dshift.json';job.write_text(json.dumps(dict(schema_version=5,gds_path=str(source),top_cell='TOP',roles=roles,
        layer_order=['6/0','5/0','4/0','3/0','128/0','127/0'],parameters=asdict(p),settings={'animation_enabled':False,'reconstruction_grid_nodes':3},overlays={})))
  wait();w.load_project(job);wait();assert w.view_settings.evaluation_scope=='focus'
+ assert not w.setting_fields['reconstruction_grid_nodes'].isEnabled()
  w.run_evaluation();wait();assert w.result['extreme_factors']['package_states']==7
  w.width_toggle.setChecked(True);w.reconstruction_toggle.setChecked(True);wait()
  assert w.reconstruction_yield.bank['method']=='focus';assert w.reconstruction_yield.bank['total']==7
  assert w.width_yield.bank['method']=='focus';assert w._width_grid_summary['package_states']==7
  assert '重点组合' in w.width_yield.label.text()
  w.grid_mode.setCurrentIndex(0);wait()
- assert w.view_settings.evaluation_scope=='all';assert w.result['extreme_factors']['package_states']==9
+ assert w.view_settings.evaluation_scope=='all';assert w.setting_fields['reconstruction_grid_nodes'].isEnabled();assert w.result['extreme_factors']['package_states']==9
  assert w.reconstruction_yield.bank['method']=='grid';assert w.reconstruction_yield.evidence['package_states']==9
  assert w.width_yield.bank['method']=='grid'
  w.grid_mode.setCurrentIndex(1);wait();assert w.reconstruction_yield.bank['method']=='focus'
