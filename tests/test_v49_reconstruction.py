@@ -76,12 +76,16 @@ class V49ReconstructionTests(unittest.TestCase):
    s.prepare(lambda *_:None);model,r=s.model(s.p);z=np.zeros((1,3));original=r.frame(z,diagnostics=False)
    failed=copy.deepcopy(original);ref=('5/0',0)
    failed['hard_failures']=((ref,'injected local failed connection'),);failed['electrically_valid']=False
+   # A subtraction can leave a sub-grid detached speck. It must not abort OAS.
+   speck=shapely.box(400.0001,150.0001,400.0002,150.0002)
+   for row in failed['replacements']['5/0']:
+    if 0 in row['indices']:row['geometry']=row['geometry'].union(speck)
    for q in failed['pieces']:
     if (q['layer'],q['index'])==ref:q.update(connection_failed=True,hard_unroutable=True)
    rows=[dict(die=1,dx_um=0.,dy_um=0.,angle_deg=0.)]
    with patch.object(r,'frame',return_value=failed):
     with self.assertRaises(DiagnosticFailure) as caught:s.run(rows,preview=False)
-    self.assertTrue(caught.exception.frame['diagnostic_only']);self.assertTrue(caught.exception.details['drc_issues'])
+    self.assertTrue(caught.exception.frame['diagnostic_only']);self.assertTrue(caught.exception.details['drc_issues']);self.assertTrue(caught.exception.frame['reconstruction']['failed_segments'])
     with self.assertRaises(ValueError):snapshot(data,e.contact.cache,caught.exception.frame,reconstruction=True)
     frame,out,details=s.run(rows,preview=False,output_policy='omit_failed_regions')
    self.assertTrue(details['partial_output']);self.assertTrue(details['fixed_rdl_drc_checked']);self.assertGreater(details['connection_failure_count'],0)
@@ -91,5 +95,8 @@ class V49ReconstructionTests(unittest.TestCase):
    actual=shapely.union_all(polygons).difference(before);source=model.nodes[model.ids[ref]]['poly']
    self.assertLess(source.symmetric_difference(actual).difference(removed).area,1e-8)
    self.assertTrue(all(g.is_valid for g in map(shapely.from_wkb,out.layers['5/0'])))
+   self.assertTrue(any(q.get('quantization') for q in details['omitted_regions']))
+   from die_shift_studio.oas_stream import polygons as encode
+   self.assertTrue(encode(out.layers,data.dbu_um))
   finally:s.close();e.close()
 if __name__=='__main__':unittest.main()
