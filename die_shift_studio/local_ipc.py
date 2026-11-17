@@ -17,8 +17,8 @@ def decode(data):
     return value
 
 
-def call(endpoint,command,args=None,timeout=60,request_id=None):
-    info=json.loads(Path(endpoint).read_text(encoding='utf8'))
+def call(endpoint,command,args=None,timeout=60,request_id=None,descriptor=None):
+    info=dict(descriptor) if descriptor is not None else json.loads(Path(endpoint).read_text(encoding='utf8'))
     if info.get('family') not in ('AF_UNIX','AF_PIPE'):raise ValueError('Only local IPC is supported')
     request=dict(id=request_id or uuid.uuid4().hex,command=command,args=args or {})
     payload=json.dumps(request,allow_nan=False,separators=(',',':')).encode()
@@ -36,7 +36,9 @@ class Server:
         self.endpoint=Path(endpoint).resolve();self.endpoint.parent.mkdir(parents=True,exist_ok=True)
         # Cross-process lifetime lock prevents two simultaneous starts from
         # publishing different authenticated sockets under one descriptor.
-        self.lock_file=open(str(self.endpoint)+'.lock','a+b');self.lock_file.seek(0);self.lock_file.write(b'0');self.lock_file.flush();self.lock_file.seek(0)
+        self.lock_file=open(str(self.endpoint)+'.lock','a+b');self.lock_file.seek(0,2)
+        if not self.lock_file.tell():self.lock_file.write(b'0');self.lock_file.flush()
+        self.lock_file.seek(0)
         try:
             if os.name=='nt':
                 import msvcrt

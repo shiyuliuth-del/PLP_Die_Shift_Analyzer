@@ -3,6 +3,8 @@ from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from contextlib import closing
 import json
 import os
+import shutil
+import hashlib
 from pathlib import Path
 import threading
 import time
@@ -29,20 +31,22 @@ class StopToken:
 
 class Runner:
     def __init__(self, database, endpoint, project, output, workers=4, memory_mb=2048,
-                 retries=3, timeout=900, stop=None, progress=lambda _: None, transport=None):
+                 retries=3, timeout=0, stop=None, progress=lambda _: None, transport=None, trace=None):
         self.database = Path(database).resolve()
         self.output = Path(output).absolute()
         if self.output.suffix.lower() != '.oas' or self.output.is_symlink():
             raise ValueError('输出必须为普通 .oas 文件')
         self.output = self.output.resolve()
+        self.managed_output = self.output.parent.name.lower() == 'output'
+        self.cache = self.output.parent.parent / 'Cache' if self.managed_output else self.output.parent / 'Cache'
         self.project = str(Path(project).resolve())
         self.endpoint = str(Path(endpoint).resolve())
-        if not 1 <= workers <= 64 or not 128 <= memory_mb <= 1048576 or not 0 <= retries <= 10 or timeout < 10:
+        if not 1 <= workers <= 64 or not 128 <= memory_mb <= 1048576 or not 0 <= retries <= 10 or timeout < 0:
             raise ValueError('并发、内存、重试或超时设置超出范围')
         self.workers, self.memory_mb, self.retries, self.timeout = workers, memory_mb, retries, timeout
         self.stop = stop if stop is not None else threading.Event()
         self.progress = progress
-        self.transport = transport or Transport(endpoint, timeout=min(15, timeout))
+        self.transport = transport or Transport(endpoint, timeout=min(15, timeout) if timeout else 15, trace=trace)
         self.ledger = None
         self.active_progress = {}
         self.progress_lock = threading.Lock()
@@ -97,7 +101,7 @@ class Runner:
         if info.get('batch_owner') != self.ledger.get('run_id'):
             raise ValueError('不能取消其他客户端批次')
         t.request('compute.cancel', retries=1)
-        until = time.monotonic() + min(self.timeout, 120)
+        until = time.monotonic() + (min(self.timeout, 120) if self.timeout else 120)
         while time.monotonic() < until:
             info = t.request('info', retries=0)['result']
             if not info.get('batch') and not info.get('running'):
@@ -138,11 +142,13 @@ class Runner:
         run = ledger.get('run_id')
         self.run_id = run
         stage_name = f'RDA_{run}_{attempt}.oas'
-        stage = self.output.parent / stage_name
+        directory = self.cache / 'Batches' / run
+        directory.mkdir(parents=True, exist_ok=True)
+        stage = directory / stage_name
         if stage.exists():
             raise FileExistsError('批次暂存名已经存在，拒绝覆盖')
         ledger.set('stage', str(stage))
-        t.request('output.configure', {'output_directory': str(self.output.parent), 'max_threads': self.workers, 'max_memory_mb': self.memory_mb}, stop=self.stop)
+        t.request('output.configure', {'output_directory': str(directory), 'max_threads': self.workers, 'max_memory_mb': self.memory_mb}, stop=self.stop)
         begin = t.request('batch.begin', {'filename': stage_name, 'client_id': run}, request_id=uuid.uuid5(uuid.UUID(run), f'begin:{attempt}').hex, stop=self.stop)['result']
         batch = begin['batch_id']
         lanes = max(1, min(self.workers, int(begin['threads'])))
@@ -250,9 +256,37 @@ class Runner:
                 raise ValueError('目标文件被其他程序修改，保留新旧输出等待人工处理')
             if self.stop.is_set():
                 raise InterruptedError('已停止发布；旧输出未替换')
+            if self.managed_output and self.output.exists():
+                archive = self.cache / 'History' / ledger.get('run_id') / self.output.name
+                archive.parent.mkdir(parents=True, exist_ok=True)
+                if not archive.exists():
+                    temporary = archive.with_suffix('.copying')
+                    shutil.copyfile(self.output, temporary)
+                    if sha256(temporary, self.stop) != previous:
+                        raise ValueError('旧结果在归档期间发生变化，未覆盖目标')
+                    os.replace(temporary, archive)
+                if sha256(archive, self.stop) != previous:
+                    raise ValueError('旧结果归档校验不符，未覆盖目标')
+                record['archived_outputs'] = {str(self.output): dict(path=str(archive), sha256=previous)}
+                ledger.set('publish', record)
+            if (sha256(self.output, self.stop) if self.output.is_file() else None) != previous:
+                raise ValueError('目标在提交期间被修改，未覆盖目标')
             os.replace(stage, self.output)
         else:
             raise ValueError('已完成批次文件缺失或校验不符，请保留日志检查磁盘')
+        if self.managed_output:
+            # Legacy partials and ancillary files are retained in Cache, never
+            # deleted. Repeat safely after a crash between rename and receipt.
+            archive = self.cache / 'History' / ledger.get('run_id') / 'OtherOutputFiles'
+            for extra in self.output.parent.iterdir():
+                if extra == self.output:
+                    continue
+                archive.mkdir(parents=True, exist_ok=True)
+                destination = archive / extra.name
+                if destination.exists():
+                    destination = archive / (uuid.uuid4().hex + '_' + extra.name)
+                os.replace(extra, destination)
+                self.note(f'旧Output附属文件归档：{extra.name} → {destination}')
         with ledger.db:
             ledger.db.execute("update packages set state='committed'")
         ledger.set('state', 'completed')
@@ -264,12 +298,27 @@ class Runner:
         if not self.database.is_file():
             raise FileNotFoundError('任务数据库不存在')
         self.output.parent.mkdir(parents=True, exist_ok=True)
-        with Lease(self.database), Lease(self.output):
+        locks = self.cache / 'Locks'
+        locks.mkdir(parents=True, exist_ok=True)
+        key = str(self.output.parent if self.managed_output else self.output)
+        lock = locks / hashlib.sha256(os.path.normcase(key).encode()).hexdigest()
+        with Lease(self.database), Lease(lock):
             self.ledger = Ledger(self.database)
             ledger = self.ledger
             try:
                 if not ledger.get('count'):
                     raise ValueError('数据库没有完整导入的封装')
+                if self.managed_output:
+                    protected = [Path(self.project), self.database]
+                    protected.extend(Path(item['path']) for item in ledger.get('sources', []))
+                    try:
+                        project_data = json.loads(Path(self.project).read_text(encoding='utf8'))
+                        source = Path(project_data.get('gds_path', ''))
+                        protected.append(source if source.is_absolute() else Path(self.project).parent / source)
+                    except (OSError, ValueError):
+                        pass  # Service validates the actual source before compute.
+                    if any(path.resolve().is_relative_to(self.output.parent) for path in protected):
+                        raise ValueError('输入或任务记录位于Output内；请移至项目输入目录后创建任务')
                 config = dict(endpoint=self.endpoint, project=self.project, output=str(self.output))
                 if ledger.get('config') and ledger.get('config') != config:
                     raise ValueError('继续任务须使用原入口、工程和输出路径')

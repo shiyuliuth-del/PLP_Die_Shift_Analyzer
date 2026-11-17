@@ -62,8 +62,13 @@ class MeasuredOutput(QtCore.QObject):
         self.saved_overlays={name:w.overlay_widget(name).isChecked() for name in ('reconstruction','width','drc','space','probability')}
         from .local_ipc import Server
         home=Path(os.environ.get('LOCALAPPDATA',Path.home()/'.local'/'state'))/'DieShiftAnalyze'/'ipc'
-        endpoint=endpoint or getattr(w,'requested_ipc_endpoint',None) or home/'endpoint.json'
-        self.server=Server(endpoint,lambda request,event,reply:self.incoming.emit(request,event,reply))
+        requested=endpoint or getattr(w,'requested_ipc_endpoint',None)
+        dispatch=lambda request,event,reply:self.incoming.emit(request,event,reply)
+        if requested:self.server=Server(requested,dispatch)
+        else:
+            try:self.server=Server(home/'endpoint.json',dispatch)
+            except RuntimeError:
+                self.server=Server(home/('endpoint-'+str(os.getpid())+'-'+uuid.uuid4().hex[:12]+'.json'),dispatch)
         w.requested_measured=False # startup-only guard; ordinary editing resumes after disabling IPC
         for name in self.saved_overlays:
             widget=w.overlay_widget(name);widget.blockSignals(True);widget.setChecked(False);widget.blockSignals(False)
