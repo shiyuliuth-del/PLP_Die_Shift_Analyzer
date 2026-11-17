@@ -110,6 +110,23 @@ class V49ReconstructionTests(unittest.TestCase):
    self.assertEqual(result['discarded_subgrid_fragments'],1)
    values=gdstk.read_gds(target).top_level()[0].get_polygons()
    self.assertEqual(len(values),1);self.assertLess(shapely.Polygon(values[0].points).symmetric_difference(good).area,1e-12)
+ def test_issue_catalogue_closes_every_connection_even_on_error(self):
+  import sqlite3
+  from die_shift_studio.measured_issues import write,page
+  closed=[];connect=sqlite3.connect
+  class Tracked(sqlite3.Connection):
+   def close(self):
+    closed.append(self);super().close()
+  def factory(*args,**kwargs):return connect(*args,**dict(kwargs,factory=Tracked))
+  with tempfile.TemporaryDirectory() as tmp,patch('die_shift_studio.measured_issues.sqlite3.connect',side_effect=factory):
+   path=Path(tmp)/'issues.sqlite';result=write(path,'a',{'drc_issues':[]})
+   self.assertEqual(len(closed),1);self.assertEqual(page(result['issue_catalog'])['total'],0)
+   self.assertEqual(len(closed),2)
+   with self.assertRaises(ValueError):page(dict(result['issue_catalog'],task_id='missing'))
+   self.assertEqual(len(closed),3)
+   for db in closed:
+    with self.assertRaises(sqlite3.ProgrammingError):db.execute('select 1')
+   path.unlink();self.assertFalse(path.exists())
  def test_complete_issue_pages_and_top_cell_coordinates(self):
   from die_shift_studio.measured_issues import catalogue,place,write,page
   rows=[dict(kind='线宽不足',geometry=shapely.box(i,0,i+.2,1),layer='5/0',refs=(),owner=0,dependencies=(0,)) for i in range(1025)]

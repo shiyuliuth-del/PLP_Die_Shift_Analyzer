@@ -1,5 +1,6 @@
 """Complete, durable per-pose DRC catalogues with bounded IPC pages."""
 import json,sqlite3
+from contextlib import closing
 from pathlib import Path
 import numpy as np
 
@@ -39,7 +40,7 @@ def write(path,task_id,details):
     rows=details.get('drc_issues')
     if rows is None:return details
     path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
-    with sqlite3.connect(path,timeout=30) as db:
+    with closing(sqlite3.connect(path,timeout=30)) as db, db:
         db.execute('pragma journal_mode=WAL')
         db.execute('create table if not exists issues(task_id text, ordinal integer, payload text, primary key(task_id,ordinal))')
         db.execute('create table if not exists catalogs(task_id text primary key, total integer, metadata text)')
@@ -53,7 +54,7 @@ def write(path,task_id,details):
 def page(catalog,offset=0,limit=128):
     if type(offset) is not int or offset<0 or type(limit) is not int or not 1<=limit<=512:raise ValueError('offset须为非负整数，limit须为1～512')
     path=Path(catalog['path']).resolve()
-    with sqlite3.connect(path.as_uri()+'?mode=ro',uri=True,timeout=30) as db:
+    with closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True,timeout=30)) as db:
         meta=db.execute('select total from catalogs where task_id=?',(catalog['task_id'],)).fetchone()
         if meta is None:raise ValueError('问题目录不存在')
         rows=[json.loads(row[0]) for row in db.execute('select payload from issues where task_id=? and ordinal>=? order by ordinal limit ?',(catalog['task_id'],offset,limit))]

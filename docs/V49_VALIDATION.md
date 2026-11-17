@@ -36,3 +36,5 @@
 上述是主程序功能冻结，不代表联合Release已发布。最后的干净源码聚合、两个软件的全部实图、Windows源码/双EXE和实际资产回下载由联合集成窗口完成；任何失败须修复并重验后再发布。
 
 外部原图补验完成：本机原GD55_9-21.gds通过`test_user_gds_522_vertex_shape_restored_against_klayout_area`（修复图形/面积/归属/源摘要）和`test_gd55_three_die_joint_events_match_complete_frames`（24状态联合事件与完整帧），2项35.079秒正常退出0。环境DIE_SHIFT_TEST_GDS，仅用于本地验收，不提交、不随包。日志本机`/tmp/v49-external.log`。运行代码仍d0d4397。
+
+Windows首次联合任务44033182926的with-cupy环境在目录分页测试发现WinError32：sqlite3连接的上下文管理器仅提交/回滚事务，不关闭连接。修复为显式closing，写入同时保留事务提交/回滚，读取与异常路径也保证关闭。追加跟踪连接/异常后不可复用/立即删除数据库的回归，本地13项V49专项通过；必须以包含此修复的新头重跑Windows，不能只忽略清理失败或调用GC掩盖资源泄漏。该变更不改变几何求解和问题坐标。
