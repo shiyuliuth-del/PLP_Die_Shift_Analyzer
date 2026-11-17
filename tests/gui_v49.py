@@ -38,7 +38,7 @@ try:
  assert w.extreme_table.columnCount()==4 and not w.extreme_table.verticalHeader().isHidden()
  assert '共 ' in w.page_label.text() if hasattr(w,'page_label') else True
  key('K');assert w.rulers.active
- event('button_press_event',(0,80));event('motion_notify_event',(30,120));event('button_release_event',(30,120))
+ event('button_press_event',(0,80));event('motion_notify_event',(30,120));event('button_release_event',(30,120));assert not w.rulers.rows;event('button_press_event',(30,120));event('button_release_event',(30,120))
  assert len(w.rulers.rows)==1;assert abs(np.linalg.norm(np.subtract(*w.rulers.rows[0]))-50)<1e-5
  key('Escape');assert not w.rulers.active and len(w.rulers.rows)==1
  w.write_project(job);w.load_project(job);wait();assert len(w.rulers.rows)==1

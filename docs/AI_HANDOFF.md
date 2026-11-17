@@ -1,3 +1,15 @@
+V50续检优化：extreme_validation把大重点目录按真实DIE依赖分解，只投影所选行；不构造729份带表格量测的显示帧。检查类别也用于旧机械/接口状态计数，不能仅从新DRC表隐藏。实际值量测仅交互显示，measured_core批量保留全部规则/见证但不量表格尺寸。完整删空铜的boundary可为None，partial_output先判断差集为空。
+
+nul7123复现入口：tools/verify_v50_nul.py与tools/verify_v50_nul_mouse.py，均传入用户外部工程JSON；不附私人图纸。具体本轮证据和首次失败保留于V50_VALIDATION，不为发布而循环扩大检查。
+
+# V50 增量交接
+
+本轮以V50_使用说明为准，旧版同步重点组合已替代。focus_cover.py使用GF(3^m)覆盖完整DIE状态配对；不是仅两条轴的覆盖。branch_regions.transition_domains按全截面分割实体，再依据真实端孔分类；避免包围掩膜亚格点重叠吞并分支。topology_checks.py只并行私有WKB解码后的只读核验，联合改线仍确定性串行；不可再共享原生prepared查询对象并发修改。local_failures.py按真实断口/接触见证定位失败动区，正常动区不连带染色。
+
+layout_export.py负责GUI当前姿态GDS/OAS（参数保存、ERROR、原子提交）；名义ABC保持原出口。drc_policy.py控制分类检查/显示，drc_actual.py只在真实见证附近量值。ruler_snap.py按当前实际铜查询几何，方向锁定优先。Settings.reconstruction_auto是调度开关，不是几何参数；pending时保留上个完成帧并拒绝输出待应用状态。新缓存键含检查类别，显示类别不影响数值身份。
+
+实测ERROR四角已含真实姿态，OAS不能再重复施加DIE旋转；legacy bounds保留。客户端相关代码由协作窗口提交后merge，不能复制工作树。V50验收按用户只做一轮集中检查；失败修复仅重跑相关项。下方历史代码地图供定位，冲突以V50合同为准。
+
 # V49 软件交接
 
 新增入口：`ruler.py/measurement_data.py`测量和纯数据持久化；`manual_regions.py`严格旋转框；`parallel_zones.py`自动方向与相邻截面；`drc_rules.py`有效规则/生成余量/冲突严重度；`reconstruction_diagnostic.py`失败局部及双侧虚线；`measured_issues.py`完整SQLite问题目录；`partial_output.py`明确局部删铜及量化核验；`oas_errors.py`逐DIE ERROR矩形。`current_drc.locations`是画布、表格和IPC的统一问题组件目录。

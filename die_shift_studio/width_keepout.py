@@ -74,5 +74,6 @@ def violations(model,states,replacements=None,*,replacements_only=False):
 
 def routing_violations(model,states,parameters,settings,replacements=None,*,replacements_only=False):
     from .edge_clearance import edge_violations
-    return (edge_violations(model,states,parameters,settings,replacements,replacements_only=replacements_only)
-            +violations(model,states,replacements,replacements_only=replacements_only))
+    from .drc_policy import enabled
+    return ((edge_violations(model,states,parameters,settings,replacements,replacements_only=replacements_only) if enabled(settings,'board') else [])
+            +(violations(model,states,replacements,replacements_only=replacements_only) if enabled(settings,'keepout') else []))

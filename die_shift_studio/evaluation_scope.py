@@ -44,7 +44,9 @@ def conditional_event(grid,indices,weights,clauses):
 def focused_reconstruction(r,grid,indices,progress):
     from .reconstruction_joint import scan
     from .reconstruction_probability import attach
-    bank=attach(scan(r,grid,None,progress,indices=indices),r)
+    from .reconstruction_joint import prepare
+    bundles=prepare(r,grid,lambda n,t:progress(round(n*.25),t)) if len(indices)>1 else None
+    bank=attach(scan(r,grid,bundles,lambda n,t:progress(25+round(n*.75),t),indices=indices),r)
     weights,error,logmass=bank['scope_weights'],bank['scope_mass_error'],bank['scope_log_mass']
     success,failure=conditional_event(grid,indices,weights,bank['red_factors'])
     value=dict(method='focus',value=success,failure=failure,grid_nodes=3,total=len(indices),
@@ -61,7 +63,7 @@ def focused_width(analyzer,p,progress):
     from .resources import cancel_check
     p=replace(p,target_nsigma=0,reference_nsigma=p.scale_nsigma if math.isfinite(p.scale_nsigma) else p.reference_nsigma)
     model=analyzer.model;group=analyzer.cache.group
-    key=('focused-width-v46',logical_fingerprint((model.data.geometry_id,model.data.top_name,model.roles,
+    key=('focused-width-pair-cover-v50',logical_fingerprint((model.data.geometry_id,model.data.top_name,model.roles,
          model.connections.order,asdict(p),analyzer.settings.width_key())))
     def compute():
         from .width_analysis import ADEQUATE,BLOCKED

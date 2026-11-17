@@ -58,7 +58,9 @@ class GlobalDRC:
             if key in self.cache:self.hits+=1;self.cache.move_to_end(key);return self.cache[key]
         from .geometry_rules import angle_regions
         self.misses+=1;dbu=self.model.data.dbu_um
-        out=[('线宽不足',rule_region(geometry,width,dbu)),('线距不足',rule_region(geometry,space,dbu,'space'))]
+        out=[]
+        if width>0:out.append(('线宽不足',rule_region(geometry,width,dbu)))
+        if space>0:out.append(('线距不足',rule_region(geometry,space,dbu,'space')))
         if angle:out.append(('最小内角不足',angle_regions(geometry,angle,dbu)))
         out=[(k,g) for k,g in out if not g.is_empty]
         with self.lock:

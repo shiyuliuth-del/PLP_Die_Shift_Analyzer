@@ -164,3 +164,12 @@ RealDataAnalyse生产批次将output.configure指向项目Cache/Batches；OAS完
 批量在未占用数字层写名为ERROR的矩形，按相关DIE分子Cell，范围向外取整且至少1DBU。同一矩形归属多个DIE时各标记一次，同DIE相同矩形去重，因此error_rectangles与drc_count不必相等。每包回执含error_rectangles，batch.end包含总数。完整目录不受IPC消息大小限制截断。
 
 显式部分输出中的小于格点碎片直接删除；其范围、归属和删除原因也进入目录与ERROR层。完整输出依然保留原始连接失败事实，不将已裁剪的封装标为电连接成功。通信、无效几何或磁盘错误保持任务失败，不能用部分输出策略掩盖。
+
+
+## V50 定向标记与检查策略
+
+新回执可含`marker_corners_um`（当前姿态顶层坐标中的4个有序矩形顶点，不重复首点）、`marker_angle_deg`；不可再次按DIE旋转。`bounds_um`仍保留实际见证的轴对齐范围以兼容旧客户端，批量还有`top_cell_marker_corners_um`。单DIE见证按该DIE方向包围，共同见证取自身最小旋转矩形。同一见证归属多个DIE时几何一致。没有新字段的旧回执仍按bounds绘制。
+
+交互预览可含`actual_um/actual_deg`；批量不做表格专用实际尺寸量测，其值可为null，但所启用DRC检查、问题范围及完整分页不省略。工程`settings.drc_checks`控制检查类别，`drc_visible`仅控制界面显示，批量不受显示开关影响。几何有效、电连接和物理异网隔离仍是重构生成门禁，不是可跳过的制造成功条件。
+
+批次同时选择独立`failure_layer`（名称FAIL）。只有`connection_failure_count>0`的封装写入原始真实封装轮廓，DRC-only不进入FAIL；回执`failed_packages`是逐包0/1，batch.end为汇总。ERROR与FAIL都随TopCell封装摆放平移一次。芯片边框已包含每颗DIE实际平移、旋转和自定义旋转中心的作用。

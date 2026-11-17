@@ -26,17 +26,21 @@ def evaluate_states(engine,catalog,settings,progress=lambda *_:None):
     is the only two-owner rule in this undeformed assessment.
     """
     import numpy as np
-    from .fast_preview import check_frame
+    from .fast_preview import check_frame,PreviewEngine
     from .resources import parallel_map
     from .statistics import ExtremeCatalog
     grid=catalog if isinstance(catalog,ExtremeCatalog) else catalog.full
     engine.configure_deformation(False,settings);engine.configure_drc(True,settings)
-    if not isinstance(catalog,ExtremeCatalog):
+    focused=not isinstance(catalog,ExtremeCatalog);focus_digits=None
+    if focused:
         from .evaluation_scope import digits_for
-        poses={};indices=(-1,*catalog.indices)
+        indices=(-1,*catalog.indices)
+        focus_digits=[digits_for(grid,i) for i in indices]
+    if focused and (len(indices)<64 or not isinstance(engine,PreviewEngine)):
+        poses={}
         for number,index in enumerate(indices):
             digits=digits_for(grid,index);states=np.asarray([v[d] for v,d in zip(grid.locals,digits)])
-            frame=engine.frame(states);status=frame_status(frame)
+            frame=engine.frame(states,statistics_only=True) if isinstance(engine,PreviewEngine) else engine.frame(states);status=frame_status(frame)
             status['moving_drc']=sum(all(engine.roles.get(k)!='固定RDL' for k in q.get('layers',(q.get('layer'),))) for q in frame['drc'])
             poses[str(index)]=status
             progress(93+round(6*(number+1)/len(indices)),f'重点组合 DRC {number+1}/{len(indices)}')
@@ -50,7 +54,8 @@ def evaluate_states(engine,catalog,settings,progress=lambda *_:None):
         z=np.array([v[k] if k<len(v) else v[0] for v in grid.locals])
         owners={i for i,r in enumerate(grid.radices) if k<r} if k else None
         counts=np.zeros((n+1,4),int)  # contacts, scheme failures, DRC markers; last row is static
-        counts[:n,0]=model.current(z,p,counts_only=True,owners=owners)
+        from .drc_policy import contact_frame
+        counts[:n,0]=contact_frame(model,z,p,settings,counts_only=True,owners=owners)
         layers=bound.transform(z,workers=1) if obstacles else {}
         checks=check_frame(bound,engine.roles,p,None,z,layers,1,model.connections,False,include_pairs=False,active_owners=owners,settings=settings)
         for q in checks['failures']:counts[max(-1,q['owner']),1]+=3
@@ -73,7 +78,8 @@ def evaluate_states(engine,catalog,settings,progress=lambda *_:None):
     # pairs whose bounding boxes are disjoint by MORE than the minimum gap.
     from .representatives import pair_tables
     from .drc_rules import effective_clearances
-    pairs=pair_tables(bound.case,effective_clearances(p,settings),grid,tol)
+    from .drc_policy import enabled
+    pairs=pair_tables(bound.case,effective_clearances(p,settings),grid,tol) if enabled(settings,'die_gap') else []
     pair_checks=sum(grid.radices[q['owners'][0]]*grid.radices[q['owners'][1]] for q in pairs)
     from .current_drc import coupled_scopes
     import itertools
@@ -81,18 +87,25 @@ def evaluate_states(engine,catalog,settings,progress=lambda *_:None):
     scopes=coupled_scopes(model,p,settings)
     for number,scope in enumerate(scopes):
         dims=tuple(grid.radices[i] for i in scope)
-        tuples=list(itertools.product(*(range(r) for r in dims)))
+        tuples=sorted({tuple(d[o] for o in scope) for d in focus_digits}) if focus_digits is not None else list(itertools.product(*(range(r) for r in dims)))
         def check(digits):
             z=np.zeros((n,3))
             for owner,digit in zip(scope,digits):z[owner]=grid.locals[owner][digit]
             rows=engine.global_drc.frame(z,settings=settings,scopes={scope})
             return len(rows),sum(all(engine.roles.get(k)!='固定RDL' for k in q.get('layers',(q.get('layer'),))) for q in rows)
         counts=parallel_map(check,tuples,progress=lambda done,total:progress(98,f'跨芯片 DRC {number+1}/{len(scopes)} · {done}/{total}'))
-        values=np.asarray(counts,int).reshape((*dims,2))
-        coupled.append(dict(owners=scope,counts=values[...,0].tolist(),moving_counts=values[...,1].tolist()))
+        if focus_digits is not None:
+            coupled.append(dict(owners=scope,sparse_counts={tuple(d):tuple(v) for d,v in zip(tuples,counts)}))
+        else:
+            values=np.asarray(counts,int).reshape((*dims,2))
+            coupled.append(dict(owners=scope,counts=values[...,0].tolist(),moving_counts=values[...,1].tolist()))
     progress(99,'整包离散组合的独立规则校验完成')
-    return dict(checked=True,base=nominal[-1,:3].tolist(),local=local,moving_drc_base=int(nominal[-1,3]),moving_drc_local=[stacked[:r,i,3].tolist() for i,r in enumerate(grid.radices)],pairs=pairs,drc_factors=coupled,unknown=int(unknown),
+    result=dict(checked=True,base=nominal[-1,:3].tolist(),local=local,moving_drc_base=int(nominal[-1,3]),moving_drc_local=[stacked[:r,i,3].tolist() for i,r in enumerate(grid.radices)],pairs=pairs,drc_factors=coupled,unknown=int(unknown),
                 local_states=sum(grid.radices),batches=waves,pair_states=pair_checks,package_states=grid.total+1)
+    if focused:
+        poses={str(index):status_for(result,digits) for index,digits in zip(indices,focus_digits)}
+        result.update(scope='focus',pose_status=poses,scope_indices=indices,radices=grid.radices,package_states=len(indices))
+    return result
 
 
 def status_for(factors,digits):
@@ -110,12 +123,16 @@ def status_for(factors,digits):
         i,j=pair['owners']
         failures+=3*int(pair['hits'][digits[i]][digits[j]])
     for factor in factors.get('drc_factors',()):
+        if 'sparse_counts' in factor:
+            drc+=factor['sparse_counts'][tuple(digits[o] for o in factor['owners'])][0];continue
         count=factor['counts']
         for owner in factor['owners']:count=count[digits[owner]]
         drc+=int(count)
     moving=int(factors.get('moving_drc_base',0))
     for i,rows in enumerate(factors.get('moving_drc_local',())):moving+=int(rows[digits[i]])
     for factor in factors.get('drc_factors',()):
+        if 'sparse_counts' in factor:
+            moving+=factor['sparse_counts'][tuple(digits[o] for o in factor['owners'])][1];continue
         count=factor.get('moving_counts')
         if count is not None:
             for owner in factor['owners']:count=count[digits[owner]]

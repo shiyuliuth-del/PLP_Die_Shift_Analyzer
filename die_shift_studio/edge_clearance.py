@@ -78,5 +78,5 @@ def edge_violations(model,states,parameters,settings,replacements=None,owners=No
                 bad=g.intersection(witness.buffer((rule-gap)/2))
             if not bad.is_empty:
                 out.append(dict(kind='封装边缘线距不足',layer=key,layers=(key,),indices=ids,net=net,
-                                geometry=bad,point=list(bad.representative_point().coords[0]),gap_um=float(gap),required_um=rule))
+                                geometry=bad,point=list(bad.representative_point().coords[0]),gap_um=float(gap),actual_um=float(gap),required_um=rule))
     return out

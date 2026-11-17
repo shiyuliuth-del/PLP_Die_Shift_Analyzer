@@ -159,13 +159,27 @@ def _adopt(rows,geometry,tol,reason):
         a=overlay(overlay(remaining,q['regions']['A'].buffer(tol*4),'intersection'),assigned,'difference')
         regions.append(a);assigned=overlay(assigned,a,'union')
     for g in parts(overlay(remaining,assigned,'difference')):
-        index=min(range(len(rows)),key=lambda i:rows[i]['regions']['A'].distance(g) if not rows[i]['regions']['A'].is_empty else rows[i].get('missing_region',g).distance(g))
-        regions[index]=overlay(regions[index],g,'union')
+        support=[q['regions']['A'] if not q['regions']['A'].is_empty else q.get('missing_region',shapely.Polygon()) for q in rows]
+        index=min(range(len(rows)),key=lambda i:support[i].distance(g) if not support[i].is_empty else float('inf'))
+        # Boolean quantization leaves thin residues along distant rigid edges.
+        # They belong to that rigid region, not to a remote transition. Giving
+        # them to A produced the apparent nonlinear spur at nul7123 5613/2266.
+        thin=g.area<=tol*g.length*2
+        if thin and (not fixed.is_empty or not moving.is_empty):
+            near=overlay(g,support[index].buffer(tol*8),'intersection') if not support[index].is_empty else shapely.Polygon()
+            far=overlay(g,near,'difference');regions[index]=overlay(regions[index],near,'union')
+            if moving.is_empty or (not fixed.is_empty and fixed.distance(far)<=moving.distance(far)):fixed=overlay(fixed,far,'union')
+            else:moving=overlay(moving,far,'union')
+        else:regions[index]=overlay(regions[index],g,'union')
     for q,a in zip(rows,regions):
+        for name in ('moved_cut','extra_cut'):
+            cut=q.get(name)
+            if cut is not None and cut.geom_type not in ('Point','MultiPoint'):
+                q[name]=cut.intersection(geometry.buffer(tol*.05))
         q.update(regions=dict(A=a,B=fixed,C=moving),bridge=a,fixed=fixed,moved=moving,
                  bridge_area_um2=a.area,fixed_area_um2=fixed.area,moved_area_um2=moving.area,
                  connection_failed=False,valid=True,routing_recovered=True,routing_note=reason,
-                 warning=reason,compensation_region=before.symmetric_difference(geometry))
+                 warning=reason,compensation_region=before.symmetric_difference(geometry).intersection(a.buffer(tol*4)))
 
 
 def resolve(r,replacements,pieces,states,progress=lambda *_:None):
@@ -237,11 +251,13 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
                     if candidate.symmetric_difference(objects[ref]).difference(allowed.buffer(r.tol*2)).area>r.tol*r.tol:continue
                 return candidate,reason
         return None
+    from .topology_checks import inspect_many,foreign_pairs
+    checked=inspect_many(r,objects,original,ports,manual_masks,manual_before)
     # Recover electrical discontinuities first; the actual posed foreign copper
     # is an obstacle even when full native DRC artwork was not requested.
     for number,ref in enumerate(sorted(mutable)):
         cancel_check();progress(round(40*number/max(1,len(mutable))),f'核验实际连接 {number+1}/{len(mutable)} · {ref[0]} #{ref[1]+1}')
-        if valid(ref,objects[ref]) and not enters_keepout(objects[ref]) and not foreign_hits(ref,objects[ref]) and not any(q.get('connection_failed') for q in by_ref[ref]):continue
+        if checked[ref][0] and not checked[ref][1] and not foreign_hits(ref,objects[ref]) and not any(q.get('connection_failed') for q in by_ref[ref]):continue
         candidate=attempt(ref,'保连通补偿：已调整连接轮廓，工艺规则另检')
         if candidate is not None:
             objects[ref]=candidate[0];changed.add(ref);_adopt(by_ref[ref],candidate[0],r.tol,candidate[1])
@@ -249,10 +265,7 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
     # A rerouted candidate is checked against every current neighbour before use.
     refs=list(objects)
     for iteration in range(max(1,len(refs)*2)):
-        cancel_check();progress(40+round(30*iteration/max(1,len(refs)*2)),f'消除异网接触 · 第 {iteration+1} 轮');values=[objects[ref] for ref in refs];tree=shapely.STRtree(values);pairs=[]
-        for i,a in enumerate(values):
-            for j in tree.query(a,predicate='intersects'):
-                if j>i and nets[refs[i]][0]==nets[refs[int(j)]][0] and nets[refs[i]]!=nets[refs[int(j)]]:pairs.append((refs[i],refs[int(j)]))
+        cancel_check();progress(40+round(30*iteration/max(1,len(refs)*2)),f'消除异网接触 · 第 {iteration+1} 轮');pairs=foreign_pairs(objects,nets)
         if not pairs:break
         progressed=False
         for left,right in pairs:
@@ -276,17 +289,15 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
             if not candidates:continue
             _,ref,g,reason=min(candidates,key=lambda item:(item[0],item[1]));objects[ref]=g;changed.add(ref);_adopt(by_ref[ref],g,r.tol,reason);progressed=True
         if not progressed:break
+    checked=inspect_many(r,objects,original,ports,manual_masks,manual_before)
     for number,ref in enumerate(sorted(objects)):
         progress(70+round(20*number/max(1,len(objects))),f'最终连接核验 {number+1}/{len(objects)}')
         if any(q.get('box_invalid') for q in by_ref.get(ref,())):blocked.append((ref,'框选动区没有切断运动—固定连接路径，严格区域不能完成适配'))
-        if not valid(ref,objects[ref]):blocked.append((ref,'无法获得包含全部过孔且保持原拓扑的连通铜'))
-        if enters_keepout(objects[ref]):blocked.append((ref,'固定RDL进入禁布区，无法在保持电连接的同时避让'))
+        if not checked[ref][0]:blocked.append((ref,'无法获得包含全部过孔且保持原拓扑的连通铜'))
+        if checked[ref][1]:blocked.append((ref,'固定RDL进入禁布区，无法在保持电连接的同时避让'))
         if foreign_hits(ref,objects[ref]):blocked.append((ref,'固定RDL仍接触其他网络的实际过孔或同层金属'))
-    values=[objects[ref] for ref in refs];tree=shapely.STRtree(values)
-    for i,a in enumerate(values):
-        for j in tree.query(a,predicate='intersects'):
-            if j>i and nets[refs[i]][0]==nets[refs[int(j)]][0] and nets[refs[i]]!=nets[refs[int(j)]]:
-                blocked.extend(((refs[i],'异网实体接触仍无法避让'),(refs[int(j)],'异网实体接触仍无法避让')))
+    for left,right in foreign_pairs(objects,nets):
+        blocked.extend(((left,'异网实体接触仍无法避让'),(right,'异网实体接触仍无法避让')))
     for plane,values in immutable.items():
         for node,g in values:
             if r.model.roles[node['key']]=='运动RDL' and enters_keepout(g):blocked.append(((node['key'],node['index']),'运动RDL进入禁布区，无法通过固定RDL改线消除'))
@@ -297,8 +308,14 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
             for j in tree.query(g,predicate='intersects'):
                 if j>i and nodes[i]['net']!=nodes[int(j)]['net']:
                     blocked.extend((((n['key'],n['index']),'同层异网金属实体接触，无法通过固定RDL改线消除') for n in (nodes[i],nodes[int(j)])))
+    from .local_failures import locate
     for ref,reason in blocked:
-        for q in by_ref.get(ref,()):q.update(connection_failed=True,valid=False,warning=reason,hard_unroutable=True)
+        rows=by_ref.get(ref,())
+        if not rows:continue
+        ids,witness=locate(rows,objects[ref],ports[ref],foreign_hits(ref,objects[ref])+[objects[other] for other in refs if other!=ref and nets[other][0]==nets[ref][0] and nets[other]!=nets[ref] and objects[other].intersects(objects[ref])],r.rules.keepout,r.tol)
+        for i,q in enumerate(rows):
+            if i in ids:q.update(connection_failed=True,valid=False,warning=reason,hard_unroutable=True,failure_witness=witness)
+
     for layer,rows in out.items():
         for row in rows:
             if len(row['indices'])==1:row['geometry']=objects[layer,row['indices'][0]]

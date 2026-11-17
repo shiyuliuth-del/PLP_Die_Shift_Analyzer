@@ -312,7 +312,10 @@ class MainWindow(W.QMainWindow):
         self.fixed_assignment='all'
         page.addStretch()
         self.build_settings(self._page('设置'))
-        output=self._page('输出');self.dxf_button=W.QPushButton('DXF输出');output.addWidget(self.dxf_button)
+        output=self._page('输出')
+        from .layout_export import build_controls
+        build_controls(self,output)
+        self.dxf_button=W.QPushButton('DXF输出');output.addWidget(self.dxf_button)
         self.regions_dxf_button=W.QPushButton('动静区输出');output.addWidget(self.regions_dxf_button)
         output.setSpacing(4)
         from .dxf_controls import build as build_dxf_controls
@@ -380,7 +383,7 @@ class MainWindow(W.QMainWindow):
         ir.addWidget(self.show_issues);self.issue_prev=W.QPushButton('上一页');self.issue_next=W.QPushButton('下一页');ir.addWidget(self.issue_prev);ir.addWidget(self.issue_next);self.issue_summary=label('第 1/1 页');ir.addWidget(self.issue_summary,1);iv.addLayout(ir)
         self.issue_page=0;self.issue_page_size=256
         self.issue_prev.clicked.connect(lambda:self.show_issue_page(self.issue_page-1));self.issue_next.clicked.connect(lambda:self.show_issue_page(self.issue_page+1))
-        self.issue_table=table(['规则问题','图层','要求','X / μm','Y / μm']);self.issue_table.verticalHeader().setVisible(True);iv.addWidget(self.issue_table)
+        self.issue_table=table(['规则问题','图层','要求','实际','X / μm','Y / μm']);self.issue_table.verticalHeader().setVisible(True);iv.addWidget(self.issue_table)
         for col,width in enumerate((142,76,90,100,100)):self.issue_table.setColumnWidth(col,width)
         self.issue_table.horizontalHeader().setStretchLastSection(True)
         self.issue_table.currentCellChanged.connect(self.issue_row_changed);self.issue_table.cellClicked.connect(lambda *_:self.issue_navigation.start())
@@ -426,7 +429,7 @@ class MainWindow(W.QMainWindow):
             return form
         general=group('通用')
         summary=label('方案1：动静区之间局部重构RDL。\n方案2：RDL整体随动，固定RDL窗口捕获。\n方案3：预制运动RDL，动静接口适配。');summary.setObjectName('Notice');general.addRow(summary)
-        self.shortcut_label=label('快捷键（鼠标位于图中）：F 恢复视图，M 手动偏移，Shift＋点选/框选追加，Ctrl＋点选/框选扣除，Q 查看或编辑选中图形节点，ESC 退出/取消选择。\n普通模式：滚轮缩放，中键平移，右键单击查看选中图形、拖框缩放。\n手动偏移：右键拖动芯片，滚轮旋转，Ctrl＋滚轮缩放。');general.addRow(self.shortcut_label)
+        self.shortcut_label=label('快捷键（鼠标位于图中）：F 恢复视图，M 手动偏移，K 两次单击测量（吸附图形；Ctrl八方向、Shift水平垂直；Shift/Ctrl+K清空），Shift＋点选/框选追加，Ctrl＋点选/框选扣除，Q 查看或编辑选中图形节点，ESC 退出/取消选择。\n普通模式：滚轮缩放，中键平移，右键单击查看选中图形、拖框缩放。\n手动偏移：右键拖动芯片，滚轮旋转，Ctrl＋滚轮缩放。');general.addRow(self.shortcut_label)
         biases=group('系统偏差与相关性')
         for key in ('mean_x_um','mean_y_um','mean_angle_deg','rho_xy'):
             name,low,high,decimals=SPECS[key]
@@ -494,12 +497,12 @@ class MainWindow(W.QMainWindow):
         spin(animation,'animation_speed','预演速度级别',1,5)
         spin(animation,'animation_fps','FPS（自动计算插值数）',10,120)
         spin(animation,'camera_speed','定位视角速度级别',1,5)
-        safe=group('安全范围')
+        safe=group('结果分析')
         spin(safe,'safe_box_precision','端点搜索精度 / 输入单边幅度',.0001,.1,4)
         spin(safe,'safe_box_budget','每候选连续验证盒预算',32,32768)
         spin(safe,'safe_box_starts','端点扩张起点数',1,6)
         spin(safe,'safe_box_passes','体积交换轮数',1,8)
-        yield_group=group('无接触良率')
+        yield_group=safe
         choices['yield_method']=[('蒙特卡洛 + 99%置信区间','monte_carlo'),('确定性积分（不随机采样）','partition')]
         choice(yield_group,'yield_method','计算方法')
         spin(yield_group,'yield_sample_exponent','样本数 = 2 的指数',8,20)
@@ -537,6 +540,10 @@ class MainWindow(W.QMainWindow):
         spin(drc_group,'drc_tolerance_um','尺寸容差 ± / μm',-10000,10000,3)
         self.setting_fields['drc_tolerance_um'].setToolTip('有效最小值 = 工艺值 − 容差。正值放宽，负值收紧；默认0.1 μm。线宽、线距、包围量、机械净距和图形距边框共用；实体偏移分布不变。')
         recon=group('重构预演')
+        auto_row=W.QWidget();auto_layout=W.QHBoxLayout(auto_row);auto_layout.setContentsMargins(0,0,0,0)
+        auto=W.QCheckBox('自动计算');self.setting_fields['reconstruction_auto']=auto
+        self.reconstruction_compute=W.QPushButton('重构计算');auto_layout.addWidget(auto);auto_layout.addWidget(self.reconstruction_compute)
+        recon.addRow(auto_row);auto.toggled.connect(self.settings_changed);self.reconstruction_compute.clicked.connect(self.compute_reconstruction)
         row=W.QWidget();rv=W.QHBoxLayout(row);rv.setContentsMargins(0,0,0,0)
         self.region_move=W.QPushButton('框选动区');self.region_move.setCheckable(True)
         self.region_move.toggled.connect(lambda on:self.region_mode('move',on))
@@ -556,6 +563,8 @@ class MainWindow(W.QMainWindow):
         live=W.QCheckBox('实时反馈动区变化');self.setting_fields['reconstruction_live']=live;recon.addRow(live);live.toggled.connect(self.settings_changed)
         spin(recon,'reconstruction_corner_guard_um','拐角吸附预留 / μm',0,1000,2)
         recon.addRow(label('动区沿原图追溯路径定义，所有姿态共用。两端蓝色边界分别拖动；圆点表示对应孔盘纳入动区。'))
+        from .drc_policy import build as build_drc_policy
+        build_drc_policy(self,page)
         drawing=group('接触标记');
         markers=W.QCheckBox('显示DRC问题');self.setting_fields['show_contact_markers']=markers;drawing.addRow(markers);markers.toggled.connect(self.settings_changed)
         spin(drawing,'intrusion_alpha','侵入面积不透明度',.05,.85,2)
@@ -622,6 +631,14 @@ class MainWindow(W.QMainWindow):
         if self.loading:return
         values={k:(w.currentData() if isinstance(w,W.QComboBox) else w.isChecked() if isinstance(w,W.QCheckBox) else w.text() if isinstance(w,W.QLineEdit) else w.value()) for k,w in self.setting_fields.items()}
         updated=ViewSettings.from_dict(dict(asdict(self.view_settings),**values))
+        if not updated.reconstruction_auto and self.reconstruction_toggle.isChecked():
+            numerical=updated.reconstruction_key()!=self.view_settings.reconstruction_key() or updated.numeric_key()!=self.view_settings.numeric_key()
+            if numerical:
+                self.view_settings=updated;self.enable_settings();self.defer_reconstruction();return
+            if self.view_settings.reconstruction_auto:
+                self.view_settings=updated;self.enable_settings();return
+        if updated.reconstruction_auto and not self.view_settings.reconstruction_auto:
+            self.view_settings=updated;self.enable_settings();self.compute_reconstruction();return
         analysis_inputs=('safe_box_precision','safe_box_budget','safe_box_starts','safe_box_passes','yield_method','yield_sample_exponent','yield_box_budget','yield_tolerance')
         if any(getattr(updated,k)!=getattr(self.view_settings,k) for k in analysis_inputs):
             if self.result is not None:
@@ -640,7 +657,7 @@ class MainWindow(W.QMainWindow):
                     self.draw_contact_ranges();self.refresh_legend();self.update_die_label_visibility();self.render_scene()
                 else:self._layout_pending=True
             return
-        presentation=('show_contact_markers','reconstruction_live','width_show_probability','width_display','width_label_font_pt','width_label_decimals','width_yield_decimals','show_low_contact','show_low_width',*ranges)
+        presentation=('drc_visible','show_contact_markers','reconstruction_live','width_show_probability','width_display','width_label_font_pt','width_label_decimals','width_yield_decimals','show_low_contact','show_low_width',*ranges)
         if all(getattr(updated,k)==getattr(self.view_settings,k) for k in values if k not in (*presentation,'cache_max_entries')):
             display_change=any(getattr(updated,k)!=getattr(self.view_settings,k) for k in presentation)
             self.view_settings=updated;self.show_issues.setChecked(updated.show_contact_markers);self.cache_group.limit(updated.cache_max_entries);self.refresh_cache_status()
@@ -984,6 +1001,8 @@ class MainWindow(W.QMainWindow):
             self.refresh_jobs()
         self.start_worker(read_and_prepare,accepted)
     def set_data(self,data,project=None,project_path=None):
+        self.cut_drag.cancel();self.reconstruction_overlay.hide();self.constraint_feedback.cancel()
+        self.reconstruction_pending=False;self._reconstruction_apply_once=False
         self.exit_region_mode()
         from .session_cache import logical_fingerprint
         project=normalize_project(project) if project else {}
@@ -1008,6 +1027,8 @@ class MainWindow(W.QMainWindow):
             from .dxf_settings import DxfSettings
             from .dxf_controls import restore as restore_dxf_controls
             self.dxf_settings=DxfSettings.from_dict(project.get('dxf_options'));restore_dxf_controls(self)
+            from .layout_export import restore_controls
+            restore_controls(self,project.get('layout_output'))
             self.data=data;self.gds_label.setText(str(Path(data.path).resolve()));self.gds_label.setToolTip(str(Path(data.path).resolve()))
             view=project.get('extreme_view',{'mode':'focus','page':1})
             self.grid_mode.blockSignals(True);self.grid_mode.setCurrentIndex(int(view['mode']=='focus'));self.grid_mode.blockSignals(False)
@@ -1121,7 +1142,10 @@ class MainWindow(W.QMainWindow):
         if hasattr(self,'width_overlay'):self.width_overlay.reset_summary()
         self._legend_stamp=None
         self.clear_space_artists()
-        for artist in list(self.ax.collections)+list(self.ax.texts)+list(self.ax.patches):artist.remove()
+        if hasattr(self,'reconstruction_overlay'):self.reconstruction_overlay.hide()
+        for artist in list(self.ax.collections)+list(self.ax.texts)+list(self.ax.patches)+list(self.ax.lines):artist.remove()
+        if hasattr(self,'scene_renderer'):
+            self.scene_renderer.external_draw(None);self.scene_renderer.static_cache.clear();self.scene_renderer.pending_key=None
         self.replacement_artists={};self.layer_artists={};self.die_labels=[];self.issue_artists=[];self.shift_artist=None;self.failure_artist=None;self._artist_frame=None;self.invalid_artists=[]
         for artist in self.probability_artists:
             if artist.axes is not None:artist.remove()
@@ -1285,8 +1309,23 @@ class MainWindow(W.QMainWindow):
         for button in (self.region_move,):
             button.blockSignals(True);button.setChecked(False);button.blockSignals(False)
 
+    def defer_reconstruction(self):
+        self.reconstruction_pending=True;self.stop_animation();self.cancel_previews()
+        self.constraint_feedback.cancel()
+        if hasattr(self,'reconstruction_yield'):self.reconstruction_yield.reset()
+        self.statusBar().showMessage('重构修改待应用；点击“重构计算”统一计算。')
+
+    def compute_reconstruction(self):
+        if self.remote_locked or self.data is None:return
+        self.reconstruction_pending=False;self._reconstruction_apply_once=True
+        if not self.reconstruction_toggle.isChecked():
+            self.reconstruction_toggle.blockSignals(True);self.reconstruction_toggle.setChecked(True);self.reconstruction_toggle.blockSignals(False)
+        self.invalidate_reconstruction_edit();self.request_preview()
+
     def invalidate_reconstruction_edit(self):
         """Reject old coupled/extreme evidence after a reconstruction edit."""
+        if not self.view_settings.reconstruction_auto and not getattr(self,"_reconstruction_apply_once",False):
+            self.defer_reconstruction();return
         self.cancel_previews()
         if self.motion_worker:self.motion_worker.cancelled.set()
         if hasattr(self,"reconstruction_yield"):self.reconstruction_yield.refresh()
@@ -1596,7 +1635,7 @@ class MainWindow(W.QMainWindow):
         if self.reconstruction_toggle.isChecked():
             from .reconstruction_overlay import COLORS,CUT_COLOR,SECOND_CUT_COLOR,WARNING_COLOR
             from .reconstruction_events import PALETTE
-            handles += [Patch(facecolor=PALETTE[k],alpha=.66,label=title) for k,title in [('red','动区违规'),('yellow','当前通过 / 其他极端风险'),('green','全部离散极端通过'),('gray','低概率满足要求')]]
+            handles += [Patch(facecolor=PALETTE[k],alpha=.66,label=title) for k,title in [('red','动区违规'),('yellow','当前通过 / 其他极端风险'),('green','所选组合均通过'),('gray','低概率满足要求')]]
             handles += [Patch(facecolor=COLORS[k],alpha=.66,label={'B':'C','C':'B'}[k]+' '+title) for k,title in [('B','静区'),('C','平移区')]]
             handles += [Line2D([],[],color=CUT_COLOR,lw=2,label='运动侧边界 / 整孔盘蓝点'),Line2D([],[],color=SECOND_CUT_COLOR,lw=2,label='固定侧边界 / 整孔盘蓝点'),Patch(facecolor='#dd5790',edgecolor='#bc386d',alpha=.45,label='动区自身风险 · 选中查看')]
         if self.current_frame and self.current_frame.get('motion_issues'):handles.append(Line2D([],[],color='#bf862c',ls='--',label='运动归属未定：保持名义位置'))
@@ -1786,6 +1825,8 @@ class MainWindow(W.QMainWindow):
     def cancel_previews(self):
         for worker in self.preview_workers:worker.cancelled.set()
     def request_preview(self,direct=False,settle=False,quiet=False):
+        if self.reconstruction_toggle.isChecked() and not self.view_settings.reconstruction_auto and not getattr(self,"_reconstruction_apply_once",False):
+            self.defer_reconstruction();return
         if self.remote_locked or getattr(self,'requested_measured',False):return
         self._preview_quiet=bool(quiet)
         if not self.data or getattr(self,'_restoring_project',False):return
@@ -1795,6 +1836,7 @@ class MainWindow(W.QMainWindow):
                 self._evaluation_requested=True;self._coverage_pending=True;self.coverage_timer.start()
             else:self.run_evaluation(automatic=True)
             return
+        self._reconstruction_apply_once=False;self.reconstruction_pending=False
         self.schedule_coupled_filter();self.stop_animation()
         self.preview_ticket+=1;ticket=self.preview_ticket;self._prepared_motion=None
         # Committed extreme poses finish into cache even if a later pose wins
@@ -1857,6 +1899,7 @@ class MainWindow(W.QMainWindow):
                 return
         self.preview_pending=(self.revision,self.view_settings,ticket,state.copy(),self.motions(),roles,p,self.result,case,self.geometry_cache,self.connections,self.ordered_layers(),show_frame,self.probability_toggle.isChecked(),self.space_toggle.isChecked())
         self.preview_pending+=(False,True,direct,settle,origin,self.width_toggle.isChecked(),self.reconstruction_toggle.isChecked(),self.footprint_toggle.isChecked())
+        self._reconstruction_apply_once=False;self.reconstruction_pending=False
         self.statusBar().showMessage('正在后台生成预演…保留已显示状态。');self.launch_preview()
     def launch_preview(self):
         if self._closing or self.motion_worker is not None or self.preview_pending is None:return
@@ -2334,6 +2377,7 @@ class MainWindow(W.QMainWindow):
         if self.loading:return
         if hasattr(self,'mouse_die'):
             self.mouse_die.cancel_pending();self.mouse_die.exit()
+        self.reconstruction_overlay.clear_hover()
         self.manual_states=None
         self.active_preview=self.page_items[row-1][0] if 1<=row<=len(self.page_items) else None
         self._selected_grid_pose=self.extremes[self.active_preview]['states'] if self.active_preview is not None else None
@@ -2354,8 +2398,11 @@ class MainWindow(W.QMainWindow):
 
     def fill_issues(self):
         entries=self.contact_entries(self.current_frame)
-        if id(entries)==self._issue_table_stamp:return
-        self._issue_table_stamp=id(entries);self.display_issues=entries
+        stamp=(id(entries),self.view_settings.drc_checks,self.view_settings.drc_visible)
+        if stamp==self._issue_table_stamp:return
+        from .drc_policy import visible
+        entries=[q for q in entries if visible(self.view_settings,q)]
+        self._issue_table_stamp=stamp;self.display_issues=entries
         self.show_issue_page(self.issue_page)
     def show_issue_page(self,page):
         entries=getattr(self,'display_issues',[]);size=self.issue_page_size
@@ -2363,7 +2410,8 @@ class MainWindow(W.QMainWindow):
         self.filtered_issues=entries[start:start+size];self.issue_table.blockSignals(True);self.issue_table.setRowCount(len(self.filtered_issues))
         for i,row in enumerate(self.filtered_issues):
             required=(f"{row['required_deg']:g}°" if row.get('required_deg') is not None else f"{row['required_um']:g} μm" if row.get('required_um') is not None else '—')
-            values=[row['kind'],'、'.join(row.get('layers',(row['layer'],))),required,*[fmt(v) for v in row['point']]]
+            actual=(f"{row['actual_deg']:.3f}°" if row.get('actual_deg') is not None else f"{row['actual_um']:.3f} μm" if row.get('actual_um') is not None else '—')
+            values=[row['kind'],'、'.join(row.get('layers',(row['layer'],))),required,actual,*[fmt(v) for v in row['point']]]
             for j,value in enumerate(values):
                 item=W.QTableWidgetItem(str(value));item.setToolTip('当前姿态实际铜的DRC；显隐不影响检查。');self.issue_table.setItem(i,j,item)
         self.issue_table.setVerticalHeaderLabels([str(start+i+1) for i in range(len(self.filtered_issues))]);self.issue_table.blockSignals(False)
@@ -2413,6 +2461,7 @@ class MainWindow(W.QMainWindow):
         return dict(schema_version=5,app_version=__version__,rulers=self.rulers.rows,sha256=self.data.sha256,top_cell=self.data.top_name,
                     roles=self.roles(),parameters=asdict(self.params()),settings=asdict(self.view_settings),node_edits=list(self.data.node_edits),
                     geometry_indexing=getattr(self.data,'geometry_indexing','legacy'),legacy_node_edits=list(getattr(self.data,'legacy_node_edits',[])),
+                    layout_output=__import__('die_shift_studio.layout_export',fromlist=['configuration']).configuration(self),
                     dxf_directory=self.dxf_directory,dxf_options=asdict(self.dxf_settings),measured_output=self.measured_output.configuration(),
                     ignored_reconstruction=dict(sha256=self.data.sha256,top_cell=self.data.top_name,refs=[list(r) for r in self.view_settings.reconstruction_ignored]),
                     ignored_width_lines=dict(sha256=self.data.sha256,top_cell=self.data.top_name,refs=[list(r) for r in sorted(self.ignored_width_lines)]),

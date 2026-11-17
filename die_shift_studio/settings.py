@@ -19,6 +19,9 @@ def normalize_display(values):
 
 @dataclass(frozen=True)
 class ViewSettings:
+    from .drc_policy import ALL
+    drc_checks:tuple=ALL
+    drc_visible:tuple=ALL
     reconstruction_pad_trigger_um:float=5.
     save_project_results:bool=True
     result_cache_directory:str=''
@@ -88,6 +91,7 @@ class ViewSettings:
     reconstruction_second_cuts:tuple=()
     reconstruction_dropped_cuts:tuple=()
     reconstruction_enabled:bool=False
+    reconstruction_auto:bool=True
     reconstruction_live:bool=True
     reconstruction_style:str="linear"
     reconstruction_boundary_mode:str="wide"
@@ -160,6 +164,11 @@ class ViewSettings:
     @classmethod
     def from_dict(cls,values=None):
         values=dict(values or {})
+        from .drc_policy import ALL
+        for name in ('drc_checks','drc_visible'):
+            raw=values.get(name,ALL)
+            if not isinstance(raw,(tuple,list)) or any(v not in ALL for v in raw):raise ValueError('DRC类别无效')
+            values[name]=tuple(k for k in ALL if k in raw)
         values.setdefault('drc_min_angle_deg',values.get('deformation_min_angle_deg',90.))
         intervals=[]
         for row in values.get('reconstruction_intervals',()):
@@ -216,7 +225,7 @@ class ViewSettings:
             v=getattr(q,key)
             if not isinstance(v,(int,float)) or not math.isfinite(v) or not lo<=v<=hi or (key in integers and int(v)!=v):
                 raise ValueError(f'设置 {key} 超出范围 {lo}—{hi}')
-        for key in ('save_project_results','show_contact_markers','reconstruction_live','width_show_probability','show_annulus_range','show_spacing_range','show_low_contact','show_low_width','animation_enabled','animation_return_zero','probability_show_ranges','contact_marker_absolute','unadapted_marker_absolute'):
+        for key in ('reconstruction_auto','save_project_results','show_contact_markers','reconstruction_live','width_show_probability','show_annulus_range','show_spacing_range','show_low_contact','show_low_width','animation_enabled','animation_return_zero','probability_show_ranges','contact_marker_absolute','unadapted_marker_absolute'):
             if not isinstance(getattr(q,key),bool):raise ValueError(key+'必须为布尔值')
         import re
         color=lambda v:isinstance(v,str) and re.fullmatch(r'#[0-9a-fA-F]{6}',v)
@@ -229,15 +238,15 @@ class ViewSettings:
         return cls(**data)
 
     def width_key(self):
-        return (True,'nominal-physical-throat-v47-sync-focus',self.drc_tolerance_um,self.evaluation_scope)
+        return (True,'nominal-physical-throat-v50-pair-focus',self.drc_checks,self.drc_tolerance_um,self.evaluation_scope)
 
     def numeric_key(self):
-        return tuple(getattr(self,k) for k in ('acceleration','probability_method','sample_exponent','random_seed',
+        return tuple(getattr(self,k) for k in ('drc_checks','acceleration','probability_method','sample_exponent','random_seed',
             'quadrature_order','probability_cell_um','angle_bins','space_resolution','contact_box_budget','safe_box_precision','safe_box_budget','safe_box_starts','safe_box_passes','yield_method','yield_sample_exponent','yield_box_budget','yield_tolerance'))
 
     def reconstruction_key(self):
         """Everything the reconstruction result depends on besides the pose."""
-        return (True,'nominal-route-continuity-v48',self.evaluation_scope,self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_pad_trigger_um,self.reconstruction_ignored,self.reconstruction_following,self.drc_tolerance_um,
+        return (True,'nominal-route-continuity-v50',self.drc_checks,self.evaluation_scope,self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_pad_trigger_um,self.reconstruction_ignored,self.reconstruction_following,self.drc_tolerance_um,
                 self.reconstruction_corner_guard_um,tuple(self.reconstruction_intervals),
                 self.reconstruction_forced,self.reconstruction_angles,self.reconstruction_deleted,self.reconstruction_added,
                 tuple(self.reconstruction_regions),tuple(self.reconstruction_boxes),tuple(self.reconstruction_cuts),

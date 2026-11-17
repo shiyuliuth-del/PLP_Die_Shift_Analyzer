@@ -1,7 +1,7 @@
 """Real GD55 mixed batch: valid/failing/valid packages, ERROR ownership, no loss."""
 import os
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
-import hashlib,json,math,shutil,sqlite3,subprocess,sys,tempfile,time
+import hashlib,json,shutil,sqlite3,subprocess,sys,tempfile,time
 from pathlib import Path
 from contextlib import closing
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -9,6 +9,9 @@ from die_shift_studio.local_ipc import call
 from die_shift_studio.oas_validation import verify_crc
 from RealDataAnalyse.excel import DEFAULT_PROFILE
 import klayout.db as k
+import numpy as np
+import shapely
+from die_shift_studio.oas_errors import rectangles as error_rectangles
 ROOT=Path(__file__).resolve().parents[1]
 with tempfile.TemporaryDirectory(prefix='rda-error-output-') as temp:
  root=Path(temp).resolve();folder=root/'GD55';shutil.copytree(Path(os.environ.get('REALDATA_TEST_CASE',ROOT/'Jobs/GD55')),folder)
@@ -31,6 +34,15 @@ with tempfile.TemporaryDirectory(prefix='rda-error-output-') as temp:
   error_indices=[i for i in layout.layer_indexes() if layout.get_info(i).name=='ERROR'];assert len(error_indices)==1;error_index=error_indices[0]
   server_info=call(endpoint,'info')['result'];board=server_info['board_bounds_um']
   placements={inst.cell.name:inst.dcplx_trans.disp for inst in top.each_inst()}
+  fail_indices=[i for i in layout.layer_indexes() if layout.get_info(i).name=='FAIL'];assert len(fail_indices)==1
+  fail_index=fail_indices[0];assert fail_index!=error_index
+  original=k.Layout();original.read(str(source));original_top=original.cell(server_info['top_cell'])
+  assert abs(original.dbu-layout.dbu)<1e-12
+  expected_board=k.Region()
+  for key,role in server_info['roles'].items():
+   if role=='封装边框':expected_board+=k.Region(original_top.begin_shapes_rec(original.layer(*map(int,key.split('/')))))
+  expected_board.merge();assert not expected_board.is_empty()
+  expected_fail=k.Region()
   issue_packages=0;rectangles=0;failed=[]
   for seq,package,payload,receipt,state in rows:
    assert receipt['fixed_rdl_drc_checked'] is True
@@ -39,6 +51,12 @@ with tempfile.TemporaryDirectory(prefix='rda-error-output-') as temp:
    assert abs(origin.y-(payload['position_um'][1]-board[1]))<=layout.dbu
    if receipt.get('connection_failure_count'):
     failed.append(package);assert receipt['partial_output'] is True and receipt['omitted_region_count']>0
+   fail_cell=layout.cell('G_FAIL_'+payload['cell'])
+   if receipt.get('connection_failure_count'):
+    assert receipt['failed_packages']==1 and receipt['failure_layer']['name']=='FAIL'
+    assert fail_cell and (k.Region(fail_cell.shapes(fail_index))^expected_board).is_empty(),'FAIL must preserve the real package outline'
+    expected_fail+=expected_board.transformed(k.Trans(round(origin.x/layout.dbu),round(origin.y/layout.dbu)))
+   else:assert fail_cell is None and receipt.get('failed_packages',0)==0,'DRC-only package must not enter FAIL'
    catalog=receipt['issue_catalog'];path=Path(catalog['path']).resolve();assert path.is_relative_to(folder/'Cache'),path
    with closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True)) as db:
     issues=[json.loads(row[0]) for row in db.execute('select payload from issues where task_id=? order by ordinal',(catalog['task_id'],))]
@@ -52,22 +70,27 @@ with tempfile.TemporaryDirectory(prefix='rda-error-output-') as temp:
     assert page['next_offset']>offset;offset=page['next_offset']
    assert paged==issues,'IPC pagination omitted or changed diagnostic positions'
 
+   # Complete-catalogue/ownership audit. Independent orientation and pose
+   # expectations are covered by test_oriented_oas_errors' two-reader fixtures.
    expected={};unique={}
-   for issue in issues:
-    x0,y0,x1,y1=issue['bounds_um'];dbu=layout.dbu
-    a,b=math.floor(x0/dbu),math.floor(y0/dbu);c,d=max(a+1,math.ceil(x1/dbu)),max(b+1,math.ceil(y1/dbu))
-    for die in issue['die_ids']:
-     expected.setdefault(die,k.Region()).insert(k.Box(a,b,c,d));unique.setdefault(die,set()).add((a,b,c,d))
+   for die,blobs in error_rectangles(issues,server_info['die_count'],layout.dbu).items():
+    region=k.Region();keys=set()
+    for blob in blobs:
+     xy=np.rint(shapely.get_coordinates(shapely.from_wkb(blob))/layout.dbu).astype(np.int64)
+     region.insert(k.Polygon([k.Point(int(x),int(y)) for x,y in xy]));keys.add(blob)
+    expected[die]=region;unique[die]=keys
    for die in range(4):
     cell=layout.cell('G_ERROR_'+payload['cell']+f'_DIE_{die}')
     actual=k.Region(cell.shapes(error_index)) if cell else k.Region()
     assert (actual^expected.get(die,k.Region())).is_empty(),(package,die,'marker location differs from full catalogue')
     assert actual.count()==len(unique.get(die,())),(package,die,'duplicate/missing rectangles')
     for shape in (cell.shapes(error_index).each() if cell else []):
-     assert shape.is_box() or (shape.is_polygon() and shape.polygon.area()==shape.bbox().area()),'ERROR must be rectangular'
+     assert shape.is_box() or (shape.is_polygon() and shape.polygon.num_points_hull()==4),'ERROR must retain four oriented corners'
    assert receipt['error_rectangles']==sum(len(s) for s in unique.values())
    issue_packages+=bool(issues);rectangles+=receipt['error_rectangles']
   assert outcome['issue_packages']==issue_packages and outcome['error_rectangles']==rectangles
+  assert outcome['failed_packages']==len(failed)
+  assert (k.Region(top.begin_shapes_rec(fail_index))^expected_fail).is_empty(),'FAIL contains extra/missing package outlines'
   if profile['sheet']=='FailureRecovery':
    assert {'RECOVERY_002','RECOVERY_004','RECOVERY_005'}.issubset(failed),failed
    assert not rows[0][3]['connection_failure_count'] and not rows[-1][3]['connection_failure_count']

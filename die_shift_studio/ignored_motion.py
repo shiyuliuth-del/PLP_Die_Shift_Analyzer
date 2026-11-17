@@ -20,6 +20,7 @@ def fixed_enclosures_safe(r,ref,vias):
 def entries(r):
     out=[]
     for ref in sorted(set(r.settings.reconstruction_ignored)|set(r.auto_ignored)):
+        if ref in getattr(r,'box_refs',()):continue
         vias=r.vias_by_target.get(ref,())
         if not vias:continue
         source=r.model.cache.layers[ref[0]]['geometry'][ref[1]]
@@ -37,11 +38,11 @@ def complex_mode(r,ref,vias,stationary_certificate):
     """Choose only a rigid mode certified over the complete independent box."""
     source=r.model.cache.layers[ref[0]]['geometry'][ref[1]]
     fixed=[v for v in r.stays if v['net']==vias[0]['net'] and source.intersects(v['poly'])]
-    if len(vias)+len(fixed)<4:return None
     from .drc_rules import effective_rules
     width,space=effective_rules(r.p,r.settings)
     from .geometry_rules import width_ok
-    if not width_ok(source,width,r.tol):return None
+    from .drc_policy import enabled
+    intrinsic_bad=int(enabled(r.settings,'width') and not width_ok(source,width,r.tol))
     def reach(g,owners):
         values=[0.]
         for owner in owners:
@@ -65,7 +66,12 @@ def complex_mode(r,ref,vias,stationary_certificate):
             other=r.vias_by_target.get((key,node['index']),())
             expansion=reach(node['poly'],{v['owner'] for v in other})
             gap=swept.distance(node['poly'])-expansion-space
-            if gap<2*r.tol:safe=False;break
+            # No physical contact may be hidden by automatic ignore. A
+            # dimensional spacing deficit is ranked, not called a short.
+            if gap+space<2*r.tol:safe=False;break
             margin=min(margin,gap)
-        if safe and all(not swept.intersects(g) for g in r.model.case.get('obstacles',())):choices.append((margin,not mode,mode))
-    return max(choices)[2] if choices else None
+        if safe and not (not r.rules.keepout.is_empty and shapely.relate_pattern(swept,r.rules.keepout,'T********')):
+            # Conservative whole-input envelopes. Prefer no rule deficit,
+            # then the smallest residual dimensional deficit and larger room.
+            choices.append((-(intrinsic_bad+int(margin<0)),-max(0.,-margin),margin,not mode,mode))
+    return max(choices)[-1] if choices else None

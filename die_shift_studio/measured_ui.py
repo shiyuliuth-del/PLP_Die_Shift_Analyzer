@@ -17,7 +17,7 @@ class MeasuredOutput(QtCore.QObject):
         self.pending_enable=False;self.pool=None;self.generation=0;self.batch=None;self.current=None;self.render_engine=None;self.ready=False;self.last_error=None;self.transition=None;self.running={};self.stopping=False;self.requests=OrderedDict()
         self.incoming.connect(self.dispatch);self.finished.connect(self.complete);self.progressed.connect(self.progress)
         self.toggle=W.QCheckBox('实测输出');self.toggle.setStyleSheet('font-weight:bold; padding:4px 2px;');layout.addWidget(self.toggle)
-        self.settings_header,self.settings_body,form=w.collapsible(layout,'实测输出设置',w.setting_sections);self.toggle.toggled.connect(self.toggled)
+        self.settings_header,self.settings_body,form=w.collapsible(layout,'实测输出参数',w.setting_sections);self.toggle.toggled.connect(self.toggled)
         self.directory=W.QLineEdit();self.directory.setPlaceholderText('输出目录，可通过output.configure设置');form.addRow('输出目录',self.directory)
         self.memory=W.QSpinBox();self.memory.setRange(0,1048576);self.memory.setSpecialValueText('自动');self.memory.setSingleStep(128);form.addRow('最大内存 / MB',self.memory)
         self.threads=W.QSpinBox();self.threads.setRange(0,256);self.threads.setSpecialValueText('自动');form.addRow('最大线程',self.threads)
@@ -113,6 +113,8 @@ class MeasuredOutput(QtCore.QObject):
                         result=write(issue_path,key,result)
                 self.finished.emit(key,result,None)
             except Exception as exc:
+                import traceback
+                self.w.log_bus.emit(traceback.format_exc(),'ERROR')
                 payload=getattr(exc,'frame',None)
                 if payload is not None:
                     from .measured_issues import write
@@ -331,6 +333,7 @@ class MeasuredOutput(QtCore.QObject):
             policy=args.get('output_policy','strict')
             if policy not in ('strict','omit_failed_regions'):raise ValueError('未知实测输出策略')
             error_layer=choose_error_layer(self.session.cache.layers)
+            failure_layer=choose_error_layer([*self.session.cache.layers,f'{error_layer[0]}/{error_layer[1]}'])
             profile=resource_profile();memory=self.options.memory_budget_mb(profile)
             per_lane=max(96,int(self.session.cache.bytes*24/1024**2));lanes=max(1,min(self.options.max_threads or profile['workers'],profile['workers'],int(memory*.7)//per_lane))
             if per_lane>memory:raise MemoryError(f'此图纸估计单任务需{per_lane} MB，超过批次内存限额{memory} MB')
@@ -339,9 +342,9 @@ class MeasuredOutput(QtCore.QObject):
                 import psutil
                 baseline=psutil.Process().memory_info().rss
             except (ImportError,OSError):baseline=0
-            self.batch=dict(id=uuid.uuid4().hex,client_id=client_id,store=Store(destination.parent,self.session.data.dbu_um,max(1024**2,memory*1024**2//5),checkpoint_destination=destination.with_name(destination.stem+'.'+uuid.uuid4().hex[:12]+'.partial.oas'),error_layer=error_layer),lock=threading.Lock(),path=destination,baseline=baseline,
+            self.batch=dict(id=uuid.uuid4().hex,client_id=client_id,store=Store(destination.parent,self.session.data.dbu_um,max(1024**2,memory*1024**2//5),checkpoint_destination=destination.with_name(destination.stem+'.'+uuid.uuid4().hex[:12]+'.partial.oas'),error_layer=error_layer,failure_layer=failure_layer),lock=threading.Lock(),path=destination,baseline=baseline,
                             executor=ThreadPoolExecutor(max_workers=lanes,thread_name_prefix='dsa-batch'),pending=set(),inflight=set(),completed=0,failed=0,failures=[],ending=False,lanes=lanes,memory_mb=memory,semaphore=threading.Semaphore(lanes),output_policy=policy)
-            return dict(status='completed',result=dict(batch_id=self.batch['id'],threads=lanes,max_memory_mb=memory,queue_limit=lanes*4,output_policy=policy,error_layer=dict(layer=error_layer[0],datatype=error_layer[1],name='ERROR')))
+            return dict(status='completed',result=dict(batch_id=self.batch['id'],threads=lanes,max_memory_mb=memory,queue_limit=lanes*4,output_policy=policy,error_layer=dict(layer=error_layer[0],datatype=error_layer[1],name='ERROR'),failure_layer=dict(layer=failure_layer[0],datatype=failure_layer[1],name='FAIL')))
         if command=='batch.submit':
             batch=self.batch
             if batch is None or batch['ending']:raise RuntimeError('批次未开始或已结束接收')
@@ -379,7 +382,7 @@ class MeasuredOutput(QtCore.QObject):
                     if details['connection_failure_count'] and not (batch['output_policy']=='omit_failed_regions' and details.get('partial_output') and details.get('omitted_region_count',0)>0):raise ValueError('存在未处理的连接失败，拒绝输出')
                     cancel_check()
                     with batch['lock']:
-                        markers=batch['store'].add(name,snapshot.layers,position,session.case['board'].bounds[:2],errors=details['drc_issues'],die_count=len(session.case['dies']))
+                        markers=batch['store'].add(name,snapshot.layers,position,session.case['board'].bounds[:2],errors=details['drc_issues'],die_count=len(session.case['dies']),failure_outline=session.case['board'].wkb if details.get('connection_failure_count',0)>0 else None)
                         if batch['store'].count==1 or batch['store'].count%64==0:batch['store'].flush()
                     return dict(cell=name,checkpoint=str(batch['store'].checkpoint_destination),checkpoint_cells=batch['store'].checkpoint_count,**markers,**details)
                 finally:batch['semaphore'].release()

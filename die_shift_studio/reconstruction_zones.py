@@ -21,6 +21,7 @@ def expand(r,entries):
             if scope==['seed']:seeded[id(best)]=(x,y,identity)
             else:attached[id(best)].append((x,y,identity,scope))
     for entry in entries:
+        if (entry['layer'],entry['index']) in getattr(r,'box_refs',()):result.append(entry);continue
         plan=entry['plan'];extras=attached.get(id(entry),());seed=seeded.get(id(entry))
         if seed and plan is not None:
             x,y,identity=seed;child=copy.copy(plan);child.cache={};child.pose_memo=OrderedDict();child.memo_bytes=0

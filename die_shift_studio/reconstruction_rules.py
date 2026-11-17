@@ -13,6 +13,7 @@ from .drc import rule_region,separation_region
 from .drc_rules import effective_rules
 from .reconstruction import transform
 from .resources import cancel_check
+from .drc_policy import enabled
 
 
 @lru_cache(maxsize=512)
@@ -20,7 +21,7 @@ def intrinsic(wkb,width,space,dbu):
     g=shapely.from_wkb(wkb)
     from .native_backend import any_violation
     return tuple((name,rule_region(g,value,dbu,op)) for name,op,value in
-                 (('线宽不足','width',width),('线距不足','space',space)) if any_violation(op,wkb,dbu,value))
+                 (('线宽不足','width',width),('线距不足','space',space)) if value>0 and any_violation(op,wkb,dbu,value))
 
 
 class FixedRules:
@@ -53,7 +54,7 @@ class FixedRules:
         self.keepout=forbidden(model)
         self.contexts={};self.hard_memo={};self._nominal_rows=None;self._nominal_lock=threading.Lock()
         from .session_cache import logical_fingerprint
-        self.identity=logical_fingerprint((model.data.geometry_id,model.roles,model.connections.order,self.width,self.space,p.annulus_um,p.package_clearance_um,getattr(cfg,'drc_min_angle_deg',0)))
+        self.identity=logical_fingerprint((model.data.geometry_id,model.roles,model.connections.order,self.width,self.space,p.annulus_um,p.package_clearance_um,getattr(cfg,'drc_min_angle_deg',0),cfg.drc_checks))
 
     def nominal_check(self):
         if self._nominal_rows is None:
@@ -71,28 +72,30 @@ class FixedRules:
                 if any(ref in changed for ref in refs) else self.original[key] for key,refs in self.nets.items()}
 
     def local(self,key,g,states,vias=None):
-        out=list(intrinsic(g.wkb,self.width,self.space,self.dbu))
+        out=list(intrinsic(g.wkb,self.width if enabled(self.cfg,'width') else 0.,self.space if enabled(self.cfg,'space') else 0.,self.dbu))
         from .geometry_rules import angle_regions
-        angle=angle_regions(g,getattr(self.cfg,'drc_min_angle_deg',0),self.dbu)
+        angle=angle_regions(g,getattr(self.cfg,'drc_min_angle_deg',0),self.dbu) if enabled(self.cfg,'angle') else shapely.Polygon()
         if not angle.is_empty:out.append(('最小内角不足',angle))
-        for ref,owner,required in (self.vias[key] if vias is None else vias):
+        for ref,owner,required in ((self.vias[key] if vias is None else vias) if enabled(self.cfg,'enclosure') else ()):
             target=self.model.moved(required,owner,states)
             missing=target.difference(g)
             if missing.area>self.dbu*self.dbu:out.append(('孔盘包围不足',missing))
-        if self.board is not None and (not self.board.covers(g) or g.distance(self.board.boundary)<self.border-self.dbu*.001):
+        if enabled(self.cfg,'board') and self.board is not None and (not self.board.covers(g) or g.distance(self.board.boundary)<self.border-self.dbu*.001):
             bad=g.difference(self.inside)
             if not bad.is_empty:out.append(('封装边缘线距不足',bad))
-        if not self.keepout.is_empty and shapely.relate_pattern(g,self.keepout,'T********'):
+        if enabled(self.cfg,'keepout') and not self.keepout.is_empty and shapely.relate_pattern(g,self.keepout,'T********'):
             out.append(('进入禁布区',g.intersection(self.keepout)))
         return out
 
     def pair(self,a,b):
+        if not enabled(self.cfg,'space'):return shapely.Polygon()
         if a.distance(b)>=self.space:return shapely.Polygon()
         markers=separation_region(a,b,self.space,self.dbu)
         if a.intersects(b):markers=shapely.union_all([markers,a.intersection(b).buffer(self.dbu)])
         return markers
 
     def pair_fails(self,a,b):
+        if not enabled(self.cfg,'space'):return False
         if a.distance(b)>=self.space:return False
         if a.intersects(b):return True
         from .native_backend import any_violation
@@ -100,12 +103,14 @@ class FixedRules:
 
     def passes(self,key,g,states,vias=None):
         """Boolean version: cheap exact failures precede native edge-pair work."""
-        for ref,owner,required in (self.vias[key] if vias is None else vias):
+        for ref,owner,required in ((self.vias[key] if vias is None else vias) if enabled(self.cfg,'enclosure') else ()):
             if self.model.moved(required,owner,states).difference(g).area>self.dbu*self.dbu:return False
-        if self.board is not None and (not self.board.covers(g) or g.distance(self.board.boundary)<self.border-self.dbu*.001):return False
-        if not self.keepout.is_empty and shapely.relate_pattern(g,self.keepout,'T********'):return False
+        if enabled(self.cfg,'board') and self.board is not None and (not self.board.covers(g) or g.distance(self.board.boundary)<self.border-self.dbu*.001):return False
+        if enabled(self.cfg,'keepout') and not self.keepout.is_empty and shapely.relate_pattern(g,self.keepout,'T********'):return False
         from .native_backend import any_violation
-        return not (any_violation('width',g.wkb,self.dbu,self.width) or any_violation('space',g.wkb,self.dbu,self.space))
+        from .geometry_rules import angle_regions
+        if enabled(self.cfg,'angle') and not angle_regions(g,getattr(self.cfg,'drc_min_angle_deg',0),self.dbu).is_empty:return False
+        return not ((enabled(self.cfg,'width') and any_violation('width',g.wkb,self.dbu,self.width)) or (enabled(self.cfg,'space') and any_violation('space',g.wkb,self.dbu,self.space)))
 
     def context(self,plan):
         tag=(plan.key,plan.identity)
@@ -126,13 +131,13 @@ class FixedRules:
         copper=shapely.union_all([rest,*candidate.values()]);kinds=set();amount=0.
         active=candidate['A'].buffer(self.dbu*2)
         for op,value in (('width',self.width),('space',self.space)):
-            if any_violation(op,copper.wkb,self.dbu,value) and rule_region(copper,value,self.dbu,op).intersects(active):kinds.add(op)
-        for ref,owner,required in vias:
+            if enabled(self.cfg,op) and any_violation(op,copper.wkb,self.dbu,value) and rule_region(copper,value,self.dbu,op).intersects(active):kinds.add(op)
+        for ref,owner,required in (vias if enabled(self.cfg,'enclosure') else ()):
             missing=self.model.moved(required,owner,states).difference(copper).intersection(active).area
             if missing>self.dbu*self.dbu:kinds.add('enclosure');amount+=missing/max(self.width*self.space,1e-12)
-        if self.board is not None and not copper.difference(self.inside).intersection(active).is_empty:
+        if enabled(self.cfg,'board') and self.board is not None and not copper.difference(self.inside).intersection(active).is_empty:
             kinds.add('board');amount+=copper.difference(self.inside).area/max(self.width*self.space,1e-12)
-        if not self.keepout.is_empty and shapely.relate_pattern(copper.intersection(active),self.keepout,'T********'):
+        if enabled(self.cfg,'keepout') and not self.keepout.is_empty and shapely.relate_pattern(copper.intersection(active),self.keepout,'T********'):
             kinds.add('keepout');amount+=copper.intersection(self.keepout).area/max(self.width*self.space,1e-12)
         for j in tree.query(copper,predicate='dwithin',distance=self.space):
             other=others[int(j)]
@@ -141,7 +146,7 @@ class FixedRules:
                 if copper.intersects(other):kinds.add('short')
                 amount+=(self.space-gap)/max(self.space,1e-12)+(copper.intersection(other).area/max(self.width*self.space,1e-12) if gap==0 else 0)
         from .geometry_rules import angle_regions
-        if not angle_regions(copper,getattr(self.cfg,'drc_min_angle_deg',0),self.dbu).intersection(active).is_empty:kinds.add('angle')
+        if enabled(self.cfg,'angle') and not angle_regions(copper,getattr(self.cfg,'drc_min_angle_deg',0),self.dbu).intersection(active).is_empty:kinds.add('angle')
         from .drc_rules import violation_priority
         return (*violation_priority(kinds),amount)
 
@@ -167,6 +172,7 @@ class FixedRules:
             for g in (part['B'],part['C']):
                 if g.is_empty:continue
                 for op,value in (('width',self.width),('space',self.space)):
+                    if not enabled(self.cfg,op):continue
                     bad=rule_region(g,max(self.dbu,value-4*self.dbu),self.dbu,op)
                     if not bad.is_empty and bad.distance(seam)>max(self.width,self.space)*2:permanent=True
             self.hard_memo[hard_key]=permanent
@@ -186,12 +192,13 @@ class FixedRules:
         return dict(best),None,best_score
 
     def check(self,replacements,states,progress=lambda *_:None):
+        if not self.cfg.drc_checks:progress(100,'尺寸DRC未启用');return []
         geos=self.geometries(replacements);out=[];keys=list(geos)
         for n,key in enumerate(keys):
             progress(round(70*n/max(1,len(keys))),'检查重构线宽、线距与包围量')
             for kind,g in self.local(key,geos[key],states):
                 out.append(dict(kind=kind,geometry=g,layers=tuple(sorted({r[0] for r in self.nets[key]})),net=key))
-        for plane in {k[0] for k in keys}:
+        for plane in ({k[0] for k in keys} if enabled(self.cfg,'space') else ()):
             selected=[k for k in keys if k[0]==plane];values=[geos[k] for k in selected];tree=shapely.STRtree(values)
             for i,a in enumerate(values):
                 for j in tree.query(a,predicate='dwithin',distance=self.space):

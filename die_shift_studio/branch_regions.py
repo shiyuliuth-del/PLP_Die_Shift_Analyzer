@@ -38,16 +38,46 @@ def interior_interfaces(source,domain,rigid,tolerance):
     interfaces=[g.boundary.intersection(domain.buffer(tolerance*.05)).difference(exterior) for g in rigid]
     lines=[line for g in interfaces for line in shapely.get_parts(g)
            if line.geom_type=='LineString' and line.length>tolerance*8]
-    return shapely.line_merge(shapely.union_all(lines))
+    from .straight_controls import straight
+    return straight(shapely.line_merge(shapely.union_all(lines)),tolerance)
+
+
+def transition_domains(source,rows,tol):
+    """Split by every real seam before classifying path interiors.
+
+    Unioning whole per-path partitions swallowed unrelated forks/terminals.
+    A component belongs to A only when an interior route interval visits it.
+    """
+    from shapely.ops import split,substring
+    if any(q.get('strict_box') is not None for q in rows):
+        return shapely.union_all([q['nominal_regions']['A'] for q in rows])
+    components=parts(source);intervals=[];blades=[]
+    for row in rows:
+        plan=row['route_plan'];a,b=row['interval'];eps=min(tol*8,(b-a)*.05)
+        if b-a>tol:intervals.append(substring(plan.route,a+eps,b-eps))
+        part=plan.partition(a,b,row.get('boundary_angles',(0.,0.)))
+        if part is None:continue
+        for name in ('near','far'):
+            face=part[name]
+            if face.geom_type!='LineString':continue
+            xy=np.asarray(face.coords);v=xy[-1]-xy[0];v/=max(np.linalg.norm(v),tol)
+            blades.append(shapely.LineString([xy[0]-v*tol*32,xy[-1]+v*tol*32]))
+    for blade in blades:
+        components=[piece for g in components for piece in (parts(split(g,blade)) if g.intersects(blade) else [g])]
+    return shapely.union_all([g for g in components if any(g.intersection(line).length>tol*4 for line in intervals)])
 
 
 def assemble(r,source,rows,states):
     from .reconstruction import transform
     owner=rows[0]['die'];pose=states[owner];center=r.model.bound.centers[owner]
     moving=shapely.union_all([q['moving_nominal'] for q in rows]);fixed=shapely.union_all([q['fixed_nominal'] for q in rows])
-    active=shapely.union_all([q['nominal_regions']['A'] for q in rows]);rigid=[];known={}
+    active=transition_domains(source,rows,r.tol);rigid=[];known={}
+    physical_moving=shapely.union_all([g for q in rows for g in getattr(q['route_plan'],'terminal_vias',((moving,),(fixed,)))[0]])
+    physical_fixed=shapely.union_all([g for q in rows for g in getattr(q['route_plan'],'terminal_vias',((moving,),(fixed,)))[1]])
     for g in parts(source.difference(active)):
-        m=g.intersection(moving).area>r.tol*r.tol;f=g.intersection(fixed).area>r.tol*r.tol
+        # Enclosure masks may overlap a cut by a sub-DBU sliver. Only actual
+        # terminal bodies decide ownership; those masks cannot swallow a fork.
+        m=g.intersection(physical_moving).area>r.tol*r.tol;f=g.intersection(physical_fixed).area>r.tol*r.tol
         if m and f and not any(q.get('strict_box') is not None for q in rows):active=shapely.union_all([active,g]);continue
         index=len(rigid);rigid.append(g)
         if m or f:known[index]=float(m)
@@ -92,7 +122,8 @@ def assemble(r,source,rows,states):
         return shapely.transform(dense,coordinates)
     result=[]
     for domain_index,(group,ids) in enumerate(zip(domains,neighbours)):
-        members=[q for q in rows if group.intersects(q['nominal_regions']['A'])]
+        from shapely.ops import substring
+        members=[q for q in rows if (q.get('strict_box') is not None and group.intersection(q['nominal_regions']['A']).area>r.tol*r.tol) or group.intersection(substring(q['route_plan'].route,q['interval'][0]+r.tol*4,q['interval'][1]-r.tol*4)).length>r.tol*4]
         if not members or not ids:continue
         q=dict(members[0]);posed=deform(group,ids);valid=posed.is_valid and posed.geom_type=='Polygon'
         flow_steps=0
@@ -115,6 +146,10 @@ def assemble(r,source,rows,states):
             # display-only sub-DBU neighbourhood recovers the real line; isolated
             # touch points are NOT whole-pad controls.
             seam=interior_interfaces(source,group,[rigid[i] for i in ids if i<physical_count and abs(values[i]-weight)<1e-10],r.tol)
+            if any(m.get('strict_box') is not None for m in members):
+                from .manual_regions import partition
+                faces=[partition(m['route_plan'],m['strict_box']) for m in members if m.get('strict_box') is not None]
+                seam=shapely.union_all([p['near' if side==0 else 'far'] for p in faces if p is not None and p['near' if side==0 else 'far'].geom_type not in ('Point','MultiPoint')])
             terminals=[]
             for member in members:
                 plan=member['route_plan'];s=member['interval'][side]
@@ -127,6 +162,18 @@ def assemble(r,source,rows,states):
                     terminals.append(terminal)
             return shapely.union_all([seam,*terminals])
         nearcut,farcut=face(high,0),face(low,1)
+        # A common trunk with exactly two material seams is a normal strip,
+        # even if several terminal paths share it. Use endpoint-matched curves
+        # instead of a distance field which can pinch its two sides inward.
+        if style in ('linear','arc') and nearcut.geom_type=='LineString' and farcut.geom_type=='LineString' and high>1-1e-10 and low<1e-10 and not any(m.get('strict_box') is not None for m in members):
+            from .connection_curves import endpoint_active
+            plan=q['route_plan'];part=dict(A=group,B=b,C=c,near=nearcut,far=farcut,a=q['interval'][0],b=q['interval'][1],angles=q.get('boundary_angles',(0.,0.)))
+            try:
+                candidate=endpoint_active(part,plan,center,pose,style)
+                # Keep only a connected, valid candidate, preserving branch
+                # material outside this transition; final whole-net guard runs.
+                if candidate.is_valid and candidate.geom_type=='Polygon' and not candidate.is_empty:posed=candidate;valid=True
+            except (ValueError,shapely.errors.GEOSException):pass
         # Whole-pad controls are physical terminal locations. Floating material
         # weights apply to interface lines, never to the terminal itself.
         if nearcut.geom_type in ('Point','MultiPoint'):high=1.
@@ -151,7 +198,7 @@ def consolidate(r,pieces,states):
         else:other.append(q)
     for rows in groups.values():
         source=rows[0]['route_plan'].source
-        cache_key=('branch-assembly-interior-seams-v46',r.rules.identity,r.settings.reconstruction_style,
+        cache_key=('branch-assembly-local-intervals-v50',r.rules.identity,r.settings.reconstruction_style,
                    tuple(r.model.bound.centers[rows[0]['die']]),states[rows[0]['die']].tobytes(),
                    tuple((q['route_identity'],q['interval'],q['boundary_angles'],tuple(q['nominal_regions'][k].wkb for k in 'ABC')) for q in rows))
         cached=r.geometry_pool.get(cache_key)

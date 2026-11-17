@@ -20,12 +20,15 @@ class Rulers:
         if self.w.toolbar.mode:
             (self.w.toolbar.pan if 'pan' in str(self.w.toolbar.mode).lower() else self.w.toolbar.zoom)()
         self.active=True;self.w.canvas.ruler_active=True
-        self.w.statusBar().showMessage('测量：左键拖动或依次点击两个端点；Esc退出，Shift+K / Ctrl+K清空')
+        self.w.statusBar().showMessage('测量：依次单击起点和终点；吸附图形，Ctrl锁8方向，Shift锁水平/垂直；Esc退出，Shift+K / Ctrl+K清空')
     def exit(self):
         was=self.active;self.active=False;self.w.canvas.ruler_active=False;self.start=self.current=None;self.draw();return was
     def clear(self):self.rows=[];self.start=self.current=None;self.draw()
     def restore(self,rows):self.exit();self.rows=normalize(rows);self.draw()
-    def point(self,e):return np.array([e.xdata,e.ydata]) if e.inaxes is self.w.ax and e.xdata is not None and e.ydata is not None else None
+    def point(self,e):
+        if e.inaxes is not self.w.ax or e.xdata is None or e.ydata is None:return None
+        from .ruler_snap import point
+        return point(self.w,np.array([e.xdata,e.ydata]),self.start,getattr(e,'key',''))
     def press(self,e):
         if not self.active or e.button!=1:return
         point=self.point(e)
@@ -35,8 +38,7 @@ class Rulers:
         self.start=point;self.current=point;self.pixel=np.array([e.x,e.y]);self.draw()
     def move(self,e):
         if self.active and self.start is not None and self.point(e) is not None:self.current=self.point(e);self.draw()
-    def release(self,e):
-        if self.active and e.button==1 and self.start is not None and self.point(e) is not None and np.linalg.norm(np.array([e.x,e.y])-self.pixel)>3:self.finish(self.point(e))
+    def release(self,e):pass  # only the second click commits a measurement
     def finish(self,point):
         if np.linalg.norm(point-self.start)>1e-12:self.rows.append([self.start.tolist(),point.tolist()])
         self.start=self.current=None;self.draw()

@@ -135,7 +135,7 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
     total=len(indices) if indices is not None else grid.total+1
     def evaluate(digits):
         cancel_check()
-        if indices is None:states,frame=scene(r,grid,bundles,digits)
+        if bundles is not None:states,frame=scene(r,grid,bundles,digits)
         else:
             states=np.asarray([v[d] for v,d in zip(grid.locals,digits)])
             frame=r.frame(states)
