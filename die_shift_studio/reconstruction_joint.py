@@ -119,7 +119,7 @@ def remember(r,states,frame):
     return value
 
 
-def scan(r,grid,bundles,progress=lambda *_:None):
+def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
     from .reconstruction_events import zone_key,active_region,current_failures
     from .width_keepout import routing_violations
     from .width_summary import strongest
@@ -127,8 +127,16 @@ def scan(r,grid,bundles,progress=lambda *_:None):
     from .width_analysis import BLOCKED
     records=defaultdict(set);reasons=defaultdict(set);locations=defaultdict(dict);witnesses={};zones_seen=set();scene_records=set()
     routing_lines={};routing_witnesses={};routing_factors=[];binary=r.p.target_nsigma in (0.,math.inf);repairs=0
-    for number,digits in enumerate(product(*(range(n) for n in grid.radices))):
-        cancel_check();states,frame=scene(r,grid,bundles,digits);repairs+=bool(frame['repair_refs'])
+    from .evaluation_scope import digits_for
+    visits=(digits_for(grid,i) for i in indices) if indices is not None else product(*(range(n) for n in grid.radices))
+    total=len(indices) if indices is not None else grid.total+1
+    for number,digits in enumerate(visits):
+        cancel_check()
+        if indices is None:states,frame=scene(r,grid,bundles,digits)
+        else:
+            states=np.asarray([v[d] for v,d in zip(grid.locals,digits)])
+            frame=r.frame(states)
+        repairs+=bool(frame['repair_refs'])
         remember(r,states,frame)
         clause=PoseClause(tuple((o,(int(d),)) for o,d in enumerate(digits)));index=grid.index(digits)
         if frame['violations'] or frame['hard_failures'] or current_failures(frame):scene_records.add(clause)
@@ -143,7 +151,7 @@ def scan(r,grid,bundles,progress=lambda *_:None):
         edges=routing_violations(r.model,states,r.p,r.settings,frame['replacements'])
         if edges:routing_factors.append(clause)
         for row in edges:strongest(routing_lines,[(row['layer'],i) for i in row['indices']],BLOCKED,None,binary,routing_witnesses,edge_witness(row,index,r.model,states))
-        progress(round(100*(number+1)/(grid.total+1)),f'电连接补偿后联合核验 {number+1:,}/{grid.total+1:,}')
+        progress(round(100*(number+1)/total),f'电连接补偿后联合核验 {number+1:,}/{total:,}')
     zones={}
     for key in zones_seen:
         clauses=tuple(sorted(records[key],key=lambda q:q.allowed));idx=ProblemIndex(grid,clauses)
@@ -152,8 +160,8 @@ def scan(r,grid,bundles,progress=lambda *_:None):
                         probability=dict(lower=0.,upper=1.,certified=False,reason='有限离散极端不能证明连续概率上界'))
     return dict(complete=True,grid=grid,grid_key=tuple(v.tobytes() for v in grid.locals),zones=zones,
                 routing_summary=dict(lines=routing_lines,witnesses=routing_witnesses,red_factors=routing_factors),
-                red_factors=tuple(sorted(scene_records,key=lambda q:q.allowed)),package_states=grid.total+1,
-                geometry_checks=sum(len(b['values']) for b in bundles.values()),local_checks=grid.total+1,pair_checks=grid.total+1,
+                red_factors=tuple(sorted(scene_records,key=lambda q:q.allowed)),package_states=total,selected_indices=tuple(indices) if indices is not None else None,
+                geometry_checks=sum(len(b['values']) for b in bundles.values()) if bundles is not None else total,local_checks=total,pair_checks=total,
                 joint_repaired_states=repairs,scope='全部离散极端；按电连接补偿后的实际铜联合核验。连续概率另给界限。')
 
 

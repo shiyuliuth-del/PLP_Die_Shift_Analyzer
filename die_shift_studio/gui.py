@@ -360,7 +360,8 @@ class MainWindow(W.QMainWindow):
         self.problem_filter.setToolTip('重构开启时按重构后的线宽、线距与连接等规则筛选；否则按宽度红色风险或当前整层DRC筛选。空白首行始终保留。')
         nav.addWidget(self.problem_filter);self.manual_button=W.QPushButton('手动偏移');nav.addWidget(self.manual_button);self.manual_button.clicked.connect(lambda:self.manual_preview.open_editor());nav.addStretch();ep.addLayout(nav)
         self.problem_filter.toggled.connect(lambda *_:self.filter_changed())
-        self.grid_mode.currentIndexChanged.connect(lambda *_:self.show_extreme_page(0))
+        self.grid_mode.currentIndexChanged.connect(self.evaluation_scope_changed)
+        self.view_settings=replace(self.view_settings,evaluation_scope='focus')
         self.page_prev.clicked.connect(lambda:self.show_extreme_page(self.preview_page-1))
         self.page_next.clicked.connect(lambda:self.show_extreme_page(self.preview_page+1))
         self.page_edit.returnPressed.connect(self.jump_extreme_page)
@@ -866,7 +867,7 @@ class MainWindow(W.QMainWindow):
         self.parked_groups.clear()
     def assessment_identity(self,data,roles,order,p,settings):
         from .session_cache import logical_fingerprint
-        return ('assessment-v28',logical_fingerprint((data.geometry_id,data.top_name,roles,order,asdict(p),settings.numeric_key(),settings.drc_tolerance_um,settings.drc_min_angle_deg)))
+        return ('assessment-v28',logical_fingerprint((data.geometry_id,data.top_name,roles,order,asdict(p),settings.numeric_key(),settings.drc_tolerance_um,settings.drc_min_angle_deg,settings.evaluation_scope)))
     def preview_identity(self,data,roles,order,motions,params,result):
         from .session_cache import logical_fingerprint
         digest=None
@@ -1015,7 +1016,7 @@ class MainWindow(W.QMainWindow):
             self._initial_extreme_page=view['page']-1
             for title,header in self.setting_sections.items():header.setChecked(title in project.get('expanded_settings',[]))
             for title,header in self.process_sections.items():header.setChecked(title in project.get('expanded_process',[]))
-            self.view_settings=replace(ViewSettings.from_dict(project.get('settings')),reconstruction_ignored=tuple(sorted(restored_width_ignores(project,data,'ignored_reconstruction'))));self.load_view_settings();self.layer_styles=project.get('layer_styles',{})
+            self.view_settings=replace(ViewSettings.from_dict(project.get('settings')),evaluation_scope='focus' if self.grid_mode.currentIndex() else 'all',reconstruction_ignored=tuple(sorted(restored_width_ignores(project,data,'ignored_reconstruction'))));self.load_view_settings();self.layer_styles=project.get('layer_styles',{})
             for name,value in project_overlays(project).items():
                 toggle=self.overlay_widget(name)
                 toggle.blockSignals(True)
@@ -1171,7 +1172,7 @@ class MainWindow(W.QMainWindow):
             q=frame['width_analysis']['counts'];message+=f" · 保宽足够 {q['宽度足够']}，需收窄 {q['需局部收窄']}，宽度不足 {q['宽度不足']}"
         if frame and frame.get('width_summary') and self.width_toggle.isChecked():
             s=self._coupled_data if self.coupled_view() else frame['width_summary']
-            if s:message+=f" · 全部 {s['package_states']:,} 种姿态，{len(s['lines'])} 条风险线路"
+            if s:message+=f" · {'重点组合' if self.view_settings.evaluation_scope=='focus' else '全部'} {s['package_states']:,} 种姿态，{len(s['lines'])} 条风险线路"
             else:message+=' · 正在核实型变后首行汇总'
         self.statusBar().showMessage(message)
         self.refresh_extreme_colors(frame)
@@ -2021,7 +2022,7 @@ class MainWindow(W.QMainWindow):
                 nonlocal model
                 model=ContactModel(data,case,roles,connections,actual_cache,motions,p)
                 return evaluate(data,roles,p,progress=progress,layer_order=order,connections=connections,motions=motions,include_analysis=False,
-                                settings=settings,safe_range_cache=values,contact_model=model,validate_extremes=True)
+                                settings=settings,safe_range_cache=values,contact_model=model,validate_extremes=True,extreme_scope=settings.evaluation_scope)
             r=dict(values.get_or_compute(key,assess),motions=motions,view_settings=asdict(settings))
             catalog=ExtremeCatalog(case,p)
             from .session_cache import logical_fingerprint
@@ -2187,6 +2188,16 @@ class MainWindow(W.QMainWindow):
             if pending_ok and ((self.reconstruction_toggle.isChecked() and self.reconstruction_yield.evidence is None) or (self.coupled_view() and self._coupled_data is None) or (self.width_toggle.isChecked() and self._width_grid_summary is None)):
                 self.active_preview=current;self.leave_extreme_selection()
             else:self.select_preview(0,0)
+
+    def evaluation_scope_changed(self,*_):
+        if self.loading:return
+        self.view_settings=replace(self.view_settings,evaluation_scope='focus' if self.grid_mode.currentIndex() else 'all')
+        self.revision+=1;self.stop_animation();self.cancel_previews()
+        self.width_yield.reset();self.reconstruction_yield.reset();self.constraint_feedback.cancel()
+        self._width_grid_summary=None;self._coupled_data=None;self._problem_tag=None
+        if self.result is not None or self._evaluation_requested:
+            self._coverage_pending=True;self.coverage_timer.start()
+        self.show_extreme_page(0,redraw=False)
 
     def show_extreme_page(self,page=0,redraw=True):
         if self.extremes is None:return

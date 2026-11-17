@@ -64,6 +64,11 @@ class ReconstructionYieldDisplay:
                     from .reconstruction_events import scan
                     from .reconstruction_probability import attach
                     evidence_key=('reconstruction-extreme-events-continuity',logical_fingerprint((data.geometry_id,data.top_name,roles,order,asdict(p),cfg.reconstruction_key())))
+                    if cfg.evaluation_scope=='focus':
+                        from .evaluation_scope import focused_catalog,focused_reconstruction
+                        grid,indices=focused_catalog(model,p)
+                        evidence,bank=focused_reconstruction(engine,grid,indices,progress)
+                        return {'yield':bank,'evidence':evidence}
                     evidence=group.values.get_or_compute(evidence_key,lambda:attach(scan(engine,ExtremeCatalog(case,p),lambda n,t:progress(round(n*.8),t),source_cache=group.values),engine))
                     worker.publish({'evidence':evidence})
                     bank=measure_reconstruction_yield(engine,p,cfg,lambda n,t:progress(80+round(n*.2),t),self.factor_pool,
@@ -90,8 +95,8 @@ class ReconstructionYieldDisplay:
         if self.bank is None:return
         from .width_yield import percentage_text
         b=self.bank;decimals=self.w.view_settings.width_yield_decimals
-        text='重构良率 '+('≤' if b.get('partial') else '≈')+percentage_text(b['value'],b['failure'],decimals)+('（检查中）' if b.get('partial') else '')
-        tip=f"{b['scope']}\n每轴{b['grid_nodes']}节点，完整联合网格{b['total']:,}个姿态；局部{b['local_checks']:,}次、异网{b['pair_checks']:,}次。\n{b['limitation']}\n0/∞沿用最近有限概率尺度：{b['scale_nsigma']:g}σ。"
+        text=('重点组合良率 ' if b.get('method')=='focus' else '重构良率 ')+('≤' if b.get('partial') else '≈')+percentage_text(b['value'],b['failure'],decimals)+('（检查中）' if b.get('partial') else '')
+        tip=f"{b['scope']}\n本范围{b['total']:,}个姿态；局部{b['local_checks']:,}次、异网{b['pair_checks']:,}次。\n{b['limitation']}\n0/∞沿用最近有限概率尺度：{b['scale_nsigma']:g}σ。"
         self.w.width_yield.label.set_extra(text,tip)
         if self.w.result is not None:self.w.result['reconstruction_yield']=b
 
