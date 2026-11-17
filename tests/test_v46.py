@@ -41,6 +41,20 @@ class V46Tests(unittest.TestCase):
     result=resolve(r,frame['replacements'],frame['pieces'],states)
    self.assertTrue(seen);self.assertFalse(result[-1])
   finally:e.close()
+ def test_mixed_branch_point_selects_its_terminal_without_jump(self):
+  from types import SimpleNamespace
+  from die_shift_studio.branch_regions import editable_piece
+  def member(y):
+   plan=SimpleNamespace(route=shapely.LineString([(0,y),(100,y)]),length=100.,tolerance=.001)
+   return dict(route_plan=plan,interval=(30.,80.),moved_cut=shapely.LineString([(30,y-10),(30,y+10)]),
+               extra_cut=shapely.LineString([(80,y-10),(80,y+10)]),moving_terminals=shapely.Point(0,y).buffer(3))
+  first,second=member(0),member(100)
+  piece=dict(first,graph_members=(first,second),endpoint_weights=(1.,0.),
+             moved_cut=shapely.GeometryCollection([shapely.Point(0,0),second['moved_cut']]))
+  picked=editable_piece(piece,(.2,.1),'moved')
+  self.assertIs(picked['route_plan'],first['route_plan'])
+  self.assertEqual(picked['interval'],(0.,80.));self.assertEqual(first['interval'],(30.,80.))
+  self.assertEqual(len(picked['drag_members']),1)
  def test_project_folder_and_legacy_discovery(self):
   with tempfile.TemporaryDirectory() as t:
    root=Path(t);source=root/'input.gds';source.write_bytes(b'original')
