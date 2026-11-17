@@ -106,14 +106,20 @@ class MeasuredOutput(QtCore.QObject):
                     result=fn(progress);cancel_check()
                     from .measured_issues import write
                     if kind=='preview':
+                        self.progressed.emit(key,99,'保存完整DRC问题目录')
                         product,engine=result;frame,snapshot,details=product;result=((frame,snapshot,write(issue_path,key,details)),engine)
-                    elif isinstance(result,dict):result=write(issue_path,key,result)
+                    elif isinstance(result,dict):
+                        if 'drc_issues' in result:self.progressed.emit(key,99,'保存完整DRC问题目录')
+                        result=write(issue_path,key,result)
                 self.finished.emit(key,result,None)
             except Exception as exc:
                 payload=getattr(exc,'frame',None)
                 if payload is not None:
                     from .measured_issues import write
-                    try:payload=dict(payload,ipc_details=write(issue_path,key,getattr(exc,'details',{})))
+                    try:
+                        with cancellation_scope(event):
+                            cancel_check();self.progressed.emit(key,99,'保存完整DRC问题目录')
+                            payload=dict(payload,ipc_details=write(issue_path,key,getattr(exc,'details',{})))
                     except Exception as storage_error:
                         payload=dict(payload,ipc_details=dict(drc_status='catalog_write_error',message=str(storage_error)))
                 self.finished.emit(key,payload,(type(exc).__name__,str(exc)))
