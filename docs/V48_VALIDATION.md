@@ -31,3 +31,5 @@ Excel为明确列映射的.xlsx，GD55是合成数据。快批跳过完整DRC/�
 工作流[44016068299](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/actions/runs/44016068299)的clean与with-cupy两环境全部成功，检查头为`7be169d0e6667cb8f7558900ea87d81e48c34aba`。包含实际源码ZIP解压、BUILD.bat、两个相邻无控制台EXE、真实命名管道/旋转中心/GDS/OAS/重启恢复，以及两项目24封装计划队列、重复队列不重算、三实例同时开启与正常退出。没有上传验收EXE。
 
 Windows生成的源码ZIP与Linux逐字节一致：163文件、2,119,979字节，ZIP SHA-256 `aadace500c667c0d1a621b78472d41f11148b45e8e13d59b8aa51ee0c01a6c56`。随后的验收文档提交不改程序、测试或构建，发布回下载结果另写Release与发布审计记录，不改历史标签。
+
+V48于2026-11-17正式发布，PR39合并8536446d86c2329e743eade38a951488c11734d2为不可改写标签。实际Release/自动ZIP/tar及独立MD/PY回下载均逐文件匹配；CRC/SHA-256/7-Zip通过，详见[V48发布审计](V48_RELEASE_VERIFICATION.json)。[正式下载](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/releases/tag/V48)。
