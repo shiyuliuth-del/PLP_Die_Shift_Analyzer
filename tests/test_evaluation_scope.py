@@ -23,6 +23,27 @@ class ScopeTests(unittest.TestCase):
   positive=int(np.flatnonzero(grid.locals[0][:,0]>0)[0]);clause=PoseClause(((0,(positive,)),))
   passed,failed=conditional_event(grid,indices,weights,[clause])
   self.assertAlmostEqual(failed,tail*(1-tail)/mass);self.assertAlmostEqual(passed+failed,1.)
+ def test_infinite_level_keeps_last_finite_joint_law(self):
+  p=replace(self.parameters(),reference_nsigma=1);grid,indices=focused_catalog(self.model(),p)
+  finite=conditional_weights(grid,p,indices)[0]
+  binary=conditional_weights(grid,replace(p,target_nsigma=math.inf),indices)[0]
+  np.testing.assert_allclose(binary,finite)
+  self.assertTrue(np.all(binary>0))
+ def test_focus_width_event_masks_remain_bounded(self):
+  from die_shift_studio.evaluation_scope import focused_width
+  from die_shift_studio.width_yield import policy_yields
+  p=self.parameters();dies=[box(i*1000,0,i*1000+10,10) for i in range(17)]
+  model=SimpleNamespace(case={'dies':dies,'infos':[{'cx':i*1000+5.,'cy':5.} for i in range(17)]},interdie_networks=[],
+                        data=SimpleNamespace(geometry_id='mask-test',top_name='TOP'),roles={},connections=SimpleNamespace(order=[]))
+  row=dict(status='宽度不足',refs=(('5/0',0),),minimum_um=10.,keep_um=12.,gap_um=1.,nominal_witness_um=[[0,0],[1,0]],
+           original=0,required=1,current=0,narrowing_um=11.,pair=('a','b'),probability_key=('site',))
+  analyzer=SimpleNamespace(model=model,cache=SimpleNamespace(group=None),settings=ViewSettings(evaluation_scope='focus'),
+                           probability=None,frame=lambda _:dict(rows=[row]))
+  with patch('die_shift_studio.width_keepout.routing_violations',return_value=[]):summary,bank=focused_width(analyzer,p,lambda *_:None)
+  self.assertGreater(bank['total'],32);self.assertGreater(len(bank['chunks']),1)
+  self.assertTrue(all(n<=32 and mask.bit_length()<=32 for n,mask,*_ in bank['chunks']))
+  q=policy_yields(bank,{('5/0',0)})
+  np.testing.assert_allclose(q['failure_probability'],[1.,1.])
  def test_settings_scope_is_saved_and_separates_caches(self):
   a=ViewSettings();b=ViewSettings.from_dict({'evaluation_scope':'focus'})
   self.assertEqual(a.evaluation_scope,'all');self.assertNotEqual(a.reconstruction_key(),b.reconstruction_key());self.assertNotEqual(a.width_key(),b.width_key())

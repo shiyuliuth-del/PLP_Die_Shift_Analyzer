@@ -22,6 +22,9 @@ def conditional_weights(grid,p,indices):
     of a continuous distribution. All scopes include the physical zero pose.
     """
     from .reconstruction_probability import extreme_weights
+    if math.isinf(p.target_nsigma):
+        from dataclasses import replace
+        p=replace(p,target_nsigma=0)
     local,error=extreme_weights(grid,p);logs=[]
     for index in indices:
         weights=[local[o][d] for o,d in enumerate(digits_for(grid,index))]
@@ -71,7 +74,7 @@ def focused_width(analyzer,p,progress):
         from .extreme_filter import PoseClause
         grid,indices=focused_catalog(model,p);weights,error,logmass=conditional_weights(grid,p,indices)
         lines={};witnesses={};channels={};channel_witnesses={};red_factors=[];channel_factors=[]
-        red=[];yellow=[];sites={};has_edge=False
+        red=[];yellow=[];sites={};chunks=[];site_chunks=[];has_edge=False
         previous=analyzer.probability;analyzer.probability=None
         try:
             for number,index in enumerate(indices):
@@ -86,22 +89,25 @@ def focused_width(analyzer,p,progress):
                     witness=channel_witness(row,index)
                     strongest(channels,refs,row['status'],None,False,channel_witnesses,witness)
                     strongest(lines,refs,row['status'],None,False,witnesses,witness)
-                    if row.get('probability_key') is not None:sites[row['probability_key']]=sites.get(row['probability_key'],0)|(1<<number)
+                    if row.get('probability_key') is not None:sites[row['probability_key']]=sites.get(row['probability_key'],0)|(1<<(number%32))
                 if channel_red:channel_factors.append(clause)
                 edges=routing_violations(model,states,p,analyzer.settings);has_edge|=bool(edges)
                 for row in edges:
                     refs=[(row['layer'],i) for i in row['indices']];rset.update(refs)
                     strongest(lines,refs,BLOCKED,None,False,witnesses,edge_witness(row,index,model,states))
-                    for site in edge_keys(row):sites[site]=sites.get(site,0)|(1<<number)
+                    for site in edge_keys(row):sites[site]=sites.get(site,0)|(1<<(number%32))
                 if rset:red_factors.append(clause)
                 red.append(rset);yellow.append(yset)
+                if len(red)==32 or number+1==len(indices):
+                    chunks.append(packed_events(red,yellow,weights[number+1-len(red):number+1]));site_chunks.append(sites)
+                    red=[];yellow=[];sites={}
                 progress(round(100*(number+1)/len(indices)),f'重点组合宽度 {number+1}/{len(indices)}')
         finally:analyzer.probability=previous
         summary=dict(lines=lines,witnesses=witnesses,red_factors=red_factors,channel_lines=channels,
                      channel_witnesses=channel_witnesses,channel_factors=channel_factors,has_edge_risk=has_edge,
                      grid_key=tuple(v.tobytes() for v in grid.locals),package_states=len(indices),
                      selected_indices=indices,local_checks=len(indices),complete=True,scope='focus')
-        bank=enrich(dict(method='focus',chunks=(packed_events(red,yellow,weights),),site_chunks=(sites,),
+        bank=enrich(dict(method='focus',chunks=tuple(chunks),site_chunks=tuple(site_chunks),
                          total=len(indices),scale_nsigma=p.scale_nsigma,mass_error=error,scope_log_mass=logmass,selected_indices=indices,grid_key=tuple(v.tobytes() for v in grid.locals)))
         return summary,bank
     return group.values.get_or_compute(key,compute) if group is not None else compute()
