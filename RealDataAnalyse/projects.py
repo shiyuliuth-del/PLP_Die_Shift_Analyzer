@@ -89,7 +89,7 @@ def copy_excel(folder, paths, stop):
         if source.is_relative_to(root):
             result.append(str(source))
             continue
-        destination = root / 'Excel'
+        destination = inside(root, 'Excel')
         destination.mkdir(parents=True, exist_ok=True)
         digest = sha256(source, stop)
         target = destination / source.name

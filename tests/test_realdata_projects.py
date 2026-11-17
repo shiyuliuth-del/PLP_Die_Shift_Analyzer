@@ -55,6 +55,13 @@ class Projects(unittest.TestCase):
             self.skipTest('This Windows account cannot create symbolic links')
         with self.assertRaisesRegex(ValueError, '文件必须位于'):
             load_folder(self.folder)
+        external_dir = self.root/'outside-excel'
+        external_dir.mkdir()
+        (self.folder/'Excel').symlink_to(external_dir, target_is_directory=True)
+        source = self.root/'outside.xlsx'; source.write_bytes(b'measurements')
+        with self.assertRaisesRegex(ValueError, '文件必须位于'):
+            copy_excel(self.folder, [source], threading.Event())
+        self.assertEqual(list(external_dir.iterdir()), [])
 
     def test_external_copy_collision_and_cancel(self):
         external = self.root/'measurements.xlsx'
