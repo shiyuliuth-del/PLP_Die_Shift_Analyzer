@@ -1,11 +1,11 @@
 {
   "version": "V46",
   "status": "PASS",
-  "tested_at_utc": "2026-11-17T01:47:29.951713+00:00",
+  "tested_at_utc": "2026-11-17T02:36:05.731517+00:00",
   "scope": "Clean source checkout, local platform. Windows executable verification is recorded separately.",
   "platform": "linux",
-  "verified_runtime_sha256": "98655362e7fac0dd219222d451cc99603896aa565ec6684ec0c4ead307f49b67",
-  "gui_suites": 30,
+  "verified_runtime_sha256": "0f313ea3f678cbce7e16126d5f3efdb2fdcf747622856b1a9c4e75240c0162a9",
+  "gui_suites": 31,
   "runs": [
     {
       "args": [
@@ -21,7 +21,7 @@
       "env": {},
       "status": "PASS",
       "summary": [
-        "Ran 420 tests in 152.023s",
+        "Ran 430 tests in 123.637s",
         "",
         "OK (skipped=2)"
       ]
@@ -383,6 +383,18 @@
     },
     {
       "args": [
+        "tests/gui_evaluation_scope.py"
+      ],
+      "env": {},
+      "status": "PASS",
+      "summary": [
+        "/home/niubi/.local/lib/python3.12/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.",
+        "  warnings.warn(\"Unable to import Axes3D. This may be due to multiple versions of \"",
+        "GUI_EVALUATION_SCOPE_PASS focus 7 / all 9, reconstruction/DRC/width/cache/saved mode"
+      ]
+    },
+    {
+      "args": [
         "main.py",
         "--smoke-test",
         "results/default.json"
@@ -699,6 +711,5 @@
       ],
       "discrete_states": 3
     }
-  ],
-  "verified_commit": "7e66532b51b26a7d25b2c078d4b1d0c59f6ffe11"
+  ]
 }
