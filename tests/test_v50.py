@@ -145,6 +145,12 @@ class V50Tests(unittest.TestCase):
    self.assertTrue(all(not v['failures'] for v in f['checks'].values()))
    self.assertEqual(frame_status(f)['failures'],0)
   finally:e.close()
+ def test_enclosure_actual_value_is_local_to_each_reported_witness(self):
+  from die_shift_studio.drc_actual import measured
+  via=shapely.Point(0,0).buffer(3);copper=shapely.box(-5,-10,5,20)
+  item=dict(kind='孔盘包围不足',required_um=10,_measurement_enclosure=(via,copper))
+  self.assertAlmostEqual(measured(item,shapely.box(-13,-10,-5,10))['actual_um'],2,places=5)
+  self.assertAlmostEqual(measured(item,shapely.box(-4,-13,4,-10))['actual_um'],7,places=5)
  def test_new_options_legacy_defaults_and_expand_migration(self):
   from die_shift_studio.project import normalize_project
   q=normalize_project(dict(schema_version=5,roles={},settings={},expanded_settings=['DXF','实测输出设置','安全范围','无接触良率']))

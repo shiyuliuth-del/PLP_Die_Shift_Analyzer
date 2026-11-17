@@ -55,7 +55,7 @@ class ReconstructionOverlay:
             plan=q.get('route_plan')
             for kind,side,name in (('moved',0,'moved_cut'),('extra',1,'extra_cut')):
                 g=q.get(name);key=(self._key(q),kind)
-                if not self.w.view_settings.reconstruction_auto and getattr(self.w,'reconstruction_pending',False):
+                if getattr(self.w,'reconstruction_pending',False) and not self.w.view_settings.reconstruction_auto:
                     staged=[];changed=False
                     for member in q.get('graph_members',(q,)):
                         route=member.get('route_plan')

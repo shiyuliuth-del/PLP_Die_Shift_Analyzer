@@ -157,7 +157,7 @@ def frame(checker,states,replacements,settings,progress,owners=None,scopes=None)
             required=clearances.min_package_clearance_um
             bad=die.difference(board.buffer(-required))
             if not bad.is_empty:
-                items.append(dict(layer='',layers=(),geometry=bad,kind='芯片到封装机械净距不足',owner=i,dependencies=(i,),refs=(),required_um=required,actual_um=die.distance(board.boundary) if board.covers(die) else -die.difference(board).hausdorff_distance(board.boundary)))
+                items.append(dict(layer='',layers=(),geometry=bad,kind='芯片到封装机械净距不足',owner=i,dependencies=(i,),refs=(),required_um=required,actual_um=die.distance(board.boundary) if board.covers(die) else -float(np.max(shapely.distance(shapely.points(shapely.get_coordinates(die.difference(board))),board),initial=0.))))
         for j in range(i):
             deps=(j,i)
             if not wanted(deps) or not enabled(settings,'die_gap'):continue
