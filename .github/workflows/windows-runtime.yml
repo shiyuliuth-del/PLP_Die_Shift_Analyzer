@@ -68,6 +68,11 @@ on:
       - '.gitattributes'
       - '.github/workflows/windows-runtime.yml'
   workflow_dispatch:
+    inputs:
+      resume_v50:
+        description: 'Continue the V50 acceptance after its focused GD55 performance fix; skip previously passed suites'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -95,6 +100,7 @@ jobs:
           python -m venv .venv
           .\.venv\Scripts\python -m pip install -r requirements.txt ezdxf
       - name: V47 measured commands, compact focus and saved geometry regression
+        if: ${{ inputs.resume_v50 != true }}
         shell: cmd
         run: |
           .\.venv\Scripts\python -m unittest discover -s tests -p test_v47.py -v
@@ -132,6 +138,7 @@ jobs:
           "DSA_TEST_SOURCE=$source" >> $env:GITHUB_ENV
           "DIE_SHIFT_PYTHON=$py" >> $env:GITHUB_ENV
       - name: Verify ordered plans, output isolation and bounded IPC conversation
+        if: ${{ inputs.resume_v50 != true }}
         shell: cmd
         run: |
           set PYTHONPATH=.;tests
@@ -143,6 +150,7 @@ jobs:
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" tests/gui_realdata_instances.py
       - name: Verify partial measured output, ERROR layer and expanded GD55
+        if: ${{ inputs.resume_v50 != true }}
         shell: cmd
         run: |
           set PYTHONPATH=.;tests
@@ -156,6 +164,7 @@ jobs:
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" tests/gui_realdata_errors.py
       - name: Verify V50 output, pair coverage, DRC policy and interaction contracts
+        if: ${{ inputs.resume_v50 != true }}
         shell: cmd
         run: |
           set PYTHONPATH=.;tests
@@ -168,6 +177,7 @@ jobs:
           "%DIE_SHIFT_PYTHON%" tests/gui_v50.py
           if errorlevel 1 exit /b 1
       - name: Verify V49 reconstruction rules, ruler and GD55 interactions
+        if: ${{ inputs.resume_v50 != true }}
         shell: cmd
         run: |
           set PYTHONPATH=.;tests
@@ -176,6 +186,15 @@ jobs:
           "%DIE_SHIFT_PYTHON%" tests/gui_v49.py
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" tests/gui_v49_gd55.py
+      - name: Resume only affected V50 focused assessment and GD55 handles
+        if: ${{ inputs.resume_v50 == true }}
+        shell: cmd
+        run: |
+          set PYTHONPATH=.;tests
+          "%DIE_SHIFT_PYTHON%" -m unittest test_v26.V26Tests.test_all_729_statuses_match_full_geometry_and_drc test_evaluation_scope -v
+          if errorlevel 1 exit /b 1
+          "%DIE_SHIFT_PYTHON%" tests/gui_v49_gd55.py
+          if errorlevel 1 exit /b 1
       - name: Locate the Windows C++ compiler for the interface test
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"

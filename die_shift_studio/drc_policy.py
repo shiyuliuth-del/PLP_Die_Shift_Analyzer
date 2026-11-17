@@ -39,3 +39,18 @@ def build(w,layout):
             b=W.QCheckBox(label);b.setChecked(True);editor.boxes[key]=b;box.addWidget(b);b.toggled.connect(editor.valueChanged)
         form.addRow(title,row)
     show.valueChanged.connect(w.settings_changed);check.valueChanged.connect(w.settings_changed)
+
+
+def contact_parameters(p,settings):
+    """Legacy interface windows use only the enabled spacing/enclosure rules."""
+    if not (enabled(settings,'space') or enabled(settings,'enclosure')):return None
+    if enabled(settings,'space') and enabled(settings,'enclosure'):return p
+    from dataclasses import replace
+    return replace(p,line_space_um=p.line_space_um if enabled(settings,'space') else 0.,annulus_um=p.annulus_um if enabled(settings,'enclosure') else 0.)
+
+def contact_frame(model,states,p,settings,replacements=None,counts_only=False,owners=None):
+    q=contact_parameters(p,settings)
+    if q is None:
+        import numpy as np
+        return np.zeros(len(states),int) if counts_only else dict(issues=[],regions=[],intrusions=[],problem_percent=0)
+    return model.current(states,q,replacements,counts_only,owners)

@@ -133,6 +133,18 @@ class V50Tests(unittest.TestCase):
    self.assertFalse(book.passes(key,g,np.zeros((1,3)),[]))
    self.assertTrue(FixedRules(e.contact,e.p,replace(cfg,drc_checks=())).passes(key,g,np.zeros((1,3)),[]))
   finally:e.close()
+ def test_disabled_rules_do_not_leak_through_legacy_preview_counts(self):
+  from test_v49_reconstruction import V49ReconstructionTests
+  from die_shift_studio.extreme_validation import frame_status
+  e,_,_=V49ReconstructionTests().fixture()
+  try:
+   cfg=replace(ViewSettings(),drc_checks=())
+   e.configure_reconstruction(False,cfg);e.configure_drc(True,cfg)
+   f=e.frame(np.array([[600.,0.,0.]]))
+   self.assertEqual(f['drc'],[]);self.assertFalse(f['contact']['issues'])
+   self.assertTrue(all(not v['failures'] for v in f['checks'].values()))
+   self.assertEqual(frame_status(f)['failures'],0)
+  finally:e.close()
  def test_new_options_legacy_defaults_and_expand_migration(self):
   from die_shift_studio.project import normalize_project
   q=normalize_project(dict(schema_version=5,roles={},settings={},expanded_settings=['DXF','实测输出设置','安全范围','无接触良率']))

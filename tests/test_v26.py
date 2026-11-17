@@ -65,6 +65,13 @@ class V26Tests(unittest.TestCase):
                 safe+=bool(fact['safe']);bad+=not fact['safe']
             self.assertTrue(safe and bad)
             focused=RepresentativeExtremes(c,p,g,pairs=factors['pairs'])
+            from unittest.mock import patch
+            with patch.object(e,'frame',side_effect=AssertionError('focused status must not build display measurements')):
+                fast=evaluate_states(e,focused,settings)
+            for index in range(-1,g.total):
+                digits=g.choices(index) if index>=0 else [0,0]
+                for name in ('safe','drc','failures','contact'):
+                    self.assertEqual(status_for(fast,digits)[name],status_for(factors,digits)[name])
             # V50 includes complete local pairs, including one DIE zero.
             for owner,local in enumerate(g.locals):
                 self.assertEqual({g.choices(i)[owner] for i in focused.indices},set(range(len(local))))
