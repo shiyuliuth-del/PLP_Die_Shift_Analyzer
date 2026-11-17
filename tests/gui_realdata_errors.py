@@ -34,6 +34,15 @@ with tempfile.TemporaryDirectory(prefix='rda-error-output-') as temp:
   error_indices=[i for i in layout.layer_indexes() if layout.get_info(i).name=='ERROR'];assert len(error_indices)==1;error_index=error_indices[0]
   server_info=call(endpoint,'info')['result'];board=server_info['board_bounds_um']
   placements={inst.cell.name:inst.dcplx_trans.disp for inst in top.each_inst()}
+  fail_indices=[i for i in layout.layer_indexes() if layout.get_info(i).name=='FAIL'];assert len(fail_indices)==1
+  fail_index=fail_indices[0];assert fail_index!=error_index
+  original=k.Layout();original.read(str(source));original_top=original.cell(server_info['top_cell'])
+  assert abs(original.dbu-layout.dbu)<1e-12
+  expected_board=k.Region()
+  for key,role in server_info['roles'].items():
+   if role=='封装边框':expected_board+=k.Region(original_top.begin_shapes_rec(original.layer(*map(int,key.split('/')))))
+  expected_board.merge();assert not expected_board.is_empty()
+  expected_fail=k.Region()
   issue_packages=0;rectangles=0;failed=[]
   for seq,package,payload,receipt,state in rows:
    assert receipt['fixed_rdl_drc_checked'] is True
@@ -42,6 +51,12 @@ with tempfile.TemporaryDirectory(prefix='rda-error-output-') as temp:
    assert abs(origin.y-(payload['position_um'][1]-board[1]))<=layout.dbu
    if receipt.get('connection_failure_count'):
     failed.append(package);assert receipt['partial_output'] is True and receipt['omitted_region_count']>0
+   fail_cell=layout.cell('G_FAIL_'+payload['cell'])
+   if receipt.get('connection_failure_count'):
+    assert receipt['failed_packages']==1 and receipt['failure_layer']['name']=='FAIL'
+    assert fail_cell and (k.Region(fail_cell.shapes(fail_index))^expected_board).is_empty(),'FAIL must preserve the real package outline'
+    expected_fail+=expected_board.transformed(k.Trans(round(origin.x/layout.dbu),round(origin.y/layout.dbu)))
+   else:assert fail_cell is None and receipt.get('failed_packages',0)==0,'DRC-only package must not enter FAIL'
    catalog=receipt['issue_catalog'];path=Path(catalog['path']).resolve();assert path.is_relative_to(folder/'Cache'),path
    with closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True)) as db:
     issues=[json.loads(row[0]) for row in db.execute('select payload from issues where task_id=? order by ordinal',(catalog['task_id'],))]
@@ -74,6 +89,8 @@ with tempfile.TemporaryDirectory(prefix='rda-error-output-') as temp:
    assert receipt['error_rectangles']==sum(len(s) for s in unique.values())
    issue_packages+=bool(issues);rectangles+=receipt['error_rectangles']
   assert outcome['issue_packages']==issue_packages and outcome['error_rectangles']==rectangles
+  assert outcome['failed_packages']==len(failed)
+  assert (k.Region(top.begin_shapes_rec(fail_index))^expected_fail).is_empty(),'FAIL contains extra/missing package outlines'
   if profile['sheet']=='FailureRecovery':
    assert {'RECOVERY_002','RECOVERY_004','RECOVERY_005'}.issubset(failed),failed
    assert not rows[0][3]['connection_failure_count'] and not rows[-1][3]['connection_failure_count']

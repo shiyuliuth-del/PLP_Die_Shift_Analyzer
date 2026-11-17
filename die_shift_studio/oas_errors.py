@@ -4,8 +4,9 @@ import numpy as np
 import shapely
 
 
-def choose_error_layer(source_layers):
+def choose_error_layer(source_layers,*,reserved=()):
     occupied={tuple(map(int,key.split('/'))) for key in source_layers}
+    occupied.update(tuple(pair) for pair in reserved)
     for layer in range(65535,-1,-1):
         if (layer,0) not in occupied:return layer,0
     raise ValueError('没有空闲ERROR图层；未覆盖原始层')
