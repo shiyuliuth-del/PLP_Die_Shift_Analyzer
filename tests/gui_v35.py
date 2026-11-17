@@ -29,6 +29,8 @@ def main():
     try:
         job=json.loads((ROOT/'examples/示例O_运动网络三线路通道.json').read_text(encoding='utf-8'))
         job['gds_path']=str(ROOT/'examples'/job['gds_path'])
+        # Preserve this suite's full-input probability / integration contract.
+        job['extreme_view']={'mode':'all','page':1}
         job['parameters'].update(multi_bound_y_um=0,bound_angle_deg=0,target_nsigma=2)
         job['settings'].update(animation_enabled=False,width_yield_method='importance',width_yield_exponent=8,width_grid_nodes=5)
         job['overlays']={'width':True}

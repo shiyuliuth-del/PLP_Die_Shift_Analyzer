@@ -32,6 +32,8 @@ def main():
         assert w.dxf_fields['merge_layers'].isChecked()
         q=json.loads((ROOT/'examples/示例O_运动网络三线路通道.json').read_text())
         q['gds_path']=str(ROOT/'examples'/q['gds_path'])
+        # Preserve this suite's full-input probability / integration contract.
+        q['extreme_view']={'mode':'all','page':1}
         q['parameters'].update(multi_bound_y_um=0,bound_angle_deg=0,target_nsigma=2)
         q['settings'].update(animation_enabled=False,width_grid_nodes=5)
         q['settings'].pop('width_yield_method',None)

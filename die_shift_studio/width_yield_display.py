@@ -96,6 +96,7 @@ class WidthYieldDisplay:
         p=replace(p,target_nsigma=0)
         cfg=w.view_settings;roles=w.roles();order=w.ordered_layers()
         sampling=(cfg.width_yield_method,cfg.width_grid_nodes) if cfg.width_yield_method=='grid' else (cfg.width_yield_method,cfg.width_yield_exponent,cfg.width_yield_seed)
+        if cfg.evaluation_scope=='focus':sampling=('focus',)
         token=('width-yield-v36',logical_fingerprint((w.data.geometry_id,w.data.top_name,roles,order,asdict(p),
                cfg.drc_tolerance_um,sampling,cfg.evaluation_scope)))
         key=(id(w.cache_group),token)
