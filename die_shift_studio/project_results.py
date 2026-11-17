@@ -74,7 +74,7 @@ def save(w,path):
     queued=any(controller.pending is not None or controller.timer.isActive() for controller in (w.width_yield,w.reconstruction_yield))
     if w._tasks or w.preview_pending or w.motion_pending or queued:
         w.log_bus.emit('计算尚未完成，本次仅保存设置，不保存不完整结果。','WARNING');return None
-    folder=Path(w.view_settings.result_cache_directory).expanduser() if w.view_settings.result_cache_directory else path.parent
+    folder=path.parent/'Cache'
     folder.mkdir(parents=True,exist_ok=True)
     payload=dict(frame=w.current_frame,result=w.result,shown=w.shown_states,probability=w.probability_data,space=w.space_data,
                  footprints=w.footprint_data,width_summary=w._width_grid_summary,width_bank=w.width_yield.bank,

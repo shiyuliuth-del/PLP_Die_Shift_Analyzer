@@ -286,7 +286,6 @@ class CutDrag:
         if getattr(self.w,"remote_locked",False):return
         w=self.w
         if not w.reconstruction_toggle.isChecked() or event.inaxes is not w.ax or event.xdata is None or getattr(w.canvas,'die_move_active',False):return
-        if getattr(w,'region_select',None) and w.region_select.mode is not None:return
         picked=w.reconstruction_overlay.pick(event.xdata,event.ydata,self._tolerance())
         if picked is None:return
         piece,xy,kind=picked
@@ -295,6 +294,12 @@ class CutDrag:
         overlay=w.reconstruction_overlay;overlay.selected=overlay._key(piece);overlay.selected_kind=kind
         if kind in ('bridge','problem'):return
         if event.button!=1:return
+        if getattr(w,'region_select',None) and w.region_select.mode is not None:w.exit_region_mode()
+        if w.toolbar.mode:
+            if 'pan' in str(w.toolbar.mode).lower():
+                if getattr(w.toolbar,'_pan_info',None) is not None:w.toolbar.release_pan(event)
+                w.toolbar.pan()
+            else:w.toolbar.zoom()
         event.reconstruction_cut_handled=True
         w.stop_animation();w.cancel_previews()
         if event.dblclick:self.clear(overlay._key(piece),piece,kind);return
@@ -604,7 +609,7 @@ class RegionSelect:
         for layer in layers:
             regions.append((layer, bounds, self.mode))
         self.w.view_settings = replace(self.w.view_settings, reconstruction_regions=tuple(regions))
-        self.w.dirty=True
+        self.w.invalidate_reconstruction_edit()
         self.w.statusBar().showMessage(
             f'已写入 {len(layers)} 个图层的{REGION_LABELS[self.mode]}；可继续框选，或点“清除全部手动区域”恢复')
         self.w.request_preview(quiet=True)
