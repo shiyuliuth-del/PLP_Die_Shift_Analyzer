@@ -321,6 +321,10 @@ class MeasuredOutput(QtCore.QObject):
             client_id=args.get('client_id')
             if client_id is not None and (not isinstance(client_id,str) or len(client_id)!=32 or any(c not in '0123456789abcdef' for c in client_id)):raise ValueError('client_id须为32位小写十六进制')
             from .oas_stream import Store
+            from .oas_errors import choose_error_layer
+            policy=args.get('output_policy','strict')
+            if policy not in ('strict','omit_failed_regions'):raise ValueError('未知实测输出策略')
+            error_layer=choose_error_layer(self.session.cache.layers)
             profile=resource_profile();memory=self.options.memory_budget_mb(profile)
             per_lane=max(96,int(self.session.cache.bytes*24/1024**2));lanes=max(1,min(self.options.max_threads or profile['workers'],profile['workers'],int(memory*.7)//per_lane))
             if per_lane>memory:raise MemoryError(f'此图纸估计单任务需{per_lane} MB，超过批次内存限额{memory} MB')
@@ -329,9 +333,9 @@ class MeasuredOutput(QtCore.QObject):
                 import psutil
                 baseline=psutil.Process().memory_info().rss
             except (ImportError,OSError):baseline=0
-            self.batch=dict(id=uuid.uuid4().hex,client_id=client_id,store=Store(destination.parent,self.session.data.dbu_um,max(1024**2,memory*1024**2//5),checkpoint_destination=destination.with_name(destination.stem+'.'+uuid.uuid4().hex[:12]+'.partial.oas')),lock=threading.Lock(),path=destination,baseline=baseline,
-                            executor=ThreadPoolExecutor(max_workers=lanes,thread_name_prefix='dsa-batch'),pending=set(),inflight=set(),completed=0,failed=0,failures=[],ending=False,lanes=lanes,memory_mb=memory,semaphore=threading.Semaphore(lanes),allow_failed=bool(args.get('allow_failed',False)))
-            return dict(status='completed',result=dict(batch_id=self.batch['id'],threads=lanes,max_memory_mb=memory,queue_limit=lanes*4))
+            self.batch=dict(id=uuid.uuid4().hex,client_id=client_id,store=Store(destination.parent,self.session.data.dbu_um,max(1024**2,memory*1024**2//5),checkpoint_destination=destination.with_name(destination.stem+'.'+uuid.uuid4().hex[:12]+'.partial.oas'),error_layer=error_layer),lock=threading.Lock(),path=destination,baseline=baseline,
+                            executor=ThreadPoolExecutor(max_workers=lanes,thread_name_prefix='dsa-batch'),pending=set(),inflight=set(),completed=0,failed=0,failures=[],ending=False,lanes=lanes,memory_mb=memory,semaphore=threading.Semaphore(lanes),output_policy=policy)
+            return dict(status='completed',result=dict(batch_id=self.batch['id'],threads=lanes,max_memory_mb=memory,queue_limit=lanes*4,output_policy=policy,error_layer=dict(layer=error_layer[0],datatype=error_layer[1],name='ERROR')))
         if command=='batch.submit':
             batch=self.batch
             if batch is None or batch['ending']:raise RuntimeError('批次未开始或已结束接收')
@@ -358,7 +362,7 @@ class MeasuredOutput(QtCore.QObject):
                                 with batch['lock']:batch['store'].flush()
                                 raise MemoryError('批次增量内存超过配置上限；已分段暂存，任务未输出，请降低并发或提高预算')
                     try:
-                        with serial_scope():frame,snapshot,details=session.run(rows,bounded_progress,preview=False)
+                        with serial_scope():frame,snapshot,details=session.run(rows,bounded_progress,preview=False,output_policy=batch['output_policy'])
                     except Exception as exc:
                         if hasattr(exc,'details'):
                             from .measured_issues import place
@@ -366,12 +370,12 @@ class MeasuredOutput(QtCore.QObject):
                         raise
                     from .measured_issues import place
                     details=place(details,position)
-                    if details['connection_failure_count'] and not batch['allow_failed']:raise ValueError('存在未连接动区：'+json.dumps(details,ensure_ascii=False))
+                    if details['connection_failure_count'] and not (batch['output_policy']=='omit_failed_regions' and details.get('partial_output') and details.get('omitted_region_count',0)>0):raise ValueError('存在未处理的连接失败，拒绝输出')
                     cancel_check()
                     with batch['lock']:
-                        batch['store'].add(name,snapshot.layers,position,session.case['board'].bounds[:2])
+                        markers=batch['store'].add(name,snapshot.layers,position,session.case['board'].bounds[:2],errors=details['drc_issues'],die_count=len(session.case['dies']))
                         if batch['store'].count==1 or batch['store'].count%64==0:batch['store'].flush()
-                    return dict(cell=name,checkpoint=str(batch['store'].checkpoint_destination),checkpoint_cells=batch['store'].checkpoint_count,**details)
+                    return dict(cell=name,checkpoint=str(batch['store'].checkpoint_destination),checkpoint_cells=batch['store'].checkpoint_count,**markers,**details)
                 finally:batch['semaphore'].release()
             response=self.submit(command,produce,'batch.pose');batch['inflight'].add(response['task_id']);return response
         if command=='batch.end':
