@@ -176,3 +176,5 @@ V48发布回下载完成：PR39合并main为8536446d86c2329e743eade38a951488c117
 ## 2026-11-17 V49 RealDataAnalyse问题标记协作
 
 用户授权两窗口直接同步并协调合并。客户端窗口分支codex/v49-realdata-error-output负责oas_stream/oas_errors、RealDataAnalyse和GD55扩展案例；预演窗口负责完整实测DRC/连接问题目录、明确DIE归属和移除失败位置后的可输出快照。已向该窗口发送具体接口约定，正式发布共同用V49，不能改V48。本轮旧严格门禁须保留默认；客户端明确请求output_policy=omit_failed_regions，不能把allow_failed当成成功绕过。Store的可选error_layer及add(errors,die_count)已通过KLayout/gdstk双读者验证，完整应用接线及联合验收仍待完成。
+
+V49客户端/案例进展：Store.add返回逐封装ERROR矩形数，客户端显式协商omit_failed_regions，检查完整DRC/已裁剪证据及逐项与最终标记计数，只把完成的局部输出列为“已输出（含问题）”，不吞通信/磁盘异常。27项旧客户端契约、3项新续跑契约、3项双读者OAS标记检查通过。用户补充普通偏移后，三份GD55 Excel新增Ordinary60（180个独立DIE XYZ）、Stress42和FailureRecovery6，原Measurements/Diagnostic值、样式、格式和窗格逐项相同；实际解析器核对所有表/坐标/中心。三组ForeignPadContact在V48严格模式真实失败，参数及复现步骤见Jobs/GD55/README；未提前把尚待联合实测的新接口说成已通过。

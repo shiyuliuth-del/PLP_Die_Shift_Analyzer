@@ -251,7 +251,7 @@ class Runner:
             receipt = t.wait_task(reply['task_id'], self.stop, self.timeout)
         if receipt.get('cells') != ledger.get('count') or Path(receipt['path']).resolve() != stage:
             raise ValueError('OAS完成回执与请求数量或路径不符')
-        if receipt.get('error_layer',{}).get('name') != 'ERROR':
+        if not isinstance(receipt.get('error_layer'),dict) or receipt['error_layer'].get('name') != 'ERROR':
             raise ValueError('OAS完成回执没有ERROR命名层')
         if receipt.get('error_packages',0) != ledger.get('issue_packages',0) or receipt.get('error_rectangles',0) != ledger.get('error_rectangles',0):
             raise ValueError('OAS的ERROR标记数量与逐封装回执不一致')
