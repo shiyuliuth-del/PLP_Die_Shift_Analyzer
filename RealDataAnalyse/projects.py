@@ -57,19 +57,22 @@ def load_folder(folder):
     normalized = []
     for item in files:
         path = inside(root, item['path'])
-        normalized.append(dict(path=str(path), enabled=bool(item.get('enabled', True))))
+        entry = dict(path=str(path), enabled=bool(item.get('enabled', True)))
+        if 'profile' in item:
+            entry['profile'] = copy.deepcopy(item['profile'])
+        normalized.append(entry)
     return dict(folder=str(root), project=str(project), files=normalized,
                 database=str(inside(root, saved.get('database', 'Tasks/measurements.sqlite'))),
                 output=str(inside(root, saved.get('output', 'Output/' + root.name + '.oas'))),
-                profile=copy.deepcopy(saved.get('profile', DEFAULT_PROFILE)), controls=saved.get('controls', {}))
+                profile=copy.deepcopy(saved.get('profile', DEFAULT_PROFILE)), controls=saved.get('controls', {}), shared_mapping=bool(saved.get('shared_mapping', True)))
 
 
-def save_folder(folder, project, files, database, output, profile, controls):
+def save_folder(folder, project, files, database, output, profile, controls, shared_mapping=True):
     root = Path(folder).resolve()
     def relative(path):
         return inside(root, path).relative_to(root).as_posix()
-    payload = dict(schema=1, project=relative(project), files=[dict(path=relative(p['path']), enabled=p['enabled']) for p in files],
-                   database=relative(database), output=relative(output), profile=profile, controls=controls)
+    payload = dict(schema=1, project=relative(project), files=[dict(path=relative(p['path']), enabled=p['enabled'], **({'profile': p['profile']} if 'profile' in p else {})) for p in files],
+                   database=relative(database), output=relative(output), profile=profile, controls=controls, shared_mapping=shared_mapping)
     atomic_save(inside(root, SETTINGS), payload)
 
 

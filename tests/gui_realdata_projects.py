@@ -9,7 +9,11 @@ import sys
 import tempfile
 import time
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from die_shift_studio.qt_compat import QtWidgets as W, QtCore, QtGui
+from die_shift_studio.qt_compat import QtWidgets as W, QtCore, QtGui, BINDING
+if BINDING == 'PyQt6':
+    from PyQt6.QtTest import QTest
+else:
+    from PyQt5.QtTest import QTest
 from RealDataAnalyse.gui import Window, ProgressBar
 from RealDataAnalyse.transport import Transport
 from RealDataAnalyse.storage import configure_logging, sha256
@@ -45,6 +49,34 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         assert w.connect_button.property('connected') is True
         assert w.start_button.property('connected') is True
         assert w.file_view.rowCount() == 3 and w.profile.rowCount() == 9
+        assert w.log_check.text() == ''
+        assert w.log_check.geometry().right() < w.progress.geometry().left()
+        assert abs(w.log_check.geometry().center().y() - w.progress.geometry().center().y()) <= 3
+        assert w.dies.parentWidget().title() == '连接与工程'
+        assert w.dies.geometry().top() > w.connect_button.geometry().bottom()
+        assert w.mapping_shared.isChecked()
+        w.sheet.setText('Diagnostic')
+        w.mapping_shared.click()
+        assert not w.mapping_shared.isChecked()
+        def select(row):
+            item = w.file_view.item(row, 1)
+            w.file_view.scrollToItem(item)
+            QTest.mouseClick(w.file_view.viewport(), getattr(QtCore.Qt, 'MouseButton', QtCore.Qt).LeftButton, pos=w.file_view.visualItemRect(item).center())
+            app.processEvents()
+        select(1)
+        assert w.sheet.text() == 'Diagnostic'
+        w.sheet.setText('SeparateSheet'); w.header_row.setValue(2)
+        w.profile.item(0, 1).setText('SeparatePackage')
+        select(0); assert w.sheet.text() == 'Diagnostic' and w.header_row.value() == 1
+        select(1); assert w.sheet.text() == 'SeparateSheet' and w.profile.item(0, 1).text() == 'SeparatePackage'
+        w.persist(); w.open_folder(folder, link=False); wait(w)
+        assert not w.mapping_shared.isChecked()
+        select(1); assert w.sheet.text() == 'SeparateSheet' and w.header_row.value() == 2
+        w.mapping_shared.click(); assert w.sheet.text() == 'Diagnostic' and w.header_row.value() == 1
+        w.sheet.setText('Measurements')
+        w.mapping_shared.click(); select(1); assert w.sheet.text() == 'SeparateSheet'
+        w.mapping_shared.click(); assert w.sheet.text() == 'Measurements'
+
         assert w.info['die_count'] == 3
         assert Path(w.info['project']).samefile(folder/'GD55.dshift.json')
         assert Path(w.database.text()).is_relative_to(folder)

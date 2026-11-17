@@ -14,11 +14,11 @@
 
 1. 选择项目文件夹，等预演软件完成图纸加载、评估及实测准备。GD55随包提供工程、图纸与三份合成Excel，客户端不再提供生成示例按钮。
 2. 在Excel表格勾选要使用的文件；每颗DIE一个Excel。可添加或删除行。
-3. “Excel列映射”表格将字段映射到实际表头名称，另可选择工作表和表头行号。长度为μm、角度为度；中心XY成对提供，留空沿用工程中心。未提供真实产线模板，当前适配器支持.xlsx，旧.xls须先转换。
-4. 核对DIE数量、并发线程、内存、重试和超时。“校验并创建任务”将按文本封装ID匹配各DIE，拒绝重复、缺测、公式、非有限数值和摆放坐标冲突。全零测量保留。现有任务记录不会覆盖，新建时自动生成独立任务名。
+3. “Excel列映射”标题左侧checkbox默认勾选，所有文件共用一份映射；取消勾选后，点击上方Excel行切换并编辑该文件自己的映射。各文件可有不同的工作表、表头行号和列名；切回共用模式不会删除已编辑的独立映射。映射和模式随项目保存。长度为μm、角度为度；中心XY成对提供，留空沿用工程中心。未提供真实产线模板，当前适配器支持.xlsx，旧.xls须先转换。
+4. 在“连接与工程”底部核对DIE数量、并发线程、内存、重试和超时。“校验并创建任务”将按文本封装ID匹配各DIE，拒绝重复、缺测、公式、非有限数值和摆放坐标冲突。全零测量保留。现有任务记录不会覆盖，新建时自动生成独立任务名。
 5. “运行 / 继续补算”生成最终OAS。界面仅选择项目文件夹，工程路径自动识别，任务记录与最终OAS采用该项目内默认目录，无需输入。改变勾选项/映射/DIE数量后须新建任务。
 
-底部连续进度条叠加当前阶段、真实计数/百分比及用时：输入摘要、Excel读取与汇入、封装匹配、服务准备、并行封装计算、OAS写入、CRC/SHA校验、原子提交。各阶段分别计进度；未知总行数时显示已读取行数，不编造总百分比。长文字自动省略，悬停可查看完整信息。信息输出默认隐藏，通过checkbox展开；隐藏不影响实时文件日志。
+底部连续进度条叠加当前阶段、真实计数/百分比及用时：输入摘要、Excel读取与汇入、封装匹配、服务准备、并行封装计算、OAS写入、CRC/SHA校验、原子提交。各阶段分别计进度；未知总行数时显示已读取行数，不编造总百分比。长文字自动省略，悬停可查看完整信息。信息输出默认隐藏，通过进度条左侧无文字checkbox展开（悬停有说明）；隐藏不影响实时文件日志。
 
 ## 恢复与数据边界
 
@@ -30,4 +30,4 @@ SQLite WAL/FULL保存输入摘要/源行号、任务状态、回执及事件；�
 
 第二页保留15个命令及JSON参数编辑：ping、info、app.start、project.open、project.close、session.prepare、output.configure、preview.submit、export.gds、batch.begin、batch.submit、batch.end、task.get、compute.cancel、app.shutdown。支持异步等待，批次ID/任务ID自动填入模板；项目和输出目录仍限定在所选文件夹。app.start使用同目录启动规则。
 
-自动化兼容原有入口：`python RealDataAnalyse/main.py --import-data import.json --result imported.json`，导入JSON字段为paths、database、die_count、workers及可选profile；随后 `--run config.json --result result.json`，运行JSON字段为database、endpoint、project、output及workers、memory_mb、retries、timeout。EXE接受相同参数。这些无界面接口保持兼容已有完整路径配置。
+自动化兼容原有入口：`python RealDataAnalyse/main.py --import-data import.json --result imported.json`，导入JSON字段为paths、database、die_count、workers及可选profile、profiles（文件绝对路径到独立映射的字典）；随后 `--run config.json --result result.json`，运行JSON字段为database、endpoint、project、output及workers、memory_mb、retries、timeout。EXE接受相同参数。这些无界面接口保持兼容已有完整路径配置。

@@ -1,5 +1,6 @@
 """Portable project ownership, input selection, and progress integrity."""
 import json
+import copy
 import shutil
 import tempfile
 import threading
@@ -76,6 +77,39 @@ class Projects(unittest.TestCase):
         project.write_text('user changes')
         install_case(destination)
         self.assertEqual(project.read_text(), 'user changes')
+
+    def test_different_sheet_header_and_columns_per_excel(self):
+        from openpyxl import load_workbook
+        from RealDataAnalyse.storage import Ledger
+        config = load_folder(self.folder)
+        paths = [entry['path'] for entry in config['files']]
+        second = Path(paths[1])
+        book = load_workbook(second)
+        sheet = book['Measurements']; sheet.title = 'DieTwo'
+        sheet.insert_rows(1)
+        for cell in sheet[2]:
+            if cell.value is not None: cell.value = 'D2_' + str(cell.value)
+        book.save(second); book.close()
+        profile = copy.deepcopy(DEFAULT_PROFILE)
+        profile.update(sheet='DieTwo', header_row=2)
+        profile['columns'] = {k: 'D2_' + v for k, v in profile['columns'].items()}
+        with self.assertRaises(ValueError):
+            import_files(paths, self.folder/'wrong.sqlite', 3, 3, threading.Event())
+        database = self.folder/'correct.sqlite'
+        result = import_files(paths, database, 3, 3, threading.Event(), profiles={str(second): profile})
+        self.assertEqual(result['packages'], 12)
+        ledger = Ledger(database)
+        try:
+            self.assertEqual(ledger.get('profiles')[str(second)], profile)
+            payload = json.loads(ledger.db.execute('select payload from packages where seq=2').fetchone()[0])
+            self.assertEqual([d['die'] for d in payload['dies']], [1,2,3])
+            self.assertEqual([d['dx_um'] for d in payload['dies']], [1,0,0])
+        finally: ledger.close()
+        config['files'][1]['profile'] = profile
+        save_folder(self.folder, config['project'], config['files'], str(database), config['output'], DEFAULT_PROFILE, {}, shared_mapping=False)
+        again = load_folder(self.folder)
+        self.assertFalse(again['shared_mapping'])
+        self.assertEqual(again['files'][1]['profile'], profile)
 
     def test_real_case_import_progress_counts(self):
         config = load_folder(self.folder)
