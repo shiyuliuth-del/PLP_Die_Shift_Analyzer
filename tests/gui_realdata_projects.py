@@ -89,6 +89,14 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         w.sheet.setText('Measurements')
         w.import_button.click(); wait(w)
         assert w.table.rowCount() == 12
+        previous_database = w.database.text()
+        w.sheet.setText('MissingSheet')
+        w.import_button.click()
+        until = time.monotonic() + 15
+        while w.worker and time.monotonic() < until: app.processEvents(); time.sleep(.02)
+        assert w.worker is None and w.progress.failed
+        assert w.database.text() == previous_database and Path(previous_database).is_file()
+        w.sheet.setText('Measurements')
         w.file_view.item(1, 0).setCheckState(getattr(QtCore.Qt, 'CheckState', QtCore.Qt).Unchecked)
         w.run_button.click()
         until = time.monotonic() + 10

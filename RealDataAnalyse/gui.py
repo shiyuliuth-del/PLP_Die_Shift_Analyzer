@@ -601,8 +601,6 @@ class Window(W.QMainWindow):
             if target.exists():
                 import uuid
                 target = target.with_name(target.stem + '_' + time.strftime('%Y%m%d_%H%M%S') + '_' + uuid.uuid4().hex[:6] + '.sqlite')
-                self.database.setText(str(target))
-                self.persist()
         except (OSError, ValueError) as exc:
             self.log(exc)
             return
