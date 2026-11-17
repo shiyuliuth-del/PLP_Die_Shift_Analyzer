@@ -107,9 +107,12 @@ class Window(W.QMainWindow):
         folder_row.addWidget(self.folder, 1)
         folder_row.addWidget(self.folder_button)
         form.addRow('项目文件夹', folder_row)
-        self.project = self.path_row(form, 'Die Shift Analyze工程', '', '*.json', 'project', readonly=True)
-        self.database = self.path_row(form, '任务记录', '', '*.sqlite', 'database', save=True)
-        self.output = self.path_row(form, '最终OAS', '', '*.oas', 'output', save=True)
+        # Paths are project-owned state, never independent user input rows.
+        self.project = W.QLineEdit(self)
+        self.database = W.QLineEdit(self)
+        self.output = W.QLineEdit(self)
+        for state in (self.project, self.database, self.output):
+            state.hide()
         self.endpoint = self.path_row(form, 'IPC入口', str(default_endpoint()), '*.json', 'endpoint')
         buttons = W.QHBoxLayout()
         self.connect_button = W.QPushButton('连接状态')
@@ -137,7 +140,7 @@ class Window(W.QMainWindow):
         self.file_view.setHorizontalHeaderLabels(['使用', 'Excel文件（相对于项目文件夹）'])
         self.file_view.setColumnWidth(0, 55)
         self.file_view.horizontalHeader().setStretchLastSection(True)
-        self.file_view.setSelectionBehavior(W.QAbstractItemView.SelectionBehavior.SelectRows)
+        self.file_view.setSelectionBehavior(getattr(W.QAbstractItemView, 'SelectionBehavior', W.QAbstractItemView).SelectRows)
         self.file_view.setMinimumHeight(100)
         self.file_view.setMaximumHeight(160)
         batch_layout.addWidget(self.file_view)
@@ -169,7 +172,7 @@ class Window(W.QMainWindow):
             for j, text in enumerate((field, field, descriptions[i])):
                 item = W.QTableWidgetItem(text)
                 if j != 1:
-                    item.setFlags(item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
+                    item.setFlags(item.flags() & ~getattr(QtCore.Qt, 'ItemFlag', QtCore.Qt).ItemIsEditable)
                 self.profile.setItem(i, j, item)
         self.profile.setMinimumHeight(150)
         self.profile.setMaximumHeight(220)
@@ -459,19 +462,19 @@ class Window(W.QMainWindow):
         self.file_view.setRowCount(len(files))
         for row, entry in enumerate(files):
             check = W.QTableWidgetItem()
-            check.setFlags(QtCore.Qt.ItemFlag.ItemIsEnabled | QtCore.Qt.ItemFlag.ItemIsSelectable | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
-            check.setCheckState(QtCore.Qt.CheckState.Checked if entry.get('enabled', True) else QtCore.Qt.CheckState.Unchecked)
+            check.setFlags(getattr(QtCore.Qt, 'ItemFlag', QtCore.Qt).ItemIsEnabled | getattr(QtCore.Qt, 'ItemFlag', QtCore.Qt).ItemIsSelectable | getattr(QtCore.Qt, 'ItemFlag', QtCore.Qt).ItemIsUserCheckable)
+            check.setCheckState(getattr(QtCore.Qt, 'CheckState', QtCore.Qt).Checked if entry.get('enabled', True) else getattr(QtCore.Qt, 'CheckState', QtCore.Qt).Unchecked)
             self.file_view.setItem(row, 0, check)
             path = Path(entry['path']).resolve()
             item = W.QTableWidgetItem(str(path.relative_to(self.project_root)) if self.project_root else str(path))
-            item.setData(QtCore.Qt.ItemDataRole.UserRole, str(path))
+            item.setData(getattr(QtCore.Qt, 'ItemDataRole', QtCore.Qt).UserRole, str(path))
             item.setToolTip(str(path))
-            item.setFlags(item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
+            item.setFlags(item.flags() & ~getattr(QtCore.Qt, 'ItemFlag', QtCore.Qt).ItemIsEditable)
             self.file_view.setItem(row, 1, item)
 
     def file_entries(self):
-        return [dict(path=self.file_view.item(row, 1).data(QtCore.Qt.ItemDataRole.UserRole),
-                     enabled=self.file_view.item(row, 0).checkState() == QtCore.Qt.CheckState.Checked)
+        return [dict(path=self.file_view.item(row, 1).data(getattr(QtCore.Qt, 'ItemDataRole', QtCore.Qt).UserRole),
+                     enabled=self.file_view.item(row, 0).checkState() == getattr(QtCore.Qt, 'CheckState', QtCore.Qt).Checked)
                 for row in range(self.file_view.rowCount())]
 
     def set_profile(self, profile):
@@ -558,6 +561,11 @@ class Window(W.QMainWindow):
                 meta = {k: json.loads(v) for k, v in db.execute('select key,value from meta')}
             if selected != sorted(p['path'] for p in meta.get('sources', [])) or profile != meta.get('profile') or self_die != meta.get('die_count'):
                 raise ValueError('Excel勾选、列映射或DIE数量与任务记录不符，请先校验并创建新任务')
+            from .storage import sha256
+            for index, source in enumerate(meta.get('sources', []), 1):
+                progress(dict(text=f'核对Excel输入 · {index}/{len(selected)} · {Path(source["path"]).name}', current=index - 1, total=len(selected)))
+                if sha256(source['path'], stop) != source['sha256']:
+                    raise ValueError('Excel内容已修改，请先校验并创建新任务')
             return Runner(**kwargs, stop=stop, progress=progress).run()
         self_die = self.dies.value()
         self.execute(run, operation='批量计算与OAS输出')

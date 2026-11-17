@@ -26,7 +26,7 @@ def load_folder(folder):
     root = Path(folder).resolve()
     if not root.is_dir():
         raise ValueError('请选择已有项目文件夹')
-    manifest = root / SETTINGS
+    manifest = inside(root, SETTINGS)
     saved = json.loads(manifest.read_text(encoding='utf8')) if manifest.exists() else {}
     if not isinstance(saved, dict) or saved.get('schema', 1) != 1:
         raise ValueError('不支持的客户端项目配置')
@@ -44,6 +44,7 @@ def load_folder(folder):
         if len(candidates) != 1:
             raise ValueError('项目文件夹须包含唯一的 Die Shift Analyze 工程JSON，或在客户端项目配置中明确指定')
         project = candidates[0]
+    project = inside(root, project)
     data = json.loads(project.read_text(encoding='utf8'))
     source = inside(root, data['gds_path'])
     if not source.is_file():
@@ -69,7 +70,7 @@ def save_folder(folder, project, files, database, output, profile, controls):
         return inside(root, path).relative_to(root).as_posix()
     payload = dict(schema=1, project=relative(project), files=[dict(path=relative(p['path']), enabled=p['enabled']) for p in files],
                    database=relative(database), output=relative(output), profile=profile, controls=controls)
-    atomic_save(root / SETTINGS, payload)
+    atomic_save(inside(root, SETTINGS), payload)
 
 
 def copy_excel(folder, paths, stop):

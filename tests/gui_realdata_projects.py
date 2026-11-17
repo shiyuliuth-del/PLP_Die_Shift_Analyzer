@@ -26,7 +26,7 @@ def wait(window, timeout=240):
     app.processEvents()
 
 with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
-    root = Path(temp)
+    root = Path(temp).resolve()
     folder = root/'Jobs'/'GD55 项目'
     shutil.copytree(ROOT/'Jobs/GD55', folder)
     before = sha256(folder/'GD55_1105.gds')
@@ -34,6 +34,8 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
     w = Window(); w.endpoint.setText(str(endpoint)); w.show(); app.processEvents()
     try:
         assert not w.log_check.isChecked() and w.log_view.isHidden()
+        assert all(field.isHidden() for field in (w.project, w.database, w.output))
+        assert not any(label.text() in ('Die Shift Analyze工程', '任务记录', '最终OAS') for label in w.findChildren(W.QLabel))
         w.log_check.click(); assert not w.log_view.isHidden()
         w.log_check.click(); assert w.log_view.isHidden()
         assert not any('生成GD55' in x.text() for x in w.findChildren(W.QPushButton))
@@ -47,14 +49,22 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         assert Path(w.info['project']).samefile(folder/'GD55.dshift.json')
         assert Path(w.database.text()).is_relative_to(folder)
         assert Path(w.output.text()).is_relative_to(folder)
-        w.file_view.item(1, 0).setCheckState(QtCore.Qt.CheckState.Unchecked)
+        w.file_view.item(1, 0).setCheckState(getattr(QtCore.Qt, 'CheckState', QtCore.Qt).Unchecked)
         w.sheet.setText('Diagnostic'); w.workers.setValue(2); w.persist()
         w.open_folder(folder, link=False); wait(w)
         assert not w.file_entries()[1]['enabled'] and w.sheet.text() == 'Diagnostic' and w.workers.value() == 2
-        w.file_view.item(1, 0).setCheckState(QtCore.Qt.CheckState.Checked)
+        w.file_view.item(1, 0).setCheckState(getattr(QtCore.Qt, 'CheckState', QtCore.Qt).Checked)
         w.sheet.setText('Measurements')
         w.import_button.click(); wait(w)
         assert w.table.rowCount() == 12
+        w.file_view.item(1, 0).setCheckState(getattr(QtCore.Qt, 'CheckState', QtCore.Qt).Unchecked)
+        w.run_button.click()
+        until = time.monotonic() + 10
+        while w.worker and time.monotonic() < until: app.processEvents(); time.sleep(.02)
+        assert w.worker is None and w.progress.failed
+        assert '与任务记录不符' in w.response.toPlainText()
+        assert not Path(w.output.text()).exists()
+        w.file_view.item(1, 0).setCheckState(getattr(QtCore.Qt, 'CheckState', QtCore.Qt).Checked)
         w.run_button.click(); wait(w, 900)
         assert Path(w.output.text()).is_file()
         assert 'OAS' in w.progress.detail

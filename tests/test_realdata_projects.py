@@ -5,7 +5,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
-from RealDataAnalyse.projects import load_folder, save_folder, inside, copy_excel
+from RealDataAnalyse.projects import load_folder, save_folder, inside, copy_excel, install_case
 from RealDataAnalyse.excel import DEFAULT_PROFILE, import_files
 from RealDataAnalyse.storage import sha256
 
@@ -15,7 +15,7 @@ class Projects(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.folder = self.root / '项目 空格'
         shutil.copytree(ROOT / 'Jobs/GD55', self.folder)
 
@@ -43,6 +43,18 @@ class Projects(unittest.TestCase):
         (self.folder/'GD55_1105.gds').unlink()
         with self.assertRaisesRegex(ValueError, '不存在'): load_folder(self.folder)
 
+    def test_project_symlinks_cannot_escape_folder(self):
+        external = self.root/'outside.json'
+        external.write_bytes((self.folder/'GD55.dshift.json').read_bytes())
+        target = self.folder/'GD55.dshift.json'
+        target.unlink()
+        try:
+            target.symlink_to(external)
+        except OSError:
+            self.skipTest('This Windows account cannot create symbolic links')
+        with self.assertRaisesRegex(ValueError, '文件必须位于'):
+            load_folder(self.folder)
+
     def test_external_copy_collision_and_cancel(self):
         external = self.root/'measurements.xlsx'
         external.write_bytes(b'first')
@@ -55,6 +67,15 @@ class Projects(unittest.TestCase):
         self.assertEqual(two.read_bytes(), b'second')
         stop = threading.Event(); stop.set()
         with self.assertRaises(InterruptedError): copy_excel(self.folder, [external], stop)
+
+    def test_build_installs_case_without_overwriting_user_project(self):
+        destination = self.root/'dist'
+        install_case(destination)
+        project = destination/'Jobs/GD55/GD55.dshift.json'
+        self.assertEqual(project.read_bytes(), (ROOT/'Jobs/GD55/GD55.dshift.json').read_bytes())
+        project.write_text('user changes')
+        install_case(destination)
+        self.assertEqual(project.read_text(), 'user changes')
 
     def test_real_case_import_progress_counts(self):
         config = load_folder(self.folder)
