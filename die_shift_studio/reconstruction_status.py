@@ -46,7 +46,7 @@ class ReconstructionYieldDisplay:
         completed=getattr(getattr(self.w,'engine',None),'reconstructor',None)
         if completed is not None and completed._plans is not None and not self.w.preview_workers:
             self.plan_pool.update(clone_plan_pool(completed.plan_pool))
-        while len(self.plan_pool)>16:self.plan_pool.pop(next(iter(self.plan_pool)))
+        while len(self.plan_pool)>max(64,4*len(getattr(completed,'plan_pool',{}))):self.plan_pool.pop(next(iter(self.plan_pool)))
         from .gui import Worker
         def work(progress):
             def calculate():

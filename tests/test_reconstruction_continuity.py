@@ -37,8 +37,8 @@ class ContinuityTests(unittest.TestCase):
  def test_branch_pick_preserves_selected_side(self):
   from die_shift_studio.branch_regions import editable_piece
   from types import SimpleNamespace
-  a=dict(moved_cut=Point(0,0),extra_cut=Point(100,0),name='a',route_plan=SimpleNamespace(tolerance=.001,route=LineString([(0,0),(100,0)])))
-  b=dict(moved_cut=Point(101,0),extra_cut=Point(200,0),name='b',route_plan=SimpleNamespace(tolerance=.001,route=LineString([(101,0),(200,0)])))
+  a=dict(moved_cut=Point(0,0),extra_cut=Point(100,0),name='a',interval=(0.,100.),route_plan=SimpleNamespace(tolerance=.001,length=100.,route=LineString([(0,0),(100,0)])))
+  b=dict(moved_cut=Point(101,0),extra_cut=Point(200,0),name='b',interval=(0.,99.),route_plan=SimpleNamespace(tolerance=.001,length=99.,route=LineString([(101,0),(200,0)])))
   group=dict(graph_members=(a,b),endpoint_weights=(1.,0.),moved_cut=a['moved_cut'],extra_cut=a['extra_cut'])
   self.assertEqual(editable_piece(group,(101,0),'extra')['name'],'a')
 
