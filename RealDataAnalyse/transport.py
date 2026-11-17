@@ -145,6 +145,8 @@ class Transport:
 
     def alive(self):
         import psutil
+        if (self.process is not None and self.process.poll() is None) or self.starting_alive():
+            return True
         descriptor = self.descriptor
         if self.endpoint.exists():
             try:

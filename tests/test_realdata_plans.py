@@ -87,6 +87,21 @@ class Contracts(unittest.TestCase):
         self.assertEqual(len(rows),4);self.assertIn('17',rows[0]);self.assertTrue(all(len(s)<150 for s in rows))
         full=(self.root/'logs/IPC-conversation.log').read_text()
         self.assertNotIn('never-log-me',full);self.assertEqual(full.count('[REDACTED]'),20);self.assertIn('x'*200,full)
+    def test_alive_owned_startup_wins_over_stale_descriptor(self):
+        from unittest.mock import Mock
+        endpoint=self.root/'endpoint';endpoint.write_text(json.dumps({'pid':99999999,'process_created':0}))
+        t=Transport(endpoint);t.process=Mock();t.process.poll.return_value=None
+        self.assertTrue(t.alive())
+        with self.assertRaisesRegex(RuntimeError,'进程仍在'):t.launch(self.root/'case.json')
+    def test_preparation_crash_restarts_only_confirmed_dead_instance(self):
+        from unittest.mock import Mock
+        from RealDataAnalyse.instances import prepare
+        t=Transport(self.root/'endpoint');t.descriptor={'pid':99999999};t.alive=Mock(return_value=False)
+        t.launch=Mock();t.request=Mock(side_effect=[ConnectionError('dead'),dict(result=dict(ready=True,project=str(self.root/'case.json'),instance_id='new'))])
+        callback=Mock()
+        info=prepare(t,self.root/'case.json',self.stop,lambda _:None,0,callback)
+        self.assertEqual(info['instance_id'],'new');t.launch.assert_called_once();callback.assert_called_once_with(t)
+
     def test_instance_change_rejected_before_sending(self):
         endpoint=self.root/'ipc.json';endpoint.write_text(json.dumps({'instance_id':'new'}))
         t=Transport(endpoint,expected_instance='old')

@@ -18,17 +18,26 @@ def project_matches(info, project):
     return bool(info.get('project')) and Path(info['project']).resolve() == Path(project).resolve()
 
 
-def prepare(transport, project, stop, progress, timeout=0):
+def prepare(transport, project, stop, progress, timeout=0, on_launch=None):
     until = time.monotonic() + timeout if timeout else float('inf')
     requested = False
+    restarts = 0
     while time.monotonic() < until:
         if stop.is_set():
             raise InterruptedError('已停止连接工程')
         try:
             info = transport.request('info', stop=stop, retries=0)['result']
         except (OSError, EOFError, TimeoutError, json.JSONDecodeError):
-            if (transport.process is not None and transport.process.poll() is not None) or (transport.starting and not transport.starting_alive()):
-                raise RuntimeError('预演软件启动退出，请查看项目日志')
+            known = transport.process is not None or transport.starting or transport.descriptor
+            if known and not transport.alive():
+                if restarts >= 3:
+                    raise RuntimeError('预演软件准备阶段连续退出，自动重启已耗尽；请查看项目日志')
+                restarts += 1
+                progress(f'预演软件已退出，重新启动同目录程序（{restarts}/3）')
+                transport.launch(project)
+                if on_launch: on_launch(transport)
+                requested = False
+                continue
             if stop.wait(.2):
                 raise InterruptedError('已停止连接工程')
             continue
@@ -87,7 +96,7 @@ def connect(project, preferred, stop, progress, timeout=0, trace=None, exact=Fal
     if chosen:
         transport, info = chosen
         transport.timeout = 15
-        return transport, prepare(transport, project, stop, progress, timeout), False
+        return transport, prepare(transport, project, stop, progress, timeout, on_launch), transport.process is not None
     custom_new = preferred != default_endpoint() and preferred.parent != default_endpoint().parent and not preferred.exists()
     endpoint = preferred if exact or custom_new else dedicated
     endpoint.parent.mkdir(parents=True, exist_ok=True)
@@ -98,10 +107,10 @@ def connect(project, preferred, stop, progress, timeout=0, trace=None, exact=Fal
             info = transport.request('info', stop=stop)['result']
             if not project_matches(info, project):
                 raise ValueError('项目专用入口已被其他工程占用，未重复启动')
-            return transport, prepare(transport, project, stop, progress, timeout), False
+            return transport, prepare(transport, project, stop, progress, timeout, on_launch), transport.process is not None
         if transport.find_starting(project):
-            return transport, prepare(transport, project, stop, progress, timeout), False
+            return transport, prepare(transport, project, stop, progress, timeout, on_launch), transport.process is not None
         transport.launch(project)
         if on_launch: on_launch(transport)
-        info = prepare(transport, project, stop, progress, timeout)
+        info = prepare(transport, project, stop, progress, timeout, on_launch)
         return transport, info, True
