@@ -63,13 +63,14 @@ def main():
         checked(endpoint,'output.configure',dict(output_directory=str(output),max_threads=4,max_memory_mb=1024))
         zeros=[dict(die=d['die'],dx_um=0.,dy_um=0.,angle_deg=0.,rotation_center_um=d['center_um']) for d in info['dies']]
         preview=wait(endpoint,checked(endpoint,'preview.submit',{'dies':zeros}));report['preview']=preview
-        # Strict default production output is checked first. Any failed routes
-        # must be rejected; diagnostic output then requires explicit opt-in.
-        strict=rpc(endpoint,'export.gds',{'filename':'gd55_measured.gds'})
-        if preview['connection_failure_count']:
-            assert strict['status']=='error';strict=checked(endpoint,'export.gds',{'filename':'gd55_measured.gds','allow_failed':True})
-        report['gds']=wait(endpoint,strict)
-        batch=checked(endpoint,'batch.begin',{'filename':'gd55_batch.oas','allow_failed':True})['result'];report['batch']=batch
+        # Single-pose GDS remains strict. Connection failures are real errors;
+        # the retired allow_failed flag cannot bypass this gate.
+        report['gds']=wait(endpoint,checked(endpoint,'export.gds',{'filename':'gd55_measured.gds'}))
+        # Partial batch output requires explicit agreement from both endpoints.
+        batch=checked(endpoint,'batch.begin',{'filename':'gd55_batch.oas','output_policy':'omit_failed_regions'})['result']
+        if batch.get('output_policy')!='omit_failed_regions':
+            raise RuntimeError('Server did not confirm the requested partial-output policy')
+        report['batch']=batch
         bounds=info['board_bounds_um'];pitch=[bounds[2]-bounds[0]+100,bounds[3]-bounds[1]+100]
         columns=math.ceil(math.sqrt(args.count))
         def send(i):
