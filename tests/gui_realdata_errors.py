@@ -1,7 +1,7 @@
 """Real GD55 mixed batch: valid/failing/valid packages, ERROR ownership, no loss."""
 import os
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
-import hashlib,json,math,shutil,sqlite3,subprocess,sys,tempfile,time
+import hashlib,json,shutil,sqlite3,subprocess,sys,tempfile,time
 from pathlib import Path
 from contextlib import closing
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -9,6 +9,9 @@ from die_shift_studio.local_ipc import call
 from die_shift_studio.oas_validation import verify_crc
 from RealDataAnalyse.excel import DEFAULT_PROFILE
 import klayout.db as k
+import numpy as np
+import shapely
+from die_shift_studio.oas_errors import rectangles as error_rectangles
 ROOT=Path(__file__).resolve().parents[1]
 with tempfile.TemporaryDirectory(prefix='rda-error-output-') as temp:
  root=Path(temp).resolve();folder=root/'GD55';shutil.copytree(Path(os.environ.get('REALDATA_TEST_CASE',ROOT/'Jobs/GD55')),folder)
@@ -52,19 +55,22 @@ with tempfile.TemporaryDirectory(prefix='rda-error-output-') as temp:
     assert page['next_offset']>offset;offset=page['next_offset']
    assert paged==issues,'IPC pagination omitted or changed diagnostic positions'
 
+   # Complete-catalogue/ownership audit. Independent orientation and pose
+   # expectations are covered by test_oriented_oas_errors' two-reader fixtures.
    expected={};unique={}
-   for issue in issues:
-    x0,y0,x1,y1=issue['bounds_um'];dbu=layout.dbu
-    a,b=math.floor(x0/dbu),math.floor(y0/dbu);c,d=max(a+1,math.ceil(x1/dbu)),max(b+1,math.ceil(y1/dbu))
-    for die in issue['die_ids']:
-     expected.setdefault(die,k.Region()).insert(k.Box(a,b,c,d));unique.setdefault(die,set()).add((a,b,c,d))
+   for die,blobs in error_rectangles(issues,server_info['die_count'],layout.dbu).items():
+    region=k.Region();keys=set()
+    for blob in blobs:
+     xy=np.rint(shapely.get_coordinates(shapely.from_wkb(blob))/layout.dbu).astype(np.int64)
+     region.insert(k.Polygon([k.Point(int(x),int(y)) for x,y in xy]));keys.add(blob)
+    expected[die]=region;unique[die]=keys
    for die in range(4):
     cell=layout.cell('G_ERROR_'+payload['cell']+f'_DIE_{die}')
     actual=k.Region(cell.shapes(error_index)) if cell else k.Region()
     assert (actual^expected.get(die,k.Region())).is_empty(),(package,die,'marker location differs from full catalogue')
     assert actual.count()==len(unique.get(die,())),(package,die,'duplicate/missing rectangles')
     for shape in (cell.shapes(error_index).each() if cell else []):
-     assert shape.is_box() or (shape.is_polygon() and shape.polygon.area()==shape.bbox().area()),'ERROR must be rectangular'
+     assert shape.is_box() or (shape.is_polygon() and shape.polygon.num_points_hull()==4),'ERROR must retain four oriented corners'
    assert receipt['error_rectangles']==sum(len(s) for s in unique.values())
    issue_packages+=bool(issues);rectangles+=receipt['error_rectangles']
   assert outcome['issue_packages']==issue_packages and outcome['error_rectangles']==rectangles

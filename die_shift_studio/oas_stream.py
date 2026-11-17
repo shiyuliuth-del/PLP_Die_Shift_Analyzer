@@ -125,6 +125,8 @@ class Store:
             if self.error_layer is None:raise ValueError('批次没有配置ERROR图层')
             if f'{self.error_layer[0]}/{self.error_layer[1]}' in layers:raise ValueError('ERROR层与金属源层冲突')
             from .oas_errors import rectangles
+            # Markers already use current-pose coordinates, just like copper
+            # and shifted DIE outlines. Only TopCell placement is added below.
             markers=rectangles(errors,die_count,self.dbu)
             for die in range(0,die_count+1):
                 blobs=markers.get(die,())
