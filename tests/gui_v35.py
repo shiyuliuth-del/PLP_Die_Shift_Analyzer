@@ -34,7 +34,9 @@ def main():
         job['parameters'].update(multi_bound_y_um=0,bound_angle_deg=0,target_nsigma=2)
         job['settings'].update(animation_enabled=False,width_yield_method='importance',width_yield_exponent=8,width_grid_nodes=5)
         job['overlays']={'width':True}
-        w.set_data(read_gds(Path(job['gds_path'])),job);settle();w.run_evaluation();settle()
+        w.set_data(read_gds(Path(job['gds_path'])),job);settle()
+        # This suite tests the full-grid/sampling algorithm controls, not focus conditioning.
+        w.grid_mode.setCurrentIndex(0);settle();w.run_evaluation();settle()
         assert w.controls.tabText(3)=='输出' and w.dxf_button.text()=='DXF输出'
         assert not hasattr(w,'width_label_overflow')
         label=w.width_yield.label
