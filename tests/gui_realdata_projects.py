@@ -117,15 +117,16 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         while w.worker and time.monotonic() < until: app.processEvents(); time.sleep(.02)
         assert w.worker is None and w.progress.failed
         assert '与任务记录不符' in w.response.toPlainText()
-        assert not any(dialog.isVisible() for dialog in w.findChildren(W.QMessageBox))
+        assert w.completion_dialog is None or not w.completion_dialog.isVisible()
         assert not Path(w.output.text()).exists()
         w.file_view.item(1, 0).setCheckState(getattr(QtCore.Qt, 'CheckState', QtCore.Qt).Checked)
         with patch('RealDataAnalyse.gui.Runner') as runner:
             runner.return_value.run.return_value = dict(state='completed', output=w.output.text())
             w.run_button.click(); wait(w)
             runner.return_value.run.assert_called_once()
-            dialog, = [dialog for dialog in w.findChildren(W.QMessageBox) if dialog.isVisible()]
-            assert dialog.windowTitle() == '任务完成' and dialog.informativeText() == w.output.text()
+            dialog = w.completion_dialog
+            assert dialog.isVisible() and dialog.windowTitle() == '任务完成'
+            assert w.completion_path.isReadOnly() and w.completion_path.text() == w.output.text()
             dialog.accept(); app.processEvents()
         assert w.template.text()==str(folder/'RealDataAnalyse/Template/GD55_Template.gds')
         assert sha256(folder/'GD55_1105.gds') == before

@@ -695,17 +695,23 @@ class Window(W.QMainWindow):
             if value['state'] != 'completed' or self.pending_close:
                 return
             if self.completion_dialog is None:
-                dialog = W.QMessageBox(self)
-                option = getattr(getattr(W.QMessageBox, 'Option', None), 'DontUseNativeDialog', None)
-                if option is not None:
-                    dialog.setOption(option)
-                dialog.setIcon(W.QMessageBox.Icon.Information)
+                dialog = W.QDialog(self)
                 dialog.setWindowTitle('任务完成')
-                dialog.setTextFormat(QtCore.Qt.TextFormat.PlainText)
-                dialog.setText('最终 OAS 已保存')
+                dialog.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
+                layout = W.QVBoxLayout(dialog)
+                layout.addWidget(W.QLabel('最终 OAS 已保存'))
+                output_path = W.QLineEdit()
+                output_path.setReadOnly(True)
+                output_path.setMinimumWidth(340)
+                layout.addWidget(output_path)
+                buttons = W.QDialogButtonBox(W.QDialogButtonBox.StandardButton.Ok)
+                buttons.button(W.QDialogButtonBox.StandardButton.Ok).setText('确定')
+                buttons.accepted.connect(dialog.accept)
+                layout.addWidget(buttons)
                 self.completion_dialog = dialog
-            self.completion_dialog.setInformativeText(value['output'])
-            self.completion_dialog.open()
+                self.completion_path = output_path
+            self.completion_path.setText(value['output'])
+            self.completion_dialog.show()
         self.execute(run, done, operation='批量计算与OAS输出')
 
     def command_changed(self, command):
