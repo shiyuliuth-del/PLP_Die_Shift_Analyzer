@@ -109,4 +109,24 @@ class OrientedMarkers(unittest.TestCase):
      self.assertEqual(json.loads(row[0])['drc_issues'][0],marker)
    self.assertEqual(list((root/'Output').iterdir()),[root/'Output'/'final.oas'])
 
+
+class MarkerGridAngle(unittest.TestCase):
+ def test_subgrid_angle_is_retained_by_oas_polygon_placement(self):
+  corners=posed_box((0,0,.03,.015),.035,shift=(100,200))
+  row=issue(corners,[1],.035)
+  with tempfile.TemporaryDirectory() as name:
+   out=Path(name)/'rotated.oas';store=Store(name,.001,error_layer=(65535,0))
+   try:
+    self.assertEqual(store.add('P',{},(10,20),(0,0),errors=[row],die_count=1)['error_rectangles'],1)
+    store.write(out)
+   finally:store.close()
+   lib=gdstk.read_oas(out)
+   die=next(c for c in lib.cells if c.name=='G_ERROR_P_DIE_1')
+   shape=die.get_polygons()[0]
+   points=np.asarray(shape.points);vector=points[1]-points[0]
+   angle=math.degrees(math.atan2(vector[1],vector[0]))
+   self.assertAlmostEqual(math.remainder(angle-.035,90),0.,places=5)
+   self.assertTrue(shapely.Polygon(points).covers(shapely.Polygon(corners)))
+   self.assertEqual(len(shape.points),4)
+
 if __name__=='__main__':unittest.main()

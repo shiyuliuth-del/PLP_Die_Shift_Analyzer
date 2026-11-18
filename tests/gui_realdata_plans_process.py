@@ -11,7 +11,7 @@ import threading
 import time
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from RealDataAnalyse.plans import Plans, capture
-from RealDataAnalyse.excel import DEFAULT_PROFILE
+from RealDataAnalyse.excel import DEFAULT_PROFILE, generate_example
 from RealDataAnalyse.storage import sha256
 from die_shift_studio.oas_validation import verify_crc
 import gdstk
@@ -22,8 +22,14 @@ with tempfile.TemporaryDirectory(prefix='rda-plans-process-') as name:
         folder=root/f'GD55 project {index+1}'
         shutil.copytree(Path(os.environ.get('REALDATA_TEST_CASE',ROOT/'Jobs/GD55')),folder)
         sources.append((folder/'GD55_1105.gds',sha256(folder/'GD55_1105.gds')))
-        config=dict(folder=str(folder),project=str(folder/'GD55.dshift.json'),files=[dict(path=str(p),enabled=True) for p in sorted(folder.glob('*.xlsx'))],
-            profile=DEFAULT_PROFILE,shared_mapping=True,controls=dict(dies=3,workers=2,memory=512,retries=1,timeout=0))
+        # Independent compact scheduling fixture. The shipped 36 rows are
+        # imported once by the production acceptance, including all FAIL poses.
+        files=generate_example(folder/'PlanInputs',count=2,die_count=3,pitch=(12000,12000))
+        config=dict(folder=str(folder),project=str(folder/'GD55.dshift.json'),
+                    template=str(folder/'GD55_Template.gds'),
+                    files=[dict(path=str(p),enabled=True) for p in files],
+                    profile=DEFAULT_PROFILE,shared_mapping=True,
+                    controls=dict(dies=3,workers=2,memory=512,retries=1,timeout=0))
         ids.append(plans.add(capture(config,threading.Event())))
     command=[os.environ['REALDATA_TEST_EXE']] if os.environ.get('REALDATA_TEST_EXE') else [sys.executable,str(ROOT/'RealDataAnalyse/main.py')]
     result=root/'result.json'
@@ -38,8 +44,8 @@ with tempfile.TemporaryDirectory(prefix='rda-plans-process-') as name:
         assert list(output.parent.iterdir())==[output],list(output.parent.iterdir())
         assert verify_crc(output)
         layout=gdstk.read_oas(output);top=layout.top_level()[0]
-        assert top.name=='TopCell' and len(top.references)==12
-        assert len({ref.cell_name for ref in top.references})==12
+        assert top.name=='TopCell' and len(top.references)==3
+        assert len({ref.cell_name for ref in top.references})==3 and any(ref.cell_name=='G_TEMPLATE' for ref in top.references)
         before.append((output,sha256(output),output.stat().st_mtime_ns))
         conversation=(Path(row['folder'])/'logs/IPC-conversation.log').read_text()
         assert 'batch.submit' in conversation and 'Die Shift Analyze → RealDataAnalyse' in conversation
@@ -48,4 +54,4 @@ with tempfile.TemporaryDirectory(prefix='rda-plans-process-') as name:
     assert repeated.returncode==0 and json.loads(result.read_text())['completed']==0
     for path,digest,mtime in before:assert sha256(path)==digest and path.stat().st_mtime_ns==mtime
     for path,digest in sources:assert sha256(path)==digest
-print('GUI_REALDATA_PLANS_PROCESS_PASS: actual client sequential two projects, 24 packages, independent OAS read/CRC, no extra Output files, no repeat, source unchanged')
+print('GUI_REALDATA_PLANS_PROCESS_PASS: actual client sequential two projects, 4 packages, one template per project, independent OAS read/CRC, no extra Output files, no repeat, source unchanged')

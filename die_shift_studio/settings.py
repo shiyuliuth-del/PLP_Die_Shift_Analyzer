@@ -22,6 +22,8 @@ class ViewSettings:
     from .drc_policy import ALL
     drc_checks:tuple=ALL
     drc_visible:tuple=ALL
+    max_threads:int=0
+    max_memory_mb:int=0
     reconstruction_pad_trigger_um:float=5.
     save_project_results:bool=True
     result_cache_directory:str=''
@@ -215,6 +217,8 @@ class ViewSettings:
                 'footprint_samples':(1,8),'space_resolution':(31,401),
                 'animation_fps':(10,120),'animation_speed':(1,5),'camera_speed':(1,5),'contact_box_budget':(128,32768),'animation_duration_ms':(80,3000),'animation_steps':(2,60),'probability_alpha':(.05,.95),'space_alpha':(.05,.95),'intrusion_alpha':(.05,.85)}
         integers={'width_yield_decimals','width_label_decimals','animation_fps','animation_speed','camera_speed','contact_box_budget','sample_exponent','random_seed','quadrature_order','angle_bins','footprint_samples','space_resolution','animation_duration_ms','animation_steps'}
+        integers.update(('max_threads','max_memory_mb'))
+        limits.update(max_threads=(0,1024),max_memory_mb=(0,16777216))
         limits.update(width_yield_exponent=(8,20),width_yield_seed=(0,2147483647),width_grid_nodes=(3,21))
         limits.update(reconstruction_pad_trigger_um=(0,1000),reconstruction_grid_nodes=(3,9),reconstruction_corner_guard_um=(0,1000),cache_max_entries=(10,100000),yield_sample_exponent=(8,20),yield_box_budget=(64,65536),yield_tolerance=(.000001,.1),
 
@@ -246,7 +250,7 @@ class ViewSettings:
 
     def reconstruction_key(self):
         """Everything the reconstruction result depends on besides the pose."""
-        return (True,'nominal-route-continuity-v50',self.drc_checks,self.evaluation_scope,self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_pad_trigger_um,self.reconstruction_ignored,self.reconstruction_following,self.drc_tolerance_um,
+        return (True,'nominal-route-continuity-v51',self.drc_checks,self.evaluation_scope,self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_pad_trigger_um,self.reconstruction_ignored,self.reconstruction_following,self.drc_tolerance_um,
                 self.reconstruction_corner_guard_um,tuple(self.reconstruction_intervals),
                 self.reconstruction_forced,self.reconstruction_angles,self.reconstruction_deleted,self.reconstruction_added,
                 tuple(self.reconstruction_regions),tuple(self.reconstruction_boxes),tuple(self.reconstruction_cuts),

@@ -27,6 +27,14 @@ def serial_scope():
     finally:_local.nested=previous
 
 
+_limits=(0,0)
+
+def configure_limits(threads=0,memory_mb=0):
+    global _limits
+    if any(type(x) is not int or x<0 for x in (threads,memory_mb)):
+        raise ValueError('资源上限必须为非负整数')
+    _limits=(threads,memory_mb)
+
 def resource_profile():
     cpu=os.cpu_count() or 1
     try:cpu=min(cpu,len(os.sched_getaffinity(0)))
@@ -45,9 +53,11 @@ def resource_profile():
         limit=Path('/sys/fs/cgroup/memory.max').read_text().strip()
         if limit!='max':total=min(total,int(limit));available=min(available,max(0,int(limit)-int(Path('/sys/fs/cgroup/memory.current').read_text())))
     except (OSError,ValueError):pass
-    workers=max(1,min(max(1,cpu-max(2,(cpu+9)//10)),int(available*.35)//(384*1024**2)))
+    threads,cap_mb=_limits
+    budget=max(1,min(int(available/1024**2) if cap_mb else int(available*.35/1024**2),cap_mb or 2**31))
+    workers=max(1,min(cpu,threads or max(1,cpu-max(2,(cpu+9)//10)),budget//384))
     profile=dict(cpu=cpu,total_memory_mb=round(total/1024**2),available_memory_mb=round(available/1024**2),workers=workers,worker_capacity=workers,
-                process_workers=max(1,min(4,workers,int(available*.35)//(768*1024**2))),
+                memory_budget_mb=budget,process_workers=max(1,min(4,workers,budget//768)),
                 policy='预留至少2个逻辑CPU（大机器约10%）与65%可用内存；原生几何/FFT使用线程；大型独立原图DRC与RDL候选搜索使用spawn进程；小任务串行')
     from .scheduling import constrain
     return constrain(profile)
@@ -65,9 +75,9 @@ def native_phase_profile():
 
 def geometry_budget(profile,packed_bytes):
     """Limit simultaneous GEOS copies (decoded coordinates, rings and trees)."""
-    available=profile['available_memory_mb']*1024**2
+    available=profile.get('memory_budget_mb',.35*profile['available_memory_mb'])*1024**2
     per_lane=max(16*1024**2,8*packed_bytes)
-    return max(1,min(profile['workers'],int(.35*available//per_lane)))
+    return max(1,min(profile['workers'],int(available//per_lane)))
 
 
 def parallel_map(fn,items,profile=None,progress=None,process=False):

@@ -20,7 +20,7 @@ def load_snapshot():
 
 def admission(active,estimated_mb=256,snapshot=None):
     p=snapshot or load_snapshot();free=p['available_memory_mb'];cpu=p.get('cpu_percent')
-    cap=2 if p['cpu']>=6 and free>=max(2048,estimated_mb*3) and cpu is not None and cpu<80 else 1
+    cap=2 if p['workers']>=2 and p.get('memory_budget_mb',free)>=estimated_mb*2 and p['cpu']>=6 and free>=max(2048,estimated_mb*3) and cpu is not None and cpu<80 else 1
     start=active<cap
     # Keep an interactive lane available, give the foreground job the
     # larger share. The global CPU budget is shared by concurrent jobs.

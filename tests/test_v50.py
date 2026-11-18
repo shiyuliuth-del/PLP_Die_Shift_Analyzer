@@ -159,5 +159,5 @@ class V50Tests(unittest.TestCase):
   q['settings']['drc_checks']=['width'];q['layout_output']['dbu_um']=.01
   q['expanded_settings'].append('DRC');q['expanded_process']=['DRC']
   again=normalize_project(q);self.assertEqual(again['settings']['drc_checks'],('width',));self.assertEqual(again['layout_output']['dbu_um'],.01)
-  self.assertIn('DRC',again['expanded_settings']);self.assertEqual(again['expanded_process'],['DRC'])
+  self.assertIn('DRC',again['expanded_settings']);self.assertEqual(again['expanded_process'],['其他'])
 if __name__=='__main__':unittest.main()

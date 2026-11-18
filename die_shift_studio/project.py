@@ -76,7 +76,7 @@ def normalize_project(project):
     p['expanded_settings']=list(dict.fromkeys(titles.get(title,title) for title in sections if not title.startswith('预演分析')))
     process=p.get('expanded_process',[title for title in p['expanded_settings'] if title=='DRC'])
     if not isinstance(process,list) or any(not isinstance(v,str) for v in process):raise ValueError('工艺栏目列表必须由标题字符串组成')
-    p['expanded_process']=list(dict.fromkeys(process))
+    p['expanded_process']=list(dict.fromkeys({'DRC':'其他','机械净距':'芯片距离'}.get(title,title) for title in process))
     # V50 has a separate DRC category panel in Settings as well as process
     # dimensions. Only legacy projects relocate the old single DRC panel.
     if not any(k in p.get('settings',{}) for k in ('drc_checks','drc_visible')):
@@ -96,7 +96,9 @@ def normalize_project(project):
     # Keep the old first pose on screen when the larger pages absorb a V26 page.
     filtered=view.get('filter_problems',True)
     if type(filtered) is not bool:raise ValueError('过滤无问题情况必须为布尔值')
-    p['extreme_view']=dict(filter_problems=filtered,mode=view['mode'],page=1+(view['page']-1)*view['page_size']//EXTREME_PAGE_SIZE,page_size=EXTREME_PAGE_SIZE)
+    mode=view.get('filter_mode','drc' if filtered else 'all')
+    if mode not in ('all','drc','failed'):raise ValueError('极端情况筛选模式无效')
+    p['extreme_view']=dict(filter_mode=mode,filter_problems=mode!='all',mode=view['mode'],page=1+(view['page']-1)*view['page_size']//EXTREME_PAGE_SIZE,page_size=EXTREME_PAGE_SIZE)
     p['overlays']=project_overlays(p)
     p['settings']=asdict(ViewSettings.from_dict(p.get('settings')))
     p['settings']['show_contact_markers']=bool(p['settings']['show_contact_markers'] or p['overlays'].get('drc',False))

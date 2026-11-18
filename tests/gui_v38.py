@@ -1,5 +1,5 @@
 """Real Qt/matplotlib events for unified overlays and both nominal cut handles."""
-import os,sys,tempfile,time,json
+import os,sys,tempfile,time,json,threading
 from pathlib import Path
 from dataclasses import replace
 from unittest.mock import patch
@@ -19,8 +19,8 @@ def wait():
  else:raise AssertionError('timeout')
  assert not errors,errors
 
-def event(name,xy):
- px,py=w.ax.transData.transform(xy);ev=MouseEvent(name,w.canvas,px,py,button=1)
+def event(name,xy,button=1):
+ px,py=w.ax.transData.transform(xy);ev=MouseEvent(name,w.canvas,px,py,button=button)
  w.canvas.callbacks.process(name,ev);app.processEvents()
 
 def drag(q,which,mark,live=True):
@@ -56,6 +56,31 @@ try:
  pos=np.asarray(q['moved_cut'].centroid.coords[0]);w.ax.set_xlim(pos[0]-100,pos[0]+100);w.ax.set_ylim(pos[1]-100,pos[1]+100);w.plot_layout(preserve=True);w.canvas.draw()
  event('button_press_event',pos);assert w.cut_drag.state is not None
  w.escape_action();assert w.cut_drag.state is None and w.view_settings.reconstruction_intervals==before
+ # Deliberately hold the copper worker. A native middle-button event must
+ # still pan the active canvas and Escape must discard the eventual result.
+ from die_shift_studio.reconstruction_zones import live_serial
+ entered=threading.Event();resume=threading.Event()
+ def hold(*args,**kw):
+  entered.set()
+  if not resume.wait(5):raise RuntimeError('blocked drag worker timed out')
+  return live_serial(*args,**kw)
+ original=w.current_frame
+ with patch('die_shift_studio.reconstruction_zones.live_serial',side_effect=hold):
+  try:
+   event('button_press_event',pos);assert w.cut_drag.state is not None
+   end=pos+q['route_plan'].tangent(a)*20
+   event('motion_notify_event',end);w.cut_drag._tick()
+   assert entered.wait(1) and w.current_frame is original
+   limits=w.ax.get_xlim()
+   event('button_press_event',pos,2);event('motion_notify_event',pos+[12,0],2);event('button_release_event',pos,2)
+   assert not np.allclose(w.ax.get_xlim(),limits) and w.cut_drag.state is not None
+   w.escape_action();assert w.current_frame is original
+  finally:
+   resume.set()
+  deadline=time.monotonic()+15
+  while w.cut_drag.worker is not None and time.monotonic()<deadline:
+   app.processEvents();time.sleep(.005)
+  assert w.cut_drag.worker is None and w.current_frame is original
  q1=drag(q,0,a+60)
  assert q1['interval'][1]==b and q1['interval'][0]>a+50,q1['interval']
  q2=drag(q1,1,b-50);assert q2['interval'][0]==q1['interval'][0] and q2['interval'][1]<b-40

@@ -38,19 +38,13 @@ def measured(item,witness):
     copper=item.get('_measurement_copper')
     if copper is None:return {}
     if item.get('required_deg') is not None:
-        from shapely.geometry.polygon import orient
+        from .geometry_rules import corner_angles
         angles=[]
         for polygon in shapely.get_parts(copper):
             if polygon.geom_type!='Polygon':continue
-            polygon=orient(polygon,sign=1.)
-            for ring in (polygon.exterior,*polygon.interiors):
-                xy=np.asarray(ring.coords)[:-1]
-                for i,b in enumerate(xy):
-                    if witness.distance(shapely.Point(b))>1e-5:continue
-                    u=b-xy[i-1];v=xy[(i+1)%len(xy)]-b
-                    if min(np.linalg.norm(u),np.linalg.norm(v))<1e-12:continue
-                    turn=math.atan2(u[0]*v[1]-u[1]*v[0],float(u@v))
-                    angles.append(math.degrees(math.pi-turn))
+            for xy,values,lengths in corner_angles(polygon,item.get('_measurement_dbu',0.)):
+                hit=(lengths>0)&(shapely.distance(shapely.points(xy),witness)<=1e-5)
+                angles.extend(values[hit])
         return {'actual_deg':min(angles)} if angles else {}
     requirement=item.get('required_um')
     if requirement is None:return {}

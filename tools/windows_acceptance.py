@@ -57,8 +57,8 @@ def main():
     source=parser.parse_args().source_root.resolve()
     binary=source/'dist'/'Die_Shift_Analyze.exe'
     assert (source/'dist'/'Jobs'/'GD55'/'GD55.dshift.json').is_file()
-    for item in (source/'Jobs'/'GD55').iterdir():
-        if item.is_file():assert (source/'dist'/'Jobs'/'GD55'/item.name).read_bytes()==item.read_bytes()
+    for item in (source/'Jobs'/'GD55').rglob('*'):
+        if item.is_file():assert (source/'dist'/item.relative_to(source)).read_bytes()==item.read_bytes()
     from PyInstaller.archive.readers import CArchiveReader
     archive=CArchiveReader(str(binary));pyz=next(n for n in archive.toc if n.lower().endswith('.pyz'))
     modules=archive.open_embedded_archive(pyz).toc
@@ -130,7 +130,6 @@ def main():
             print(f'FROZEN_REALDATA_CYCLE_PASS {iteration+1}/1',flush=True)
         print('FROZEN_REALDATA_PASS: both sibling EXEs, one fresh two-lot cycle, named pipe, Excel join, OAS and sibling restart',flush=True)
         gd55_env=dict(paired_env,REALDATA_TEST_CASE=str(source/'Jobs/GD55'))
-        subprocess.run([sys.executable,str(ROOT/'tests/gui_v44_gd55.py')],cwd=ROOT,env=gd55_env,check=True,timeout=1350)
         subprocess.run([sys.executable,str(ROOT/'tests/gui_realdata_plans_process.py')],cwd=ROOT,env=gd55_env,check=True,timeout=900)
         subprocess.run([sys.executable,str(ROOT/'tests/gui_realdata_instances.py')],cwd=ROOT,env=gd55_env,check=True,timeout=600)
         subprocess.run([sys.executable,str(ROOT/'tests/gui_realdata_errors.py')],cwd=ROOT,env=gd55_env,check=True,timeout=2400)

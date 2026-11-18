@@ -44,7 +44,7 @@ try:
  assert w.params().line_width_um==40
  w.reconstruction_toggle.setChecked(True);wait()
  assert w.reconstruction_yield.evidence and w.reconstruction_yield.evidence['complete']
- assert w.problem_filter.isChecked() and w.extreme_table.rowCount()>1
+ assert (w.problem_filter.currentIndex()!=0) and w.extreme_table.rowCount()>1
  assert not w.dirty,'reconstruction edits must not invalidate the base assessment'
  views=w.reconstruction_overlay.zone_views;assert any(status=='red' for q,status,g in views.values())
  q,status,region=next(v for v in views.values() if v[1]=='red')
@@ -77,7 +77,7 @@ try:
  wait()
  assert w.current_frame['reconstruction']['parameters']['connection_style']=='c2'
  assert not w._tasks and not w.progress.isVisible(),(w._tasks,w.runtime_view.toPlainText()[-5000:])
- assert w.problem_filter.isChecked() and w.extreme_table.rowCount()>1
+ assert (w.problem_filter.currentIndex()!=0) and w.extreme_table.rowCount()>1
  angles=w.setting_fields['reconstruction_boundary_mode'];assert [angles.itemText(i) for i in range(angles.count())]==['垂直','重构区优先','两侧平均']
  angles.setCurrentIndex(angles.findData('wide'));wait()
  w.setting_fields['drc_tolerance_um'].setValue(12);wait()

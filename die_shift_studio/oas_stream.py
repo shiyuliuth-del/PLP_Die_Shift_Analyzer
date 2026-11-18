@@ -87,8 +87,9 @@ class Store:
     Completed packets flush in blocks to the same temporary OAS. SQLite holds
     only the index/placements, never all copper. Finalization appends TopCell.
     """
-    def __init__(self,directory,dbu,memory_bytes=64*1024**2,checkpoint_destination=None,*,error_layer=None,failure_layer=None):
+    def __init__(self,directory,dbu,memory_bytes=64*1024**2,checkpoint_destination=None,*,error_layer=None,failure_layer=None,template=None):
         if not math.isfinite(dbu) or dbu<=0:raise ValueError('Output DBU must be finite and positive')
+        self.template=template is not None
         self.failure_layer=failure_layer;self.failed_packages=0
         if failure_layer is not None and failure_layer==error_layer:raise ValueError('ERROR与FAIL必须使用独立图层')
         self.error_layer=error_layer;self.error_rectangles=0;self.error_packages=0;self.discarded_subgrid_fragments=0
@@ -108,10 +109,20 @@ class Store:
                 self.close();raise ValueError(label+'层编号无效')
             # OASIS LAYERNAME geometry record: exact layer/datatype intervals.
             self.emit(b'\x0b'+string(label)+b'\x03'+uint(layer)+b'\x03'+uint(datatype))
+        if template is not None:
+            body, layer_names = template
+            for key, label in layer_names.items():
+                if label:
+                    layer, datatype = map(int, key.split('/'))
+                    self.emit(b'\x0b' + string(label) + b'\x03' + uint(layer) + b'\x03' + uint(datatype))
+            self.cell('G_TEMPLATE', body)
     def add(self,name,layers,position,board_origin,*,errors=None,die_count=0,failure_outline=None):
+        return self.commit(self.prepare(name,layers,position,board_origin,errors=errors,die_count=die_count,failure_outline=failure_outline))
+
+    def prepare(self,name,layers,position,board_origin,*,errors=None,die_count=0,failure_outline=None):
+        """Encode independent geometry before taking the shared stream lock."""
         if not name or len(name)>120 or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-' for c in name):raise ValueError('Cell name must be 1–120 ASCII letters/digits/_/-')
         if name=='TopCell' or name.startswith('G_'):raise ValueError('Reserved cell name')
-        if name in self.pending_names or self.db.execute('select 1 from packages where name=?',(name,)).fetchone():raise ValueError('Duplicate package Cell: '+name)
         children=[];cells=[];marker_count=0;failed=0;stats={}
         for pair in (self.error_layer,self.failure_layer):
             if pair is not None and f'{pair[0]}/{pair[1]}' in layers:
@@ -141,18 +152,34 @@ class Store:
             from .oas_errors import rectangles
             # Markers already use current-pose coordinates, just like copper
             # and shifted DIE outlines. Only TopCell placement is added below.
-            markers=rectangles(errors,die_count,self.dbu)
+            markers=rectangles(errors,die_count,self.dbu,with_placements=True)
+            error_key=f'{self.error_layer[0]}/{self.error_layer[1]}'
             for die in range(0,die_count+1):
-                blobs=markers.get(die,())
-                if not blobs and die==0:continue
-                # G_ is reserved from package names; G_ERROR_ is disjoint from
-                # hexadecimal geometry hashes and keeps DIE ownership readable.
+                shapes=markers.get(die,())
+                if not shapes and die==0:continue
+                # Keep direct polygons unless their angle needs a transformed
+                # polygon reference to remain representable on the OAS grid.
+                direct=[]
+                refs=[]
+                for blob,origin,angle in shapes:
+                    if not angle:
+                        direct.append(blob)
+                        continue
+                    local=polygons({error_key:[blob]},self.dbu)
+                    marker='G_'+hashlib.sha256(local).hexdigest()
+                    cells.append((marker,local))
+                    refs.append(placement(marker,origin,angle,self.dbu))
                 child='G_ERROR_'+name+f'_DIE_{die}'
-                cells.append((child,polygons({f'{self.error_layer[0]}/{self.error_layer[1]}':blobs},self.dbu)))
+                cells.append((child,polygons({error_key:direct},self.dbu)+b''.join(refs)))
                 children.append(placement(child,dbu=self.dbu))
             marker_count=sum(map(len,markers.values()))
         body=b''.join(children);shift=np.asarray(position,dtype=float)-np.asarray(board_origin)
         if shift.shape!=(2,) or not np.isfinite(shift).all():raise ValueError('Package origin must have two finite coordinates')
+        return name,cells,body,tuple(shift),marker_count,failed,stats
+
+    def commit(self,packet):
+        name,cells,body,shift,marker_count,failed,stats=packet
+        if name in self.pending_names or self.db.execute('select 1 from packages where name=?',(name,)).fetchone():raise ValueError('Duplicate package Cell: '+name)
         self.pending.append((name,cells,body,tuple(shift)));self.pending_names.add(name);self.bytes+=sum(len(b) for _,b in cells)+len(body)
         self.count+=1;self.discarded_subgrid_fragments+=stats.get('discarded_subgrid_fragments',0);self.error_rectangles+=marker_count;self.error_packages+=bool(marker_count);self.failed_packages+=failed
         if self.bytes>=self.limit:self.flush()
@@ -188,6 +215,7 @@ class Store:
                     nonlocal crc
                     out.write(data);crc=zlib.crc32(data,crc)
                 emit(b'\x0e'+string('TopCell'))
+                if self.template:emit(placement('G_TEMPLATE',dbu=self.dbu))
                 for cell,x,y in self.db.execute('select name,x,y from packages order by name'):
                     emit(placement(cell,(x,y),dbu=self.dbu))
                 emit(b'\x02'+uint(248)+b'\0'*248+b'\x01');out.write(struct.pack('<I',crc));out.flush();os.fsync(out.fileno())
@@ -200,6 +228,7 @@ class Store:
         if self.finished:raise RuntimeError('Batch OAS already finalized')
         if not self.count:raise ValueError('批次没有成功的封装Cell，不替换已有文件')
         self.flush();destination=Path(destination);self.emit(b'\x0e'+string('TopCell'))
+        if self.template:self.emit(placement('G_TEMPLATE',dbu=self.dbu))
         total=self.db.execute('select count(*) from cells').fetchone()[0]
         for i,(name,x,y) in enumerate(self.db.execute('select name,x,y from packages order by name')):
             cancel_check();self.emit(placement(name,(x,y),dbu=self.dbu))

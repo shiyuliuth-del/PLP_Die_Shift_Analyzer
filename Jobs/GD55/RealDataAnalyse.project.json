@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "profile": {
-    "sheet": "Ordinary",
+    "sheet": "Measurements",
     "header_row": 1,
     "columns": {
       "package_id": "package_id",
@@ -18,9 +18,10 @@
   "shared_mapping": true,
   "controls": {
     "dies": 3,
-    "workers": 4,
-    "memory": 2048,
+    "workers": 12,
+    "memory": 4096,
     "retries": 3,
     "timeout": 0
-  }
+  },
+  "template": "GD55_Template.gds"
 }

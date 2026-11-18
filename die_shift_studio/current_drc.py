@@ -87,7 +87,7 @@ def frame(checker,states,replacements,settings,progress,owners=None,scopes=None)
                 required=width if kind=='线宽不足' else space if kind=='线距不足' else getattr(settings,'drc_min_angle_deg',0)
                 items.append(dict(layer=layers[0],layers=layers,geometry=world,kind=kind,net=key[1],refs=refs,
                                   owner=deps[0] if len(deps)==1 else -1,dependencies=deps,required_um=required if kind!='最小内角不足' else None,
-                                  required_deg=required if kind=='最小内角不足' else None,_measurement_copper=actual))
+                                  required_deg=required if kind=='最小内角不足' else None,_measurement_dbu=m.data.dbu_um,_measurement_copper=actual))
     tree=shapely.STRtree([n['geometry'] for n in nets]);maximum=max((n['space'] for n in nets),default=0.)
     for i,a in enumerate(nets if enabled(settings,'space') else ()):
         cancel_check()

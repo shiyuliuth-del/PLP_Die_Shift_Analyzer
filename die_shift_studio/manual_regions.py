@@ -21,10 +21,9 @@ def partition(plan,polygon):
     active=plan.source.intersection(polygon)
     if active.is_empty or active.area<=plan.tolerance**2:return None
     marks=shapely.line_locate_point(plan.route,shapely.points(shapely.get_coordinates(plan.route.intersection(polygon))))
-    route_crosses=bool(len(marks))
     if not len(marks):marks=shapely.line_locate_point(plan.route,shapely.points(shapely.get_coordinates(active)))
     a,b=float(marks.min()),float(marks.max())
-    moving=[];fixed=[];ambiguous=not route_crosses;terminals=getattr(plan,'terminal_vias',((plan.land,),tuple(plan.anchors)))
+    moving=[];fixed=[];ambiguous=False;terminals=getattr(plan,'terminal_vias',((plan.land,),tuple(plan.anchors)))
     moving_terminal=shapely.union_all(terminals[0]);anchors=shapely.union_all(terminals[1])
     for g in parts(plan.source.difference(active)):
         m=g.intersection(moving_terminal).area>plan.tolerance**2;f=g.intersection(anchors).area>plan.tolerance**2
@@ -34,16 +33,31 @@ def partition(plan,polygon):
     c=shapely.union_all(moving);d=shapely.union_all(fixed)
     # Rectangular box edges are the authoritative cut lines. Never line-merge
     # different box sides into an L-shaped or zig-zag reconstruction boundary.
-    def seam(material):
+    def seam(material,s):
         edges=[]
         segments=[(u,v) for part in shapely.get_parts(polygon) if part.geom_type=='Polygon' for xy in [np.asarray(part.exterior.coords)] for u,v in zip(xy[:-1],xy[1:])]
+        # Boolean intersections may round a rotated side by a few ulps. Do
+        # not substitute a pad point merely because two nominal lines miss.
+        rings=[np.asarray(r.coords) for g in parts(material) for r in (g.exterior,*g.interiors)]
+        if not rings:return shapely.LineString()
+        starts=np.concatenate([r[:-1] for r in rings]);ends=np.concatenate([r[1:] for r in rings])
+        eps=max(plan.tolerance*1e-5,32*np.spacing(max(1.,float(np.max(np.abs(starts))))))
         for u,v in segments:
-            edge=shapely.LineString([u,v]);hit=edge.intersection(plan.source)
-            for line in shapely.get_parts(hit):
-                if line.geom_type=='LineString' and line.length>plan.tolerance and line.distance(material)<=plan.tolerance*4:edges.append(line)
-        return shapely.MultiLineString(edges) if len(edges)>1 else edges[0] if edges else shapely.LineString()
-    near=seam(c) if not c.is_empty else shapely.LineString()
-    far=seam(d) if not d.is_empty else shapely.LineString()
+            length=np.linalg.norm(v-u)
+            if length<=eps:continue
+            axis=(v-u)/length;normal=np.array([-axis[1],axis[0]])
+            mask=(abs((starts-u)@normal)<=eps)&(abs((ends-u)@normal)<=eps)
+            if not mask.any():continue
+            spans=np.sort(np.column_stack(((starts[mask]-u)@axis,(ends[mask]-u)@axis)),axis=1).clip(0,length)
+            runs=[]
+            for lo,hi in sorted(map(tuple,spans)):
+                if hi-lo<=eps:continue
+                if runs and lo<=runs[-1][1]+eps:runs[-1][1]=max(hi,runs[-1][1])
+                else:runs.append([lo,hi])
+            edges.extend(shapely.LineString([u+lo*axis,u+hi*axis]) for lo,hi in runs if hi-lo>plan.tolerance)
+        return min(edges,key=lambda g:(g.distance(plan.route.interpolate(s)),-g.length)) if edges else shapely.LineString()
+    near=seam(c,a) if not c.is_empty else shapely.LineString()
+    far=seam(d,b) if not d.is_empty else shapely.LineString()
     if near.is_empty:near=shapely.Point(plan.route.coords[0]);a=0.
     if far.is_empty:far=shapely.Point(plan.route.coords[-1]);b=plan.length
     angles=[]
@@ -53,3 +67,24 @@ def partition(plan,polygon):
         angle=math.atan2(u[1],u[0])-math.atan2(normal[1],normal[0]);angles.append((angle+math.pi/2)%math.pi-math.pi/2)
     return dict(A=active,B=d,C=c,near=near,far=far,a=a,b=b,angles=tuple(angles),manual_angles=(True,True),strict_box=polygon,
                 box_invalid=ambiguous,box_complex=active.geom_type!='Polygon' or near.geom_type not in ('LineString','Point') or far.geom_type not in ('LineString','Point'))
+
+
+def move_side(settings,plan,press,cursor):
+    """Move only the pressed side of its source rectangle in nominal coordinates."""
+    from dataclasses import replace
+    choices=[];press=np.asarray(press,float);cursor=np.asarray(cursor,float)
+    for i,(layer,verts) in enumerate(settings.reconstruction_boxes):
+        if layer!=plan.layer or not plan.source.intersects(shapely.Polygon(verts)):continue
+        xy=np.asarray(verts,float)
+        for j in range(4):
+            edge=shapely.LineString([xy[j],xy[(j+1)%4]])
+            choices.append((edge.distance(shapely.Point(press)),i,j))
+    if not choices:return None
+    _,i,j=min(choices);rows=list(settings.reconstruction_boxes);layer,verts=rows[i];xy=np.array(verts,float)
+    a,b=j,(j+1)%4;v=xy[b]-xy[a];n=np.array([-v[1],v[0]])/np.linalg.norm(v)
+    thickness=(xy[(j+2)%4]-xy[b])@n
+    if thickness<0:n=-n;thickness=-thickness
+    xy[[a,b]]+=min(float((cursor-press)@n),thickness-plan.tolerance*2)*n
+    rows[i]=(layer,tuple(map(tuple,xy)));cfg=replace(settings,reconstruction_boxes=tuple(rows))
+    bounds=shapely.union_all([shapely.Polygon(v) for k,v in rows if k==layer and plan.source.intersects(shapely.Polygon(v))]);part=partition(plan,bounds)
+    return (cfg,part) if part is not None else None

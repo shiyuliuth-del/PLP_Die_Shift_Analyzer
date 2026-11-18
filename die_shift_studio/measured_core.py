@@ -24,7 +24,7 @@ class Options:
     def memory_budget_mb(self,profile=None):
         profile=profile or resource_profile()
         available=max(128,int(profile['available_memory_mb']*.35))
-        return min(self.max_memory_mb or available,available)
+        return min(self.max_memory_mb or profile.get('memory_budget_mb',available),profile.get('memory_budget_mb',available))
 
 
 def pose_parameters(case,parameters,rows):

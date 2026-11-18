@@ -17,3 +17,17 @@ def straight(geometry,tol):
             axis=unit;previous=end
         if np.linalg.norm(previous-start)>tol:lines.append(shapely.LineString([start,previous]))
     return shapely.GeometryCollection([*lines,*points]) if points and lines else shapely.MultiLineString(lines) if len(lines)>1 else lines[0] if lines else shapely.union_all(points)
+
+
+def representative(geometry, opposite, tol, focus=None):
+    """One editable handle; underlying domains and port ownership stay intact."""
+    leaves=[];stack=[geometry]
+    while stack:
+        g=stack.pop()
+        if g is None or g.is_empty:continue
+        if g.geom_type in ('LineString','Point'):
+            leaves.extend(shapely.get_parts(straight(g,tol)))
+        elif hasattr(g,'geoms'):stack.extend(g.geoms)
+    points=[g for g in leaves if g.geom_type=='Point'];lines=[g for g in leaves if g.geom_type=='LineString' and g.length>tol]
+    target=opposite if opposite is not None and not opposite.is_empty else geometry
+    return min(points or lines,key=lambda g:(g.distance(focus) if focus is not None else 0.,g.distance(target),-g.length,g.bounds),default=shapely.LineString())
