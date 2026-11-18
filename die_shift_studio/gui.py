@@ -2043,7 +2043,7 @@ class MainWindow(W.QMainWindow):
         self.log_bus.emit(admitted['reason']+f" · 活跃预演 {len(self.preview_workers)} · CPU {admitted['load'].get('cpu_percent')}% · 可用内存 {admitted['load']['available_memory_mb']} MiB")
         def partial(_):
             value=worker.take_partial()
-            if value is None or worker.cancelled.is_set():return
+            if value is None or worker.cancelled.is_set() or self.navigation.drag is not None:return
             if revision!=self.revision or worker.view_ticket!=self.preview_ticket or data is not self.data:return
             actual,frame,distribution,con,cache,field=value
             self.engine=actual;self.case=case;self.probability_data=distribution;self.connections=con;self.geometry_cache=cache;self.space_data=field
@@ -2052,7 +2052,12 @@ class MainWindow(W.QMainWindow):
         def accepted(value):
             worker.delivered=True
             if worker.cancelled.is_set():return
-            if revision!=self.revision or data is not self.data or worker.view_ticket!=self.preview_ticket:return
+            if revision!=self.revision or data is not self.data or worker.view_ticket!=self.preview_ticket or self._closing:return
+            # Keep cursor and pan events ahead of expensive artist/table
+            # replacement. Apply one finished pose after the middle drag.
+            if self.navigation.drag is not None:
+                QtCore.QTimer.singleShot(40,lambda:accepted(value))
+                return
             self.engine,frame,self.probability_data,self.connections,self.geometry_cache,self.space_data,self._prepared_package,self._prepared_motion,self.footprint_data,summary=value
             if summary is not None and self._width_grid_summary is not summary:
                 self._width_grid_summary=summary
@@ -2583,7 +2588,7 @@ class MainWindow(W.QMainWindow):
             unfiltered=canonical_project(original,project)
             updated,edited_project=apply(edited_snapshot(getattr(original,'_area_base',original),unfiltered.get('node_edits',[])),unfiltered)
             progress(35,'重建几何和金属连接');cache=GeometryCache(updated)
-            try:case=build_case(updated,project['roles'],layer_order=project['layer_order'])
+            try:case=build_case(updated,edited_project['roles'],layer_order=edited_project['layer_order'])
             except ValueError:
                 if valid_case:raise
                 case=None
@@ -2594,7 +2599,15 @@ class MainWindow(W.QMainWindow):
             updated.geometry_cache=cache;updated.prepared_case=case;updated.prepared_roles=project['roles'];updated.prepared_auto=automatic_parameters(updated,project['roles'])
             self.set_data(updated,edited_project,project_path=self.project_path)
             self.ax.set_xlim(view[0]);self.ax.set_ylim(view[1])
-            self.manual_states=pose;self.selection.selected=selected
+            self.manual_states=pose
+            previous_map=getattr(original,'area_indices',{})
+            current_map=getattr(updated,'area_indices',{})
+            mapped=[]
+            for key,index in selected:
+                source_index=previous_map.get(key,range(len(original.layers[key])))[index]
+                present=current_map.get(key,range(len(updated.layers.get(key,()))))
+                if source_index in present:mapped.append((key,present.index(source_index)))
+            self.selection.selected=mapped
             self.plot_layout(preserve=True)
             if pose is not None:self.request_preview()
             if was_assessed:

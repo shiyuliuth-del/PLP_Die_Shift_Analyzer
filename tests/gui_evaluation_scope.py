@@ -30,7 +30,10 @@ try:
  p=Parameters(multi_bound_x_um=1,multi_bound_y_um=0,bound_angle_deg=0,line_width_um=5,line_space_um=5,wafer_line_width_um=5,wafer_line_space_um=5,annulus_um=5,moving_annulus_um=5)
  job=root/'case.dshift.json';job.write_text(json.dumps(dict(schema_version=5,gds_path=str(source),top_cell='TOP',roles=roles,
        layer_order=['6/0','5/0','4/0','3/0','128/0','127/0'],parameters=asdict(p),settings={'animation_enabled':False,'reconstruction_grid_nodes':3},overlays={})))
- wait();w.load_project(job);wait();assert w.view_settings.evaluation_scope=='focus'
+ wait();w.load_project(job);wait();assert w.view_settings.evaluation_scope=='risk'
+ assert w.view_settings.table_page_limit==500
+ w.grid_mode.setCurrentIndex(w.grid_mode.findData('focus'));wait()
+ assert w.view_settings.evaluation_scope=='focus'
  assert not w.setting_fields['reconstruction_grid_nodes'].isEnabled()
  w.run_evaluation();wait();assert w.result['extreme_factors']['package_states']==9
  w.width_toggle.setChecked(True);w.reconstruction_toggle.setChecked(True);wait()
@@ -62,6 +65,17 @@ try:
 
  saved=root/'Jobs'/'saved'/'saved.dshift.json';w.write_project(saved);w.load_project(saved);wait()
  assert w.grid_mode.currentIndex()==1 and w.view_settings.evaluation_scope=='focus'
+ w.grid_mode.setCurrentIndex(w.grid_mode.findData('risk'));wait()
+ assert w.result['evaluation_scope']=='risk'
+ assert w.reconstruction_yield.bank['method']==w.width_yield.bank['method']=='risk'
+ assert w.result['discrete_states']==w.reconstruction_yield.bank['total']==w.width_yield.bank['total']
+ assert w.result['discrete_states']<9 and '极端组合' in w.width_yield.label.text()
+ w.problem_filter.setCurrentIndex(0);wait()
+ assert w.extreme_table.rowCount()==w.result['discrete_states']
+ revision=w.revision
+ w.setting_fields['table_page_limit'].setValue(3);wait()
+ assert w.extreme_table.rowCount()==3 and w.page_next.isEnabled() and w.revision==revision
+ w.page_next.click();wait();assert w.extreme_table.verticalHeaderItem(1).text()=='3'
  assert not errors,errors
  print('GUI_EVALUATION_SCOPE_PASS focus pair coverage 9 / all 9, reconstruction/DRC/width/cache/saved mode')
 finally:close_window(app,w);tmp.cleanup()

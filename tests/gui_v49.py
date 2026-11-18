@@ -62,9 +62,9 @@ try:
  key('Escape');assert w.region_select.mode is None
  # Paging must never truncate the full canvas catalogue or change the row's source.
  rows=[dict(kind='线宽不足',layer='5/0',layers=('5/0',),point=[i,0],geometry=shapely.box(i,0,i+.1,1),required_um=10) for i in range(600)]
- w.display_issues=rows;w.show_issue_page(0);assert w.issue_table.rowCount()==256
- w.issue_next.click();assert w.issue_table.verticalHeaderItem(0).text()=='257';assert w.filtered_issues[0] is rows[256]
- w.issue_next.click();assert w.issue_table.rowCount()==88 and w.issue_summary.text()=='第 3/3 页'
+ w.display_issues=rows;w.show_issue_page(0);assert w.issue_table.rowCount()==500
+ w.issue_next.click();assert w.issue_table.verticalHeaderItem(0).text()=='501';assert w.filtered_issues[0] is rows[500]
+ assert w.issue_table.rowCount()==100 and w.issue_summary.text()=='第 2/2 页'
  assert len(w.display_issues)==600
  w.show_issues.setChecked(True);w.view_bounds=(-1,-1,601,2);w.drc_overlay.draw();assert len(w.rendered_issues)==600
  assert not errors,errors

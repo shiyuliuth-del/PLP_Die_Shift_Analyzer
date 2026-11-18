@@ -82,9 +82,9 @@ with tempfile.TemporaryDirectory() as tmp:
         chosen=window.result['schemes'][window.result['recommendation']['scheme']-1]
         assert chosen['gamma']<=min(s['gamma'] for s in candidates)+1e-9
     else:assert window.result['recommendation']['scheme'] is None
-    assert windo(w.problem_filter.currentIndex()!=0);window.problem_filter.setCurrentIndex(0);wait_idle()
-    assert window.extreme_table.rowCount()==window.focus_extremes.total+1 and window.extremes.total==728
-    window.grid_mode.setCurrentIndex(0);wait_idle();assert window.extreme_table.rowCount()==257
+    assert window.problem_filter.currentIndex()!=0;window.problem_filter.setCurrentIndex(0);wait_idle()
+    assert window.extreme_table.rowCount()==window.scoped_catalog().total+1 and window.extremes.total==728
+    window.grid_mode.setCurrentIndex(0);wait_idle();assert window.extreme_table.rowCount()==500
     assert all(window.extreme_table.item(0,j).text()=='' for j in range(window.extreme_table.columnCount()))
     assert not hasattr(window,'detail')
     # Rapid requests must show only the newest selection.

@@ -112,9 +112,10 @@ def central_certificate(r,entry,entries):
 
 def attach(bank,r):
     if bank.get('selected_indices') is not None:
-        from .evaluation_scope import conditional_weights,conditional_event
+        from .evaluation_scope import SCOPE_NAMES,conditional_weights,conditional_event
         indices=bank['selected_indices'];weights,error,logmass=conditional_weights(bank['grid'],r.p,indices)
-        result=dict(bank,zones={},scale_nsigma=r.p.scale_nsigma,scope_weights=weights,scope_mass_error=error,scope_log_mass=logmass,scope='重点组合（含零位）内的离散联合评估')
+        title=SCOPE_NAMES['risk' if r.settings.evaluation_scope=='risk' else 'focus']
+        result=dict(bank,zones={},scale_nsigma=r.p.scale_nsigma,scope_weights=weights,scope_mass_error=error,scope_log_mass=logmass,scope=f'{title}（含零位）内的离散联合评估')
         mass=math.exp(logmass)
         delta=min(1.,2*error/max(mass-error,np.finfo(float).tiny)+64*np.finfo(float).eps*len(indices))
         threshold=2*float(ndtr(-r.p.scale_nsigma))
@@ -122,7 +123,7 @@ def attach(bank,r):
             passed,failed=conditional_event(bank['grid'],indices,weights,row['clauses'])
             result['zones'][key]=dict(row,probability=dict(lower=max(0.,failed-delta),upper=min(1.,failed+delta),estimate=failed,
                 threshold=threshold,mass_error=error,certified=True,domain='focused-discrete',
-                reason='重点组合代表单元内归一化；不证明未选组合或连续空间安全'))
+                reason=f'{title}代表单元内归一化；未覆盖其余组合及连续空间'))
         return result
     weights,error=extreme_weights(bank['grid'],r.p)
     entries=r._plans_for_all_poses(lambda *_:None)

@@ -173,7 +173,10 @@ class Reconstructor:
         self.vias=[];self.stays=[];self.vias_by_target={};self._plans=None;self.manual_quality={};self.manual_masses={}
         self.plan_pool=plan_pool if plan_pool is not None else {}
         self._last_raw_frames={}
-        self.geometry_pool=geometry_pool if geometry_pool is not None else EphemeralCache(budget=64*1024**2,max_entries=4096)
+        from .resources import resource_profile
+        geometry_mb=max(4,min(512,resource_profile()['memory_budget_mb']//24))
+        self.geometry_pool=geometry_pool if geometry_pool is not None else EphemeralCache(
+            budget=geometry_mb*1024**2,max_entries=max(4096,128*geometry_mb))
         from .manual_regions import boxes_by_source
         self.source_boxes=boxes_by_source(model,settings.reconstruction_boxes)
         self.box_refs=set(self.source_boxes)
@@ -738,7 +741,7 @@ class Reconstructor:
                        fallback_regions=fallback if part.get('near') is not None else None,connection_failed=bool(error) or not valid,
                        missing_region=part['A'] if part.get('strict_box') is not None or getattr(plan,'plane_domain',False) else missing_area(part,plan,self.model.bound.centers[owner],states[owner]) if plan is not None and part.get('near') is not None else source,
                        moving_handle_endpoint=(transform(shapely.Point(plan.route.coords[0]),self.model.bound.centers[owner],states[owner]) if plan is not None else None),
-                       moving_terminals=shapely.union_all([self.model.moved(v['poly'],owner,states) for v in entry['mine']]),
+                       moving_terminals=shapely.union_all([self.model.moved(v['poly'],owner,states) for v in entry['mine'] if 'poly' in v]),
                        source=source,source_scope_complete=bool(entry.get('routing_source',source) is source if plan is None else plan.source is source),endpoint_weights=(entry.get('serial_left',1.),entry.get('serial_right',0.)),branch=entry.get('branch',1),branch_count=entry.get('branch_count',1),route_plan=plan,interval=(a,b),boundary_angles=part.get('angles',(0.,0.)),route_identity=None if plan is None else plan.identity,
                        nominal_regions={k:part[k] for k in 'ABC'},regions=regions,
                        movable=part['C'],moved=regions['C'],fixed=regions['B'],immovable=regions['B'],bridge=regions['A'],
