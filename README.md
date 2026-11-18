@@ -21,6 +21,6 @@ V50：芯片对重点组合、分叉边界修正、当前姿态GDS/OAS与旋转E
 
 Windows完整解压源码，RUN.bat启动，BUILD.bat在目标电脑用已有Python/PyInstaller构建两个相邻单文件EXE；Linux使用`python3 main.py`。依赖不锁定版本，运行不联网补装。缺少Python KLayout模块可调用已安装桌面KLayout，不捆绑整套软件。GPU失败回退CPU。
 
-正式Release为两个软件的联合源码ZIP与SHA-256，不单独发布RealDataAnalyse。按本轮要求附Jobs/GD55图纸、工程、三份合成Excel和说明；无EXE、其他私人图纸和缓存。Jobs/logs缺失会在运行目录创建。每个Jobs项目包含图纸副本、JSON与Cache，工程JSON引用的.dsresults结果侧车需随项目保留，不进入源码包；旧平铺工程可打开并在保存时迁移。
+正式Release为两个软件的联合源码ZIP与SHA-256，不单独发布RealDataAnalyse。随包 `Jobs/GD55` 提供源图纸、工程、实测模板和三份合成Excel。新建工程时自动创建主程序的 `Cache/` 和实测客户端的 `RealDataAnalyse/` 目录树。用户把实测输入放入 `RealDataAnalyse/Excel/` 和 `RealDataAnalyse/Template/`，实测结果保存在 `RealDataAnalyse/Output/`。工程JSON引用的.dsresults侧车需随用户项目保留。旧平铺工程可打开并在保存时迁移。
 
 验证入口：`python3 tools/check_contribution.py`、`python3 tools/package_release.py verify-source`。源码验收、Windows托管验证与工厂/GPU设备验收分别记录；完整有限网格不代表连续空间穷尽，模型良率不代表产线实测。

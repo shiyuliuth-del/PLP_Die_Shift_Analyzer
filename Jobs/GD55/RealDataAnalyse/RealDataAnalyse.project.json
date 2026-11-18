@@ -23,5 +23,5 @@
     "retries": 3,
     "timeout": 0
   },
-  "template": "GD55_Template.gds"
+  "template": "RealDataAnalyse/Template/GD55_Template.gds"
 }

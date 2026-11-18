@@ -35,7 +35,7 @@ with tempfile.TemporaryDirectory(prefix='rda-error-output-') as temp:
     entry['dies'][die]=pose
   finally:book.close()
  count=len(excel_rows);assert count==36 and len(paths)==3
- database=folder/'Tasks'/'run.sqlite';endpoint=root/'endpoint.json';output=folder/'Output'/'GD55.oas';result=root/'result.json'
+ workspace=Path(project_config['workspace']);database=Path(project_config['database']);endpoint=root/'endpoint.json';output=Path(project_config['output']);result=root/'result.json'
  command=[os.environ['REALDATA_TEST_EXE']] if os.environ.get('REALDATA_TEST_EXE') else [sys.executable,str(ROOT/'RealDataAnalyse/main.py')]
  config=root/'import.json';config.write_text(json.dumps(dict(paths=list(map(str,paths)),database=str(database),die_count=3,workers=3,profile=project_config['profile'])),encoding='utf8')
  subprocess.run(command+['--import-data',str(config),'--result',str(result)],check=True,timeout=120)
@@ -87,7 +87,7 @@ with tempfile.TemporaryDirectory(prefix='rda-error-output-') as temp:
     assert fail_cell and (k.Region(fail_cell.shapes(fail_index))^expected_board).is_empty(),'FAIL must preserve the real package outline'
     expected_fail+=expected_board.transformed(k.Trans(round(origin.x/layout.dbu),round(origin.y/layout.dbu)))
    else:assert fail_cell is None and receipt.get('failed_packages',0)==0,'DRC-only package must not enter FAIL'
-   catalog=receipt['issue_catalog'];path=Path(catalog['path']).resolve();assert path.is_relative_to(folder/'Cache'),path
+   catalog=receipt['issue_catalog'];path=Path(catalog['path']).resolve();assert path.is_relative_to(workspace/'Cache'),path
    with closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True)) as db:
     issues=[json.loads(row[0]) for row in db.execute('select payload from issues where task_id=? order by ordinal',(catalog['task_id'],))]
    assert len(issues)==receipt['drc_count']==catalog['total']
@@ -141,7 +141,7 @@ with tempfile.TemporaryDirectory(prefix='rda-error-output-') as temp:
   if os.environ.get('REALDATA_EVIDENCE_DIR'):
    evidence=Path(os.environ['REALDATA_EVIDENCE_DIR']);evidence.mkdir(parents=True,exist_ok=True)
    shutil.copy2(output,evidence/'GD55.oas')
-   shutil.copy2(folder/'logs/RealDataAnalyse.log',evidence/'RealDataAnalyse.log')
+   shutil.copy2(workspace/'logs/RealDataAnalyse.log',evidence/'RealDataAnalyse.log')
   print(json.dumps(dict(status='REALDATA_ERROR_OUTPUT_PASS',packages=count,connection_failure_packages=failed,issue_packages=issue_packages,error_rectangles=rectangles,rotated_error_polygons=rotated,subgrid_rotated_references=retained_subgrid_angles,scope='Actual Excel read-only import, template once, complete ERROR/FAIL, exact package poses and positioning'),ensure_ascii=False),flush=True)
  finally:
   if endpoint.exists():

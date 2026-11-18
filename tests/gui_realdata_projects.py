@@ -8,6 +8,7 @@ import shutil
 import sys
 import tempfile
 import time
+from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from die_shift_studio.qt_compat import QtWidgets as W, QtCore, QtGui, BINDING
 if BINDING == 'PyQt6':
@@ -89,7 +90,7 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         w.sheet.setText('Measurements')
         # Exercise the UI-to-import boundary with a genuinely different DIE2 file.
         from openpyxl import load_workbook
-        workbook_path = folder/'Excel'/'GD55_SYNTHETIC_DIE2.xlsx'
+        workbook_path = folder/'RealDataAnalyse/Excel/GD55_SYNTHETIC_DIE2.xlsx'
         book = load_workbook(workbook_path)
         sheet = book['Measurements']; sheet.title = 'SeparateSheet'
         sheet.insert_rows(1); sheet['A2'] = 'SeparatePackage'
@@ -116,11 +117,19 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         while w.worker and time.monotonic() < until: app.processEvents(); time.sleep(.02)
         assert w.worker is None and w.progress.failed
         assert '与任务记录不符' in w.response.toPlainText()
+        assert not any(dialog.isVisible() for dialog in w.findChildren(W.QMessageBox))
         assert not Path(w.output.text()).exists()
         w.file_view.item(1, 0).setCheckState(getattr(QtCore.Qt, 'CheckState', QtCore.Qt).Checked)
-        assert w.template.text()==str(folder/'GD55_Template.gds')
+        with patch('RealDataAnalyse.gui.Runner') as runner:
+            runner.return_value.run.return_value = dict(state='completed', output=w.output.text())
+            w.run_button.click(); wait(w)
+            runner.return_value.run.assert_called_once()
+            dialog, = [dialog for dialog in w.findChildren(W.QMessageBox) if dialog.isVisible()]
+            assert dialog.windowTitle() == '任务完成' and dialog.informativeText() == w.output.text()
+            dialog.accept(); app.processEvents()
+        assert w.template.text()==str(folder/'RealDataAnalyse/Template/GD55_Template.gds')
         assert sha256(folder/'GD55_1105.gds') == before
-        assert (folder/'logs'/'RealDataAnalyse.log').is_file()
+        assert (folder/'RealDataAnalyse/logs/RealDataAnalyse.log').is_file()
         # Continuous fill has no alternating Windows segments; text fits by elision.
         w.progress.failed = False
         w.progress.status('批次1 · 完成6/12 · 并行2 · 封装8 重构几何 · 写入OAS', 6, 12)

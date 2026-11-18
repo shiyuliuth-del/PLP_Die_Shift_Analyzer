@@ -1,6 +1,6 @@
 # GD55 实测批量验证
 
-在 RealDataAnalyse 选择源码包内的 `Jobs/GD55` 项目目录。项目自动读取 `Excel/` 下的三个工作簿，每份只有 `Measurements`。项目中的“模板图纸”默认指向 `GD55_Template.gds`。点击“创建任务”，再点击“运行 / 继续补算”。运行结束后 `Output/` 只有最终 OAS。Excel、源图及模板均为只读输入。
+在 RealDataAnalyse 选择源码包内的 `Jobs/GD55` 项目目录。客户端自动读取 `RealDataAnalyse/Excel/` 下的三个工作簿，每份只有 `Measurements`，并选用 `RealDataAnalyse/Template/GD55_Template.gds`。点击“创建任务”，再点击“运行 / 继续补算”。成功后弹窗显示最终 OAS 的路径，`RealDataAnalyse/Output/` 只有这一份 OAS。Excel、源图及模板均为只读输入。
 
 Excel 定义全部 36 个封装位置和每颗 DIE 的偏移与旋转。封装是 6×6 摆放，行列间距为 12000 μm。输入随编号递增，普通位置的方向、XY 和角度组合使用固定种子 510036；以三颗 DIE 的最大 `sqrt(dx² + dy² + (angle/0.035)²)` 为生成时的偏移阶梯，不是生产容限。编号 034、035、036 各包含一组实际异网孔碰接，预期局部断开并进入 FAIL。各工作簿包含全部输入值，程序直接导入这些记录。
 

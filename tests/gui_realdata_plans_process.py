@@ -24,9 +24,9 @@ with tempfile.TemporaryDirectory(prefix='rda-plans-process-') as name:
         sources.append((folder/'GD55_1105.gds',sha256(folder/'GD55_1105.gds')))
         # Independent compact scheduling fixture. The shipped 36 rows are
         # imported once by the production acceptance, including all FAIL poses.
-        files=generate_example(folder/'PlanInputs',count=2,die_count=3,pitch=(12000,12000))
+        files=generate_example(folder/'RealDataAnalyse/Excel/PlanInputs',count=2,die_count=3,pitch=(12000,12000))
         config=dict(folder=str(folder),project=str(folder/'GD55.dshift.json'),
-                    template=str(folder/'GD55_Template.gds'),
+                    template=str(folder/'RealDataAnalyse/Template/GD55_Template.gds'),
                     files=[dict(path=str(p),enabled=True) for p in files],
                     profile=DEFAULT_PROFILE,shared_mapping=True,
                     controls=dict(dies=3,workers=2,memory=512,retries=1,timeout=0))
@@ -47,7 +47,7 @@ with tempfile.TemporaryDirectory(prefix='rda-plans-process-') as name:
         assert top.name=='TopCell' and len(top.references)==3
         assert len({ref.cell_name for ref in top.references})==3 and any(ref.cell_name=='G_TEMPLATE' for ref in top.references)
         before.append((output,sha256(output),output.stat().st_mtime_ns))
-        conversation=(Path(row['folder'])/'logs/IPC-conversation.log').read_text()
+        conversation=(Path(row['folder'])/'RealDataAnalyse/logs/IPC-conversation.log').read_text()
         assert 'batch.submit' in conversation and 'Die Shift Analyze → RealDataAnalyse' in conversation
         assert 'app.shutdown' in conversation
     repeated=subprocess.run(command+['--run-plans',str(plans.path),'--result',str(result)],timeout=60)

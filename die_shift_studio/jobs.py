@@ -2,6 +2,39 @@
 import json,os,re,sys,tempfile
 from pathlib import Path
 
+REALDATA_DIRECTORY = 'RealDataAnalyse'
+PROJECT_DIRECTORIES = (
+    'Cache', 'Cache/runtime',
+    *(f'{REALDATA_DIRECTORY}/{name}' for name in (
+        'Excel', 'Template', 'Output', 'Tasks/Plans', 'logs',
+        'Cache/Batches', 'Cache/History', 'Cache/Imports', 'Cache/Inputs',
+        'Cache/Locks', 'Cache/Manual', 'Cache/Plans',
+    )),
+)
+
+
+def provision_project(folder):
+    """Create the fixed project directories without moving any existing files."""
+    root = Path(folder).resolve()
+    paths = [root / name for name in PROJECT_DIRECTORIES]
+    for path in paths:
+        if path.resolve() != path:
+            raise ValueError(f'文件必须位于所选项目文件夹内，固定目录不可重定向：{path}')
+    for path in paths:
+        path.mkdir(parents=True, exist_ok=True)
+    return root / REALDATA_DIRECTORY
+
+
+def measured_workspace(project):
+    """Find a project's RealDataAnalyse workspace, including plan snapshots."""
+    folder = Path(project).resolve().parent
+    workspace, cache, plans = folder.parent.parent.parent, folder.parent.parent, folder.parent
+    if (workspace.name, cache.name, plans.name) == (REALDATA_DIRECTORY, 'Cache', 'Plans'):
+        return workspace
+    workspace = folder / REALDATA_DIRECTORY
+    return workspace if workspace.is_dir() and workspace.resolve() == workspace else folder
+
+
 def installation_root():
     return Path(sys.executable).resolve().parent if getattr(sys,'frozen',False) else Path(__file__).resolve().parent.parent
 
