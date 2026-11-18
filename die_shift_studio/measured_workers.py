@@ -2,86 +2,114 @@
 from concurrent.futures import ProcessPoolExecutor, TimeoutError as FutureTimeout
 from concurrent.futures.process import BrokenProcessPool
 import multiprocessing
-import os
 import queue
+import threading
+import time
 
 from .resources import cancellation_scope, cancel_check, serial_scope
 
 _session = None
 _stop = None
 _status = None
-_memory = 0
-_parent_pid = None
+_over_budget = None
 
 
-def _initialize(inputs, stop, status, memory_mb, parent_pid):
-    global _session, _stop, _status, _memory, _parent_pid
+def _initialize(inputs, stop, status, over_budget):
+    global _session, _stop, _status, _over_budget
     from .measured_core import Session
-    _stop, _status, _memory = stop, status, memory_mb * 1024**2
-    _parent_pid = parent_pid
+    _stop, _status, _over_budget = stop, status, over_budget
     _session = Session(*inputs)
 
 
 def _compute(rows, policy, slot):
-    import psutil
-    parent = psutil.Process(_parent_pid)
-    last_check = -1
-
     def progress(percent, _message):
-        nonlocal last_check
         cancel_check()
-        _status[slot] = int(percent)
-        if percent >= last_check + 5:
-            last_check = percent
-            used = 0
-            for process in parent.children(recursive=True):
-                try:
-                    used += process.memory_info().rss
-                except psutil.NoSuchProcess:
-                    continue
-            if used > _memory:
-                raise MemoryError('独立计算进程超过批次共享内存预算')
+        _status[slot] = 20+int(percent)*4//5
+        if _over_budget.is_set():
+            raise MemoryError('独立计算进程超过批次共享内存预算')
 
     with cancellation_scope(_stop), serial_scope():
         _, snapshot, details = _session.run(rows,progress,preview=False,output_policy=policy)
         cancel_check()
+        progress(100,'重构与DRC完成')
         return snapshot.layers,details
 
 
 class BatchWorkers:
     def __init__(self, session, count, memory_mb):
-        context = multiprocessing.get_context('spawn')
-        self.stop = context.Event()
-        self.status = context.Array('i',count,lock=False)
+        import psutil
+        self.session = session
+        self.count = count
+        self.parent = psutil.Process()
+        self.memory_bytes = memory_mb*1024**2
+        self.context = multiprocessing.get_context('spawn')
+        self.stop = self.context.Event()
+        self.over_budget = self.context.Event()
+        self.status = self.context.Array('i',count,lock=False)
         self.slots = queue.SimpleQueue()
         for slot in range(count):
             self.slots.put(slot)
-        # Only in-memory frozen project data goes to our own worker processes.
-        # No IPC request or on-disk sidecar is deserialized as Python objects.
-        inputs = (session.data,session.case,session.roles,session.motions,
-                  session.p,session.settings,session.cache)
-        self.pool = ProcessPoolExecutor(count,mp_context=context,initializer=_initialize,
-                                        initargs=(inputs,self.stop,self.status,memory_mb,os.getpid()))
+        self.init_lock = threading.Lock()
+        self.pool = None
+        self.budget_lock = threading.Lock()
+        self.last_sample = 0.
+
+    def executor(self, progress):
+        while not self.init_lock.acquire(timeout=.1):
+            cancel_check()
+        try:
+            cancel_check()
+            if self.pool is None:
+                # Prepare the frozen nominal routes once, before spawning.
+                # RoutePlan serialization drops mutable pose caches. Workers
+                # retain private GEOS/KLayout objects and can recompute misses.
+                self.session.prepare(lambda pct,text: progress(int(pct)//5,text))
+                cancel_check()
+                s = self.session
+                inputs = (s.data,s.case,s.roles,s.motions,s.p,s.settings,s.cache,s.plan_pool)
+                self.pool = ProcessPoolExecutor(self.count,mp_context=self.context,initializer=_initialize,
+                                                initargs=(inputs,self.stop,self.status,self.over_budget))
+            return self.pool
+        finally:
+            self.init_lock.release()
+
+    def monitor_memory(self):
+        import psutil
+        now = time.monotonic()
+        if now-self.last_sample<.5 or not self.budget_lock.acquire(blocking=False):
+            return
+        try:
+            self.last_sample=now
+            total=0
+            for process in self.parent.children(recursive=True):
+                try:
+                    total+=process.memory_info().rss
+                except psutil.NoSuchProcess:
+                    continue
+            if total>self.memory_bytes:
+                self.over_budget.set()
+                raise MemoryError('独立计算进程超过批次共享内存预算')
+        finally:
+            self.budget_lock.release()
 
     def solve(self, rows, policy, progress):
+        pool = self.executor(progress)
         slot = self.slots.get_nowait()
-        self.status[slot] = 0
+        self.status[slot] = 20
         try:
-            future = self.pool.submit(_compute,rows,policy,slot)
+            future = pool.submit(_compute,rows,policy,slot)
             while True:
                 try:
                     return future.result(timeout=.25)
                 except FutureTimeout:
                     if future.done():
                         return future.result()
-                    try:
-                        progress(self.status[slot],'独立进程重构与DRC')
-                    except InterruptedError:
-                        self.stop.set()
-                        # All queued/running child functions share this event.
-                        # Let the child reach its cancel point before batch close.
-                        future.cancel()
-                        raise
+                    self.monitor_memory()
+                    progress(self.status[slot],'独立进程重构与DRC')
+        except InterruptedError:
+            # The controller closes the pool only after cooperative cancellation.
+            self.stop.set()
+            raise
         except BrokenProcessPool as exc:
             raise TimeoutError('独立计算进程意外退出，批次未提交') from exc
         finally:
@@ -89,4 +117,5 @@ class BatchWorkers:
 
     def close(self):
         self.stop.set()
-        self.pool.shutdown(wait=True,cancel_futures=True)
+        if self.pool is not None:
+            self.pool.shutdown(wait=True,cancel_futures=True)
