@@ -1692,11 +1692,11 @@ class MainWindow(W.QMainWindow):
                     if title!='宽度足够' or self.width_sufficient_toggle.isChecked():
                         handles.append(Patch(facecolor='none',edgecolor=tint(color,modes['截面']),label=title))
         if self.reconstruction_toggle.isChecked():
-            from .reconstruction_overlay import CUT_COLOR,SECOND_CUT_COLOR,WARNING_COLOR
+            from .reconstruction_overlay import CUT_COLOR,SECOND_CUT_COLOR
             from .reconstruction_events import PALETTE
             handles += [Patch(facecolor=PALETTE[k],alpha=.66,label=title) for k,title in [('red','动区连线失败'),('yellow','动区存在 DRC 违例'),('green','动区通过检查'),('pending','动区待核验')]]
-            handles += [Patch(facecolor=COLORS[k],alpha=.66,label={'B':'C','C':'B'}[k]+' '+title) for k,title in [('B','静区'),('C','平移区')]]
-            handles += [Line2D([],[],color=CUT_COLOR,lw=2,label='运动侧边界 / 整孔盘蓝点'),Line2D([],[],color=SECOND_CUT_COLOR,lw=2,label='固定侧边界 / 整孔盘蓝点'),Patch(facecolor='#dd5790',edgecolor='#bc386d',alpha=.45,label='动区自身风险 · 选中查看')]
+            handles.append(Patch(facecolor='#dfd5ed',alpha=.20,label='忽略重构 · 随动'))
+            handles += [Line2D([],[],color=CUT_COLOR,lw=2,label='运动侧边界 / 整孔盘蓝点'),Line2D([],[],color=SECOND_CUT_COLOR,lw=2,label='固定侧边界 / 整孔盘蓝点')]
         if self.current_frame and self.current_frame.get('motion_issues'):handles.append(Line2D([],[],color='#bf862c',ls='--',label='运动归属未定：保持名义位置'))
         if getattr(self.data,'ignored_geometry',[]):handles.append(Line2D([],[],color='#d72b91',ls='--',lw=.7,label='忽略的无效图形'))
         if self.current_frame is not None:
