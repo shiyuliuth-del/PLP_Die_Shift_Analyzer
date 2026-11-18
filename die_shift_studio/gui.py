@@ -809,8 +809,19 @@ class MainWindow(W.QMainWindow):
         self.cache_size_label.setToolTip(f'当前普通结果 {count-pinned} 个；固定保留 {pinned} 个；动画 {len(self.cache_group.replays)} 个。统计本次运行中所有打开过的工程缓存文件，关闭软件后清理。')
         if self.data is not None and self.extremes is not None and self._cache_colors_changed():
             self.refresh_extreme_colors(self.current_frame)
+    def preview_settings(self):
+        current = self.view_settings
+        applied = getattr(self, '_applied_preview_settings', None)
+        if not getattr(self, 'reconstruction_pending', False) or applied is None:
+            return current
+        # Pose changes use committed reconstruction inputs. Keep current
+        # display and animation settings while a manual edit is staged.
+        names = [name for name in vars(current) if name.startswith('reconstruction_')]
+        names += ['drc_checks', 'drc_tolerance_um', 'drc_min_angle_deg']
+        return replace(current, **{name: getattr(applied, name) for name in names})
+
     def active_frame_key(self):
-        cfg=self.view_settings
+        cfg=self.preview_settings()
         return ((False and self.result is not None,*cfg.deformation_key()),
                 (True,cfg.drc_min_angle_deg,cfg.drc_tolerance_um),
                 cfg.width_key() if self.width_toggle.isChecked() else (False,),
@@ -1014,7 +1025,7 @@ class MainWindow(W.QMainWindow):
         self.start_worker(read_and_prepare,accepted)
     def set_data(self,data,project=None,project_path=None):
         self.cut_drag.cancel();self.reconstruction_overlay.hide();self.constraint_feedback.cancel()
-        self.reconstruction_pending=False;self._reconstruction_apply_once=False
+        self.reconstruction_pending=False;self._reconstruction_apply_once=False;self._applied_preview_settings=None
         self.exit_region_mode()
         from .session_cache import logical_fingerprint
         project=normalize_project(project) if project else {}
@@ -1323,6 +1334,7 @@ class MainWindow(W.QMainWindow):
 
     def defer_reconstruction(self):
         self.reconstruction_pending=True;self.stop_animation();self.cancel_previews()
+        self.preview_ticket+=1;self.preview_pending=None
         self.constraint_feedback.cancel()
         if hasattr(self,'reconstruction_yield'):self.reconstruction_yield.reset()
         try:
@@ -1527,7 +1539,13 @@ class MainWindow(W.QMainWindow):
         if getattr(self,'_path_frame',None) is not frame:self._path_frame=frame;self._path_cache={}
         if not preserve or self._default_view is None:self.fit_plot()
         from .viewport import ViewportIndex,expanded_bounds,overlaps
-        self.view_bounds=expanded_bounds(self.ax.get_xlim(),self.ax.get_ylim())
+        bounds=expanded_bounds(self.ax.get_xlim(),self.ax.get_ylim(),0.)
+        previous=getattr(self,'view_bounds',None)
+        if not (preserve and previous and previous[0]<=bounds[0]<=bounds[2]<=previous[2]
+                and previous[1]<=bounds[1]<=bounds[3]<=previous[3]
+                and previous[2]-previous[0]<=2*(bounds[2]-bounds[0])
+                and previous[3]-previous[1]<=2*(bounds[3]-bounds[1])):
+            self.view_bounds=expanded_bounds(self.ax.get_xlim(),self.ax.get_ylim())
         vstamp=(id(self.data),id(self.case),self.rotation_centers().tobytes() if self.case else None)
         if vstamp!=self._viewport_stamp:
             self.geometry_cache=self.geometry_cache or GeometryCache(self.data)
@@ -1568,17 +1586,22 @@ class MainWindow(W.QMainWindow):
             elif hasattr(artist,'_static_preview'):del artist._static_preview
             if visible:self.rendered_layers[key]=polys
         self._artist_frame=stamp
-        for artist in self.invalid_artists:artist.remove()
-        self.invalid_artists=[]
-        for q in getattr(self.data,'ignored_geometry',[]):
-            if not self.visible_boxes[q['layer']].isChecked():continue
-            x0,y0,x1,y1=q['bounds'];pad=max(1.,self.data.dbu_um*2)
-            path=np.array([[x0-pad,y0-pad],[x1+pad,y0-pad],[x1+pad,y1+pad],[x0-pad,y1+pad],[x0-pad,y0-pad]])
-            artist=LineCollection([path],colors='#d72b91',linestyles=(0,(3,3)),linewidths=.7,zorder=13)
-            self.ax.add_collection(artist);self.invalid_artists.append(artist)
-        self.update_connector_segments()
+        visible_layers=tuple(key for key,box in self.visible_boxes.items() if box.isChecked())
+        overlay_stamp=(id(self.data), id(frame), visible_layers)
+        if overlay_stamp!=getattr(self,'_layout_overlay_stamp',None):
+            for artist in self.invalid_artists:artist.remove()
+            self.invalid_artists=[]
+            for q in getattr(self.data,'ignored_geometry',[]):
+                if q['layer'] not in visible_layers:continue
+                x0,y0,x1,y1=q['bounds'];pad=max(1.,self.data.dbu_um*2)
+                path=np.array([[x0-pad,y0-pad],[x1+pad,y0-pad],[x1+pad,y1+pad],[x0-pad,y1+pad],[x0-pad,y0-pad]])
+                artist=LineCollection([path],colors='#d72b91',linestyles=(0,(3,3)),linewidths=.7,zorder=13)
+                self.ax.add_collection(artist);self.invalid_artists.append(artist)
+            self.update_connector_segments()
+            self._layout_overlay_stamp=overlay_stamp
         if self.shift_artist is None:self.shift_artist=LineCollection([],colors='#d9893e',linestyles=(0,(4,3)),linewidths=1.05,zorder=8);self.ax.add_collection(self.shift_artist)
-        self.shift_artist.set_segments(self.connector_segments)
+        if getattr(self.shift_artist,'_connector_data',None) is not self.connector_segments:
+            self.shift_artist.set_segments(self.connector_segments);self.shift_artist._connector_data=self.connector_segments
         self.draw_contact_ranges();self.fill_issues()
         self.drc_overlay.draw()
         self.draw_probability();self.draw_space()
@@ -1595,7 +1618,7 @@ class MainWindow(W.QMainWindow):
         if not preserve or self._default_view is None:self.fit_plot()
         self.refresh_legend();self.update_die_label_visibility()
         if hasattr(self,'width_overlay'):self.width_overlay.draw()
-        if not getattr(self,'_in_animation',False):
+        if not getattr(self,'_in_animation',False) and not getattr(self,'_in_viewport',False):
             for i,key in enumerate(self._layer_keys):
                 sty=self.style_for(key);item=self.layer_table.item(i,1)
                 if item:
@@ -1839,9 +1862,9 @@ class MainWindow(W.QMainWindow):
         self.manual_preview.preview()
     def cancel_previews(self):
         for worker in self.preview_workers:worker.cancelled.set()
-    def request_preview(self,direct=False,settle=False,quiet=False):
-        if self.reconstruction_toggle.isChecked() and not self.view_settings.reconstruction_auto and not getattr(self,"_reconstruction_apply_once",False):
-            self.defer_reconstruction();return
+    def request_preview(self,direct=False,settle=False,quiet=False,pose_change=False):
+        if getattr(self, 'reconstruction_pending', False) and not pose_change:
+            return
         if self.remote_locked or getattr(self,'requested_measured',False):return
         self._preview_quiet=bool(quiet)
         if not self.data or getattr(self,'_restoring_project',False):return
@@ -1851,8 +1874,12 @@ class MainWindow(W.QMainWindow):
                 self._evaluation_requested=True;self._coverage_pending=True;self.coverage_timer.start()
             else:self.run_evaluation(automatic=True)
             return
-        self._reconstruction_apply_once=False;self.reconstruction_pending=False
-        self.schedule_coupled_filter();self.stop_animation()
+        self._reconstruction_apply_once=False
+        settings=self.preview_settings()
+        if not getattr(self, 'reconstruction_pending', False):
+            self._applied_preview_settings=settings
+            self.schedule_coupled_filter()
+        self.stop_animation()
         self.preview_ticket+=1;ticket=self.preview_ticket;self._prepared_motion=None
         # Committed extreme poses finish into cache even if a later pose wins
         # the display ticket. Only transient mouse-drag refinements are stale.
@@ -1871,7 +1898,6 @@ class MainWindow(W.QMainWindow):
         show_frame=state is not None
         state=np.zeros_like(origin) if state is None else np.array(state,float,copy=True)
         state[state==0]=0.
-        settings=self.view_settings
         signature=self.preview_identity(self.data,roles,self.ordered_layers(),self.motions(),p,self.result)
         deform=False;drc=True
         width=settings.width_key() if self.width_toggle.isChecked() else (False,)
@@ -1912,9 +1938,8 @@ class MainWindow(W.QMainWindow):
                     self.update_state_table(state);self.update_histograms();self.show_frame_status(target)
                 else:self.present_frame(target)
                 return
-        self.preview_pending=(self.revision,self.view_settings,ticket,state.copy(),self.motions(),roles,p,self.result,case,self.geometry_cache,self.connections,self.ordered_layers(),show_frame,self.probability_toggle.isChecked(),self.space_toggle.isChecked())
+        self.preview_pending=(self.revision,settings,ticket,state.copy(),self.motions(),roles,p,self.result,case,self.geometry_cache,self.connections,self.ordered_layers(),show_frame,self.probability_toggle.isChecked(),self.space_toggle.isChecked())
         self.preview_pending+=(False,True,direct,settle,origin,self.width_toggle.isChecked(),self.reconstruction_toggle.isChecked(),self.footprint_toggle.isChecked())
-        self._reconstruction_apply_once=False;self.reconstruction_pending=False
         self.statusBar().showMessage('正在后台生成预演…保留已显示状态。');self.launch_preview()
     def launch_preview(self):
         if self._closing or self.motion_worker is not None or self.preview_pending is None:return
@@ -2393,7 +2418,7 @@ class MainWindow(W.QMainWindow):
                 for j,value in enumerate([i+1,fmt(state[0],6),fmt(state[1],6),fmt(math.degrees(state[2]),6),e['per_die_labels'][i]]):
                     self.state_table.setItem(i,j,W.QTableWidgetItem(str(value)))
             self.state_table.resizeColumnsToContents()
-        self.request_preview()
+        self.request_preview(pose_change=True)
     def contact_entries(self,frame):
         if frame is None:return []
         if 'drc_locations' not in frame:
@@ -2601,7 +2626,7 @@ class MainWindow(W.QMainWindow):
             if measured.active():measured.stop(disable=True)
             if measured.running or measured.stopping:
                 event.ignore();QtCore.QTimer.singleShot(100,self.close);return
-        self.stop_animation();self.width_yield.reset();self.reconstruction_yield.reset();self.constraint_feedback.cancel()
+        self.stop_animation();self.cut_drag.cancel(redraw=False);self.width_yield.reset();self.reconstruction_yield.reset();self.constraint_feedback.cancel()
         if hasattr(self,'mouse_die'):self.mouse_die.pending=False;self.mouse_die.full_pending=False;self.mouse_die.timer.stop();self.mouse_die.idle.stop()
         running=[w for w in self.findChildren(Worker) if w.isRunning()]
         # The physical thread may have returned before Qt delivers its queued

@@ -101,11 +101,12 @@ def serial_render(r,entry,part,center,pose):
     return adjusted,regions,None
 
 
-def live_serial(window,settings,old,ref,draft=False):
+def live_serial(original,settings,old,ref,draft=False):
     """Recompose every serial segment together, including intermediate copper."""
     from .reconstruction import Reconstructor
     from .reconstruction_status import clone_plan_pool
-    original=window.engine.reconstructor
+    from .resources import cancel_check
+    cancel_check()
     # Only this source's nominal paths are needed during a pointer move. Reuse
     # completed ownership/enclosure classification; do not rebuild all targets.
     base=getattr(original,'_base_plans',None)
@@ -115,13 +116,18 @@ def live_serial(window,settings,old,ref,draft=False):
     if base is not None and (not draft or (pool['local'] and ref not in rebuilt.box_refs and ref not in settings.reconstruction_ignored and ref not in original.settings.reconstruction_ignored and ref not in original.box_refs)):
         rebuilt.auto_following=set(original.auto_following);rebuilt.auto_ignored=dict(original.auto_ignored);rebuilt.safe_vias=dict(original.safe_vias)
         rebuilt._envelopes=original._envelopes;rebuilt._plans=expand(rebuilt,pool['local'])
-    try:local=rebuilt.frame(old['states'],targets={ref},diagnostics=False,quick=True,_raw=True)
+    try:
+        local=rebuilt.frame(old['states'],targets={ref},diagnostics=False,quick=True,_raw=True)
+        data=old['reconstruction']
+        rows=[q for q in data['pieces'] if (q['layer'],q['index'])!=ref]+local['pieces']
+        changed={k:[v for v in values if not (k==ref[0] and ref[1] in v['indices'])] for k,values in data['replacements'].items()}
+        for k,values in local['replacements'].items():
+            changed.setdefault(k,[]).extend(values)
+        if draft:
+            repaired,blocked=(),()
+        else:
+            from .topology_routing import resolve
+            changed,rows,repaired,blocked=resolve(rebuilt,changed,rows,old['states'])
     finally:
-        rebuilt.cache.close();rebuilt.block_cache.clear()
-    data=old['reconstruction'];rows=[q for q in data['pieces'] if (q['layer'],q['index'])!=ref]+local['pieces']
-    changed={k:[v for v in values if not (k==ref[0] and ref[1] in v['indices'])] for k,values in data['replacements'].items()}
-    for k,values in local['replacements'].items():changed.setdefault(k,[]).extend(values)
-    from .topology_routing import resolve
-    if draft:repaired,blocked=(),()
-    else:changed,rows,repaired,blocked=resolve(original,changed,rows,old['states'])
+        rebuilt.close()
     return dict(old,_reconstruction_changed_refs=tuple(sorted({ref,*repaired})),reconstruction=dict(data,configuration=settings.reconstruction_key(),pieces=rows,replacements=changed,violations=[],constraints_complete=False,repair_refs=repaired,hard_failures=blocked,electrically_valid=not bool(blocked)))

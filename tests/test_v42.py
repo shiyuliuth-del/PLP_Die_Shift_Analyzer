@@ -131,7 +131,7 @@ class V42Tests(unittest.TestCase):
    old=e.frame(np.array([[5.,3.,.002]]));q=old['reconstruction']['pieces'][0];plan=q['route_plan']
    cfg=replace(e.reconstructor.settings,reconstruction_intervals=((*key(plan),q['interval'][0]+20,q['interval'][1]),))
    with patch.object(FixedRules,'best_regions',side_effect=AssertionError('native search on pointer move')):
-    frame=live_serial(SimpleNamespace(engine=e),cfg,old,('5/0',0))
+    frame=live_serial(e.reconstructor,cfg,old,('5/0',0))
    self.assertFalse(frame['reconstruction']['constraints_complete'])
    self.assertEqual(frame['reconstruction']['pieces'][0]['interval'][0],q['interval'][0]+20)
    self.assertTrue(frame['reconstruction']['replacements']['5/0'][0]['geometry'].is_valid)

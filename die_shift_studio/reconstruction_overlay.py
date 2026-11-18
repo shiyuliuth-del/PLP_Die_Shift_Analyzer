@@ -69,7 +69,7 @@ class ReconstructionOverlay:
                 else:refs.add(tuple(row[:2]))
         from .reconstruction_zones import live_serial
         local=frame
-        for ref in sorted(refs):local=live_serial(w,cfg,local,ref,draft=True)
+        for ref in sorted(refs):local=live_serial(w.engine.reconstructor,cfg,local,ref,draft=True)
         self.draft_frame=frame;self.draft_key=cfg.reconstruction_key();self.draft_data=dict(local['reconstruction'],draft_refs=refs or {(q['layer'],q['index']) for q in data['pieces']})
         self.stamp=None
 
@@ -186,6 +186,13 @@ class ReconstructionOverlay:
             self.path_cache[id(g)]=item;return item[1]
         if not self.active():self.clear_hover()
         current=self.pieces();self.handles=self.handle_geometries(current)
+        self.hit_items=[]
+        for q in current:
+            if q.get('route_plan') is None:continue
+            for kind in ('moved','extra'):
+                g=self.handles.get((self._key(q),kind))
+                if g is not None and not g.is_empty:self.hit_items.append((q,kind,g))
+        self.hit_geometry=shapely.STRtree([g for _,_,g in self.hit_items])
         # A manual pose outside the probability support remains a binary fact.
         inside=True
         if current and not nominal and 'states' in (w.current_frame or {}):
@@ -292,17 +299,20 @@ class ReconstructionOverlay:
                 put(w,self.labels,count,text,tip,offset,font,color,np.asarray(to_rgb(color))*.64,color);count+=1
         for a in self.labels[count:]:a.set_visible(False)
     def pick(self,x,y,tolerance):
-        best=None;pieces=self.pieces();self.handles=self.handle_geometries(pieces)
-        for q in pieces:
-            if q.get('route_plan') is None:continue
-            for kind,g in (('moved',self.handles.get((self._key(q),'moved'))),('extra',self.handles.get((self._key(q),'extra')))):
+        if not self.active():return None
+        point=shapely.Point(x,y)
+        hit_geometry=getattr(self,'hit_geometry',None)
+        if hit_geometry is not None:
+            best=None
+            for index in hit_geometry.query(shapely.box(x-tolerance,y-tolerance,x+tolerance,y+tolerance)):
+                q,kind,g=self.hit_items[int(index)]
                 for xy in _lines(g):
-                    d=_segment_distance(xy,x,y)
-                    if best is None or d<best[0]:best=(d,q,xy,kind)
-        if best and best[0]<=tolerance:return best[1:]
+                    distance=_segment_distance(xy,x,y)
+                    if best is None or distance<best[0]:best=(distance,q,xy,kind)
+            if best and best[0]<=tolerance:return best[1:]
         for q in self.pieces():
-            if q.get('problem_region') is not None and q['problem_region'].covers(shapely.Point(x,y)):return q,None,'problem'
-            if q['bridge'].covers(shapely.Point(x,y)):return q,None,'bridge'
+            if q.get('problem_region') is not None and q['problem_region'].covers(point):return q,None,'problem'
+            if q['bridge'].covers(point):return q,None,'bridge'
         return None
     def highlight(self,picked):
         if self.hover is None or self.hover.axes is not self.w.ax:
@@ -326,7 +336,7 @@ class ReconstructionOverlay:
         self.w.scene_renderer.draw_feedback(self.hover,(id(self.data()),self.stamp),self.w.legend)
     def clear_hover(self):self.highlight(None)
     def hide(self):
-        self.clear_hover();self.stamp=None;self.handles={};self.zone_views={}
+        self.clear_hover();self.stamp=None;self.handles={};self.zone_views={};self.hit_items=[];self.hit_geometry=None
         for artist in [*self.artists.values(),*self.labels,*self.end_artists,*self.region_artists,*self.arrow_artists,*[getattr(self,n,None) for n in ('staged','warning','problems','constraints','problem_points','cuts','second_cuts','points','second_points')]]:
             if artist is not None:artist.set_visible(False)
         self.w.scene_renderer.external_draw(None)
@@ -335,6 +345,7 @@ class ReconstructionOverlay:
 class CutDrag:
     def __init__(self,window):
         self.w=window;self.state=None;self.line=None;self.latest=None
+        self.worker=None;self.pending=None
         self.timer=QtCore.QTimer(window);self.timer.setInterval(33);self.timer.timeout.connect(self._tick)
         for event,fn in [('button_press_event',self.press),('motion_notify_event',self.move),('button_release_event',self.release),('figure_leave_event',self.leave),('scroll_event',self.scroll)]:window.canvas.mpl_connect(event,fn)
     def _tolerance(self):
@@ -343,6 +354,7 @@ class CutDrag:
         if getattr(self.w.canvas,"ruler_active",False) or getattr(getattr(self.w,'region_select',None),'mode',None) is not None:return
         if getattr(self.w,"remote_locked",False):return
         w=self.w
+        if event.button!=1:return
         if not w.reconstruction_toggle.isChecked() or event.inaxes is not w.ax or event.xdata is None or getattr(w.canvas,'die_move_active',False):return
         picked=w.reconstruction_overlay.pick(event.xdata,event.ydata,self._tolerance())
         if picked is None:return
@@ -445,11 +457,12 @@ class CutDrag:
                     line=far if which else near
                     if self.w.view_settings.reconstruction_live and self.w.view_settings.reconstruction_auto:self._live(part)
                     view_piece=dict(piece,moved_cut=near,extra_cut=far)
-                    handles=self.w.reconstruction_overlay.handles if self.w.view_settings.reconstruction_live and self.w.view_settings.reconstruction_auto else self.w.reconstruction_overlay.handle_geometries([view_piece])
-                    handle=handles.get((self.w.reconstruction_overlay._key(piece),state['kind']))
-                    if handle is None:handle=self.w.reconstruction_overlay.edited_handle(piece,state['kind'],line)
-                    self.w.reconstruction_overlay.highlight((piece,_lines(handle)[0],state['kind']))
-                    self.w.render_scene()
+                    overlay=self.w.reconstruction_overlay
+                    handle=overlay.edited_handle(view_piece,state['kind'],line)
+                    segments=_lines(handle)
+                    if segments:
+                        overlay.highlight((piece,segments[0],state['kind']))
+                        overlay.pulse()
     def scroll(self,event):
         if self.state is None:return
         event.reconstruction_cut_handled=True
@@ -467,58 +480,77 @@ class CutDrag:
             self.w.statusBar().showMessage('该角度无法分离原始连接端，已保留上一个有效角度');return
         state.update(updated=updated,part=angled,moved=True,rotated_only=True)
         if self.w.view_settings.reconstruction_live and self.w.view_settings.reconstruction_auto:self._live(angled)
-        overlay=self.w.reconstruction_overlay;overlay.stamp=None;overlay.draw()
+        overlay=self.w.reconstruction_overlay
         actual=state['part'] or angled;weight=piece.get('endpoint_weights',(1.,0.))[side]
         line=transform(actual['far' if side else 'near'],state['frame']['rotation_centers'][piece['die']],state['frame']['states'][piece['die']]*weight)
         handle=overlay.edited_handle(piece,state['kind'],line) if self.w.view_settings.reconstruction_live else line
         segments=_lines(handle)
         if segments:overlay.highlight((piece,segments[0],state['kind']))
-        self.w.scene_renderer.feedback_background=None;self.w.render_scene()
+        if segments:overlay.pulse()
         self.w.statusBar().showMessage(f"边界旋转 {math.degrees(angled['angles'][side]):.1f}°；右键可撤销旋转")
 
     def _live(self,part):
-        if not self.w.view_settings.reconstruction_auto:return
-        from .reconstruction_route import warp,failed_connection,missing_area
-        state=self.state;old=state['frame'];piece=state['piece'];plan=piece['route_plan']
+        w=self.w
+        if not w.view_settings.reconstruction_auto or w.engine is None:return
         from .reconstruction_route import part_key
-        live_key=(state['updated'].reconstruction_key(),part_key(part))
-        # A snapped point may receive dozens of mouse moves with identical
-        # geometry. Reuse the accepted preview and its running checks.
-        if state.get('live_key')==live_key:return
-        state['live_key']=live_key
-        if piece.get('graph_edit') or piece.get('endpoint_weights',(1.,0.))!=(1.,0.):
-            from .reconstruction_zones import live_serial
-            proposed=live_serial(self.w,state['updated'],old,(piece['layer'],piece['index']))
-            if not self._accept_live(proposed):return
-            self.w.constraint_feedback.request(self.w.current_frame,state['updated']);self.w.reconstruction_yield.refresh(state['updated'])
-            self.w.reconstruction_overlay.stamp=None;self.w.reconstruction_overlay.draw();return
-        from .reconstruction_angles import solve
-        if self.w.view_settings.reconstruction_boundary_mode=='perpendicular':regions,error=warp(part,plan,old['rotation_centers'][piece['die']],old['states'][piece['die']],self.w.view_settings.reconstruction_style)
-        else:part,regions,error,_=solve(self.w.engine.reconstructor,plan,part,old['rotation_centers'][piece['die']],old['states'][piece['die']],quick=True)
-        if error:
-            self.w.statusBar().showMessage(error+'；已取消连接段');regions=failed_connection(part,plan,old['rotation_centers'][piece['die']],old['states'][piece['die']])
-        moved_cut=transform(part['near'],old['rotation_centers'][piece['die']],old['states'][piece['die']])
-        replacement=dict(piece,regions=regions,nominal_regions={k:part[k] for k in 'ABC'},moved=regions['C'],movable=part['C'],fixed=regions['B'],bridge=regions['A'],
-                         fallback_regions=failed_connection(part,plan,old['rotation_centers'][piece['die']],old['states'][piece['die']]),connection_failed=bool(error),
-                         missing_region=missing_area(part,plan,old['rotation_centers'][piece['die']],old['states'][piece['die']]),
-                         cut=part['near'],moved_cut=moved_cut,extra_cut=part['far'],span=part['A'],interval=(part['a'],part['b']),boundary_angles=part.get('angles',(0.,0.)),valid=not bool(error),warning=error or '',whole_landing=part['a']==0,whole_fixed_landing=part['far'].geom_type=='Point',rule_violations=())
-        data=old['reconstruction'];items=[replacement if q is piece else dict(q,regions=dict(q['regions'])) for q in data['pieces']]
-        replacements={k:[dict(v) for v in values] for k,values in data['replacements'].items()}
-        feature=[q for q in items if (q['layer'],q['index'])==(piece['layer'],piece['index'])]
-        from .reconstruction import compose_feature
-        from .reconstruction import feature_moves
-        copper,_=compose_feature(piece.get('source',plan.source),feature,plan.tolerance,feature_moves(feature,old['states'],self.w.view_settings.reconstruction_style))
-        for q in replacements.get(piece['layer'],()):
-            if piece['index'] in q['indices']:q['geometry']=copper
-        from .topology_routing import resolve
-        replacements,items,repaired,blocked=resolve(self.w.engine.reconstructor,replacements,items,old['states'])
-        proposed=dict(old,_reconstruction_changed_refs=tuple(sorted({(piece['layer'],piece['index']),*repaired})),reconstruction=dict(data,configuration=state['updated'].reconstruction_key(),pieces=items,replacements=replacements,violations=[],constraints_complete=False,repair_refs=repaired,hard_failures=blocked,electrically_valid=not bool(blocked)))
-        if not self._accept_live(proposed):return
-        from .reconstruction import decorate_problems
-        decorate_problems(self.w.current_frame['reconstruction'])
-        self.w.constraint_feedback.request(self.w.current_frame,state['updated'])
-        self.w.reconstruction_yield.refresh(state['updated'])
-        self.w.reconstruction_overlay.stamp=None;self.w.reconstruction_overlay.draw()
+        state=self.state
+        key=(state['updated'].reconstruction_key(),part_key(part))
+        if state.get('live_key')==key:return
+        state['live_key']=key
+        self.pending=(state,key,state['updated'],w.engine.reconstructor)
+        self._start_live()
+
+    def _start_live(self):
+        if self.worker is not None or self.pending is None or self.w._closing:return
+        from .gui import Worker
+        from .resources import serial_scope
+        from .reconstruction_zones import live_serial
+        state,key,settings,solver=self.pending
+        self.pending=None
+        original=state['frame']
+        piece=state['piece']
+        ref=(piece['layer'],piece['index'])
+
+        def work(_):
+            with serial_scope():
+                return live_serial(solver,settings,original,ref)
+
+        worker=Worker(work,self.w)
+        self.worker=worker
+
+        def accepted(frame):
+            if worker.cancelled.is_set() or self.state is not state or self.w._closing:return
+            current=self.w.current_frame
+            if current is not original and current is not state.get('live_frame'):
+                return
+            self._accept_live(frame)
+            state['live_frame']=self.w.current_frame
+            state['live_result_key']=key
+            from .reconstruction import decorate_problems
+            decorate_problems(self.w.current_frame['reconstruction'])
+            self.w.constraint_feedback.request(self.w.current_frame,settings)
+            overlay=self.w.reconstruction_overlay
+            overlay.stamp=None
+            overlay.draw()
+            self.w.render_scene()
+
+        def finished():
+            self.worker=None
+            worker.deleteLater()
+            if self.w._closing:
+                QtCore.QTimer.singleShot(0,self.w.close)
+            else:
+                self._start_live()
+
+        worker.done.connect(accepted)
+        worker.failed.connect(lambda message:self.w.log_bus.emit('拖动预演：'+message,'ERROR'))
+        worker.finished.connect(finished)
+        worker.start()
+
+    def _cancel_live(self):
+        self.pending=None
+        if self.worker is not None:self.worker.cancelled.set()
+
     def _accept_live(self,frame):
         failures=frame['reconstruction'].get('hard_failures',())
         if failures:
@@ -532,25 +564,29 @@ class CutDrag:
         if self.state is None:return
         if event.xdata is not None and event.ydata is not None and self.state['moved'] and not self.state.get('rotated_only'):self.latest=np.array([event.xdata,event.ydata])
         self._tick();state=self.state
-        if state.get('part') is not None and self.w.view_settings.reconstruction_auto:self._live(state['part'])
+        self._cancel_live()
         self.w.canvas.reconstruction_drag_active=False
         self.state=None;self.latest=None;self.timer.stop()
         self.w.reconstruction_overlay.clear_hover()
         if not state['moved']:return
         from .reconstruction_edits import commit_merges
-        updated=commit_merges(state['updated'],self.w.current_frame) if self.w.view_settings.reconstruction_auto else state['updated']
+        updated=state['updated']
+        if state.get('live_result_key') is not None and state['live_result_key']==state.get('live_key'):
+            updated=commit_merges(updated,self.w.current_frame)
         if updated.reconstruction_key()==self.w.view_settings.reconstruction_key():return
         self.w.view_settings=updated
         self.w.invalidate_reconstruction_edit();self.w.request_preview(quiet=True)
         if not updated.reconstruction_auto:
             self.w.reconstruction_overlay.stamp=None;self.w.reconstruction_overlay.draw();self.w.render_scene()
-    def cancel(self):
+    def cancel(self,redraw=True):
+        self._cancel_live()
         if self.state is None:return False
         self.w.canvas.reconstruction_drag_active=False
         original=self.state['frame'];self.state=None;self.latest=None;self.timer.stop()
         self.w.constraint_feedback.cancel();self.w.reconstruction_yield.refresh()
         self.w.current_frame=original;self.w.reconstruction_overlay.clear_hover()
-        self.w.reconstruction_overlay.stamp=None;self.w.reconstruction_overlay.draw();self.w.render_scene()
+        self.w.reconstruction_overlay.stamp=None
+        if redraw:self.w.reconstruction_overlay.draw();self.w.render_scene()
         return True
     def leave(self,event=None):
         if self.state is None:self.w.reconstruction_overlay.clear_hover()

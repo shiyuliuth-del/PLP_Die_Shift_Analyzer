@@ -63,6 +63,16 @@ try:
  assert abs(staged[-2]-original_interval[0])>1 and abs(staged[-1]-original_interval[1])>1
  style=w.setting_fields['reconstruction_style'];style.setCurrentIndex(style.findData('c1'));app.processEvents()
  assert w.reconstruction_pending and w.current_frame is old and not w.preview_pending
+ # A staged edit survives switching extremes and the zero row. Each
+ # frame still uses the applied settings until a manual recompute.
+ applied=old['reconstruction']['configuration']
+ w.extreme_table.setCurrentCell(1,0);wait()
+ assert w.reconstruction_pending and w.active_preview is not None
+ np.testing.assert_allclose(w.current_frame['states'],w.extremes[w.active_preview]['states'])
+ assert w.current_frame['reconstruction']['configuration']==applied
+ w.restore_button.click();wait();assert w.reconstruction_pending
+ np.testing.assert_allclose(w.current_frame['states'],0)
+ assert w.current_frame['reconstruction']['configuration']==applied
  w.reconstruction_compute.click();wait();assert not w.reconstruction_pending
  assert w.current_frame['reconstruction']['configuration']==w.view_settings.reconstruction_key()
  assert w.preview_ticket>ticket

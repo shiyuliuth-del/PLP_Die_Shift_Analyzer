@@ -82,7 +82,7 @@ class MouseDieMode:
         if settle:self.full_pending=False
         # Keep one newest pointer target while a segment is playing. Its final
         # pose is fully solved and uses the same replay packet as numeric input.
-        w.request_preview(direct=not w.view_settings.animation_enabled,settle=settle)
+        w.request_preview(direct=not w.view_settings.animation_enabled,settle=settle,pose_change=True)
     def update_text(self):
         w=self.w
         if not hasattr(self,'text'):

@@ -69,7 +69,7 @@ class ManualPreview(W.QDialog):
             states=np.asarray([[row[0].value(),row[1].value(),math.radians(row[2].value())] for row in self.rows])
             w.manual_states=states;w.active_preview=None
             w.extreme_table.blockSignals(True);w.extreme_table.setCurrentCell(-1,0);w.extreme_table.blockSignals(False)
-            w.request_preview()
+            w.request_preview(pose_change=True)
         except Exception as exc:w.error(exc)
 
     def restore(self):
