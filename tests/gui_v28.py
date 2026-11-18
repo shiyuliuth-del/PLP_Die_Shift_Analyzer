@@ -80,11 +80,13 @@ w.target_sigma.setCurrentText('3');wait();assert w.setting_fields['probability_s
 load('示例O_运动网络三线路通道',dict(target_nsigma=0,per_die_enabled=True,die_bounds=[[35,0,.7],[0,10,0]]))
 assert (w.problem_filter.currentIndex()!=0)
 w.width_toggle.setChecked(True);wait();w.grid_mode.setCurrentIndex(0);wait()
-summary=w.current_frame['width_summary'];ix=ProblemIndex(w.extremes,summary['red_factors'])
-assert [i for i,_ in w.page_items]==[ix.at(j) for j in range(ix.total)] and ix.total
+ix=ProblemIndex(w.extremes,current_drc_factors(w.result['extreme_factors']))
+assert [i for i,_ in w.page_items]==[ix.at(j) for j in range(ix.total)]
 assert w.width_overlay.outlines.get_visible() and not w.width_overlay.boxes.get_visible()
 assert all(not a.get_visible() for a in w.width_overlay.labels)
-table.setCurrentCell(1,0);wait();assert w.width_overlay.boxes.get_visible()
+w.problem_filter.setCurrentIndex(0);wait()
+red=ProblemIndex(w.extremes,w.current_frame['width_summary']['red_factors']);assert red.total
+row=next(j+1 for j,(i,_) in enumerate(w.page_items) if i==red.at(0));table.setCurrentCell(row,0);wait();assert w.width_overlay.boxes.get_visible()
 with patch('die_shift_studio.width_summary.summarize',side_effect=AssertionError('cache miss')):
     QTest.mouseClick(w.restore_button,left);wait();assert not w.width_overlay.boxes.get_visible()
 close_window(app,w);tmp.cleanup()
