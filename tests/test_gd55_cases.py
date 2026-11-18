@@ -15,7 +15,7 @@ class GD55Cases(unittest.TestCase):
         self.assertEqual(config['profile']['sheet'],'Measurements')
         files=[Path(row['path']) for row in config['files'] if row['enabled']]
         self.assertEqual(len(files),3)
-        self.assertTrue(all(path.parent==root/'Excel' for path in files))
+        self.assertTrue(all(path.parent==root/'RealDataAnalyse/Excel' for path in files))
         self.assertEqual({p.relative_to(root).as_posix() for p in root.rglob('*') if p.is_file()},set(GD55_INPUTS))
         rows=[]
         for number,path in enumerate(files,1):
@@ -40,7 +40,7 @@ class GD55Cases(unittest.TestCase):
         self.assertGreater(max(abs(p[0]) for p in poses),15)
         self.assertGreater(max(abs(p[1]) for p in poses),15)
         self.assertGreater(max(abs(p[2]) for p in poses),1)
-        self.assertEqual(config['template'],str(root/'GD55_Template.gds'))
+        self.assertEqual(config['template'],str(root/'RealDataAnalyse/Template/GD55_Template.gds'))
         project=json.loads(Path(config['project']).read_text())
         self.assertEqual(project['parameters']['minimum_area_um2'],1)
         self.assertEqual(project['settings']['drc_tolerance_um'],.5)

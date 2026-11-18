@@ -202,7 +202,7 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
     # can also have been prepared by a different overlay/worker; keep native
     # query operands private to this invocation, including nominal copper.
     def private(g):return shapely.from_wkb(g.wkb)
-    objects={ref:private(g) for ref,g in original.items()}
+    objects=dict(zip(original,shapely.from_wkb(shapely.to_wkb(list(original.values())))))
     for layer,rows in out.items():
         for row in rows:
             for i in row['indices']:objects[layer,i]=private(row['geometry'])

@@ -43,8 +43,11 @@ class Runner:
         self.template = None
         self.template_sha256 = expected_template_sha256
         if template:
+            from die_shift_studio.jobs import REALDATA_DIRECTORY
             from .projects import template_file
             root = self.output.parent.parent if self.managed_output else Path(self.project).parent
+            if self.managed_output and root.name == REALDATA_DIRECTORY and root != Path(self.project).parent:
+                root = root.parent
             self.template = str(template_file(root, template))
             if Path(self.template) == self.output:
                 raise ValueError('输出不得覆盖模板图纸')

@@ -10,6 +10,7 @@ if not getattr(sys, 'frozen', False):
 
 
 def main():
+    from die_shift_studio.jobs import measured_workspace
     from RealDataAnalyse.transport import installation
     from RealDataAnalyse.storage import configure_logging
     configure_logging(installation())
@@ -31,15 +32,14 @@ def main():
                     result = PlanRunner(Plans(args.run_plans), trace=trace).run()
                 finally: trace.close()
             elif args.import_data:
-                log_root = Path(config['database']).resolve().parent
-                if log_root.name == 'Tasks':
-                    log_root = log_root.parent
+                database = Path(config['database']).resolve()
+                log_root = next((p.parent for p in database.parents if p.name == 'Tasks'), database.parent)
                 logger = configure_logging(log_root)
                 import threading
                 from RealDataAnalyse.excel import import_files
                 result = import_files(**config, stop=threading.Event(), progress=lambda update: logger.info('%s', update))
             else:
-                configure_logging(Path(config['project']).resolve().parent)
+                configure_logging(measured_workspace(config['project']))
                 from RealDataAnalyse.runner import Runner
                 result = Runner(**config).run()
             code = 0 if result.get('state', 'completed') == 'completed' else 1

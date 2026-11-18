@@ -96,7 +96,7 @@ class WidthYieldDisplay:
         p=replace(p,target_nsigma=0)
         cfg=w.view_settings;roles=w.roles();order=w.ordered_layers()
         sampling=(cfg.width_yield_method,cfg.width_grid_nodes) if cfg.width_yield_method=='grid' else (cfg.width_yield_method,cfg.width_yield_exponent,cfg.width_yield_seed)
-        if cfg.evaluation_scope=='focus':sampling=('focus',)
+        if cfg.evaluation_scope!='all':sampling=(cfg.evaluation_scope,)
         token=('width-yield-v36',logical_fingerprint((w.data.geometry_id,w.data.top_name,roles,order,asdict(p),
                cfg.drc_tolerance_um,sampling,cfg.evaluation_scope)))
         key=(id(w.cache_group),token)
@@ -160,9 +160,9 @@ class WidthYieldDisplay:
         self.rendered=stamp
         q=policy_yields(self.bank,ignored);v=q['values']
         partial=q['samples']<q['total']
-        method={'exact':'全输入几何判定','mc':'独立联合蒙特卡洛','cubature':'确定性联合求积','importance':'全范围尾部增强加权积分','grid':'全情况有限网格穷举','focus':'重点组合内归一化联合概率'}[q['method']]
+        method={'exact':'全输入几何判定','mc':'独立联合蒙特卡洛','cubature':'确定性联合求积','importance':'全范围尾部增强加权积分','grid':'全情况有限网格穷举','focus':'重点组合内归一化联合概率','risk':'极端组合内归一化联合概率'}[q['method']]
         labels=[name+' '+text for name,text in zip(POLICIES,policy_texts(q,decimals))]
-        prefix='重点组合 · ' if q['method']=='focus' else ''
+        prefix={'focus':'重点组合 · ','risk':'极端组合 · '}.get(q['method'],'')
         self.label.set_values(prefix,labels,' …' if partial else '')
         tip=['全修正良率：红色、黄色问题均修正，被忽略线路保持原图；忽略线路出现问题即失效。',
              '不修正良率：所有问题均不修正，任一红色或黄色问题（含忽略线路）出现即失效。',f'{method} · {q["samples"]}/{q["total"]} 个整包姿态，按原始 RDL 和当前选定范围计算。']

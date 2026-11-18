@@ -8,7 +8,7 @@ from matplotlib.collections import LineCollection,PatchCollection
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 from .reconstruction import normalize_via_refs,cut_identity_matches,transform
-from .qt_compat import QtCore,QtWidgets as W
+from .qt_compat import Qt,QtCore,QtWidgets as W
 from .reconstruction_events import zone_key,active_region,color_for,PALETTE,RANK
 
 REGION_COLORS={'move':'#2f7bd6','stay':'#c2571f'}
@@ -432,7 +432,7 @@ class CutDrag:
                 projection=plan.drag_projection(route_cursor,state['projection'],state['projection_cursor'])
                 state['projection']=projection;state['projection_cursor']=route_cursor.copy()
                 from .manual_regions import move_side
-                edit=move_side(state['settings'],plan,state['nominal_press'],cursor) if any(layer==plan.layer and plan.source.intersects(shapely.Polygon(verts)) for layer,verts in state['settings'].reconstruction_boxes) else None
+                edit=move_side(state['settings'],plan,state['nominal_press'],cursor,piece.get('strict_box')) if any(layer==plan.layer and plan.source.intersects(shapely.Polygon(verts)) for layer,verts in state['settings'].reconstruction_boxes) else None
                 if edit:state['updated'],part=edit
                 else:
                     part,clamped=plan.edit_pose(*piece['interval'],which,state['press_interval']+projection-state['press_projection'],frame['rotation_centers'][owner],frame['states'][owner],self.w.view_settings.reconstruction_style,cursor=route_cursor)
@@ -622,18 +622,25 @@ def nudge_cut(settings,piece,step,kind='cut'):
     value=piece['interval'][1 if kind=='extra' else 0]+step
     return _store_cut(settings,piece,None,plan.route.interpolate(max(0.,min(plan.length,value))).coords[0],kind)
 class RegionSelect:
-    """A rotated rectangle clips the nominal copper exactly, without auto growth."""
+    """Draw an oriented selection and seed cuts on the intersected sources."""
     def __init__(self,window):
         self.w=window;self.mode=None;self.state=None;self.rect=None
         for name,fn in [('button_press_event',self.press),('motion_notify_event',self.move),('button_release_event',self.release),('scroll_event',self.scroll)]:window.canvas.mpl_connect(name,fn)
     def set_mode(self,mode):
+        if mode is not None and self.mode is None:
+            self.previous_cursor=self.w.canvas.cursor()
+            self.w.canvas.setCursor(getattr(Qt,'CursorShape',Qt).SizeAllCursor)
+        if mode is None:
+            if self.mode is not None:self.w.canvas.setCursor(self.previous_cursor)
+            self._drop()
         self.mode=mode
-        if mode is None:self._drop()
     def _drop(self):
         self.w.canvas.region_rotating=False
         if self.rect is not None:
             try:self.rect.remove()
             except ValueError:pass
+            self.w.scene_renderer.feedback_background=None
+            self.w.canvas.draw_idle()
         self.rect=None;self.state=None
     def _point(self,event):
         return np.array([event.xdata,event.ydata],float) if event.xdata is not None and event.ydata is not None else None
@@ -642,7 +649,7 @@ class RegionSelect:
         x,y=(s['current']-s['anchor'])@rotation
         return s['anchor']+np.array([[0,0],[x,0],[x,y],[0,y]])@rotation.T
     def draw(self):
-        self.rect.set_xy(self.vertices());self.w.scene_renderer.external_draw(None);self.w.canvas.draw_idle()
+        self.rect.set_xy(self.vertices());self.w.scene_renderer.draw_feedback(self.rect,('region',id(self.rect)),self.w.legend)
     def press(self,event):
         if self.mode is None or event.button!=1 or event.inaxes is not self.w.ax or getattr(event,'reconstruction_cut_handled',False):return
         if getattr(self.w,'remote_locked',False) or getattr(self.w.canvas,'ruler_active',False):return
@@ -666,7 +673,7 @@ class RegionSelect:
         self.state['anchor']=point+np.array([[c,-t],[t,c]])@(self.state['anchor']-point)
         self.state['current']=point;self.state['angle']+=delta;self.draw()
     def release(self,event):
-        if self.state is None:return
+        if self.state is None or event.button!=1:return
         if self._point(event) is not None:self.state['current']=self._point(event)
         vertices=self.vertices();layers=self._layers();self._drop()
         if abs(shapely.Polygon(vertices).area)<1e-12 or not layers:return
@@ -674,6 +681,6 @@ class RegionSelect:
         rows.extend((layer,tuple(tuple(map(float,v)) for v in vertices)) for layer in layers)
         self.w.view_settings=replace(self.w.view_settings,reconstruction_boxes=tuple(rows))
         self.w.invalidate_reconstruction_edit();self.w.request_preview(quiet=True)
-        self.w.statusBar().showMessage('已按实际选框生成动区；框外不扩展，无法分离端点时显示连接问题')
+        self.w.statusBar().showMessage('已提交框选动区；必要时在原选框周围延伸至可用边界')
     def _layers(self):
         return sorted(k for k,role in self.w.roles().items() if role=='固定RDL' and self.w.visible_boxes[k].isChecked())

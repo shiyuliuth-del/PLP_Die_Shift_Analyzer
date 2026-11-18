@@ -6,13 +6,16 @@ from pathlib import Path
 import shutil
 import tempfile
 
-from die_shift_studio.jobs import atomic_save
+from die_shift_studio.jobs import REALDATA_DIRECTORY, atomic_save, provision_project
 from .excel import DEFAULT_PROFILE
 from .storage import sha256
 
 SETTINGS = 'RealDataAnalyse.project.json'
-GD55_INPUTS = ('GD55_1105.gds','GD55.dshift.json',SETTINGS,'GD55_Template.gds',
-               *(f'Excel/GD55_SYNTHETIC_DIE{die}.xlsx' for die in range(1,4)))
+GD55_INPUTS = ('GD55_1105.gds', 'GD55.dshift.json',
+               *(f'{REALDATA_DIRECTORY}/{name}' for name in (
+                   SETTINGS, 'Template/GD55_Template.gds',
+                   *(f'Excel/GD55_SYNTHETIC_DIE{die}.xlsx' for die in range(1, 4)),
+               )))
 
 
 def inside(folder, value):
@@ -28,7 +31,11 @@ def load_folder(folder):
     root = Path(folder).resolve()
     if not root.is_dir():
         raise ValueError('请选择已有项目文件夹')
-    manifest = inside(root, SETTINGS)
+    workspace = inside(root, REALDATA_DIRECTORY)
+    had_workspace = workspace.is_dir()
+    manifest = inside(workspace, SETTINGS)
+    if not manifest.is_file():
+        manifest = inside(root, SETTINGS)  # V51 and earlier
     saved = json.loads(manifest.read_text(encoding='utf8')) if manifest.exists() else {}
     if not isinstance(saved, dict) or saved.get('schema', 1) != 1:
         raise ValueError('不支持的客户端项目配置')
@@ -51,12 +58,19 @@ def load_folder(folder):
     source = inside(root, data['gds_path'])
     if not source.is_file():
         raise ValueError(f'项目图纸不存在：{source.name}')
+    workspace = provision_project(root)
     files = list(saved.get('files') or [])
     known = {inside(root,item['path']) for item in files}
     excluded = {inside(root,path) for path in saved.get('excluded_excel',[])}
-    excel = inside(root,'Excel')
-    directory = excel if excel.is_dir() else root
-    if directory == excel or 'files' not in saved:
+    excel = workspace / 'Excel'
+    legacy_excel = inside(root, 'Excel')
+    directories = [excel]
+    legacy_selection = any(path.parent == legacy_excel for path in known)
+    if legacy_excel.is_dir() and (manifest.parent == root or legacy_selection):
+        directories.append(legacy_excel)
+    elif not had_workspace and 'files' not in saved and not manifest.is_file():
+        directories.append(legacy_excel if legacy_excel.is_dir() else root)
+    for directory in directories:
         for path in sorted(directory.iterdir()):
             if path.is_file() and path.suffix.lower()=='.xlsx' and not path.name.startswith('~$'):
                 path = inside(root,path)
@@ -64,23 +78,33 @@ def load_folder(folder):
                     files.append(dict(path=str(path),enabled=True))
                     known.add(path)
     template = template_file(root,saved.get('template'))
+    if 'template' not in saved:
+        templates = [path for path in (workspace / 'Template').iterdir()
+                     if path.is_file() and path.suffix.lower() in ('.gds', '.oas', '.oasis')]
+        if len(templates) == 1:
+            template = template_file(root, templates[0])
     normalized = []
     for item in files:
         path = inside(root, item['path'])
-        if path.parent == excel and not path.is_file():
+        if path.parent in (excel, legacy_excel) and not path.is_file():
             continue
         entry = dict(path=str(path), enabled=bool(item.get('enabled', True)))
         if 'profile' in item:
             entry['profile'] = copy.deepcopy(item['profile'])
         normalized.append(entry)
-    return dict(folder=str(root), project=str(project), files=normalized, template=str(template) if template else '',
-                database=str(inside(root, saved.get('database', 'Tasks/measurements.sqlite'))),
-                output=str(inside(root, saved.get('output', 'Output/' + root.name + '.oas'))),
+    database = inside(root, saved.get('database') or root / 'Tasks/measurements.sqlite')
+    output = inside(root, saved.get('output') or root / 'Output' / f'{root.name}.oas')
+    if not database.is_file():
+        database = inside(workspace, 'Tasks/measurements.sqlite')
+        output = inside(workspace, Path('Output') / f'{root.name}.oas')
+    return dict(folder=str(root), workspace=str(workspace), project=str(project), files=normalized,
+                template=str(template) if template else '', database=str(database), output=str(output),
                 profile=copy.deepcopy(saved.get('profile', DEFAULT_PROFILE)), controls=saved.get('controls', {}), shared_mapping=bool(saved.get('shared_mapping', True)))
 
 
 def save_folder(folder, project, files, database, output, profile, controls, shared_mapping=True, template=None):
     root = Path(folder).resolve()
+    workspace = provision_project(root)
     def relative(path):
         return inside(root, path).relative_to(root).as_posix()
     payload = dict(schema=1, project=relative(project), files=[dict(path=relative(p['path']), enabled=p['enabled'], **({'profile': p['profile']} if 'profile' in p else {})) for p in files],
@@ -88,11 +112,12 @@ def save_folder(folder, project, files, database, output, profile, controls, sha
     if template:
         payload['template'] = relative(template_file(root,template))
     selected = {inside(root,item['path']) for item in files}
-    excel = inside(root,'Excel')
-    payload['excluded_excel'] = [relative(path) for path in sorted(excel.glob('*'))
-                                 if path.is_file() and path.suffix.lower()=='.xlsx'
-                                 and not path.name.startswith('~$') and path.resolve() not in selected]
-    atomic_save(inside(root, SETTINGS), payload)
+    payload['excluded_excel'] = [
+        relative(path) for directory in (workspace / 'Excel', inside(root, 'Excel'))
+        for path in sorted(directory.glob('*')) if path.is_file() and path.suffix.lower() == '.xlsx'
+        and not path.name.startswith('~$') and path.resolve() not in selected
+    ]
+    atomic_save(inside(workspace, SETTINGS), payload)
 
 
 def template_file(root, value):
@@ -101,7 +126,8 @@ def template_file(root, value):
     path = inside(root,value)
     if path.suffix.lower() not in ('.gds','.oas','.oasis') or not path.is_file():
         raise ValueError(f'模板图纸须为已有GDS/OAS文件：{value}')
-    if path.is_relative_to(inside(root,'Output')):
+    if any(path.is_relative_to(inside(root, directory)) for directory in (
+            'Output', f'{REALDATA_DIRECTORY}/Output')):
         raise ValueError('模板图纸须存放在Output目录之外')
     return path
 
@@ -113,6 +139,7 @@ def copy_excel(folder, paths, stop):
 def copy_inputs(folder, paths, stop, subfolder, suffixes):
     """Copy external inputs without altering originals or replacing existing data."""
     root = Path(folder).resolve()
+    destination = inside(provision_project(root), subfolder)
     result = []
     for raw in paths:
         if stop.is_set():
@@ -120,15 +147,13 @@ def copy_inputs(folder, paths, stop, subfolder, suffixes):
         source = Path(raw).resolve()
         if not source.is_file() or source.suffix.lower() not in suffixes:
             raise ValueError(f'输入文件格式无效：{source}')
-        if source.is_relative_to(root):
+        if source.is_relative_to(destination):
             result.append(str(source))
             continue
-        destination = inside(root, subfolder)
-        destination.mkdir(parents=True, exist_ok=True)
         digest = sha256(source, stop)
-        target = destination / source.name
+        target = inside(destination, source.name)
         if target.exists() and sha256(target, stop) != digest:
-            target = destination / (source.stem + '-' + digest[:16] + source.suffix)
+            target = inside(destination, source.stem + '-' + digest[:16] + source.suffix)
         if not target.exists():
             fd, name = tempfile.mkstemp(prefix='.excel-', dir=destination)
             try:
@@ -164,7 +189,7 @@ def install_case(destination):
         return
     with tempfile.TemporaryDirectory(prefix='.case-', dir=jobs) as temp:
         stage = Path(temp) / 'GD55'
-        stage.mkdir()
+        provision_project(stage)
         # Only the reviewed case inputs, never copy a developer's task outputs.
         for name in GD55_INPUTS:
             (stage / name).parent.mkdir(parents=True,exist_ok=True)

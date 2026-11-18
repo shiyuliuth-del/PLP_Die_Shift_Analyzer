@@ -69,7 +69,7 @@ def partition(plan,polygon):
                 box_invalid=ambiguous,box_complex=active.geom_type!='Polygon' or near.geom_type not in ('LineString','Point') or far.geom_type not in ('LineString','Point'))
 
 
-def move_side(settings,plan,press,cursor):
+def move_side(settings,plan,press,cursor,visible_box=None):
     """Move only the pressed side of its source rectangle in nominal coordinates."""
     from dataclasses import replace
     choices=[];press=np.asarray(press,float);cursor=np.asarray(cursor,float)
@@ -80,11 +80,70 @@ def move_side(settings,plan,press,cursor):
             edge=shapely.LineString([xy[j],xy[(j+1)%4]])
             choices.append((edge.distance(shapely.Point(press)),i,j))
     if not choices:return None
-    _,i,j=min(choices);rows=list(settings.reconstruction_boxes);layer,verts=rows[i];xy=np.array(verts,float)
+    distance,i,j=min(choices);rows=list(settings.reconstruction_boxes);layer,verts=rows[i];xy=np.array(verts,float)
+    if distance>plan.tolerance*4 and visible_box is not None and visible_box.geom_type=='Polygon':
+        contour=np.asarray(visible_box.exterior.coords[:-1],float)
+        if contour.shape==(4,2):
+            xy=contour.copy()
+            j=min(range(4),key=lambda n:shapely.LineString([xy[n],xy[(n+1)%4]]).distance(shapely.Point(press)))
     a,b=j,(j+1)%4;v=xy[b]-xy[a];n=np.array([-v[1],v[0]])/np.linalg.norm(v)
     thickness=(xy[(j+2)%4]-xy[b])@n
     if thickness<0:n=-n;thickness=-thickness
     xy[[a,b]]+=min(float((cursor-press)@n),thickness-plan.tolerance*2)*n
     rows[i]=(layer,tuple(map(tuple,xy)));cfg=replace(settings,reconstruction_boxes=tuple(rows))
-    bounds=shapely.union_all([shapely.Polygon(v) for k,v in rows if k==layer and plan.source.intersects(shapely.Polygon(v))]);part=partition(plan,bounds)
+    bounds=shapely.union_all([shapely.Polygon(v) for k,v in rows if k==layer and plan.source.intersects(shapely.Polygon(v))]);part=usable_partition(plan,bounds)
     return (cfg,part) if part is not None else None
+
+
+def boxes_by_source(model, rows):
+    by_layer={}
+    for layer, xy in rows:
+        if layer in model.cache.layers:
+            by_layer.setdefault(layer,[]).append(shapely.Polygon(xy))
+    result={}
+    for layer, boxes in by_layer.items():
+        geometries=model.cache.layers[layer]['geometry']
+        tree=shapely.STRtree(geometries)
+        i,j=tree.query(boxes,predicate='intersects')
+        for box,ref in zip(i,j):
+            result.setdefault((layer,int(ref)),[]).append(boxes[int(box)])
+    return {ref:shapely.union_all(areas) for ref,areas in result.items()}
+
+
+def usable_partition(plan, polygon):
+    """Keep valid cuts; extend trapped boxes across the local trace if needed."""
+    initial = partition(plan, polygon)
+    def good(part):
+        if not part or part['box_invalid'] or part['box_complex']:
+            return False
+        # An empty outer cut is legitimate only when its terminal is included.
+        terminals = getattr(plan, 'terminal_vias', ((plan.land,), tuple(plan.anchors)))
+        for name, ports in zip(('near', 'far'), terminals):
+            if part[name].geom_type == 'Point' and not any(part['A'].intersects(g) for g in ports):
+                return False
+        return not part['A'].is_empty
+    if good(initial) or initial is None:
+        return initial
+
+    xy = shapely.get_coordinates(polygon)
+    s = plan.route.project(polygon.representative_point())
+    direction = np.asarray(plan.tangent(s))
+    if not np.linalg.norm(direction):
+        return initial
+    basis = np.column_stack((direction, [-direction[1], direction[0]]))
+    center = np.asarray(plan.route.interpolate(s).coords[0])
+    local = (xy-center)@basis
+    lo, hi = local.min(axis=0), local.max(axis=0)
+    span = np.maximum(hi-lo, plan.tolerance*4)
+    # Extend width first, around a local route, without growing along the
+    # entire connected plane. Grow length only if the selection cannot split
+    # that source with a transverse cut alone.
+    base = max(float(getattr(plan, 'width', 0.)), min(span)*.5, plan.tolerance*8)
+    for across, along in ((.5,0),(1,0),(2,0),(4,0),(2,.5),(4,1),(8,2)):
+        pad = np.array([along,across])*base
+        a,b = lo-pad,hi+pad
+        grown = shapely.Polygon(np.array([[a[0],a[1]],[b[0],a[1]],[b[0],b[1]],[a[0],b[1]]])@basis.T+center)
+        result = partition(plan, grown)
+        if good(result):
+            return result
+    return initial

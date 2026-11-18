@@ -11,7 +11,7 @@ from die_shift_studio.gui import MainWindow,W,QtCore,QtGui
 from die_shift_studio.qt_compat import Qt
 from PyQt5.QtTest import QTest
 from die_shift_studio.core import read_gds
-from die_shift_studio.jobs import atomic_save
+from die_shift_studio.jobs import atomic_save, PROJECT_DIRECTORIES
 app=W.QApplication([])
 with tempfile.TemporaryDirectory() as tmp:
     window=MainWindow(jobs_dir=Path(tmp)/'Jobs');window.show();errors=[];window.error=lambda message:errors.append(str(message))
@@ -61,6 +61,7 @@ with tempfile.TemporaryDirectory() as tmp:
     with patch.object(W.QInputDialog,'getText',return_value=('测试工程',True)) as dialog:
         window.save_project();assert dialog.call_count==1
     saved=window.project_path;assert saved.parent.parent==window.jobs_dir and saved.exists()
+    assert all((saved.parent / name).is_dir() for name in PROJECT_DIRECTORIES)
     assert json.loads(saved.read_text())['layer_order'][3:5]==['31/0','30/0']
     with patch.object(W.QInputDialog,'getText',side_effect=AssertionError('Existing jobs must overwrite')):window.save_project()
     window.job_combo.setCurrentIndex(0);assert window.project_path is None
@@ -81,9 +82,9 @@ with tempfile.TemporaryDirectory() as tmp:
         chosen=window.result['schemes'][window.result['recommendation']['scheme']-1]
         assert chosen['gamma']<=min(s['gamma'] for s in candidates)+1e-9
     else:assert window.result['recommendation']['scheme'] is None
-    assert windo(w.problem_filter.currentIndex()!=0);window.problem_filter.setCurrentIndex(0);wait_idle()
-    assert window.extreme_table.rowCount()==window.focus_extremes.total+1 and window.extremes.total==728
-    window.grid_mode.setCurrentIndex(0);wait_idle();assert window.extreme_table.rowCount()==257
+    assert window.problem_filter.currentIndex()!=0;window.problem_filter.setCurrentIndex(0);wait_idle()
+    assert window.extreme_table.rowCount()==window.scoped_catalog().total+1 and window.extremes.total==728
+    window.grid_mode.setCurrentIndex(0);wait_idle();assert window.extreme_table.rowCount()==500
     assert all(window.extreme_table.item(0,j).text()=='' for j in range(window.extreme_table.columnCount()))
     assert not hasattr(window,'detail')
     # Rapid requests must show only the newest selection.

@@ -26,7 +26,7 @@ def admission(active,estimated_mb=256,snapshot=None):
     # larger share. The global CPU budget is shared by concurrent jobs.
     def share(total):
         if p['cpu']<6 or total<2:return max(1,total)
-        extra=max(1,total//3)
+        extra=max(1,min(4,total//4))
         return extra if active else total-extra
     return dict(start=start,capacity=cap,threads=share(p['workers']),processes=share(p['process_workers']),load=p,
                 reason='资源充足，独立任务并行' if start and active else '开始后台任务' if start else '当前负载较高或已有任务占用预算，排队等待')

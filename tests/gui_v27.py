@@ -37,7 +37,7 @@ def load(name,source,overrides):
 
 params=dict(per_die_enabled=True,die_bounds=[[35,0,0],[0,0,0]],line_width_um=9,line_space_um=13,target_nsigma=2)
 load('width','示例O_运动网络三线路通道',params)
-assert w.grid_mode.currentText()=='重点组合' and '共 ' in w.page_summary.text() and '第 1/' in w.page_summary.text()
+assert w.grid_mode.currentText()=='极端组合' and '共 ' in w.page_summary.text() and '第 1/' in w.page_summary.text()
 # Tail-probability styling tests full-input probabilities, after checking the focus default.
 w.grid_mode.setCurrentIndex(0);wait()
 w.manual_preview.rebuild();w.manual_preview.rows[0][0].setValue(35);QTest.mouseClick(w.manual_preview.preview_button,left);wait()

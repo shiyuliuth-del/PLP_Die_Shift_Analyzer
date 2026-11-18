@@ -61,6 +61,7 @@ class Parameters:
     max_route_angle_deg: float = 30.0
     package_clearance_um: float = 10.0
     minimum_area_um2: float = 0.5
+    minimum_edge_um: float = 0.01
     routing_edge_keepout_um: float = 40.0
     min_die_gap_um: float = 20.0
     min_package_clearance_um: float = 20.0
@@ -154,7 +155,7 @@ class Parameters:
         for key in positive:
             if getattr(self,key) <= 0:
                 raise ValueError(f"{key} 必须大于0")
-        for key in ("minimum_area_um2", "package_clearance_um", "moving_annulus_um", "annulus_um", "residual_budget_um", "routing_edge_keepout_um", "min_die_gap_um",
+        for key in ("minimum_area_um2", "minimum_edge_um", "package_clearance_um", "moving_annulus_um", "annulus_um", "residual_budget_um", "routing_edge_keepout_um", "min_die_gap_um",
                     "min_package_clearance_um", "single_bound_x_um", "single_bound_y_um",
                     "multi_bound_x_um", "multi_bound_y_um", "bound_angle_deg"):
             if getattr(self,key) < 0:
@@ -541,7 +542,12 @@ def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order
         engine=PreviewEngine(contact_model.cache,original_case,roles,motions or {},p,result,connections,contact_model=contact_model)
         try:
             from .representatives import RepresentativeExtremes
-            selected=RepresentativeExtremes.from_result(original_case,p,result,grid) if extreme_scope=='focus' else grid
+            from .risk_scope import indices_for
+            result['risk_indices']=indices_for(contact_model,p,grid)
+            if extreme_scope=='risk':
+                selected=RepresentativeExtremes(original_case,p,grid,risk_indices=result['risk_indices'])
+            else:
+                selected=RepresentativeExtremes.from_result(original_case,p,result,grid) if extreme_scope=='focus' else grid
             factors=evaluate_states(engine,selected,cfg,notify)
         except InterruptedError:raise
         except Exception as exc:
@@ -552,7 +558,7 @@ def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order
         result['extreme_factors']=factors
         result['evaluation_scope']=extreme_scope
         result['available_discrete_states']=grid.total+1
-        if extreme_scope=='focus':result['discrete_states']=len(selected.indices)+1
+        if extreme_scope!='all' and factors.get('checked'):result['discrete_states']=factors['package_states']
         from .representatives import RepresentativeExtremes
         result['focused_states']=len(RepresentativeExtremes.from_result(original_case,p,result,grid))
         counts=[grid.radices[r['owner']] for r in contact_model.records if grid.radices[r['owner']]>1]

@@ -169,12 +169,19 @@ class Reconstructor:
         from .drc_rules import construction_rules
         self._rule_width,self.rule_space=construction_rules(parameters,settings,self.tol)
         self.overlap_um=parameters.annulus_um;self.length_um=self.width_um=self.extra_um=0.
-        self.auto_ignored={};self.auto_following=set();self.safe_vias={}
+        self.auto_ignored={};self.auto_following=set();self.safe_vias={};self.die_internal={}
         self.vias=[];self.stays=[];self.vias_by_target={};self._plans=None;self.manual_quality={};self.manual_masses={}
         self.plan_pool=plan_pool if plan_pool is not None else {}
         self._last_raw_frames={}
-        self.geometry_pool=geometry_pool if geometry_pool is not None else EphemeralCache(budget=64*1024**2,max_entries=4096)
-        self.box_refs={(layer,i) for layer,points in settings.reconstruction_boxes for i,g in enumerate(model.cache.layers[layer]['geometry']) if g.intersects(shapely.Polygon(points))} 
+        from .resources import resource_profile
+        geometry_mb=max(4,min(512,resource_profile()['memory_budget_mb']//24))
+        self.geometry_pool=geometry_pool if geometry_pool is not None else EphemeralCache(
+            budget=geometry_mb*1024**2,max_entries=max(4096,128*geometry_mb))
+        from .manual_regions import boxes_by_source
+        self.source_boxes=boxes_by_source(model,settings.reconstruction_boxes)
+        self.box_refs=set(self.source_boxes)
+        self.box_partitions={};self._entry_catalogue=None;self._entries_by_ref={}
+
         self.cuts={(str(l),int(i),normalize_via_refs(v)):(nx,ny,x,y) for l,i,v,nx,ny,x,y in settings.reconstruction_cuts}
         self.extra_cuts={(str(l),int(i),normalize_via_refs(v)):(nx,ny,x,y) for l,i,v,nx,ny,x,y in settings.reconstruction_extra_cuts}
         self.second_cuts=settings.reconstruction_second_cuts
@@ -218,13 +225,16 @@ class Reconstructor:
         from dataclasses import replace
         probability_parameters=replace(self.p,target_nsigma=0)
         priority_grid=None if getattr(self,'measured_only',False) else WidthGrid(probability_parameters,len(self.model.bound.centers),3)
+        local_poses=catalogue.locals
+        if priority_grid is not None and self.settings.evaluation_scope=='risk':
+            priority_grid,local_poses=self.risk_priority(catalogue)
         from .reconstruction_enclosure import enclosure_certificate
         groups=[]
         def classify(item):
             ref,vias=item
             if ref in self.settings.reconstruction_forced:return ref,[],None,None
             source=self.model.cache.layers[ref[0]]['geometry'][ref[1]]
-            if any(layer==ref[0] and source.intersects(shapely.Polygon(points)) for layer,points in self.settings.reconstruction_boxes):return ref,[],None,None
+            if ref in self.box_refs:return ref,[],None,None
             if any(layer==ref[0] and source.intersects(shapely.box(*bounds)) for layer,bounds,mode in self.settings.reconstruction_regions):return ref,[],None,None
             certificates=[enclosure_certificate(self.model,self.rules.p,source,[v]) for v in vias]
             safe=[v for v,proof in zip(vias,certificates) if proof]
@@ -236,7 +246,29 @@ class Reconstructor:
             if mode is not None:cert=dict(certified=True,scope='完整输入盒刚体包围及邻网/封装空间比较',following=mode)
             elif not manual:cert=None;safe=[]
             return ref,safe,cert,mode
-        for ref,safe,cert,mode in parallel_map(classify,list(self.vias_by_target.items())):
+        mode=self.settings.reconstruction_die_mode
+        if mode!='auto':
+            refs=[(key,i) for key,role in self.model.roles.items() if role=='固定RDL'
+                  for i in range(len(self.model.cache.layers[key]['geometry']))]
+            if refs:
+                dies=shapely.STRtree(self.model.case['dies'])
+                geometries=[self.model.cache.layers[k]['geometry'][i] for k,i in refs]
+                source,owners=dies.query(geometries,predicate='covered_by')
+                groups_by_ref={}
+                for i,owner in zip(source,owners):
+                    groups_by_ref.setdefault(refs[int(i)],[]).append(int(owner))
+                manual={tuple(row[:2]) for name in (self.settings.reconstruction_intervals,self.settings.reconstruction_added,
+                          self.settings.reconstruction_cuts,self.settings.reconstruction_deleted) for row in name}
+                manual.update(self.settings.reconstruction_forced)
+                manual.update(self.settings.reconstruction_ignored)
+                manual.update(self.box_refs)
+                for ref,who in groups_by_ref.items():
+                    if len(who)!=1 or ref in manual:continue
+                    self.die_internal[ref]=who[0]
+                    self.auto_ignored[ref]=dict(certified=False,scope='DIE内动区判断',following=(mode=='follow'))
+                    if mode=='follow':self.auto_following.add(ref)
+        candidates=[item for item in self.vias_by_target.items() if item[0] not in self.die_internal]
+        for ref,safe,cert,mode in parallel_map(classify,candidates):
             self.safe_vias[ref]=safe
             if cert:self.auto_ignored[ref]=cert
             if mode:self.auto_following.add(ref)
@@ -386,7 +418,7 @@ class Reconstructor:
                 for length,plan,a,b in unique.values():
                     part=plan.partition(a,b)
                     invalid=0
-                    for pose in catalogue.locals[owner]:
+                    for pose in local_poses[owner]:
                         cancel_check()
                         _,error=warp(part,plan,self.model.bound.centers[owner],pose,'c2',0)
                         invalid+=bool(error)
@@ -403,8 +435,8 @@ class Reconstructor:
                 plan.nominal_first=a;plan.nominal_second=b
                 warning=plan.warning
                 if space_unproven:warning=(warning+'；' if warning else '')+'全输入多DIE包络未证明线距充足，按当前几何复核'
-                if invalid:warning=f'基准曲线在{invalid}/{len(catalogue.locals[owner])}个本DIE极端需进一步适配；以当前样式最终检查为准'
-                return dict(local_base,plan=plan,orphan=False,warning=warning,extreme_checks=len(catalogue.locals[owner]),extreme_invalid=invalid,all_die_space_certified=not space_unproven,priority_failure_mass=mass)
+                if invalid:warning=f'基准曲线在{invalid}/{len(local_poses[owner])}个本DIE极端需进一步适配；以当前样式最终检查为准'
+                return dict(local_base,plan=plan,orphan=False,warning=warning,extreme_checks=len(local_poses[owner]),extreme_invalid=invalid,all_die_space_certified=not space_unproven,priority_failure_mass=mass)
             if len(mine)>1 or len(fixed)>1:
                 rows=[]
                 from .branch_regions import terminal_tree
@@ -455,7 +487,7 @@ class Reconstructor:
         # Route construction is pose-independent and reused after every handle edit.
         from .session_cache import logical_fingerprint
         base_key=logical_fingerprint((self.model.data.geometry_id,self.model.roles,self.model.connections.order,
-                                'source-routes-v51',self.rules.identity,bool(getattr(self,'measured_only',False)),self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
+                                'source-routes-v52',self.settings.evaluation_scope=='risk',self.rules.identity,bool(getattr(self,'measured_only',False)),self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
         # Forcing/editing one source must not rebuild every source path. Mine
         # membership includes enclosure filtering; all-via ownership controls
         # allocation. Existing path identities survive later manual edits.
@@ -480,13 +512,29 @@ class Reconstructor:
         self._plans.extend(ignored_entries(self))
         return self._plans
 
+    def risk_priority(self,catalogue=None):
+        if getattr(self,'_risk_priority',None) is None:
+            from types import SimpleNamespace
+            from .evaluation_scope import focused_catalog,conditional_weights,digits_for
+            grid,indices=focused_catalog(self.model,self.p,catalogue,scope='risk')
+            weights,_,_=conditional_weights(grid,self.p,indices)
+            digits=np.asarray([digits_for(grid,i) for i in indices])
+            projected=[np.unique(digits[:,owner]) for owner in range(grid.count)]
+            self._risk_priority=(SimpleNamespace(locals=grid.locals,weights=[
+                np.bincount(digits[:,owner],weights,minlength=radix) for owner,radix in enumerate(grid.radices)]),
+                [poses[rows] for poses,rows in zip(grid.locals,projected)])
+        return self._risk_priority
+
     def interval(self,entry):
         plan=entry['plan']
         if plan is None:return None,False
-        boxes=[shapely.Polygon(points) for layer,points in self.settings.reconstruction_boxes if layer==plan.layer and plan.source.intersects(shapely.Polygon(points))]
-        if boxes:
-            from .manual_regions import partition as exact_box_partition
-            part=exact_box_partition(plan,shapely.union_all(boxes))
+        ref=tuple(plan.key[:2])
+        if ref in self.box_refs:
+            from .manual_regions import usable_partition
+            key=plan.key,plan.identity
+            if key not in self.box_partitions:
+                self.box_partitions[key]=usable_partition(plan,self.source_boxes[ref])
+            part=self.box_partitions[key]
             if part is not None:return part,True
         if 'merged_part' in entry:return entry['merged_part'],True
         a,b=plan.nominal_first,plan.nominal_second;manual=False
@@ -544,7 +592,8 @@ class Reconstructor:
         if unproven:text+=('；' if text else '')+'全输入多DIE包络未证明线距充足，按当前几何复核'
         from dataclasses import replace
         from .width_grid import WidthGrid
-        if not hasattr(self,'priority_grid'):self.priority_grid=WidthGrid(replace(self.p,target_nsigma=0),len(self.model.bound.centers),3)
+        if not hasattr(self,'priority_grid'):
+            self.priority_grid=self.risk_priority()[0] if self.settings.evaluation_scope=='risk' else WidthGrid(replace(self.p,target_nsigma=0),len(self.model.bound.centers),3)
         mass,_=self.rules.candidate_mass(plan,part,self.priority_grid,self.settings.reconstruction_style)
         self.manual_masses[key]=mass
         if mass:text+=('；' if text else '')+f'局部规则失败质量约{mass*100:.3g}%（有限网格，整包结果见重构良率）'
@@ -603,6 +652,13 @@ class Reconstructor:
         if hit is not None:return hit
         entries=self._plans_for_all_poses(progress);pieces=[];features={}
         selected=None if targets is None else set(map(tuple,targets))
+        if selected is not None:
+            if self._entry_catalogue is not entries:
+                by_ref={}
+                for entry in entries:
+                    by_ref.setdefault((entry['layer'],entry['index']),[]).append(entry)
+                self._entries_by_ref=by_ref;self._entry_catalogue=entries
+            entries=[q for ref in sorted(selected) for q in self._entries_by_ref.get(ref,())]
         from .reconstruction_incremental import reusable
         retained,retained_pieces=reusable(self,states,selected)
         retained_refs={(layer,i) for layer,rows in retained.items() for row in rows for i in row['indices']}
@@ -685,7 +741,7 @@ class Reconstructor:
                        fallback_regions=fallback if part.get('near') is not None else None,connection_failed=bool(error) or not valid,
                        missing_region=part['A'] if part.get('strict_box') is not None or getattr(plan,'plane_domain',False) else missing_area(part,plan,self.model.bound.centers[owner],states[owner]) if plan is not None and part.get('near') is not None else source,
                        moving_handle_endpoint=(transform(shapely.Point(plan.route.coords[0]),self.model.bound.centers[owner],states[owner]) if plan is not None else None),
-                       moving_terminals=shapely.union_all([self.model.moved(v['poly'],owner,states) for v in entry['mine']]),
+                       moving_terminals=shapely.union_all([self.model.moved(v['poly'],owner,states) for v in entry['mine'] if 'poly' in v]),
                        source=source,source_scope_complete=bool(entry.get('routing_source',source) is source if plan is None else plan.source is source),endpoint_weights=(entry.get('serial_left',1.),entry.get('serial_right',0.)),branch=entry.get('branch',1),branch_count=entry.get('branch_count',1),route_plan=plan,interval=(a,b),boundary_angles=part.get('angles',(0.,0.)),route_identity=None if plan is None else plan.identity,
                        nominal_regions={k:part[k] for k in 'ABC'},regions=regions,
                        movable=part['C'],moved=regions['C'],fixed=regions['B'],immovable=regions['B'],bridge=regions['A'],

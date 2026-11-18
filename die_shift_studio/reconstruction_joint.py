@@ -13,30 +13,51 @@ from .resources import cancel_check,parallel_map
 from .extreme_filter import PoseClause,ProblemIndex
 
 
-def prepare(r,grid,progress=lambda *_:None):
-    signature=tuple(v.tobytes() for v in grid.locals)
+def entry_owners(entries,grid):
+    owners=set()
+    for q in entries:
+        if q.get('following'):owners.update(q.get('follow_owners',(q['owner'],)))
+        elif q['plan'] is not None or q['orphan']:owners.add(q['owner'])
+    return tuple(sorted(o for o in owners if o>=0 and grid.radices[o]>1))
+
+
+def prepare(r,grid,progress=lambda *_:None,*,indices=None):
+    from .evaluation_scope import digits_for
+    selected=None if indices is None else tuple(tuple(digits_for(grid,i)) for i in indices)
+    signature=(tuple(v.tobytes() for v in grid.locals),selected)
+    projections={}
+
     cached=getattr(r,'_joint_catalog',None)
     if cached is not None and cached[0]==signature:return cached[1]
     entries=r._plans_for_all_poses(progress);by_ref=defaultdict(list)
     for q in entries:by_ref[q['layer'],q['index']].append(q)
     refs=[ref for rows in r.rules.nets.values() for ref in rows]
+    ordered_refs=refs.copy()
+    immutable=[ref for ref in refs if ref not in by_ref]
+    refs=sorted(by_ref,key=lambda ref:-len(by_ref[ref]))
+    if selected is not None:
+        for local in by_ref.values():
+            owners=entry_owners(local, grid)
+            if owners not in projections:
+                projections[owners]=sorted({tuple(d[o] for o in owners) for d in selected})
+    def static(ref):
+        g=r.model.nodes[r.model.ids[ref]]['poly']
+        return dict(owners=(),values={():dict(geometry=g,pieces=())},envelope=shapely.box(*g.bounds))
     def build(ref):
-        local=by_ref[ref];owners=set()
-        for q in local:
-            owners.update(q.get('follow_owners',(q['owner'],)) if q.get('following') else (q['owner'],) if q['plan'] is not None or q['orphan'] else ())
-        owners=tuple(sorted(o for o in owners if grid.radices[o]>1));values={};render_cache={}
-        if not local:values[()]=dict(geometry=r.model.nodes[r.model.ids[ref]]['poly'],pieces=())
-        else:
-            from .reconstruction_events import _compact
-            for digits in product(*(range(grid.radices[o]) for o in owners)):
-                cancel_check();states=np.zeros((grid.count,3))
-                for owner,digit in zip(owners,digits):states[owner]=grid.locals[owner][digit]
-                f=r.frame(states,targets=(ref,),diagnostics=False,render_cache=render_cache,_raw=True)
-                row=next(q for q in f['replacements'][ref[0]] if ref[1] in q['indices'])
-                values[digits]=dict(geometry=row['geometry'],pieces=tuple(_compact(q) for q in f['pieces'] if (q['layer'],q['index'])==ref))
+        local=by_ref[ref];owners=entry_owners(local,grid);values={};render_cache={}
+        from .reconstruction_events import _compact
+        choices=projections[owners] if selected is not None else product(*(range(grid.radices[o]) for o in owners))
+        for digits in choices:
+            cancel_check();states=np.zeros((grid.count,3))
+            for owner,digit in zip(owners,digits):states[owner]=grid.locals[owner][digit]
+            f=r.frame(states,targets=(ref,),diagnostics=False,render_cache=render_cache,_raw=True)
+            row=next(q for q in f['replacements'][ref[0]] if ref[1] in q['indices'])
+            values[digits]=dict(geometry=row['geometry'],pieces=tuple(_compact(q) for q in f['pieces'] if (q['layer'],q['index'])==ref))
         bounds=np.array([v['geometry'].bounds for v in values.values()])
         return ref,dict(owners=owners,values=values,envelope=shapely.box(*bounds[:,:2].min(axis=0),*bounds[:,2:].max(axis=0)))
-    bank=dict(parallel_map(build,refs,progress=lambda n,total:progress(round(100*n/max(1,total)),f'复用局部重构几何 {n}/{total}')))
+    bank={ref:static(ref) for ref in immutable}
+    bank.update(parallel_map(build,refs,progress=lambda n,total:progress(round(100*n/max(1,total)),f'复用局部重构几何 {n}/{total}')))
+    bank={ref:bank[ref] for ref in ordered_refs}
     r._joint_catalog=(signature,bank);return bank
 
 

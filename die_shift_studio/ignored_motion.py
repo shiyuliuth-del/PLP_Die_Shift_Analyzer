@@ -22,14 +22,17 @@ def entries(r):
     for ref in sorted(set(r.settings.reconstruction_ignored)|set(r.auto_ignored)):
         if ref in getattr(r,'box_refs',()):continue
         vias=r.vias_by_target.get(ref,())
-        if not vias:continue
+        internal=r.die_internal.get(ref)
+        if not vias and internal is None:continue
         source=r.model.cache.layers[ref[0]]['geometry'][ref[1]]
-        owners=sorted({v['owner'] for v in vias if v['owner']>=0})
+        owners=[internal] if internal is not None else sorted({v['owner'] for v in vias if v['owner']>=0})
         if not owners:continue
         following=ref in r.settings.reconstruction_following or ref in getattr(r,'auto_following',())
+        node=r.model.nodes[r.model.ids[ref]]
+        mine=list(vias) or [dict(center=np.asarray(source.centroid.coords[0]))]
         out.append(dict(layer=ref[0],index=ref[1],owner=owners[0],follow_owners=tuple(owners),following=following,
                         refs=tuple((v['key'],v['index']) for v in vias),source=source,routing_source=source,
-                        land=source,net=vias[0]['net'],mine=list(vias),anchors=[],plan=None,orphan=False,
+                        land=source,net=node['net'],mine=mine,anchors=[],plan=None,orphan=False,
                         ignored=True,warning='忽略重构：整块随动' if following else '忽略重构：整块静止'))
     return out
 

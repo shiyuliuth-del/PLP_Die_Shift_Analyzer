@@ -165,6 +165,9 @@ def edited_snapshot(data,edits):
         if node_fingerprint(kind,original)!=entry['original']:
             raise ValueError(f'{key} #{index+1} 的源轮廓已改变，无法应用工程节点')
         xy=np.asarray(entry['nodes'],float)
+        outline_mode=entry.get('outline_mode',False)
+        if type(outline_mode) is not bool:raise ValueError('节点编辑轮廓标识必须为布尔值')
+        if outline_mode:source=dict(kind='polygon',winding=True)
         try:
             polygon=build_outline(xy,source,base.dbu_um)
         except ValueError as exc:
@@ -176,7 +179,9 @@ def edited_snapshot(data,edits):
         if source:
             updated.shape_info[key][index]=dict(source,nodes=xy.copy())
         changed.add((key,index))
-        updated.node_edits.append(dict(layer=key,index=index,original=entry['original'],nodes=xy.tolist()))
+        row=dict(layer=key,index=index,original=entry['original'],nodes=xy.tolist())
+        if outline_mode:row['outline_mode']=True
+        updated.node_edits.append(row)
     updated.node_edits.sort(key=lambda e:(e['layer'],e['index']))
     updated.edit_digest=hashlib.sha256(json.dumps([base.edit_digest,updated.node_edits],separators=(',',':'),allow_nan=False).encode()).hexdigest()
     for attr in ('geometry_cache','prepared_case','prepared_auto','prepared_roles'):

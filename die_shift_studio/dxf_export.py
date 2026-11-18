@@ -16,6 +16,7 @@ class Snapshot:
     top_name: str
     states: object
     ignored_count: int
+    minimum_edge_um: float = 0.
 
 
 def snapshot(data,cache,frame=None,*,deformation=False,reconstruction=False,progress=lambda *_:None,allow_partial=False):
@@ -27,6 +28,8 @@ def snapshot(data,cache,frame=None,*,deformation=False,reconstruction=False,prog
         if reconstruction:
             from .fast_preview import PreviewEngine
             replacements=PreviewEngine.final_copper(replacements,frame.get('reconstruction',{}).get('replacements',{}))
+    from .short_edges import contract
+    minimum_edge_um=getattr(data,'minimum_edge_um',0.)
     layers={};total=max(1,sum(map(len,data.layers.values())));done=0
     for key,values in data.layers.items():
         current=frame.get('layers',{}).get(key,{}).get('polygons',values) if frame else values
@@ -55,9 +58,13 @@ def snapshot(data,cache,frame=None,*,deformation=False,reconstruction=False,prog
                 rotation=np.array([[co,si],[-si,co]])
                 geoms.append(shapely.transform(g,lambda points:(points-nominal[j])@rotation+actual[j]))
         geoms.extend(q['geometry'] for q in items)
-        layers[key]=tuple(g.wkb for g in geoms)
+        try:
+            clean=[contract(g,minimum_edge_um) for g in geoms]
+        except ValueError as exc:
+            raise ValueError(f'图层 {key} 无法安全删除短边：{exc}') from exc
+        layers[key]=tuple(g.wkb for g in clean if not g.is_empty)
     return Snapshot(layers,data.top_name,None if frame is None else np.array(frame['states'],copy=True),
-                    len(getattr(data,'ignored_geometry',())))
+                    len(getattr(data,'ignored_geometry',())),minimum_edge_um)
 
 
 class PairWriter:

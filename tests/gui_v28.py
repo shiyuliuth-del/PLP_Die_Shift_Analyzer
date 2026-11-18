@@ -54,7 +54,7 @@ click([110,1060]);assert not w.selection.selected
 click([0,1000]);QTest.keyClick(w.canvas,getattr(Qt,'Key',Qt).Key_Escape);assert not w.selection.selected
 w.grid_mode.setCurrentIndex(0);wait()
 idx=ProblemIndex(w.extremes,current_drc_factors(w.result['extreme_factors']))
-assert [i for i,_ in w.page_items]==[idx.at(j) for j in range(min(256,idx.total))]
+assert [i for i,_ in w.page_items]==[idx.at(j) for j in range(min(499,idx.total))]
 w.problem_filter.setCurrentIndex(0);wait()
 table=w.extreme_table;assert table.rowCount()>35
 table.setCurrentCell(32,0);wait();bar=table.verticalScrollBar();bar.setValue(bar.maximum());app.processEvents()
