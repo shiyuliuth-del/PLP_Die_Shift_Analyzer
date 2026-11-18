@@ -11,18 +11,20 @@ _session = None
 _stop = None
 _status = None
 _memory = 0
+_parent_pid = None
 
 
-def _initialize(inputs, stop, status, memory_mb):
-    global _session, _stop, _status, _memory
+def _initialize(inputs, stop, status, memory_mb, parent_pid):
+    global _session, _stop, _status, _memory, _parent_pid
     from .measured_core import Session
     _stop, _status, _memory = stop, status, memory_mb * 1024**2
+    _parent_pid = parent_pid
     _session = Session(*inputs)
 
 
 def _compute(rows, policy, slot):
     import psutil
-    parent = psutil.Process(os.getppid())
+    parent = psutil.Process(_parent_pid)
     last_check = -1
 
     def progress(percent, _message):
@@ -59,7 +61,7 @@ class BatchWorkers:
         inputs = (session.data,session.case,session.roles,session.motions,
                   session.p,session.settings,session.cache)
         self.pool = ProcessPoolExecutor(count,mp_context=context,initializer=_initialize,
-                                        initargs=(inputs,self.stop,self.status,memory_mb))
+                                        initargs=(inputs,self.stop,self.status,memory_mb,os.getpid()))
 
     def solve(self, rows, policy, progress):
         slot = self.slots.get_nowait()

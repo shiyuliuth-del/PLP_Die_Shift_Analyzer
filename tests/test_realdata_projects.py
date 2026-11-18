@@ -64,6 +64,23 @@ class Projects(unittest.TestCase):
             copy_excel(self.folder, [source], threading.Event())
         self.assertEqual(list(external_dir.iterdir()), [])
 
+    def test_excel_subfolder_follows_disk_while_retaining_user_selection(self):
+        folder=self.folder
+        config=load_folder(folder)
+        files=config['files']
+        removed=Path(files[0]['path'])
+        hidden=Path(files.pop(1)['path'])
+        files[0]['enabled']=False
+        save_folder(folder,config['project'],files,config['database'],config['output'],config['profile'],{},
+                    template=config['template'])
+        removed.unlink()
+        added=folder/'Excel'/'NewInput.xlsx'
+        shutil.copyfile(hidden,added)
+        loaded=load_folder(folder)
+        self.assertEqual({Path(row['path']).name:row['enabled'] for row in loaded['files']},
+                         {added.name:True,Path(files[1]['path']).name:True})
+        self.assertEqual(loaded['template'],config['template'])
+
     def test_external_copy_collision_and_cancel(self):
         external = self.root/'measurements.xlsx'
         external.write_bytes(b'first')

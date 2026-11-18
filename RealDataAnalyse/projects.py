@@ -67,6 +67,8 @@ def load_folder(folder):
     normalized = []
     for item in files:
         path = inside(root, item['path'])
+        if path.parent == excel and not path.is_file():
+            continue
         entry = dict(path=str(path), enabled=bool(item.get('enabled', True)))
         if 'profile' in item:
             entry['profile'] = copy.deepcopy(item['profile'])
