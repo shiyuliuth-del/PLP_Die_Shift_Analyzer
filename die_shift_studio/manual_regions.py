@@ -21,7 +21,6 @@ def partition(plan,polygon):
     active=plan.source.intersection(polygon)
     if active.is_empty or active.area<=plan.tolerance**2:return None
     marks=shapely.line_locate_point(plan.route,shapely.points(shapely.get_coordinates(plan.route.intersection(polygon))))
-    route_crosses=bool(len(marks))
     if not len(marks):marks=shapely.line_locate_point(plan.route,shapely.points(shapely.get_coordinates(active)))
     a,b=float(marks.min()),float(marks.max())
     moving=[];fixed=[];ambiguous=False;terminals=getattr(plan,'terminal_vias',((plan.land,),tuple(plan.anchors)))
@@ -37,10 +36,25 @@ def partition(plan,polygon):
     def seam(material,s):
         edges=[]
         segments=[(u,v) for part in shapely.get_parts(polygon) if part.geom_type=='Polygon' for xy in [np.asarray(part.exterior.coords)] for u,v in zip(xy[:-1],xy[1:])]
+        # Boolean intersections may round a rotated side by a few ulps. Do
+        # not substitute a pad point merely because two nominal lines miss.
+        rings=[np.asarray(r.coords) for g in parts(material) for r in (g.exterior,*g.interiors)]
+        if not rings:return shapely.LineString()
+        starts=np.concatenate([r[:-1] for r in rings]);ends=np.concatenate([r[1:] for r in rings])
+        eps=max(plan.tolerance*1e-5,32*np.spacing(max(1.,float(np.max(np.abs(starts))))))
         for u,v in segments:
-            edge=shapely.LineString([u,v]);hit=edge.intersection(material.boundary)
-            for line in shapely.get_parts(hit):
-                if line.geom_type=='LineString' and line.length>plan.tolerance:edges.append(line)
+            length=np.linalg.norm(v-u)
+            if length<=eps:continue
+            axis=(v-u)/length;normal=np.array([-axis[1],axis[0]])
+            mask=(abs((starts-u)@normal)<=eps)&(abs((ends-u)@normal)<=eps)
+            if not mask.any():continue
+            spans=np.sort(np.column_stack(((starts[mask]-u)@axis,(ends[mask]-u)@axis)),axis=1).clip(0,length)
+            runs=[]
+            for lo,hi in sorted(map(tuple,spans)):
+                if hi-lo<=eps:continue
+                if runs and lo<=runs[-1][1]+eps:runs[-1][1]=max(hi,runs[-1][1])
+                else:runs.append([lo,hi])
+            edges.extend(shapely.LineString([u+lo*axis,u+hi*axis]) for lo,hi in runs if hi-lo>plan.tolerance)
         return min(edges,key=lambda g:(g.distance(plan.route.interpolate(s)),-g.length)) if edges else shapely.LineString()
     near=seam(c,a) if not c.is_empty else shapely.LineString()
     far=seam(d,b) if not d.is_empty else shapely.LineString()

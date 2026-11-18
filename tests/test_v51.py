@@ -1,4 +1,5 @@
 """Boundary and measurement contracts added after the V50 controller."""
+import math
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -24,6 +25,13 @@ class V51Tests(unittest.TestCase):
         plan=SimpleNamespace(layer='5/0',source=shapely.box(-3,-4,103,4),tolerance=.001,route=shapely.LineString([(0,0),(100,0)]),length=100,land=land,anchors=[anchor],tangent=lambda s:(1.,0.))
         cfg=replace(ViewSettings(),reconstruction_boxes=(('5/0',((20,-12),(50,-12),(50,12),(20,12))),))
         moved,q=move_side(cfg,plan,(20,1),(28,3));self.assertEqual(q['near'].bounds,(28.,-4.,28.,4.));self.assertEqual(q['far'].bounds,(50.,-4.,50.,4.));self.assertFalse(q['box_invalid']);self.assertAlmostEqual(q['A'].area,22*8)
+
+        from shapely.affinity import rotate
+        from die_shift_studio.manual_regions import partition
+        tilted=rotate(shapely.Polygon(cfg.reconstruction_boxes[0][1]),17)
+        q=partition(plan,tilted)
+        for name in ('near','far'):
+            self.assertEqual(q[name].geom_type,'LineString');self.assertAlmostEqual(q[name].length,8/math.cos(math.radians(17)),places=6)
 
     def test_complex_handle_and_failure_filters(self):
         g=shapely.GeometryCollection([shapely.Point(0,0),shapely.Point(99,0)]);opp=shapely.LineString([(100,-1),(100,1)])

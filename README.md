@@ -1,4 +1,6 @@
-# Die Shift Analyze V50
+# Die Shift Analyze V51
+
+V51 新增画布方向键平移、单直线边界编辑、三种极端情况筛选与计算资源上限。见[V51 使用说明](docs/V51_使用说明.md)。
 
 V50：芯片对重点组合、分叉边界修正、当前姿态GDS/OAS与旋转ERROR输出、手动重构计算、分类DRC与吸附标尺。详见[使用说明](docs/V50_使用说明.md)。按本轮要求只进行一轮集中检查；失败项仅检查受影响部分。
 
@@ -9,7 +11,7 @@ V50：芯片对重点组合、分叉边界修正、当前姿态GDS/OAS与旋转E
 软件分析Die-first封装的DIE平移与旋转，提供三方案初筛、实体覆盖与极端足迹、通道宽度风险、重构动区编辑、规则/联合模型良率、工程结果保存、GDS/OAS导入、实测IPC及批量OAS输出。长度均为μm，GDS/OAS只读，工程节点可编辑。
 
 - [实测IPC接口与注意事项](docs/MEASURED_OUTPUT_API.md) · [GD55-1105独立验证脚本](tools/verify_measured_gd55.py)
-- [用户操作](docs/V49_使用说明.md)
+- [用户操作](docs/V51_使用说明.md)
 - [AI交接：主要功能、代码地图、算法和后续重点](docs/AI_HANDOFF.md)
 - [现行设计合同](docs/DESIGN_REQUIREMENTS.md)
 - [已知边界](docs/KNOWN_ISSUES.md)
