@@ -9,7 +9,7 @@ import time
 from die_shift_studio.qt_compat import QtCore, QtGui, QtWidgets as W, Signal
 from . import __version__
 from .excel import DEFAULT_PROFILE, HEADERS, import_files
-from .projects import load_folder, save_folder, inside, copy_excel
+from .projects import load_folder, save_folder, inside, copy_excel, copy_inputs, template_file
 from .runner import Runner
 from .storage import Ledger, configure_logging
 from .transport import Transport, default_endpoint, installation
@@ -124,6 +124,8 @@ class Window(W.QMainWindow):
         folder_row.addWidget(self.folder, 1)
         folder_row.addWidget(self.folder_button)
         form.addRow('项目文件夹', folder_row)
+        self.template = self.path_row(form,'模板图纸','', '*.gds *.oas *.oasis','template', on_pick=self.select_template)
+        self.template.setClearButtonEnabled(True)
         # Paths are project-owned state, never independent user input rows.
         self.project = W.QLineEdit(self)
         self.database = W.QLineEdit(self)
@@ -307,7 +309,7 @@ class Window(W.QMainWindow):
         self.timer.timeout.connect(self.progress.update)
         self.timer.start()
 
-    def path_row(self, form, label, default, pattern, key, save=False, readonly=False):
+    def path_row(self, form, label, default, pattern, key, save=False, readonly=False, on_pick=None):
         row = W.QHBoxLayout()
         edit = W.QLineEdit(str(self.settings.value(key, default) if key == 'endpoint' else default))
         edit.setReadOnly(readonly)
@@ -316,14 +318,16 @@ class Window(W.QMainWindow):
             dialog = W.QFileDialog.getSaveFileName if save else W.QFileDialog.getOpenFileName
             path, _ = dialog(self, label, edit.text(), f'文件 ({pattern});;所有文件 (*)')
             if path:
-                edit.setText(path)
+                if on_pick: on_pick(path)
+                else: edit.setText(path)
         button.clicked.connect(browse)
         row.addWidget(edit, 1)
         if not readonly:
             row.addWidget(button)
         self.path_buttons = getattr(self, 'path_buttons', []) + [button]
         form.addRow(label, row)
-        edit.editingFinished.connect(lambda: self.settings.setValue(key, edit.text()))
+        if key == 'endpoint':
+            edit.editingFinished.connect(lambda: self.settings.setValue(key, edit.text()))
         return edit
 
     @staticmethod
@@ -352,7 +356,7 @@ class Window(W.QMainWindow):
     def busy(self, on):
         for widget in (self.connect_button, self.start_button, self.add_files, self.remove_files,
                        self.folder_button, self.import_button, self.create_plan_button, self.run_button, self.send_button,
-                       self.endpoint, self.project, self.database, self.output, self.dies, self.profile,
+                       self.endpoint, self.project, self.database, self.output, self.template, self.dies, self.profile,
                        self.workers, self.memory, self.retries, self.timeout, self.file_view, self.sheet, self.header_row, self.mapping_shared,
                        *self.path_buttons):
             widget.setEnabled(not on)
@@ -483,6 +487,7 @@ class Window(W.QMainWindow):
             self.project_root = Path(config['folder'])
             self.folder.setText(config['folder'])
             self.project.setText(config['project'])
+            self.template.setText(config['template'])
             self.database.setText(config['database'])
             self.output.setText(config['output'])
             self.shared_profile = copy.deepcopy(config['profile'])
@@ -597,8 +602,18 @@ class Window(W.QMainWindow):
         files = self.file_entries()
         profile = copy.deepcopy(self.shared_profile)
         save_folder(self.project_root, self.project.text(), files, self.database.text(), self.output.text(), profile,
-                    {key: getattr(self, key).value() for key in ('dies', 'workers', 'memory', 'retries', 'timeout')}, shared_mapping=self.mapping_mode)
+                    {key: getattr(self, key).value() for key in ('dies', 'workers', 'memory', 'retries', 'timeout')}, shared_mapping=self.mapping_mode,template=self.template.text().strip())
         return files, profile
+
+    def select_template(self,path):
+        if self.project_root is None:
+            self.log('请先选择项目文件夹')
+            return
+        root = self.project_root
+        def copy(stop, progress):
+            target, = copy_inputs(root,[path],stop,'Template',('.gds','.oas','.oasis'))
+            return str(template_file(root,target))
+        self.execute(copy,self.template.setText,operation='复制项目模板图纸')
 
     def select_files(self):
         if self.project_root is None:
@@ -653,7 +668,7 @@ class Window(W.QMainWindow):
             self.log(exc)
             return
         kwargs = dict(database=self.database.text(), endpoint=self.endpoint.text(), project=self.project.text(), output=self.output.text(),
-                      workers=self.workers.value(), memory_mb=self.memory.value(), retries=self.retries.value(), timeout=self.timeout.value())
+                      template=self.template.text().strip(), workers=self.workers.value(), memory_mb=self.memory.value(), retries=self.retries.value(), timeout=self.timeout.value())
         entries = self.file_entries()
         selected = sorted(p['path'] for p in entries if p['enabled'])
         profile = copy.deepcopy(self.shared_profile)
@@ -681,6 +696,8 @@ class Window(W.QMainWindow):
             args.update(output_directory=str(Path(self.output.text()).parent.parent / 'Cache' / 'Manual'), max_threads=self.workers.value(), max_memory_mb=self.memory.value())
         if command in ('preview.submit', 'batch.submit'):
             args['dies'] = [dict(die=i + 1, dx_um=0, dy_um=0, angle_deg=0) for i in range(self.dies.value())]
+        if command=='batch.begin' and self.template.text().strip():
+            args['template_path']=self.template.text().strip()
         if command in ('batch.submit', 'batch.end'):
             args['batch_id'] = getattr(self, 'manual_batch', '')
         if command in ('task.get','task.issues'):
@@ -713,10 +730,21 @@ class Window(W.QMainWindow):
         except (OSError, ValueError) as exc:
             self.log(exc)
             return
+        if command=='batch.begin' and args.get('template_path'):
+            try:
+                if self.project_root is None:
+                    raise ValueError('请先选择项目文件夹')
+                args['template_path']=str(template_file(self.project_root,args['template_path']))
+            except (ValueError,OSError) as exc:
+                self.log(exc)
+                return
         endpoint, should_wait, timeout = self.endpoint.text(), self.wait_check.isChecked(), self.timeout.value()
         bound_instance = self.bindings.get(str(Path(endpoint).resolve()))
         expected_project = self.project.text()
         def send(stop, progress):
+            if command=='batch.begin' and args.get('template_path') and 'template_sha256' not in args:
+                from .storage import sha256
+                args['template_sha256']=sha256(args['template_path'],stop)
             t = Transport(endpoint, trace=self.conversation, expected_instance=bound_instance)
             if command not in ('ping', 'info', 'task.get', 'task.issues'):
                 if not expected_project:
@@ -814,7 +842,7 @@ class Window(W.QMainWindow):
     def create_plan(self):
         entries = self.file_entries()
         config = dict(folder=str(self.project_root) if self.project_root else '', project=self.project.text(),
-                      files=entries, profile=copy.deepcopy(self.shared_profile), shared_mapping=self.mapping_mode,
+                      files=entries, template=self.template.text().strip(), profile=copy.deepcopy(self.shared_profile), shared_mapping=self.mapping_mode,
                       controls={key:getattr(self,key).value() for key in ('dies','workers','memory','retries','timeout')})
         def create(stop,progress):
             progress(dict(text='保存计划快照 · 校验输入摘要',current=0,total=1))

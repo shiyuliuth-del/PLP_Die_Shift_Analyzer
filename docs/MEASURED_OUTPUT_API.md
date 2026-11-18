@@ -173,3 +173,11 @@ RealDataAnalyse生产批次将output.configure指向项目Cache/Batches；OAS完
 交互预览可含`actual_um/actual_deg`；批量不做表格专用实际尺寸量测，其值可为null，但所启用DRC检查、问题范围及完整分页不省略。工程`settings.drc_checks`控制检查类别，`drc_visible`仅控制界面显示，批量不受显示开关影响。几何有效、电连接和物理异网隔离仍是重构生成门禁，不是可跳过的制造成功条件。
 
 批次同时选择独立`failure_layer`（名称FAIL）。只有`connection_failure_count>0`的封装写入原始真实封装轮廓，DRC-only不进入FAIL；回执`failed_packages`是逐包0/1，batch.end为汇总。ERROR与FAIL都随TopCell封装摆放平移一次。芯片边框已包含每颗DIE实际平移、旋转和自定义旋转中心的作用。
+
+## V51 批量模板及调度
+
+`batch.begin` 可附 `template_path`（本机绝对路径，GDS/OAS）及 `template_sha256`。服务在读图前后核对摘要，按原坐标把模板多边形、路径轮廓和文字标记写入一次，配置的诊断层避让源图和模板。模板顶层参考名为G_TEMPLATE，不计入封装数。begin和end回执返回template_sha256供客户端核对。旧请求可省略模板参数。
+
+`package_count` 可传已经从 Excel 导入的封装总数作为调度提示，批次不会据此推导姿态或生成封装。回执 `execution` 表示 threads 或 processes，`threads` 保留为实际并行路数，`queue_limit` 是在途任务上限。独立进程仅计算姿态及DRC，主程序保留问题目录、OAS写入与原子提交。
+
+ERROR由多边形记录组成。实际倾斜在整数输出格点仍可表示时，直接写斜边四角。极细或微角的四角会在原格点上变成轴对齐时，写局部四角多边形及带角度的引用。回执仍给当前姿态坐标下的marker_corners_um和marker_angle_deg。

@@ -57,6 +57,7 @@ class Projects(unittest.TestCase):
             load_folder(self.folder)
         external_dir = self.root/'outside-excel'
         external_dir.mkdir()
+        shutil.rmtree(self.folder/'Excel')
         (self.folder/'Excel').symlink_to(external_dir, target_is_directory=True)
         source = self.root/'outside.xlsx'; source.write_bytes(b'measurements')
         with self.assertRaisesRegex(ValueError, '文件必须位于'):
@@ -104,13 +105,19 @@ class Projects(unittest.TestCase):
             import_files(paths, self.folder/'wrong.sqlite', 3, 3, threading.Event())
         database = self.folder/'correct.sqlite'
         result = import_files(paths, database, 3, 3, threading.Event(), profiles={str(second): profile})
-        self.assertEqual(result['packages'], 12)
+        self.assertEqual(result['packages'], 36)
         ledger = Ledger(database)
         try:
             self.assertEqual(ledger.get('profiles')[str(second)], profile)
             payload = json.loads(ledger.db.execute('select payload from packages where seq=2').fetchone()[0])
             self.assertEqual([d['die'] for d in payload['dies']], [1,2,3])
-            self.assertEqual([d['dx_um'] for d in payload['dies']], [1,0,0])
+            from openpyxl import load_workbook
+            expected = []
+            for file in paths:
+                source = load_workbook(file,read_only=True)
+                try:expected.append(source.active.cell(4 if file == str(second) else 3,3).value)
+                finally:source.close()
+            self.assertEqual([d['dx_um'] for d in payload['dies']], expected)
         finally: ledger.close()
         config['files'][1]['profile'] = profile
         save_folder(self.folder, config['project'], config['files'], str(database), config['output'], DEFAULT_PROFILE, {}, shared_mapping=False)
@@ -149,10 +156,10 @@ class Projects(unittest.TestCase):
         config = load_folder(self.folder)
         events = []
         result = import_files([x['path'] for x in config['files']], config['database'], 3, 3, threading.Event(), events.append)
-        self.assertEqual(result['packages'], 12)
+        self.assertEqual(result['packages'], 36)
         self.assertTrue(any('封装匹配' in e['text'] for e in events))
         self.assertEqual(events[-1]['current'], events[-1]['total'])
-        self.assertIn('12封装', events[-1]['text'])
+        self.assertIn('36封装', events[-1]['text'])
         self.assertTrue(Path(config['database']).is_file())
 
 if __name__ == '__main__': unittest.main()

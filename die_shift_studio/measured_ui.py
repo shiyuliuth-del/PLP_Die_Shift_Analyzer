@@ -165,7 +165,7 @@ class MeasuredOutput(QtCore.QObject):
                 self.batch['failed']+=1
                 if len(self.batch['failures'])<100:self.batch['failures'].append(key)
         if kind=='batch.end' and self.batch and not any(v[2]=='batch.pose' for v in self.running.values()):
-            self.batch['executor'].shutdown(wait=False);self.batch['store'].close();self.batch=None
+            self.close_batch()
             if self.session:self.session.close() # release per-thread clones, keep shared nominal plans
         self.apply_lock()
     def show_diagnostic(self,frame):
@@ -178,6 +178,14 @@ class MeasuredOutput(QtCore.QObject):
             self.last_error=dict(type='ProjectError',message=str(message))
             self.jobs[self.transition['job']].update(status='error',error=self.last_error);self.transition=None;self.ready=False
             self.w.statusBar().showMessage('实测准备失败：'+str(message).splitlines()[0]+'；关闭实测输出后可调整工程。')
+    def close_batch(self):
+        batch=self.batch
+        self.batch=None
+        batch['executor'].shutdown(wait=False,cancel_futures=True)
+        if batch.get('processes'):
+            batch['processes'].close()
+        batch['store'].close()
+
     def tick(self):
         w=self.w
         if self.pending_enable and not (w.worker or w.preview_workers or w._tasks):
@@ -186,7 +194,7 @@ class MeasuredOutput(QtCore.QObject):
             self.apply_lock()
         if self.stopping and not self.running and not w._tasks:
             if self.batch:
-                self.batch['executor'].shutdown(wait=False);self.batch['store'].close();self.batch=None
+                self.close_batch()
                 if self.session:self.session.close()
             if self.session and not self.active():self.session.close();self.session=None
             self.stopping=False
@@ -228,6 +236,8 @@ class MeasuredOutput(QtCore.QObject):
             w.progress.hide();w.progress.setFormat('%p%')
     def stop(self,disable=False):
         self.pending_enable=False;self.generation+=1;self.ready=False;self.current=None
+        if self.batch and self.batch.get('processes'):
+            self.batch['processes'].stop.set()
         for event,_,_ in self.running.values():event.set()
         if self.transition:self.jobs[self.transition['job']]['status']='cancelled';self.transition=None
         self.w.task_control.cancel();self.stopping=True
@@ -332,8 +342,19 @@ class MeasuredOutput(QtCore.QObject):
             from .oas_errors import choose_error_layer
             policy=args.get('output_policy','strict')
             if policy not in ('strict','omit_failed_regions'):raise ValueError('未知实测输出策略')
-            error_layer=choose_error_layer(self.session.cache.layers)
-            failure_layer=choose_error_layer([*self.session.cache.layers,f'{error_layer[0]}/{error_layer[1]}'])
+            template = None
+            template_sha256 = args.get('template_sha256')
+            template_path = args.get('template_path')
+            if template_path is not None or template_sha256 is not None:
+                from .oas_template import read_template
+                if not isinstance(template_path,str) or not isinstance(template_sha256,str):
+                    raise ValueError('模板需要路径及SHA-256')
+                template = read_template(template_path,template_sha256,self.session.data.dbu_um)
+            occupied = set(self.session.cache.layers)
+            if template is not None:
+                occupied.update(template[1])
+            error_layer=choose_error_layer(occupied)
+            failure_layer=choose_error_layer(occupied,reserved=[error_layer])
             profile=resource_profile();memory=self.options.memory_budget_mb(profile)
             per_lane=max(96,int(self.session.cache.bytes*24/1024**2));lanes=max(1,min(self.options.max_threads or profile['workers'],profile['workers'],int(memory*.7)//per_lane))
             if per_lane>memory:raise MemoryError(f'此图纸估计单任务需{per_lane} MB，超过批次内存限额{memory} MB')
@@ -342,9 +363,27 @@ class MeasuredOutput(QtCore.QObject):
                 import psutil
                 baseline=psutil.Process().memory_info().rss
             except (ImportError,OSError):baseline=0
-            self.batch=dict(id=uuid.uuid4().hex,client_id=client_id,store=Store(destination.parent,self.session.data.dbu_um,max(1024**2,memory*1024**2//5),checkpoint_destination=destination.with_name(destination.stem+'.'+uuid.uuid4().hex[:12]+'.partial.oas'),error_layer=error_layer,failure_layer=failure_layer),lock=threading.Lock(),path=destination,baseline=baseline,
-                            executor=ThreadPoolExecutor(max_workers=lanes,thread_name_prefix='dsa-batch'),pending=set(),inflight=set(),completed=0,failed=0,failures=[],ending=False,lanes=lanes,memory_mb=memory,semaphore=threading.Semaphore(lanes),output_policy=policy)
-            return dict(status='completed',result=dict(batch_id=self.batch['id'],threads=lanes,max_memory_mb=memory,queue_limit=lanes*4,output_policy=policy,error_layer=dict(layer=error_layer[0],datatype=error_layer[1],name='ERROR'),failure_layer=dict(layer=failure_layer[0],datatype=failure_layer[1],name='FAIL')))
+            requested_count=args.get('package_count',0)
+            if type(requested_count) is not int or not 0<=requested_count<=10**9:
+                raise ValueError('package_count须为非负整数')
+            # Separate CPU-bound reconstruction and native caches across
+            # processes for large lots, bounded by the same CPU/memory budget.
+            process_memory=max(320,per_lane+160)
+            process_lanes=min(lanes,int(memory*.8)//process_memory)
+            use_processes=(policy=='omit_failed_regions' and process_lanes>=2
+                           and requested_count>=max(16,process_lanes*3))
+            if use_processes:
+                lanes=process_lanes
+            self.batch=dict(id=uuid.uuid4().hex,client_id=client_id,store=Store(destination.parent,self.session.data.dbu_um,max(1024**2,memory*1024**2//5),checkpoint_destination=destination.with_name(destination.stem+'.'+uuid.uuid4().hex[:12]+'.partial.oas'),error_layer=error_layer,failure_layer=failure_layer,template=template),lock=threading.Lock(),path=destination,baseline=baseline,
+                            executor=ThreadPoolExecutor(max_workers=lanes,thread_name_prefix='dsa-batch'),processes=None,pending=set(),inflight=set(),completed=0,failed=0,failures=[],ending=False,lanes=lanes,memory_mb=memory,template_sha256=template_sha256,semaphore=threading.Semaphore(lanes),output_policy=policy)
+            if use_processes:
+                from .measured_workers import BatchWorkers
+                try:
+                    self.batch['processes']=BatchWorkers(self.session,lanes,int(memory*.8)//lanes)
+                except Exception:
+                    self.close_batch()
+                    raise
+            return dict(status='completed',result=dict(batch_id=self.batch['id'],threads=lanes,execution='processes' if use_processes else 'threads',max_memory_mb=memory,queue_limit=lanes*4,template_sha256=template_sha256,output_policy=policy,error_layer=dict(layer=error_layer[0],datatype=error_layer[1],name='ERROR'),failure_layer=dict(layer=failure_layer[0],datatype=failure_layer[1],name='FAIL')))
         if command=='batch.submit':
             batch=self.batch
             if batch is None or batch['ending']:raise RuntimeError('批次未开始或已结束接收')
@@ -371,7 +410,13 @@ class MeasuredOutput(QtCore.QObject):
                                 with batch['lock']:batch['store'].flush()
                                 raise MemoryError('批次增量内存超过配置上限；已分段暂存，任务未输出，请降低并发或提高预算')
                     try:
-                        with serial_scope():frame,snapshot,details=session.run(rows,bounded_progress,preview=False,output_policy=batch['output_policy'])
+                        if batch['processes']:
+                            layers,details=batch['processes'].solve(rows,batch['output_policy'],progress)
+                            bounded_progress(98,'整理并写入实际铜')
+                        else:
+                            with serial_scope():
+                                _,snapshot,details=session.run(rows,bounded_progress,preview=False,output_policy=batch['output_policy'])
+                            layers=snapshot.layers
                     except Exception as exc:
                         if hasattr(exc,'details'):
                             from .measured_issues import place
@@ -381,8 +426,13 @@ class MeasuredOutput(QtCore.QObject):
                     details=place(details,position)
                     if details['connection_failure_count'] and not (batch['output_policy']=='omit_failed_regions' and details.get('partial_output') and details.get('omitted_region_count',0)>0):raise ValueError('存在未处理的连接失败，拒绝输出')
                     cancel_check()
+                    store=batch['store']
+                    packet=store.prepare(name,layers,position,session.case['board'].bounds[:2],
+                                         errors=details['drc_issues'],die_count=len(session.case['dies']),
+                                         failure_outline=session.case['board'].wkb if details.get('connection_failure_count',0)>0 else None)
+                    cancel_check()
                     with batch['lock']:
-                        markers=batch['store'].add(name,snapshot.layers,position,session.case['board'].bounds[:2],errors=details['drc_issues'],die_count=len(session.case['dies']),failure_outline=session.case['board'].wkb if details.get('connection_failure_count',0)>0 else None)
+                        markers=store.commit(packet)
                         if batch['store'].count==1 or batch['store'].count%64==0:batch['store'].flush()
                     return dict(cell=name,checkpoint=str(batch['store'].checkpoint_destination),checkpoint_cells=batch['store'].checkpoint_count,**markers,**details)
                 finally:batch['semaphore'].release()
@@ -395,7 +445,7 @@ class MeasuredOutput(QtCore.QObject):
             def finish(progress):
                 while batch['inflight']:cancel_check();time.sleep(.05)
                 if batch['failed']:raise ValueError(f"批次有{batch['failed']}项失败/取消任务，保留旧输出文件。前100任务："+','.join(batch['failures']))
-                with batch['lock']:return batch['store'].write(batch['path'],progress)
+                with batch['lock']:return dict(batch['store'].write(batch['path'],progress),template_sha256=batch['template_sha256'])
             return self.submit(command,finish,'batch.end')
         raise ValueError('未知命令：'+command)
     def destination(self,name,extension):

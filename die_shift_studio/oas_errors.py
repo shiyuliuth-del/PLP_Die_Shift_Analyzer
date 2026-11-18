@@ -55,7 +55,33 @@ def _oriented(issue,bounds,dbu):
     return polygon.wkb,key
 
 
-def rectangles(issues,die_count,dbu):
+def _preserve_angle(issue,blob,ring,dbu):
+    """Retain a nonorthogonal angle that would vanish on the global grid."""
+    corners=np.asarray(issue['marker_corners_um'],float)
+    edge=corners[1]-corners[0]
+    actual=round(math.remainder(math.degrees(math.atan2(edge[1],edge[0])),90.),9)
+    if abs(actual) < 1e-8:
+        return blob,ring,(0.,0.),0.
+    rounded=shapely.from_wkb(blob)
+    xy=np.asarray(rounded.exterior.coords)
+    diffs=np.diff(xy,axis=0)
+    if np.any((diffs[:,0]!=0)&(diffs[:,1]!=0)):
+        return blob,ring,(0.,0.),0.
+    # OAS polygon vertices are integers. Store four local corners and retain
+    # the true angle in a placement only when rounding would erase all tilt.
+    origin=np.rint(corners.mean(axis=0)/dbu)*dbu
+    rad=math.radians(actual)
+    unit=np.array([math.cos(rad),math.sin(rad)])
+    basis=np.column_stack((unit,[-unit[1],unit[0]]))
+    local=(corners-origin)@basis
+    lo=np.floor(local.min(axis=0)/dbu)-1
+    hi=np.ceil(local.max(axis=0)/dbu)+1
+    rectangle=shapely.box(*(lo*dbu),*(hi*dbu))
+    key=('oriented',tuple(origin),actual,tuple(lo),tuple(hi))
+    return rectangle.wkb,key,tuple(origin),actual
+
+
+def rectangles(issues,die_count,dbu,*,with_placements=False):
     """Group current-pose markers by explicit DIE ownership (0 is common).
 
     V50 ordered corners are authoritative and already transformed. Legacy
@@ -71,13 +97,19 @@ def rectangles(issues,die_count,dbu):
         dies=issue.get('die_ids')
         if not isinstance(dies,(list,tuple)) or not dies or any(type(i) is not int or not 0<=i<=die_count for i in dies):
             raise ValueError('问题范围缺少明确DIE归属（1起；0表示封装公共问题）')
+        origin=(0.,0.)
+        angle=0.
         if 'marker_corners_um' in issue:
             blob,ring=_oriented(issue,bounds,dbu)
+            if with_placements:
+                blob,ring,origin,angle=_preserve_angle(issue,blob,ring,dbu)
         else:
             lo=np.floor(bounds[:2]/dbu);hi=np.maximum(np.ceil(bounds[2:]/dbu),lo+1)
             polygon,ring=_grid(np.asarray([[lo[0],lo[1]],[hi[0],lo[1]],[hi[0],hi[1]],[lo[0],hi[1]]])*dbu,dbu)
             blob=polygon.wkb
         for die in sorted(set(dies)):
             key=die,ring
-            if key not in seen:groups.setdefault(die,[]).append(blob);seen.add(key)
+            if key not in seen:
+                groups.setdefault(die,[]).append((blob,origin,angle) if with_placements else blob)
+                seen.add(key)
     return groups
