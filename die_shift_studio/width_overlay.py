@@ -196,7 +196,7 @@ class WidthOverlay:
         self.rows=[];self.tree=None;self.summary_labels(summary,selected,visible,modes)
 
     def scoped_row(self,row):
-        if self.w.view_settings.evaluation_scope!='focus':return row
+        if self.w.view_settings.evaluation_scope=='all':return row
         value=self.problem_probability(row);event=None
         if value is not None:
             threshold=self.w.params().failure_threshold

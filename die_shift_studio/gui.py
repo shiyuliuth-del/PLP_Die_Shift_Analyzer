@@ -48,7 +48,7 @@ SPECS={
  'panel_layers':('固定RDL层数',0,32,0), 'wafer_layers':('运动RDL层数',0,32,0),
  'line_width_um':('固定线宽 / μm',.01,10000,3),'line_space_um':('固定线距 / μm',.01,10000,3),
  'wafer_line_width_um':('运动线宽 / μm',.01,10000,3),'wafer_line_space_um':('运动线距 / μm',.01,10000,3),
- 'minimum_area_um2':('最小图形面积 / μm²',0,1e12,6),'package_clearance_um':('图形将距封装边框 / μm',0,10000,3),'via_diameter_um':('连接孔直径 / μm',.01,10000,3),'annulus_um':('固定RDL包围量 / μm',0,10000,3),'moving_annulus_um':('运动RDL包围量 / μm',0,10000,3),
+ 'minimum_edge_um':('最短边长 / μm',0,10000,6),'minimum_area_um2':('最小图形面积 / μm²',0,1e12,6),'package_clearance_um':('图形将距封装边框 / μm',0,10000,3),'via_diameter_um':('连接孔直径 / μm',.01,10000,3),'annulus_um':('固定RDL包围量 / μm',0,10000,3),'moving_annulus_um':('运动RDL包围量 / μm',0,10000,3),
    'min_die_gap_um':('芯片间要求净距 / μm',0,10000,3),
  'min_package_clearance_um':('芯片到封装边要求净距 / μm',0,10000,3),
  'single_bound_x_um':('单芯片 X 边界 / μm',0,10000,3),'single_bound_y_um':('单芯片 Y 边界 / μm',0,10000,3),
@@ -69,7 +69,7 @@ class Worker(QtCore.QThread):
         if self.cancelled.is_set():raise InterruptedError('用户取消')
         import time
         now=time.monotonic()
-        if n in (0,100) or now-self._last_progress>=.05:
+        if not self._last_progress or now-self._last_progress>=.1:
             self._last_progress=now;self.progress.emit(n,text)
     def publish(self,value):
         with self._partial_lock:
@@ -140,7 +140,8 @@ class ExtremeTable(W.QTableWidget):
 
 
 from .gds_shapes import edited_snapshot
-from .project import normalize_project, project_overlays, OVERLAY_DEFAULTS,EXTREME_PAGE_SIZE
+from .project import normalize_project, project_overlays, OVERLAY_DEFAULTS
+from .evaluation_scope import SCOPE_NAMES
 from .width_display import WidthDisplayEditor,tint,low_ink
 from .preview import default_motion,extreme_cases,layer_owners,transformed_layers,PREVIEW_SCOPE
 from .navigation import Navigation
@@ -244,14 +245,18 @@ class MainWindow(W.QMainWindow):
         else:
             box=W.QGroupBox(title);form=W.QFormLayout(box);parent.addWidget(box)
         form.setVerticalSpacing(7)
-        for key in keys:
-            name,low,high,d=SPECS[key]
-            spin=W.QSpinBox() if d==0 else W.QDoubleSpinBox();spin.setRange(low,high)
-            if d:spin.setDecimals(d)
-            spin.setValue(getattr(Parameters(),key));spin.setKeyboardTracking(False)
-            spin.setToolTip(name);spin.valueChanged.connect(self.area_changed if key=="minimum_area_um2" else self.invalidate)
-            form.addRow(name,spin);self.fields[key]=spin
+        for key in keys:self.parameter_field(form,key)
         return form
+
+    def parameter_field(self,form,key):
+        name,low,high,decimals=SPECS[key]
+        spin=W.QSpinBox() if not decimals else W.QDoubleSpinBox()
+        spin.setRange(low,high)
+        if decimals:spin.setDecimals(decimals)
+        spin.setValue(getattr(Parameters(),key));spin.setKeyboardTracking(False)
+        spin.setToolTip(name);spin.valueChanged.connect(self.area_changed if key in ('minimum_area_um2','minimum_edge_um') else self.invalidate)
+        form.addRow(name,spin);self.fields[key]=spin
+
     def collapsible(self,parent,title,registry):
         header=W.QToolButton();header.setText(title);header.setCheckable(True)
         header.setToolButtonStyle(getattr(Qt,'ToolButtonStyle',Qt).ToolButtonTextBesideIcon)
@@ -359,7 +364,9 @@ class MainWindow(W.QMainWindow):
         extreme_page=W.QWidget();ep=W.QVBoxLayout(extreme_page);ep.setContentsMargins(0,0,0,0)
         self.page_summary=W.QLabel('尚未评估')
         policy=getattr(W.QSizePolicy,'Policy',W.QSizePolicy);self.page_summary.setSizePolicy(policy.Ignored,policy.Preferred);self.page_summary.setMinimumWidth(0)
-        nav=W.QHBoxLayout();self.grid_mode=W.QComboBox();self.grid_mode.addItems(['全部组合','重点组合']);self.grid_mode.setCurrentIndex(1)
+        nav=W.QHBoxLayout();self.grid_mode=W.QComboBox()
+        for mode,name in SCOPE_NAMES.items():self.grid_mode.addItem(name,mode)
+        self.grid_mode.setCurrentIndex(self.grid_mode.findData('risk'))
         self.page_prev=W.QPushButton('上一页');self.page_next=W.QPushButton('下一页');self.page_prev.setEnabled(False);self.page_next.setEnabled(False)
         self.page_edit=W.QLineEdit('1');self.page_edit.setMaximumWidth(54);self.page_edit.setToolTip('输入页码并按回车')
         for widget in (self.grid_mode,self.page_prev,self.page_edit,self.page_next,self.page_summary):nav.addWidget(widget)
@@ -371,7 +378,7 @@ class MainWindow(W.QMainWindow):
         nav.addWidget(self.problem_filter);self.manual_button=W.QPushButton('手动偏移');nav.addWidget(self.manual_button);self.manual_button.clicked.connect(lambda:self.manual_preview.open_editor());nav.addStretch();ep.addLayout(nav)
         self.problem_filter.currentIndexChanged.connect(lambda *_:self.filter_changed())
         self.grid_mode.currentIndexChanged.connect(self.evaluation_scope_changed)
-        self.view_settings=replace(self.view_settings,evaluation_scope='focus')
+        self.view_settings=replace(self.view_settings,evaluation_scope='risk')
         self.page_prev.clicked.connect(lambda:self.show_extreme_page(self.preview_page-1))
         self.page_next.clicked.connect(lambda:self.show_extreme_page(self.preview_page+1))
         self.page_edit.returnPressed.connect(self.jump_extreme_page)
@@ -384,7 +391,7 @@ class MainWindow(W.QMainWindow):
         issue_page=W.QWidget();iv=W.QVBoxLayout(issue_page);iv.setContentsMargins(0,0,0,0);ir=W.QHBoxLayout()
         self.show_issues=W.QCheckBox('显示DRC问题');self.show_issues.setChecked(False)
         ir.addWidget(self.show_issues);self.issue_prev=W.QPushButton('上一页');self.issue_next=W.QPushButton('下一页');ir.addWidget(self.issue_prev);ir.addWidget(self.issue_next);self.issue_summary=label('第 1/1 页');ir.addWidget(self.issue_summary,1);iv.addLayout(ir)
-        self.issue_page=0;self.issue_page_size=256
+        self.issue_page=0
         self.issue_prev.clicked.connect(lambda:self.show_issue_page(self.issue_page-1));self.issue_next.clicked.connect(lambda:self.show_issue_page(self.issue_page+1))
         self.issue_table=table(['规则问题','图层','要求','实际','X / μm','Y / μm']);self.issue_table.verticalHeader().setVisible(True);iv.addWidget(self.issue_table)
         for col,width in enumerate((142,76,90,100,100)):self.issue_table.setColumnWidth(col,width)
@@ -464,7 +471,8 @@ class MainWindow(W.QMainWindow):
             widget.setKeyboardTracking(False);self.setting_fields[key]=widget
             if form is not None:form.addRow(title,widget)
             widget.valueChanged.connect(self.settings_changed);return widget
-        spin(hardware,'max_threads','最大线程数',0,1024).setSpecialValueText('0（自动）')
+        spin(general,'table_page_limit','表格每页最大行数',2,2000)
+        spin(hardware,'max_threads','最大并行数',0,1024).setSpecialValueText('0（自动）')
         spin(hardware,'max_memory_mb','最大内存占用 / MB',0,16777216).setSpecialValueText('0（自动）')
         caches=hardware
         spin(caches,'cache_max_entries','最大缓存个数 / 工程',10,100000)
@@ -541,10 +549,13 @@ class MainWindow(W.QMainWindow):
             box=W.QCheckBox(title);self.setting_fields[key]=box;form.addRow(box);box.toggled.connect(self.settings_changed)
             box.setToolTip('有限正良率级别下，仅淡显或隐藏已证明事件概率上界不超过门限的位置。未定位置保留，全量计算结果可查。')
         drc_group=group('DRC')
+        self.parameter_field(drc_group,'minimum_edge_um')
         spin(drc_group,'drc_min_angle_deg','最小铜图形内角 / °',1,179,1)
         spin(drc_group,'drc_tolerance_um','尺寸容差 ± / μm',-10000,10000,3)
         self.setting_fields['drc_tolerance_um'].setToolTip('有效最小值 = 工艺值 − 容差。正值放宽，负值收紧；默认0.1 μm。线宽、线距、包围量、机械净距和图形距边框共用；实体偏移分布不变。')
         recon=group('重构预演')
+        choices['reconstruction_die_mode']=[('自动','auto'),('DIE内随动','follow'),('DIE内静止','stationary')]
+        choice(recon,'reconstruction_die_mode','DIE内动区判断')
         auto_row=W.QWidget();auto_layout=W.QHBoxLayout(auto_row);auto_layout.setContentsMargins(0,0,0,0)
         auto=W.QCheckBox('自动计算');self.setting_fields['reconstruction_auto']=auto
         self.reconstruction_compute=W.QPushButton('重构计算');auto_layout.addWidget(auto);auto_layout.addWidget(self.reconstruction_compute)
@@ -552,7 +563,7 @@ class MainWindow(W.QMainWindow):
         row=W.QWidget();rv=W.QHBoxLayout(row);rv.setContentsMargins(0,0,0,0)
         self.region_move=W.QPushButton('框选动区');self.region_move.setCheckable(True)
         self.region_move.toggled.connect(lambda on:self.region_mode('move',on))
-        self.region_move.setToolTip('在名义图形上严格框选动区；按住左键滚轮旋转，Esc退出。')
+        self.region_move.setToolTip('在名义图形上框选动区；必要时延伸至源铜边界。按住左键滚轮旋转，Esc退出。')
         clear_cuts=W.QPushButton('清除全部手动切口');clear_cuts.clicked.connect(self.clear_manual_cuts)
         delete_cut=W.QPushButton('删除切口');delete_cut.clicked.connect(self.delete_selected_cut)
         for button in (self.region_move,clear_cuts,delete_cut):rv.addWidget(button)
@@ -638,6 +649,13 @@ class MainWindow(W.QMainWindow):
         if self.loading:return
         values={k:(w.currentData() if isinstance(w,W.QComboBox) else w.isChecked() if isinstance(w,W.QCheckBox) else w.text() if isinstance(w,W.QLineEdit) else w.value()) for k,w in self.setting_fields.items()}
         updated=ViewSettings.from_dict(dict(asdict(self.view_settings),**values))
+        if updated.table_page_limit!=self.view_settings.table_page_limit:
+            old=self.view_settings.table_page_limit;self.view_settings=updated
+            size=updated.table_page_limit
+            if self.extremes is not None:
+                self.show_extreme_page(self.preview_page*(old-1)//(size-1),redraw=False,keep_pose=True)
+            self.show_issue_page(self.issue_page*old//size)
+            return
         if (updated.max_threads,updated.max_memory_mb)!=(self.view_settings.max_threads,self.view_settings.max_memory_mb):
             from .resources import configure_limits
             configure_limits(updated.max_threads,updated.max_memory_mb);p=resource_profile()
@@ -995,11 +1013,11 @@ class MainWindow(W.QMainWindow):
         path,_=W.QFileDialog.getOpenFileName(self,'输入GDS/OAS','','GDS/OASIS (*.gds *.gdsii *.GDS *.oas *.oasis *.OAS)')
         if path:self.load_gds(path)
     def load_gds(self,path,top=None,project=None,project_path=None):
-        self.exit_region_mode();current_area=self.fields['minimum_area_um2'].value()
+        self.exit_region_mode();current_area=self.fields['minimum_area_um2'].value();current_edge=self.fields['minimum_edge_um'].value()
         def read_and_prepare(progress):
             data=read_gds(path,top,progress)
             if isinstance(data,dict):return data
-            settings=project if project and (not project.get('sha256') or project['sha256']==data.sha256) else {'schema_version':5,'parameters':{'minimum_area_um2':current_area}}
+            settings=project if project and (not project.get('sha256') or project['sha256']==data.sha256) else {'schema_version':5,'parameters':{'minimum_area_um2':current_area,'minimum_edge_um':current_edge}}
             from .gds_merge import restore_project_geometry
             data,settings=restore_project_geometry(data,settings);data.restored_project=settings
             roles=settings.get('roles',data.auto_roles)
@@ -1053,13 +1071,13 @@ class MainWindow(W.QMainWindow):
             from .layout_export import restore_controls
             restore_controls(self,project.get('layout_output'))
             self.data=data;self.gds_label.setText(str(Path(data.path).resolve()));self.gds_label.setToolTip(str(Path(data.path).resolve()))
-            view=project.get('extreme_view',{'mode':'focus','page':1})
-            self.grid_mode.blockSignals(True);self.grid_mode.setCurrentIndex(int(view['mode']=='focus'));self.grid_mode.blockSignals(False)
+            view=project.get('extreme_view',{'mode':'risk','page':1})
+            self.grid_mode.blockSignals(True);self.grid_mode.setCurrentIndex(self.grid_mode.findData(view['mode']));self.grid_mode.blockSignals(False)
             self.problem_filter.blockSignals(True);self.problem_filter.setCurrentIndex({'all':0,'drc':1,'failed':2}[view['filter_mode']]);self.problem_filter.blockSignals(False)
             self._initial_extreme_page=view['page']-1
             for title,header in self.setting_sections.items():header.setChecked(title in project.get('expanded_settings',[]))
             for title,header in self.process_sections.items():header.setChecked(title in project.get('expanded_process',[]))
-            self.view_settings=replace(ViewSettings.from_dict(project.get('settings')),evaluation_scope='focus' if self.grid_mode.currentIndex() else 'all',reconstruction_ignored=tuple(sorted(restored_width_ignores(project,data,'ignored_reconstruction'))));self.load_view_settings();self.layer_styles=project.get('layer_styles',{})
+            self.view_settings=replace(ViewSettings.from_dict(project.get('settings')),evaluation_scope=self.grid_mode.currentData(),reconstruction_ignored=tuple(sorted(restored_width_ignores(project,data,'ignored_reconstruction'))));self.load_view_settings();self.layer_styles=project.get('layer_styles',{})
             for name,value in project_overlays(project).items():
                 toggle=self.overlay_widget(name)
                 toggle.blockSignals(True)
@@ -1225,7 +1243,7 @@ class MainWindow(W.QMainWindow):
             q=frame['width_analysis']['counts'];message+=f" · 保宽足够 {q['宽度足够']}，需收窄 {q['需局部收窄']}，宽度不足 {q['宽度不足']}"
         if frame and frame.get('width_summary') and self.width_toggle.isChecked():
             s=self._coupled_data if self.coupled_view() else frame['width_summary']
-            if s:message+=f" · {'重点组合' if self.view_settings.evaluation_scope=='focus' else '全部'} {s['package_states']:,} 种姿态，{len(s['lines'])} 条风险线路"
+            if s:message+=f" · {SCOPE_NAMES[self.view_settings.evaluation_scope]} {s['package_states']:,} 种姿态，{len(s['lines'])} 条风险线路"
             else:message+=' · 正在核实型变后首行汇总'
         self.statusBar().showMessage(message)
         self.refresh_extreme_colors(frame)
@@ -2157,6 +2175,7 @@ class MainWindow(W.QMainWindow):
         if self.case is None:self.case=build_case(self.data,self.roles(),layer_order=self.ordered_layers())
         self.extremes=catalog if catalog is not None else ExtremeCatalog(self.case,self.params())
         self.focus_extremes=RepresentativeExtremes.from_result(self.case,self.params(),r,self.extremes)
+        self.risk_extremes=RepresentativeExtremes(self.case,self.params(),self.extremes,risk_indices=r.get('risk_indices',()))
         self.active_preview=None;self.owner_cache=None;self.engine=None;self.current_frame=None
         self.show_extreme_page(saved[-1] if preserve else self._initial_extreme_page,redraw=False)
         self.fill_issues()
@@ -2231,7 +2250,7 @@ class MainWindow(W.QMainWindow):
         data=self.data;result=self.result;cfg=self.view_settings;group=self.cache_group
         signature=self.preview_identity(data,roles,order,motions,p,result)
         width=self.width_toggle.isChecked();deform=False;rebuild=width and self.reconstruction_toggle.isChecked()
-        focus=None if width or self.grid_mode.currentIndex()==0 else tuple(self.focus_extremes.indices)
+        focus=None if width or self.grid_mode.currentIndex()==0 else tuple(self.scoped_catalog().indices)
         key=('changed-extremes-v29',signature,cfg.deformation_key() if deform else (),cfg.reconstruction_key() if rebuild else (),
              cfg.width_key() if width else (),focus)
         if key!=self._coupled_key:
@@ -2289,7 +2308,7 @@ class MainWindow(W.QMainWindow):
 
     def evaluation_scope_changed(self,*_):
         if self.loading:return
-        self.view_settings=replace(self.view_settings,evaluation_scope='focus' if self.grid_mode.currentIndex() else 'all')
+        self.view_settings=replace(self.view_settings,evaluation_scope=self.grid_mode.currentData())
         self.enable_settings();self.revision+=1;self.stop_animation();self.cancel_previews()
         self.width_yield.reset();self.reconstruction_yield.reset();self.constraint_feedback.cancel()
         self._width_grid_summary=None;self._coupled_data=None;self._problem_tag=None
@@ -2297,9 +2316,14 @@ class MainWindow(W.QMainWindow):
             self._coverage_pending=True;self.coverage_timer.start()
         self.show_extreme_page(0,redraw=False)
 
-    def show_extreme_page(self,page=0,redraw=True):
+    def scoped_catalog(self):
+        mode=self.grid_mode.currentData()
+        return self.focus_extremes if mode=='focus' else self.risk_extremes if mode=='risk' else self.extremes
+
+    def show_extreme_page(self,page=0,redraw=True,keep_pose=False):
         if self.extremes is None:return
-        catalogue=self.focus_extremes if self.grid_mode.currentIndex()==1 else self.extremes
+        catalogue=self.scoped_catalog()
+        active=self.active_preview if keep_pose else None
         self.schedule_coupled_filter()
         source=catalogue;waiting=False
         if self.problem_filter.currentIndex()!=0:
@@ -2315,11 +2339,12 @@ class MainWindow(W.QMainWindow):
                 if rules is None:waiting=True
                 else:self._problem_index=ProblemIndex(self.extremes,rules);self._problem_tag=tag
             if not waiting:catalogue=FilteredCatalog(source,self._problem_index)
-        pages=max(1,(catalogue.total+EXTREME_PAGE_SIZE-1)//EXTREME_PAGE_SIZE);page=max(0,min(page,pages-1))
-        self.preview_page=page;self.page_items=catalogue.page(page,EXTREME_PAGE_SIZE);self.active_preview=None;self._extreme_paint={};self._paint_pass=None
+        size=self.view_settings.table_page_limit-1
+        pages=max(1,(catalogue.total+size-1)//size);page=max(0,min(page,pages-1))
+        self.preview_page=page;self.page_items=catalogue.page(page,size);self.active_preview=active;self._extreme_paint={};self._paint_pass=None
         self.page_edit.setText(str(page+1));self.page_prev.setEnabled(page>0);self.page_next.setEnabled(page+1<pages)
         self.page_summary.setText(f'第 {page+1:,}/{pages:,} 页 · 共 {source.total+1:,} 行'+(' · 正在核验，暂列全部' if waiting else ''))
-        self.page_summary.setToolTip('总行数按所选重点/全部范围计，含零位；过滤只改变可见行。')
+        self.page_summary.setToolTip('总行数按所选组合范围计，含零位；过滤只改变可见行。')
         self.extreme_table.blockSignals(True);self.extreme_table.clearContents();self.extreme_table.setRowCount(len(self.page_items)+1)
         for col in range(self.extreme_table.columnCount()):self.extreme_table.setItem(0,col,W.QTableWidgetItem(''))
         for i,(index,e) in enumerate(self.page_items,1):
@@ -2331,10 +2356,12 @@ class MainWindow(W.QMainWindow):
             detail='\n'.join(f'DIE {j+1}: DX={state[0]:.6g} μm, DY={state[1]:.6g} μm, θ={math.degrees(state[2]):.6g}°' for j,state in enumerate(states))
             for j,value in enumerate(values):
                 item=W.QTableWidgetItem(value);item.setToolTip(detail);self.extreme_table.setItem(i,j,item)
-        self.extreme_table.setVerticalHeaderLabels(['0',*[str(page*EXTREME_PAGE_SIZE+i) for i in range(1,len(self.page_items)+1)]])
-        self.extreme_table.setCurrentCell(0,0);self.extreme_table.blockSignals(False)
+        self.extreme_table.setVerticalHeaderLabels(['0',*[str(page*size+i) for i in range(1,len(self.page_items)+1)]])
+        row=next((j for j,(index,_) in enumerate(self.page_items,1) if index==active),0)
+        self.extreme_table.setCurrentCell(row if row or active is None else -1,0);self.extreme_table.blockSignals(False)
         for j,width in enumerate([99,94,94,81]):self.extreme_table.setColumnWidth(j,width)
-        self.extreme_table.horizontalHeader().setStretchLastSection(True);self.state_table.setRowCount(0)
+        self.extreme_table.horizontalHeader().setStretchLastSection(True)
+        if not keep_pose:self.state_table.setRowCount(0)
         self.refresh_extreme_colors()
         if redraw:self.select_preview(0,0)
     def refresh_extreme_colors(self,frame=None):
@@ -2435,7 +2462,7 @@ class MainWindow(W.QMainWindow):
         self._issue_table_stamp=stamp;self.display_issues=entries
         self.show_issue_page(self.issue_page)
     def show_issue_page(self,page):
-        entries=getattr(self,'display_issues',[]);size=self.issue_page_size
+        entries=getattr(self,'display_issues',[]);size=self.view_settings.table_page_limit
         pages=max(1,(len(entries)+size-1)//size);self.issue_page=max(0,min(int(page),pages-1));start=self.issue_page*size
         self.filtered_issues=entries[start:start+size];self.issue_table.blockSignals(True);self.issue_table.setRowCount(len(self.filtered_issues))
         for i,row in enumerate(self.filtered_issues):
@@ -2495,7 +2522,7 @@ class MainWindow(W.QMainWindow):
                     dxf_directory=self.dxf_directory,dxf_options=asdict(self.dxf_settings),measured_output=self.measured_output.configuration(),
                     ignored_reconstruction=dict(sha256=self.data.sha256,top_cell=self.data.top_name,refs=[list(r) for r in self.view_settings.reconstruction_ignored]),
                     ignored_width_lines=dict(sha256=self.data.sha256,top_cell=self.data.top_name,refs=[list(r) for r in sorted(self.ignored_width_lines)]),
-                    extreme_view=dict(filter_mode=('all','drc','failed')[self.problem_filter.currentIndex()],filter_problems=bool(self.problem_filter.currentIndex()),mode='focus' if self.grid_mode.currentIndex() else 'all',page_size=EXTREME_PAGE_SIZE,page=(self.preview_page if self.extremes is not None else self._initial_extreme_page)+1),
+                    extreme_view=dict(filter_mode=('all','drc','failed')[self.problem_filter.currentIndex()],filter_problems=bool(self.problem_filter.currentIndex()),mode=self.grid_mode.currentData(),page_size=self.view_settings.table_page_limit-1,page=(self.preview_page if self.extremes is not None else self._initial_extreme_page)+1),
                     layer_table_height=max(110,self.layer_split.sizes()[0]),expanded_settings=[title for title,header in self.setting_sections.items() if header.isChecked()],
                     expanded_process=[title for title,header in self.process_sections.items() if header.isChecked()],manual_preview=self.manual_preview.state(),
                     overlays={name:self.overlay_widget(name).isChecked() for name in OVERLAY_DEFAULTS},layer_styles=self.layer_styles,
@@ -2551,18 +2578,21 @@ class MainWindow(W.QMainWindow):
         was_assessed=self.result is not None;valid_case=self.case is not None;view=(self.ax.get_xlim(),self.ax.get_ylim())
         selected=list(self.selection.selected)
         def prepare(progress):
-            progress(5,'校验工程节点');updated=edited_snapshot(original,edits)
+            progress(5,'校验工程节点')
+            from .area_filter import canonical_project,apply
+            unfiltered=canonical_project(original,project)
+            updated,edited_project=apply(edited_snapshot(getattr(original,'_area_base',original),unfiltered.get('node_edits',[])),unfiltered)
             progress(35,'重建几何和金属连接');cache=GeometryCache(updated)
             try:case=build_case(updated,project['roles'],layer_order=project['layer_order'])
             except ValueError:
                 if valid_case:raise
                 case=None
-            return updated,cache,case
+            return updated,cache,case,edited_project
         def accepted(product):
             if self.data is not original:return
-            updated,cache,case=product
+            updated,cache,case,edited_project=product
             updated.geometry_cache=cache;updated.prepared_case=case;updated.prepared_roles=project['roles'];updated.prepared_auto=automatic_parameters(updated,project['roles'])
-            self.set_data(updated,project,project_path=self.project_path)
+            self.set_data(updated,edited_project,project_path=self.project_path)
             self.ax.set_xlim(view[0]);self.ax.set_ylim(view[1])
             self.manual_states=pose;self.selection.selected=selected
             self.plot_layout(preserve=True)

@@ -149,7 +149,7 @@ def policy_texts(result,decimals):
     for i,(value,failure,proven) in enumerate(zip(result['values'],failures,proven_flags)):
         if proven:
             texts.append('100%' if value==1 else '0%' if value==0 else percentage_text(value,failure,decimals))
-        elif result['method'] in ('grid','focus'):texts.append('≈'+percentage_text(value,failure,decimals))
+        elif result['method'] in ('grid','focus','risk'):texts.append('≈'+percentage_text(value,failure,decimals))
         elif endpoint and result.get('failure_intervals'):
             lo,_=result['intervals'][i];_,fhi=result['failure_intervals'][i]
             texts.append('≥'+percentage_text(lo,fhi,decimals,ROUND_FLOOR))
@@ -169,7 +169,7 @@ def measure_width_yield(model,params,cfg,cache_group,progress,partial=None):
     analyzer.probability=None  # Bounds used solely to fade preview annotations are irrelevant here.
     try:
         from .width_risk_probability import enrich
-        if cfg.evaluation_scope=='focus':
+        if cfg.evaluation_scope!='all':
             from .evaluation_scope import focused_width
             return focused_width(analyzer,params,progress)[1]
         if cfg.width_yield_method=='grid':

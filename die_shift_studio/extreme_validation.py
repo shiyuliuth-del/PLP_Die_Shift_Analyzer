@@ -43,8 +43,8 @@ def evaluate_states(engine,catalog,settings,progress=lambda *_:None):
             frame=engine.frame(states,statistics_only=True) if isinstance(engine,PreviewEngine) else engine.frame(states);status=frame_status(frame)
             status['moving_drc']=sum(all(engine.roles.get(k)!='固定RDL' for k in q.get('layers',(q.get('layer'),))) for q in frame['drc'])
             poses[str(index)]=status
-            progress(93+round(6*(number+1)/len(indices)),f'重点组合 DRC {number+1}/{len(indices)}')
-        return dict(checked=True,scope='focus',pose_status=poses,scope_indices=indices,radices=grid.radices,
+            progress(93+round(6*(number+1)/len(indices)),f'{"极端组合" if catalog.scope=="risk" else "重点组合"} DRC {number+1}/{len(indices)}')
+        return dict(checked=True,scope=catalog.scope,pose_status=poses,scope_indices=indices,radices=grid.radices,
                     base=[0,0,0],local=[],pairs=None,drc_factors=[],unknown=0,package_states=len(indices))
     n=grid.count;model=engine.contact;bound=engine.bound;p=engine.p
     model.configure_parameters(p);tol=max(1e-9,model.data.dbu_um*1e-6)
@@ -104,7 +104,7 @@ def evaluate_states(engine,catalog,settings,progress=lambda *_:None):
                 local_states=sum(grid.radices),batches=waves,pair_states=pair_checks,package_states=grid.total+1)
     if focused:
         poses={str(index):status_for(result,digits) for index,digits in zip(indices,focus_digits)}
-        result.update(scope='focus',pose_status=poses,scope_indices=indices,radices=grid.radices,package_states=len(indices))
+        result.update(scope=catalog.scope,pose_status=poses,scope_indices=indices,radices=grid.radices,package_states=len(indices))
     return result
 
 
@@ -114,7 +114,7 @@ def status_for(factors,digits):
     if 'pose_status' in factors:
         index=0
         for d,n in zip(digits,factors['radices']):index=index*n+d
-        return factors['pose_status'].get(str(index-1),dict(safe=None,checked=False,reason='未纳入当前重点组合'))
+        return factors['pose_status'].get(str(index-1),dict(safe=None,checked=False,reason='未纳入当前组合'))
     contact,failures,drc=factors['base']
     for i,digit in enumerate(digits):
         c,f,r=factors['local'][i][digit]

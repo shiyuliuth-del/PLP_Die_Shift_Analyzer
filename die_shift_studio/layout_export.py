@@ -60,6 +60,11 @@ def write(snapshot,destination,dbu,options=None,issues=(),die_count=0,progress=l
     for n,(key,blobs) in enumerate(snapshot.layers.items()):
         cancel_check();geos=[shapely.from_wkb(b) for b in blobs]
         if options.merge_layers:geos=list(shapely.get_parts(shapely.union_all(geos)))
+        from .short_edges import contract
+        if snapshot.minimum_edge_um:
+            snapped=[shapely.transform(g,lambda xy:np.rint(xy/dbu)*dbu) for g in geos]
+            geos=[contract(poly,snapshot.minimum_edge_um) for g in snapped
+                  for poly in shapely.get_parts(shapely.make_valid(g)) if poly.geom_type=='Polygon']
         layers[key]=tuple(g.wkb for g in geos if not g.is_empty)
         progress(round(30*(n+1)/total),'整理输出层 '+key)
     error_layer=choose_error_layer(layers) if issues else None

@@ -24,7 +24,7 @@ def pair_tables(case,p,grid,tol):
 
 
 class RepresentativeExtremes:
-    def __init__(self,case,p,full=None,coupled=(),pairs=None):
+    def __init__(self,case,p,full=None,coupled=(),pairs=None,*,risk_indices=None):
         self.full=full if full is not None else ExtremeCatalog(case,p)
         grid=self.full;n=grid.count;self.indices=[];self.names={};self.unbounded=False;self.k=1.
         def add(digits,title):
@@ -35,7 +35,10 @@ class RepresentativeExtremes:
         # orthogonal array contains every ordered local pose pair exactly once
         # when both DIEs have q states; projections also cover reduced axes.
         active=[i for i,n in enumerate(grid.radices) if n>1]
-        if len(active)==1:
+        self.scope='risk' if risk_indices is not None else 'focus'
+        if risk_indices is not None:
+            for index in risk_indices:add(grid.choices(int(index)),'高风险极端')
+        elif len(active)==1:
             for d in range(grid.radices[active[0]]):
                 digits=[0]*n;digits[active[0]]=d;add(digits,'单芯片重点')
         elif active:
@@ -55,7 +58,11 @@ class RepresentativeExtremes:
 
     def __getitem__(self,index):
         if not 0<=index<self.total:raise IndexError(index)
-        key=self.indices[index];return dict(self.full[key],name=self.names[key])
+        key=self.indices[index];return self.row(key)
+    def row(self,key):
+        row=dict(self.full[key],name=self.names[key])
+        if self.scope=='risk':row['detail']='高风险筛选 · '+row['detail']
+        return row
     def __len__(self):return self.total
     def page(self,page,size=64):
-        return [(i,dict(self.full[i],name=self.names[i])) for i in self.indices[page*size:(page+1)*size]]
+        return [(i,self.row(i)) for i in self.indices[page*size:(page+1)*size]]

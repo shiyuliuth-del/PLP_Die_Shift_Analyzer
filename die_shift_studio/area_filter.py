@@ -36,27 +36,39 @@ def remap_project(project,mapping):
 
 def apply(data,project):
     threshold=float(project.get('parameters',{}).get('minimum_area_um2',0.))
-    if threshold<=0 or getattr(data,'area_threshold',None)==threshold:return data,project
+    edge=float(project.get('parameters',{}).get('minimum_edge_um',0.01))
+    if not np.isfinite(edge) or edge<0:raise ValueError('最短边长须为有限非负数字')
+    if (threshold<=0 and edge<=0) or getattr(data,'fabrication_filter',None)==(threshold,edge):return data,project
+    from .short_edges import contract
     out=copy.copy(data);out.layers={};out.shape_info={};out._area_base=data
-    out.area_threshold=threshold;out.area_indices={};mapping={};removed=holes=0
+    out.fabrication_filter=(threshold,edge);out.minimum_edge_um=edge
+    out.area_threshold=threshold;out.area_indices={};mapping={};removed=holes=shortened=0
+    invalid=[]
     for key,arrays in data.layers.items():
-        values=[];metadata=[];indices=[]
+        values=[];metadata=[];indices=[];descriptions=data.shape_info.get(key,[None]*len(arrays))
         for i,xy in enumerate(arrays):
             g=filled_polygon(xy,True)
-            if g.area<threshold:removed+=1;continue
-            kept=[r for r in g.interiors if shapely.Polygon(r).area>=threshold]
-            changed=len(kept)!=len(g.interiors);holes+=len(g.interiors)-len(kept)
-            if changed:
-                g=shapely.Polygon(g.exterior,kept);xy=winding_outline(g)
+            try:clean=contract(g,edge)
+            except ValueError:
+                invalid.append(f'{key} #{i+1}');continue
+            shortened+=int(clean is not g)
+            if clean.is_empty or clean.area<threshold:removed+=1;continue
+            kept=[r for r in clean.interiors if shapely.Polygon(r).area>=threshold]
+            holes+=len(g.interiors)-len(kept)
+            if clean is not g or len(kept)!=len(clean.interiors):
+                clean=shapely.Polygon(clean.exterior,kept);xy=winding_outline(clean)
                 meta=dict(kind='polygon',winding=bool(kept),nodes=xy.copy())
-            else:meta=data.shape_info.get(key,[None]*len(arrays))[i]
+            else:meta=descriptions[i]
             mapping[key,i]=len(values);indices.append(i);values.append(xy);metadata.append(meta)
         out.layers[key]=values;out.shape_info[key]=metadata;out.area_indices[key]=indices
-    out.node_edits=[];out.edit_digest=hashlib.sha256((data.edit_digest+'|area-v43|'+threshold.hex()).encode()).hexdigest()
+    out.node_edits=[];out.edit_digest=hashlib.sha256((data.edit_digest+'|source-filters-v52|'+threshold.hex()+'|'+edge.hex()).encode()).hexdigest()
     for attr in ('geometry_cache','prepared_case','prepared_auto','prepared_roles','_source_snapshot'):
         out.__dict__.pop(attr,None)
     out._sanitized_token=tuple((k,id(v),len(v)) for k,v in out.layers.items())
     out.import_warnings=list(data.import_warnings)+[f'最小面积 {threshold:g} μm²：移除 {removed} 个图形，填去 {holes} 个小孔洞。源文件未改动。']
+    out.import_warnings.append(f'最短边长 {edge:g} μm：处理 {shortened} 个图形。')
+    if invalid:
+        out.import_warnings.append(f'{len(invalid)} 个轮廓删除短边后无有效几何，已忽略：'+', '.join(invalid[:20]))
     p=remap_project(project,mapping);p['node_edits']=[]
     return out,p
 

@@ -4,7 +4,6 @@ from .core import Parameters
 
 # Optional schema-5 fields. Older GDS-backed jobs use the same view defaults
 # as a newly opened drawing, independent of the previously open project.
-EXTREME_PAGE_SIZE=256
 
 OVERLAY_DEFAULTS = dict(drc=False, space=False,
                         width=False, width_sufficient=False, reconstruction=False, footprint=False)
@@ -90,17 +89,19 @@ def normalize_project(project):
     if not isinstance(p.setdefault('dxf_directory',''),str):raise ValueError('DXF输出目录必须为文本')
     view=p.get('extreme_view',{})
     if not isinstance(view,dict):raise ValueError('工程极端情况视图必须是对象')
-    view={'mode':'focus','page':1,'page_size':64,**view}
-    if view['mode'] not in ('all','focus') or any(type(view[k]) is not int or view[k]<1 for k in ('page','page_size')):
+    view={'mode':'risk','page':1,'page_size':64,**view}
+    if view['mode'] not in ('all','focus','risk') or any(type(view[k]) is not int or view[k]<1 for k in ('page','page_size')):
         raise ValueError('工程极端情况视图须包含有效目录类型、正整数页码及页大小')
     # Keep the old first pose on screen when the larger pages absorb a V26 page.
     filtered=view.get('filter_problems',True)
     if type(filtered) is not bool:raise ValueError('过滤无问题情况必须为布尔值')
     mode=view.get('filter_mode','drc' if filtered else 'all')
     if mode not in ('all','drc','failed'):raise ValueError('极端情况筛选模式无效')
-    p['extreme_view']=dict(filter_mode=mode,filter_problems=mode!='all',mode=view['mode'],page=1+(view['page']-1)*view['page_size']//EXTREME_PAGE_SIZE,page_size=EXTREME_PAGE_SIZE)
+    settings=ViewSettings.from_dict(p.get('settings'))
+    page_size=settings.table_page_limit-1
+    p['extreme_view']=dict(filter_mode=mode,filter_problems=mode!='all',mode=view['mode'],page=1+(view['page']-1)*view['page_size']//page_size,page_size=page_size)
     p['overlays']=project_overlays(p)
-    p['settings']=asdict(ViewSettings.from_dict(p.get('settings')))
+    p['settings']=asdict(settings)
     p['settings']['show_contact_markers']=bool(p['settings']['show_contact_markers'] or p['overlays'].get('drc',False))
     p['overlays']['drc']=p['settings']['show_contact_markers']
     p['schema_version']=5;p.pop('geometry',None)
