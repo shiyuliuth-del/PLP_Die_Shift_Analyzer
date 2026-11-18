@@ -54,11 +54,12 @@ try:
  assert w.cut_drag.state is None
  w.escape_action();app.processEvents();assert w.region_select.mode is None
  event('button_press_event',point);assert w.cut_drag.state is not None
- before=w.reconstruction_overlay.cuts.get_segments()
+ before=np.column_stack(w.reconstruction_overlay.hover.get_data())
  event('scroll_event',point,'down',-1)
  # No mouse motion: the new geometry and frame buffer must already be present.
- after=w.reconstruction_overlay.cuts.get_segments()
- assert any(not np.allclose(a,b) for a,b in zip(before,after))
+ after=np.column_stack(w.reconstruction_overlay.hover.get_data())
+ assert not np.allclose(before,after)
+ assert not any(a.shape==before.shape and np.allclose(a,before) for a in w.reconstruction_overlay.cuts.get_segments())
  instant=np.asarray(w.canvas.buffer_rgba()).copy();w.canvas.draw();reference=np.asarray(w.canvas.buffer_rgba()).copy()
  x0,y0,x1,y1=map(int,w.ax.bbox.extents);h=instant.shape[0]
  delta=np.abs(instant[h-y1:h-y0,x0:x1,:3].astype(int)-reference[h-y1:h-y0,x0:x1,:3].astype(int))
@@ -103,7 +104,7 @@ try:
   q=w.current_frame['reconstruction']['pieces'][0];point=q['moved_cut'].centroid.coords[0]
   event('motion_notify_event',point);w.reconstruction_toggle.setChecked(False);app.processEvents();w.plot_layout(preserve=True)
   o=w.reconstruction_overlay
-  assert not any(a.get_visible() for a in (o.cuts,o.second_cuts,o.points,o.second_points,o.problem_points))
+  assert not any(a.get_visible() for a in (o.cuts,o.second_cuts,o.points,o.second_points,o.problems))
   assert not o.pulse_timer.isActive()
  print('GUI_V41_PASS: drag-wheel rotations, retained angles, menus, serial zones, Jobs, cancel rollback, hidden overlay/pulse cleanup')
 finally:close_window(app,w);tmp.cleanup()

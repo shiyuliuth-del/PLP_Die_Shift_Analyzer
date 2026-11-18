@@ -76,12 +76,13 @@ class V41Tests(unittest.TestCase):
         self.assertFalse(associate([q],outside,.001)[zone_key(q)])
         q['rule_witnesses']=associate([q],outside,.001)[zone_key(q)]
         bank=dict(zones={zone_key(q):dict(complete=True,has_failure=False)})
-        self.assertEqual(color_for(q,bank,False,6),'green')
+        self.assertEqual(color_for(q,bank,False),'green')
         before=violation(box(12,2,14,4),'original')
         q['rule_witnesses']=associate([q],[*outside,before],.001)[zone_key(q)]
-        self.assertEqual(len(q['rule_witnesses']),1);self.assertEqual(color_for(q,None,False,6),'red')
+        self.assertEqual(len(q['rule_witnesses']),1);self.assertEqual(color_for(q,None,False),'green')
         after=violation(box(12,12,14,14))
-        self.assertEqual(len(associate([q],[after],.001)[zone_key(q)]),1)
+        q['rule_witnesses']=associate([q],[after],.001)[zone_key(q)]
+        self.assertEqual(len(q['rule_witnesses']),1);self.assertEqual(color_for(q,None,False),'yellow')
 
     def test_fixed_via_can_cross_only_locally_empty_via_rows(self):
         from die_shift_studio.core import GDSData

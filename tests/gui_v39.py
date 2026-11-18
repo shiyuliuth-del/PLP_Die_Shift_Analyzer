@@ -116,16 +116,20 @@ try:
  # V40 explicitly replaces the old QMenu by the same on-canvas selected callout as width.
  combo=w.setting_fields['reconstruction_style'];combo.setCurrentIndex(combo.findData('linear'));wait()
  w.manual_states=np.array([[8000.,8000.,0.],[0,0,0]]);w.request_preview();wait(expect_diagnostic=True)
- bad=next(p for p in w.current_frame['reconstruction']['pieces'] if p.get('problem_reasons'))
- center=bad['problem_region'].representative_point().coords[0]
+ from die_shift_studio.reconstruction_events import active_region,zone_severity
+ issues=[q for q in w.current_frame['reconstruction']['pieces'] if zone_severity(q) in ('red','yellow')]
+ assert issues
+ bad=max(issues,key=lambda q:zone_severity(q)=='red')
+ failed=bool(bad.get('connection_failed'));center=active_region(bad).representative_point().coords[0]
  w.ax.set_xlim(center[0]-60,center[0]+60);w.ax.set_ylim(center[1]-60,center[1]+60);w.plot_layout(preserve=True);w.canvas.draw()
- assert w.reconstruction_overlay.problems.get_visible()
+ assert w.reconstruction_overlay.problems.get_visible()==failed
  # The real click must open the problem menu, not a detached custom panel.
  candidates=shapely.get_coordinates(bad['problem_region'].boundary)
  pick=next((xy for xy in [center,*candidates[::max(1,len(candidates)//20)]] if (hit:=w.reconstruction_overlay.pick(*xy,w.cut_drag._tolerance())) and hit[2]=='problem'),None)
  assert pick is not None
  event('button_press_event',pick);event('button_release_event',pick);app.processEvents()
- assert any(a.get_visible() and '当前存在违规' in a.get_text() for a in w.reconstruction_overlay.labels)
+ expected='线路无法保持连通' if failed else '线路连通，有 DRC 违例'
+ assert any(a.get_visible() and expected in a.get_text() for a in w.reconstruction_overlay.labels)
  assert not any(isinstance(a,W.QMenu) and a.isVisible() for a in app.topLevelWidgets())
  w.escape_action();app.processEvents()
  w.fit_plot();w.plot_layout(preserve=True);w.canvas.draw()

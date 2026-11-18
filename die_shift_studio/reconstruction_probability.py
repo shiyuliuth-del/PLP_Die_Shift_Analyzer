@@ -115,7 +115,7 @@ def attach(bank,r):
         from .evaluation_scope import SCOPE_NAMES,conditional_weights,conditional_event
         indices=bank['selected_indices'];weights,error,logmass=conditional_weights(bank['grid'],r.p,indices)
         title=SCOPE_NAMES['risk' if r.settings.evaluation_scope=='risk' else 'focus']
-        result=dict(bank,zones={},scale_nsigma=r.p.scale_nsigma,scope_weights=weights,scope_mass_error=error,scope_log_mass=logmass,scope=f'{title}（含零位）内的离散联合评估')
+        result=dict(bank,zones={},configuration=r.settings.reconstruction_key(),scale_nsigma=r.p.scale_nsigma,scope_weights=weights,scope_mass_error=error,scope_log_mass=logmass,scope=f'{title}（含零位）内的离散联合评估')
         mass=math.exp(logmass)
         delta=min(1.,2*error/max(mass-error,np.finfo(float).tiny)+64*np.finfo(float).eps*len(indices))
         threshold=2*float(ndtr(-r.p.scale_nsigma))
@@ -128,7 +128,7 @@ def attach(bank,r):
     weights,error=extreme_weights(bank['grid'],r.p)
     entries=r._plans_for_all_poses(lambda *_:None)
     lookup={(e['layer'],e['index'],e['owner'],e['plan'].identity if e['plan'] else None):e for e in entries}
-    result=dict(bank,zones={},scale_nsigma=r.p.scale_nsigma)
+    result=dict(bank,zones={},configuration=r.settings.reconstruction_key(),scale_nsigma=r.p.scale_nsigma)
     threshold=2*float(ndtr(-r.p.scale_nsigma))
     for key,row in bank['zones'].items():
         cancel_check();current=dict(row);_,estimate=weighted_pair(ProblemIndex(bank['grid'],row['clauses']),weights)

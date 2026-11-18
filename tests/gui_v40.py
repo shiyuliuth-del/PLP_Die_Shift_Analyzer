@@ -46,9 +46,9 @@ try:
  assert w.reconstruction_yield.evidence and w.reconstruction_yield.evidence['complete']
  assert (w.problem_filter.currentIndex()!=0) and w.extreme_table.rowCount()>1
  assert not w.dirty,'reconstruction edits must not invalidate the base assessment'
- views=w.reconstruction_overlay.zone_views;assert any(status=='red' for q,status,g in views.values())
- q,status,region=next(v for v in views.values() if v[1]=='red')
- assert region.intersection(q['regions']['B']).area<.001,'red fill reached fixed copper'
+ views=w.reconstruction_overlay.zone_views;assert any(status=='yellow' for q,status,g in views.values())
+ q,status,region=next(v for v in views.values() if v[1]=='yellow')
+ assert region.intersection(q['regions']['B']).area<.001,'DRC fill reached fixed copper'
  point=region.representative_point().coords[0];w.ax.set_xlim(point[0]-180,point[0]+180);w.ax.set_ylim(point[1]-100,point[1]+100);w.plot_layout(preserve=True);w.canvas.draw()
  click(point);assert w.selection.selected
  labels=[a for a in w.reconstruction_overlay.labels if a.get_visible()]

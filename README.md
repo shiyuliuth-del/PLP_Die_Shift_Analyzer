@@ -1,4 +1,6 @@
-# Die Shift Analyze V52
+# Die Shift Analyze V53
+
+V53 修复重构铜形预演接缝、后台计算期间的切口拖动与圆点反馈，并统一动区和极端情况表的严重度。详见 [V53 使用说明](docs/V53_使用说明.md)。
 
 V52 默认采用高风险极端组合，支持实时分页、导入和导出最短边长、框选动区局部扩展以及 DIE 内固定 RDL 随动策略。详见 [V52 使用说明](docs/V52_使用说明.md)。
 
@@ -13,7 +15,7 @@ V50：芯片对重点组合、分叉边界修正、当前姿态GDS/OAS与旋转E
 软件分析Die-first封装的DIE平移与旋转，提供三方案初筛、实体覆盖与极端足迹、通道宽度风险、重构动区编辑、规则/联合模型良率、工程结果保存、GDS/OAS导入、实测IPC及批量OAS输出。长度均为μm，GDS/OAS只读，工程节点可编辑。
 
 - [实测IPC接口与注意事项](docs/MEASURED_OUTPUT_API.md) · [GD55-1105独立验证脚本](tools/verify_measured_gd55.py)
-- [用户操作](docs/V51_使用说明.md)
+- [用户操作](docs/V53_使用说明.md)
 - [AI交接：主要功能、代码地图、算法和后续重点](docs/AI_HANDOFF.md)
 - [现行设计合同](docs/DESIGN_REQUIREMENTS.md)
 - [已知边界](docs/KNOWN_ISSUES.md)

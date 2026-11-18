@@ -194,19 +194,27 @@ class FixedRules:
     def check(self,replacements,states,progress=lambda *_:None):
         if not self.cfg.drc_checks:progress(100,'尺寸DRC未启用');return []
         geos=self.geometries(replacements);out=[];keys=list(geos)
+        layers={key:tuple(sorted({r[0] for r in self.nets[key]})) for key in keys}
+        planes=defaultdict(list)
         for n,key in enumerate(keys):
+            cancel_check()
             progress(round(70*n/max(1,len(keys))),'检查重构线宽、线距与包围量')
             for kind,g in self.local(key,geos[key],states):
-                out.append(dict(kind=kind,geometry=g,layers=tuple(sorted({r[0] for r in self.nets[key]})),net=key))
-        for plane in ({k[0] for k in keys} if enabled(self.cfg,'space') else ()):
-            selected=[k for k in keys if k[0]==plane];values=[geos[k] for k in selected];tree=shapely.STRtree(values)
-            for i,a in enumerate(values):
-                for j in tree.query(a,predicate='dwithin',distance=self.space):
-                    if j<=i:continue
-                    g=self.pair(a,values[j])
-                    if not g.is_empty:
-                        layers=tuple(sorted({r[0] for k in (selected[i],selected[j]) for r in self.nets[k]}))
-                        out.append(dict(kind='异网短接 / 线距不足',geometry=g,layers=layers,net=(selected[i],selected[j])))
+                out.append(dict(kind=kind,geometry=g,layers=layers[key],net=key))
+            planes[key[0]].append(key)
+        if enabled(self.cfg,'space'):
+            for selected in planes.values():
+                values=np.array([geos[k] for k in selected],object);tree=shapely.STRtree(values)
+                # Query indexed, ordered batches to bound memory on dense planes.
+                for start in range(0,len(values),128):
+                    cancel_check()
+                    x,y=tree.query(values[start:start+128],predicate='dwithin',distance=self.space)
+                    x+=start;keep=y>x
+                    for i,j in zip(x[keep],y[keep]):
+                        g=self.pair(values[i],values[j])
+                        if not g.is_empty:
+                            a,b=selected[i],selected[j]
+                            out.append(dict(kind='异网短接 / 线距不足',geometry=g,layers=tuple(sorted(set(layers[a])|set(layers[b]))),net=(a,b)))
         progress(100,f'重构约束检查完成 · {len(out)} 组违规')
         return out
 

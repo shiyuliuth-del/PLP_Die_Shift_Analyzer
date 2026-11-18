@@ -158,11 +158,18 @@ class Reconstructor:
             candidates=((l,i,v,value) for (l,i,v),value in (exact or {}).items())
         return next(self._matching_cut_rows(candidates,layer,index,chain),None)
 
-    def __init__(self,model,parameters,settings,cache_group=None,plan_pool=None,geometry_pool=None):
+    def __init__(self,model,parameters,settings,cache_group=None,plan_pool=None,geometry_pool=None,*,reference=None):
         from .reconstruction_route import EMPTY
         self.model=model;self.p=parameters;self.settings=settings
         from .reconstruction_rules import FixedRules
-        self.rules=FixedRules(model,parameters,settings)
+        if reference is None:
+            self.rules=FixedRules(model,parameters,settings)
+        else:
+            # Geometry and nominal groups are immutable. Worker-local caches
+            # and every rule consumer still use this frame's settings.
+            from copy import copy
+            self.rules=copy(reference.rules)
+            self.rules.cfg=settings;self.rules.contexts={};self.rules.hard_memo={}
         self.cache=SessionCache(group=cache_group)
         self.block_cache=EphemeralCache(budget=16*1024**2,max_entries=2048)
         self.tol=max(1e-6,model.data.dbu_um)
@@ -178,7 +185,8 @@ class Reconstructor:
         self.geometry_pool=geometry_pool if geometry_pool is not None else EphemeralCache(
             budget=geometry_mb*1024**2,max_entries=max(4096,128*geometry_mb))
         from .manual_regions import boxes_by_source
-        self.source_boxes=boxes_by_source(model,settings.reconstruction_boxes)
+        self.source_boxes=(reference.source_boxes if reference is not None and reference.settings.reconstruction_boxes==settings.reconstruction_boxes
+                           else boxes_by_source(model,settings.reconstruction_boxes))
         self.box_refs=set(self.source_boxes)
         self.box_partitions={};self._entry_catalogue=None;self._entries_by_ref={}
 
@@ -186,6 +194,9 @@ class Reconstructor:
         self.extra_cuts={(str(l),int(i),normalize_via_refs(v)):(nx,ny,x,y) for l,i,v,nx,ny,x,y in settings.reconstruction_extra_cuts}
         self.second_cuts=settings.reconstruction_second_cuts
         self.dropped={(str(l),int(i),normalize_via_refs(v)) for l,i,v in settings.reconstruction_dropped_cuts}
+        if reference is not None:
+            self.vias=reference.vias;self.stays=reference.stays;self.vias_by_target=reference.vias_by_target.copy()
+            return
         for key,role in model.roles.items():
             if role not in ('运动过孔','固定过孔'):continue
             for index,poly in enumerate(model.cache.layers[key]['geometry']):

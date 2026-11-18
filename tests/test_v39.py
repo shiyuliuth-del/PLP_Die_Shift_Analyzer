@@ -190,13 +190,16 @@ class V39Tests(unittest.TestCase):
         w.show_issues=on;w.layer_styles={};w.style_for=lambda layer:dict(color='#aabbcc',alpha=.5)
         w.reconstruction_toggle=on;w.visible_boxes={'5/0':on};w.view_bounds=(-10,-10,210,110)
         w.ordered_layers=lambda:['5/0'];w.geometry_patch=lambda g:PathPatch(geometry_path(g))
+        w.scene_renderer=SimpleNamespace(feedback_background=None)
         empty=shapely.Polygon();pieces=[]
         for owner,g in enumerate((box(0,0,100,100),box(100,0,200,100))):
             pieces.append(dict(layer='5/0',index=17,die=owner,vias=[owner],route_plan=None,fixed=g,
                                regions=dict(A=empty,B=g,C=empty),warning='',moved_cut=None,extra_cut=None))
-        w.current_frame={'reconstruction':{'pieces':pieces}}
+        copper=box(0,0,200,100)
+        w.current_frame={'reconstruction':{'pieces':pieces,'replacements':{'5/0':[dict(indices=(17,),geometry=copper)]}}}
         overlay=ReconstructionOverlay(w);overlay.draw()
         paths=overlay.artists['5/0','B'].get_paths()
+        self.assertEqual(len(paths),1)
         self.assertTrue(any(p.contains_point((50,50)) for p in paths))
         self.assertTrue(any(p.contains_point((150,50)) for p in paths))
 
