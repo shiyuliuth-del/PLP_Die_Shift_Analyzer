@@ -289,9 +289,11 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
             if not candidates:continue
             _,ref,g,reason=min(candidates,key=lambda item:(item[0],item[1]));objects[ref]=g;changed.add(ref);_adopt(by_ref[ref],g,r.tol,reason);progressed=True
         if not progressed:break
-    checked=inspect_many(r,objects,original,ports,manual_masks,manual_before)
+    if changed:checked.update(inspect_many(r,{ref:objects[ref] for ref in changed},original,ports,manual_masks,manual_before))
+    previous_percent=-1
     for number,ref in enumerate(sorted(objects)):
-        progress(70+round(20*number/max(1,len(objects))),f'最终连接核验 {number+1}/{len(objects)}')
+        percent=70+round(20*number/max(1,len(objects)))
+        if percent!=previous_percent:progress(percent,f'最终连接核验 {number+1}/{len(objects)}');previous_percent=percent
         if any(q.get('box_invalid') for q in by_ref.get(ref,())):blocked.append((ref,'框选动区没有切断运动—固定连接路径，严格区域不能完成适配'))
         if not checked[ref][0]:blocked.append((ref,'无法获得包含全部过孔且保持原拓扑的连通铜'))
         if checked[ref][1]:blocked.append((ref,'固定RDL进入禁布区，无法在保持电连接的同时避让'))

@@ -25,6 +25,24 @@ class Navigation:
                   [('scroll_event',self.scroll),('button_press_event',self.press),
                    ('motion_notify_event',self.motion),('button_release_event',self.release),
                    ('figure_leave_event',self.release),('resize_event',lambda _:self.cancel_zoom())]]
+        # Widget-local Qt shortcuts take precedence over MPL history keys and
+        # Qt focus traversal, without stealing arrows from tables or editors.
+        from .qt_compat import Qt,QtGui,QtWidgets
+        shortcut=getattr(QtGui,'QShortcut',None) or QtWidgets.QShortcut
+        self.arrow_shortcuts=[]
+        for name,dx,dy in [('Left',-1,0),('Right',1,0),('Up',0,1),('Down',0,-1)]:
+            action=shortcut(QtGui.QKeySequence(name),canvas)
+            action.setContext(getattr(Qt,'ShortcutContext',Qt).WidgetShortcut)
+            action.activated.connect(lambda dx=dx,dy=dy:self.step(dx,dy));self.arrow_shortcuts.append(action)
+
+    def step(self,dx,dy):
+        if self.drag is not None or self.zoom is not None or getattr(self.canvas,'reconstruction_drag_active',False) or getattr(self.canvas,'region_rotating',False):return
+        x,y=self.ax.get_xlim(),self.ax.get_ylim();self.history()
+        if dx:self.ax.set_xlim(np.asarray(x)+dx*(x[1]-x[0])*.2)
+        if dy:self.ax.set_ylim(np.asarray(y)+dy*(y[1]-y[0])*.2)
+        self.history()
+        if not getattr(self.canvas,'_managed_viewport',False):self.canvas.draw_idle()
+
     def busy(self):
         return bool(getattr(getattr(self.canvas,'toolbar',None),'mode',''))
     def history(self):
@@ -45,7 +63,7 @@ class Navigation:
         self.history();self.ax.set_xlim(limits[0]);self.ax.set_ylim(limits[1]);self.history()
         if not getattr(self.canvas,'_managed_viewport',False):self.canvas.draw_idle()
     def press(self,e):
-        if getattr(self.canvas,'ruler_active',False):return
+        if getattr(self.canvas,'ruler_active',False) and e.button!=MouseButton.MIDDLE:return
         if getattr(e,'reconstruction_cut_handled',False) or e.inaxes is not self.ax or self.busy():return
         if e.button==MouseButton.MIDDLE:
             self.history();self.drag=(e.x,e.y,self.ax.get_xlim(),self.ax.get_ylim(),self.ax.transData.inverted().frozen())

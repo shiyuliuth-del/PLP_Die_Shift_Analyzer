@@ -28,11 +28,22 @@ try:
   l,d=map(int,layer.split('/'));cell.add(*(gdstk.Polygon(xy,layer=l,datatype=d) for xy in rows))
  gds=root/'case.gds';lib.write_gds(gds);job=root/'job.dshift.json'
  job.write_text(json.dumps(dict(schema_version=5,gds_path=str(gds),top_cell='TOP',roles=roles,layer_order=['6/0','5/0','4/0','3/0','128/0','127/0'],parameters=asdict(p),settings=dict(animation_enabled=False,reconstruction_boundary_mode='perpendicular'),overlays={})))
- w.load_project(job);wait();w.run_evaluation();wait();w.problem_filter.setChecked(False);wait()
+ w.load_project(job);wait();w.run_evaluation();wait();w.problem_filter.setCurrentIndex(0);wait()
  assert all(name in w.setting_sections for name in ('结果分析','DRC','GDS/OAS输出参数','DXF输出参数','实测输出参数'))
  assert '安全范围' not in w.setting_sections and '无接触良率' not in w.setting_sections
  assert not any(w.setting_sections[name].isChecked() for name in ('GDS/OAS输出参数','DXF输出参数','实测输出参数'))
- w.canvas.draw();w.rulers.enter()
+ w.canvas.draw();w.canvas.setFocus();app.processEvents();w.rulers.enter()
+ # Key events are delivered by Qt, including in ruler mode. Distances are
+ # fractions of the viewport, so layout units and zoom level do not matter.
+ keys=getattr(Qt,'Key',Qt);limits=lambda:np.array([w.ax.get_xlim(),w.ax.get_ylim()]);base=limits();span=base[:,1]-base[:,0]
+ for name,dx,dy in [('Right',1,0),('Up',0,1),('Left',-1,0),('Down',0,-1)]:
+  before=limits();QTest.keyClick(w.canvas,getattr(keys,'Key_'+name));app.processEvents();np.testing.assert_allclose(limits(),before+(.2*span*np.array([dx,dy]))[:,None],atol=1e-7)
+ np.testing.assert_allclose(limits(),base,atol=1e-7)
+ w.extreme_table.setFocus();app.processEvents();QTest.keyClick(w.extreme_table,keys.Key_Down);app.processEvents();np.testing.assert_allclose(limits(),base,atol=1e-7)
+ w.extreme_table.selectRow(0);wait();w.canvas.setFocus();app.processEvents()
+ event('button_press_event',(0,0));anchor=w.rulers.start.copy();before=limits();event('button_press_event',(0,0),2);event('motion_notify_event',(5,5),2);event('button_release_event',(5,5),2)
+ assert not np.allclose(limits(),before);np.testing.assert_equal(w.rulers.start,anchor);assert not w.rulers.rows
+ w.rulers.clear();w.ax.set_xlim(base[0]);w.ax.set_ylim(base[1]);w.canvas.draw()
  event('button_press_event',(-14.9,10.1));event('button_release_event',(-14.9,10.1));assert not w.rulers.rows
  event('motion_notify_event',(20,30),key='shift');event('button_press_event',(20,30),key='shift');event('button_release_event',(20,30),key='shift')
  np.testing.assert_allclose(w.rulers.rows[0][0],[-15,10],atol=.1);assert abs(w.rulers.rows[0][1][1]-10)<.1

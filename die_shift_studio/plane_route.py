@@ -28,7 +28,12 @@ class PlaneRoute(RoutePlan):
         if not 0<=a<b<=self.length:return None
         c=EMPTY if a==0 else self.half(a,angles[0])
         fixed=EMPTY if b==self.length else self.source.difference(self.half(b,angles[1]))
-        overlap=c.intersection(fixed);c=c.difference(overlap);fixed=fixed.difference(overlap)
+        overlap=c.intersection(fixed)
+        if overlap.area>self.tolerance**2:
+            # Intersecting infinite cut planes at a bend cannot turn their
+            # remote overlap into a spurious active copper island.
+            return RoutePlan.partition(self,a,b,angles)
+        c=c.difference(overlap);fixed=fixed.difference(overlap)
         active=self.source.difference(shapely.union_all([c,fixed]))
         if active.is_empty:return None
         near=shapely.Point(self.route.coords[0]) if a==0 else active.boundary.intersection(c.boundary)
@@ -46,6 +51,13 @@ def candidate(base,lines,r):
         fixed=tuple(v['poly'] for v in r.stays if v['net']==base['net'] and plan.source.intersects(v['poly']))
         plan.terminal_vias=(tuple(v['poly'] for v in base['mine']),fixed)
         plan.pad_modes=tuple(any(g.buffer(r.p.annulus_um).covers(shapely.Point(route.coords[0 if side==0 else -1])) for g in values) for side,values in enumerate(plan.terminal_vias))
+        for side,values in enumerate(plan.terminal_vias):
+            if not values or not plan.pad_modes[side]:continue
+            endpoint=shapely.Point(route.coords[-1 if side else 0]);pad=min(values,key=endpoint.distance)
+            marks=terminal_marks(route,pad.buffer(r.p.annulus_um))
+            if len(marks):
+                if side:plan.fixed_start=max(plan.length*.5,float(min(marks)))
+                else:plan.land_end=min(plan.length*.5,float(max(marks)))
         eps=max(r.tol*32,.01);a=min(max(eps,plan.land_end+eps),plan.length*.3);b=max(min(plan.length-eps,plan.fixed_start-eps),plan.length*.7)
         for left,right in ((a,b),(eps,plan.length-eps)):
             part=plan.partition(left,right)

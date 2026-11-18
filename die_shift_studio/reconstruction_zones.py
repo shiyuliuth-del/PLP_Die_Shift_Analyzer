@@ -101,7 +101,7 @@ def serial_render(r,entry,part,center,pose):
     return adjusted,regions,None
 
 
-def live_serial(window,settings,old,ref):
+def live_serial(window,settings,old,ref,draft=False):
     """Recompose every serial segment together, including intermediate copper."""
     from .reconstruction import Reconstructor
     from .reconstruction_status import clone_plan_pool
@@ -111,7 +111,8 @@ def live_serial(window,settings,old,ref):
     base=getattr(original,'_base_plans',None)
     pool=clone_plan_pool({'local':[q for q in base if (q['layer'],q['index'])==ref]}) if base is not None else clone_plan_pool(original.plan_pool)
     rebuilt=Reconstructor(original.model,original.p,settings,plan_pool=pool)
-    if base is not None:
+    rebuilt.vias_by_target={ref:original.vias_by_target[ref]} if ref in original.vias_by_target else {}
+    if base is not None and (not draft or (pool['local'] and ref not in rebuilt.box_refs and ref not in settings.reconstruction_ignored and ref not in original.settings.reconstruction_ignored and ref not in original.box_refs)):
         rebuilt.auto_following=set(original.auto_following);rebuilt.auto_ignored=dict(original.auto_ignored);rebuilt.safe_vias=dict(original.safe_vias)
         rebuilt._envelopes=original._envelopes;rebuilt._plans=expand(rebuilt,pool['local'])
     try:local=rebuilt.frame(old['states'],targets={ref},diagnostics=False,quick=True,_raw=True)
@@ -121,5 +122,6 @@ def live_serial(window,settings,old,ref):
     changed={k:[v for v in values if not (k==ref[0] and ref[1] in v['indices'])] for k,values in data['replacements'].items()}
     for k,values in local['replacements'].items():changed.setdefault(k,[]).extend(values)
     from .topology_routing import resolve
-    changed,rows,repaired,blocked=resolve(original,changed,rows,old['states'])
+    if draft:repaired,blocked=(),()
+    else:changed,rows,repaired,blocked=resolve(original,changed,rows,old['states'])
     return dict(old,_reconstruction_changed_refs=tuple(sorted({ref,*repaired})),reconstruction=dict(data,configuration=settings.reconstruction_key(),pieces=rows,replacements=changed,violations=[],constraints_complete=False,repair_refs=repaired,hard_failures=blocked,electrically_valid=not bool(blocked)))

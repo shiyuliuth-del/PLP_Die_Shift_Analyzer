@@ -156,10 +156,11 @@ class V39ConnectionTests(unittest.TestCase):
             self.assertEqual(copper.geom_type,'Polygon');self.assertTrue(copper.is_valid)
             painted=shapely.union_all([g for q in qs for g in q['regions'].values()])
             self.assertLess(copper.symmetric_difference(painted).area,.001)
-            # The two fixed-end dots must be at the actual connected vias,
-            # never at the centroid between branches or an unrelated net.
+            # A merged domain has one pickable dot for the closest fixed port
+            # (either terminal in this symmetric fixture); both remain connected.
             actual=shapely.get_coordinates(qs[0]['extra_cut'])
-            np.testing.assert_allclose(actual[np.argsort(actual[:,1])],[(600.,-200.),(600.,200.)],rtol=0,atol=1e-9)
+            self.assertEqual(actual.shape,(1,2));self.assertAlmostEqual(actual[0,0],600.);self.assertAlmostEqual(abs(actual[0,1]),200.)
+            for y in (-200,200):self.assertTrue(copper.covers(Point(600.,y)))
             settings,part=e.reconstructor.edited(members[0],1,members[0]['route_plan'].route.interpolate(members[0]['route_plan'].length-100).coords[0])
             self.assertEqual(len(settings.reconstruction_intervals),2)
             untouched=[row for row in settings.reconstruction_intervals if row[4]==members[1]['route_identity']][0]

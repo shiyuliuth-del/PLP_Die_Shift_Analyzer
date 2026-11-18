@@ -42,7 +42,7 @@ def click(xy,mod=keys.NoModifier):QTest.mouseClick(w.canvas,left,mod,point(xy));
 def drag(a,b,mod):
     QTest.mousePress(w.canvas,left,mod,point(a));QTest.mouseMove(w.canvas,point(b));QTest.mouseRelease(w.canvas,left,mod,point(b));app.processEvents()
 
-load('示例D_芯片外扇出');assert w.problem_filter.isChecked()
+load('示例D_芯片外扇出');assert (w.problem_filter.currentIndex()!=0)
 w.set_view([0,1000],300,200);w.viewport_changed(force=True);wait();w.canvas.draw()
 click([0,1000]);one=w.selection.selected.copy();assert one and one[0][0]=='3/0',one
 click([0,1000],keys.ShiftModifier);two=w.selection.selected.copy();assert len(two)==2 and two[0]==one[0]
@@ -55,7 +55,7 @@ click([0,1000]);QTest.keyClick(w.canvas,getattr(Qt,'Key',Qt).Key_Escape);assert 
 w.grid_mode.setCurrentIndex(0);wait()
 idx=ProblemIndex(w.extremes,current_drc_factors(w.result['extreme_factors']))
 assert [i for i,_ in w.page_items]==[idx.at(j) for j in range(min(256,idx.total))]
-w.problem_filter.setChecked(False);wait()
+w.problem_filter.setCurrentIndex(0);wait()
 table=w.extreme_table;assert table.rowCount()>35
 table.setCurrentCell(32,0);wait();bar=table.verticalScrollBar();bar.setValue(bar.maximum());app.processEvents()
 y=bar.value();assert y>0
@@ -78,7 +78,7 @@ w.write_project(root/'saved.dshift.json');saved=json.loads((root/'saved.dshift.j
 assert not saved['extreme_view']['filter_problems'] and saved['settings']['probability_show_ranges']
 w.target_sigma.setCurrentText('3');wait();assert w.setting_fields['probability_show_ranges'].isEnabled()
 load('示例O_运动网络三线路通道',dict(target_nsigma=0,per_die_enabled=True,die_bounds=[[35,0,.7],[0,10,0]]))
-assert w.problem_filter.isChecked()
+assert (w.problem_filter.currentIndex()!=0)
 w.width_toggle.setChecked(True);wait();w.grid_mode.setCurrentIndex(0);wait()
 summary=w.current_frame['width_summary'];ix=ProblemIndex(w.extremes,summary['red_factors'])
 assert [i for i,_ in w.page_items]==[ix.at(j) for j in range(ix.total)] and ix.total

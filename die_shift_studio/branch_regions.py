@@ -6,6 +6,7 @@ so it is neither duplicated nor arbitrarily pinned to one endpoint.
 """
 import numpy as np
 import shapely
+import shapely.affinity
 from .reconstruction_route import parts,clean_overlay
 
 
@@ -176,6 +177,10 @@ def assemble(r,source,rows,states):
             except (ValueError,shapely.errors.GEOSException):pass
         # Whole-pad controls are physical terminal locations. Floating material
         # weights apply to interface lines, never to the terminal itself.
+        from .straight_controls import representative
+        near_original,far_original=nearcut,farcut
+        nearcut=representative(near_original,far_original,r.tol);farcut=representative(far_original,nearcut,r.tol)
+        if nearcut.geom_type=='Point' and farcut.geom_type=='Point':nearcut=representative(near_original,farcut,r.tol)
         if nearcut.geom_type in ('Point','MultiPoint'):high=1.
         if farcut.geom_type in ('Point','MultiPoint'):low=0.
         q.update(regions=dict(A=posed,B=b,C=cposed),nominal_regions=dict(A=group,B=b,C=c),
@@ -198,7 +203,7 @@ def consolidate(r,pieces,states):
         else:other.append(q)
     for rows in groups.values():
         source=rows[0]['route_plan'].source
-        cache_key=('branch-assembly-local-intervals-v50',r.rules.identity,r.settings.reconstruction_style,
+        cache_key=('branch-assembly-local-intervals-v51',r.rules.identity,r.settings.reconstruction_style,
                    tuple(r.model.bound.centers[rows[0]['die']]),states[rows[0]['die']].tobytes(),
                    tuple((q['route_identity'],q['interval'],q['boundary_angles'],tuple(q['nominal_regions'][k].wkb for k in 'ABC')) for q in rows))
         cached=r.geometry_pool.get(cache_key)
@@ -234,7 +239,10 @@ def editable_piece(piece,point,kind=None):
     def distance(q):
         if point_mode:
             plan=q['route_plan'];endpoint=shapely.Point(plan.route.coords[-1 if side else 0])
-            if not side:return q['moving_terminals'].distance(p)
+            if not side:
+                # The posed terminal for this path, not the union of all ports.
+                actual=q.get('moving_handle_endpoint')
+                if actual is not None:return actual.distance(p)
             return endpoint.distance(p)
         return min(q[name].distance(p) for name in names)
     member=min(piece['graph_members'],key=distance)

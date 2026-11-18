@@ -44,7 +44,7 @@ try:
  with patch('die_shift_studio.result_analysis.calculate',side_effect=AssertionError('eager analysis')):
   w.load_project(job);wait();w.run_evaluation();wait()
   assert not w.result['analysis_complete'] and not w.result.get('safe_ranges')
-  w.problem_filter.setChecked(False);wait()
+  w.problem_filter.setCurrentIndex(0);wait()
   w.manual_button.click();app.processEvents();d=w.manual_preview
   assert d.isVisible() and len(d.rows)==1
   assert d.table.editTriggers()==getattr(W.QAbstractItemView,'EditTrigger',W.QAbstractItemView).NoEditTriggers

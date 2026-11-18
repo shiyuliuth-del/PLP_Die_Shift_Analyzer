@@ -126,6 +126,6 @@ class V28(unittest.TestCase):
     def test_saved_filter_and_legacy_default(self):
         for value in (True,False):
             old={'schema_version':5,'extreme_view':dict(mode='all',page=2,page_size=256,filter_problems=value)}
-            self.assertEqual(normalize_project(old)['extreme_view'],old['extreme_view'])
+            self.assertEqual(normalize_project(old)['extreme_view'],dict(old['extreme_view'],filter_mode='drc' if value else 'all'))
         self.assertTrue(normalize_project({'schema_version':3})['extreme_view']['filter_problems'])
         with self.assertRaises(ValueError):normalize_project({'schema_version':5,'extreme_view':{'filter_problems':'false'}})

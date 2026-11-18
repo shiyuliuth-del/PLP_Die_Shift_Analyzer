@@ -133,18 +133,38 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
     from .evaluation_scope import digits_for
     visits=(digits_for(grid,i) for i in indices) if indices is not None else product(*(range(n) for n in grid.radices))
     total=len(indices) if indices is not None else grid.total+1
+    # Each lane owns its mutable plan, rule and frame caches. Reduction stays in
+    # catalogue order; no material edits or Qt objects are shared between poses.
+    import threading
+    from contextlib import ExitStack
+    from .resources import parallel_iter, resource_profile, geometry_budget
+    from .reconstruction import Reconstructor
+    from .reconstruction_status import clone_plan_pool
+    profile=resource_profile()
+    workers=min(total,geometry_budget(profile,sum(n['poly'].__sizeof__()+shapely.get_num_coordinates(n['poly'])*32 for n in r.model.nodes)))
+    local=threading.local();lock=threading.Lock();solvers=[]
+    if workers>1:r._plans_for_all_poses(progress)
     def evaluate(digits):
-        cancel_check()
-        if bundles is not None:states,frame=scene(r,grid,bundles,digits)
+        cancel_check();solver=r
+        if workers>1:
+            solver=getattr(local,'solver',None)
+            if solver is None:
+                solver=Reconstructor(r.model,r.p,r.settings,plan_pool=clone_plan_pool(r.plan_pool),geometry_pool=r.geometry_pool)
+                solver._plans=clone_plan_pool({'current':r._plans})['current']
+                solver.auto_following=set(r.auto_following);solver.auto_ignored=dict(r.auto_ignored);solver.safe_vias=dict(r.safe_vias)
+                solver._envelopes=getattr(r,'_envelopes',{})
+                if getattr(r,'measured_only',False):solver.measured_only=True
+                local.solver=solver
+                with lock:solvers.append(solver)
+        if bundles is not None:states,frame=scene(solver,grid,bundles,digits)
         else:
             states=np.asarray([v[d] for v,d in zip(grid.locals,digits)])
-            frame=r.frame(states)
+            frame=solver.frame(states)
         return digits,states,frame
-    # Stream scenes without retaining their whole package cross product.
-    # One solver owns GEOS/plan caches; never concurrently mutate that solver.
-    # Independent source preparation remains parallel and repairs are cached.
-    values=map(evaluate,visits)
-    for number,(digits,states,frame) in enumerate(values):
+    with ExitStack() as cleanup:
+      cleanup.callback(lambda:[s.close() for s in solvers])
+      values=parallel_iter(evaluate,visits,dict(profile,workers=workers));cleanup.callback(values.close)
+      for number,(digits,states,frame) in enumerate(values):
         cancel_check()
         repairs+=bool(frame['repair_refs'])
         remember(r,states,frame)

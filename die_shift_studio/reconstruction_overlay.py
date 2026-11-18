@@ -39,14 +39,40 @@ def _segment_distance(points,x,y):
 
 class ReconstructionOverlay:
     def __init__(self,window):
-        self.w=window;self.artists={};self.cuts=None;self.stamp=self.table_stamp=None
+        self.draft_frame=self.draft_data=self.draft_key=None;self.w=window;self.artists={};self.cuts=None;self.stamp=self.table_stamp=None
         self.selected=self.selected_kind=None;self.hover=None;self.hover_key=None
         self.end_artists=[];self.region_artists=[];self.arrow_artists=[];self.path_cache={};self.handles={};self.union_cache={};self.labels=[];self.text_sizes={};self.zone_views={}
         self.pulse_timer=QtCore.QTimer(window);self.pulse_timer.setInterval(33);self.pulse_timer.timeout.connect(self.pulse)
     def active(self):return self.w.reconstruction_toggle.isChecked()
     @staticmethod
     def _key(q):return q['layer'],int(q['index']),normalize_via_refs(q.get('via_refs',q['vias'])),q.get('route_identity')
-    def data(self):return (self.w.current_frame or {}).get('reconstruction')
+    def data(self):
+        frame=self.w.current_frame
+        if getattr(self,'draft_frame',None) is not None:
+            if self.draft_frame is frame:return self.draft_data
+            self.draft_frame=self.draft_data=None
+        return (frame or {}).get('reconstruction')
+    def stage(self):
+        w=self.w;frame=w.current_frame
+        if not frame or not frame.get('reconstruction') or not getattr(w,'engine',None):return
+        cfg=w.view_settings;previous=w.engine.reconstructor.settings
+        if cfg.reconstruction_key()==previous.reconstruction_key():
+            self.draft_frame=self.draft_data=self.draft_key=None;self.stamp=None;return
+        if self.draft_frame is frame and self.draft_key==cfg.reconstruction_key():return
+        refs=set();data=frame['reconstruction'];geo=w.engine.reconstructor.model.cache.layers
+        for name in ('ignored','following','forced','angles','intervals','added','deleted','regions','boxes','cuts','extra_cuts','second_cuts','dropped_cuts'):
+            field='reconstruction_'+name
+            for row in set(getattr(cfg,field))^set(getattr(previous,field)):
+                if name in ('boxes','regions'):
+                    g=shapely.Polygon(row[1]) if name=='boxes' else shapely.box(*row[1]);layer=row[0]
+                    refs.update((layer,i) for i in np.flatnonzero(shapely.intersects(geo[layer]['geometry'],g)))
+                else:refs.add(tuple(row[:2]))
+        from .reconstruction_zones import live_serial
+        local=frame
+        for ref in sorted(refs):local=live_serial(w,cfg,local,ref,draft=True)
+        self.draft_frame=frame;self.draft_key=cfg.reconstruction_key();self.draft_data=dict(local['reconstruction'],draft_refs=refs or {(q['layer'],q['index']) for q in data['pieces']})
+        self.stamp=None
+
     def pieces(self):return [q for q in (self.data() or {}).get('pieces',()) if self.active() and self.w.visible_boxes[q['layer']].isChecked()]
     def piece_for(self,key):return next((q for q in self.pieces() if self._key(q)==key),None)
     def handle_geometries(self,pieces):
@@ -55,7 +81,7 @@ class ReconstructionOverlay:
             plan=q.get('route_plan')
             for kind,side,name in (('moved',0,'moved_cut'),('extra',1,'extra_cut')):
                 g=q.get(name);key=(self._key(q),kind)
-                if getattr(self.w,'reconstruction_pending',False) and not self.w.view_settings.reconstruction_auto:
+                if getattr(self.w,'reconstruction_pending',False) and not self.w.view_settings.reconstruction_auto and getattr(self,'draft_frame',None) is not frame:
                     staged=[];changed=False
                     for member in q.get('graph_members',(q,)):
                         route=member.get('route_plan')
@@ -70,7 +96,11 @@ class ReconstructionOverlay:
                         staged.append(transform(part['far' if side else 'near'],frame['rotation_centers'][q['die']],frame['states'][q['die']]*q.get('endpoint_weights',(1.,0.))[side]));changed=True
                     if changed:g=shapely.union_all(staged)
                 if g is None:continue
-                if plan is not None and g.geom_type=='Point':
+                if q.get('graph_members'):
+                    # The merged zone owns this blade/dot. Its first member may
+                    # start at an unrelated port on the other end of a plane.
+                    result[key]=g
+                elif plan is not None and g.geom_type=='Point':
                     local=plan.pad_handle(side)
                     local=transform(local,frame['rotation_centers'][q['die']],frame['states'][q['die']]*q.get('endpoint_weights',(1.,0.))[side])
                     result[key]=local
@@ -130,6 +160,7 @@ class ReconstructionOverlay:
         w=self.w
         if self.cuts is None or self.cuts.axes is not w.ax:
             self.artists={}
+            self.staged=PatchCollection([],facecolor='#5992b62a',edgecolor='#44698c',linestyles='--',linewidths=1.2,zorder=10);w.ax.add_collection(self.staged)
             self.warning=PatchCollection([],facecolor='none',edgecolor=WARNING_COLOR,linestyles='--',linewidths=.8,zorder=9.4);w.ax.add_collection(self.warning)
             self.problems=PatchCollection([],facecolor='none',edgecolor='#b92d39',alpha=.7,linewidths=.9,zorder=9.7);w.ax.add_collection(self.problems)
             self.constraints=PatchCollection([],facecolor='#dd5790',edgecolor='#bc386d',alpha=.45,linewidths=.7,zorder=10.5);w.ax.add_collection(self.constraints)
@@ -200,6 +231,13 @@ class ReconstructionOverlay:
             shapes=paths.get((layer,k),[]);artist.set_paths(shapes);artist.set_visible(bool(shapes));artist.set_facecolors(colors.get((layer,k),[]));artist.set_edgecolors(colors.get((layer,k),[]))
             artist.set_alpha(None)
             artist.set_zorder(2+(order.index(layer) if layer in order else 0)/max(1,len(order))+.001*('BCA'.index(k)+1))
+        staged=[]
+        for layer,index in (data or {}).get('draft_refs',()):
+            if layer in vis:
+                gs=[g for (l,i,kind,status),parts in region_groups.items() if (l,i)==(layer,index) and kind=='A' for g in parts.values()]
+                if not gs:gs=[w.engine.reconstructor.model.cache.layers[layer]['geometry'][index]]
+                staged.extend(patch(g) for g in gs if not g.is_empty and _in_view(g.bounds,w.view_bounds))
+        self.staged.set_paths(staged);self.staged.set_visible(bool(staged))
         self.constraints.set_paths([patch(g) for g in markers.values()]);self.constraints.set_visible(False)
         points=[g.representative_point().coords[0] for g in markers.values()]
         self.problem_points.set_data(np.array(points).T if points else [[],[]]);self.problem_points.set_visible(False)
@@ -289,7 +327,7 @@ class ReconstructionOverlay:
     def clear_hover(self):self.highlight(None)
     def hide(self):
         self.clear_hover();self.stamp=None;self.handles={};self.zone_views={}
-        for artist in [*self.artists.values(),*self.labels,*self.end_artists,*self.region_artists,*self.arrow_artists,*[getattr(self,n,None) for n in ('warning','problems','constraints','problem_points','cuts','second_cuts','points','second_points')]]:
+        for artist in [*self.artists.values(),*self.labels,*self.end_artists,*self.region_artists,*self.arrow_artists,*[getattr(self,n,None) for n in ('staged','warning','problems','constraints','problem_points','cuts','second_cuts','points','second_points')]]:
             if artist is not None:artist.set_visible(False)
         self.w.scene_renderer.external_draw(None)
 
@@ -341,6 +379,7 @@ class CutDrag:
         point=np.array([event.xdata,event.ydata])-self.state['handle_offset']
         nominal=inverse_geometry(shapely.Point(point),frame['rotation_centers'][owner],frame['states'][owner]*piece.get('endpoint_weights',(1.,0.))[side])
         plan=piece['route_plan'];origin=np.asarray(plan.route.interpolate(piece['interval'][side]).coords[0])
+        self.state['nominal_press']=np.asarray(nominal.coords[0])
         self.state['drag_offset']=origin-np.asarray(nominal.coords[0])
         self.state['press_projection']=piece['interval'][side]
         self.state['projection_cursor']=origin.copy();self.state['projection']=piece['interval'][side]
@@ -378,10 +417,14 @@ class CutDrag:
                 route_cursor=cursor+state['drag_offset']
                 projection=plan.drag_projection(route_cursor,state['projection'],state['projection_cursor'])
                 state['projection']=projection;state['projection_cursor']=route_cursor.copy()
-                part,clamped=plan.edit_pose(*piece['interval'],which,state['press_interval']+projection-state['press_projection'],frame['rotation_centers'][owner],frame['states'][owner],self.w.view_settings.reconstruction_style,cursor=route_cursor)
-                if part is not None:
-                    from .reconstruction_edits import apply_angles
-                    part=apply_angles(state['updated'],plan,part)
+                from .manual_regions import move_side
+                edit=move_side(state['settings'],plan,state['nominal_press'],cursor) if any(layer==plan.layer and plan.source.intersects(shapely.Polygon(verts)) for layer,verts in state['settings'].reconstruction_boxes) else None
+                if edit:state['updated'],part=edit
+                else:
+                    part,clamped=plan.edit_pose(*piece['interval'],which,state['press_interval']+projection-state['press_projection'],frame['rotation_centers'][owner],frame['states'][owner],self.w.view_settings.reconstruction_style,cursor=route_cursor)
+                    if part is not None:
+                        from .reconstruction_edits import apply_angles
+                        part=apply_angles(state['updated'],plan,part)
                 if part is not None:
                     rows=[r for r in self.w.view_settings.reconstruction_intervals if (r[0],r[1],r[2],normalize_via_refs(r[3]),r[4])!=(*plan.key,plan.identity)]
                     rows.append((*plan.key,plan.identity,part['a'],part['b']))

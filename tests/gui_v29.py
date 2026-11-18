@@ -84,7 +84,7 @@ with patch('die_shift_studio.width_analysis.WidthAnalyzer._measure',side_effect=
     w.visible_boxes[refs[0][0]].setChecked(True);settle();assert '工况' in labels()
     mode.setCurrentIndex(mode.findData('show'));settle()
     click([150,60]);assert not w.selection.selected and not labels().strip()
-w.problem_filter.setChecked(False);settle();table=w.extreme_table
+w.problem_filter.setCurrentIndex(0);settle();table=w.extreme_table
 table.setCurrentCell(1,0);settle();QTest.keyClick(table,getattr(Qt,'Key',Qt).Key_Down);settle()
 assert table.currentRow()==2 and not w.current_frame.get('nominal_global')
 # V36 extends probability-weighted fill to concrete poses, retaining fixed alpha.

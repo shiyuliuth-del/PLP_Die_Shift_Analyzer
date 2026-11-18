@@ -96,7 +96,7 @@ def record(frame):
     seen.append(frame['states'].copy());original_frame(frame)
 w.show_motion_frame=record
 # Exercise the return animation even if all extreme poses are problem-free.
-w.problem_filter.setChecked(False);wait();w.extreme_table.setCurrentCell(1,0);wait()
+w.problem_filter.setCurrentIndex(0);wait();w.extreme_table.setCurrentCell(1,0);wait()
 start=w.current_frame['states'].copy();assert np.any(start)
 seen.clear();w.extreme_table.setCurrentCell(0,0);wait()
 assert seen and any(np.any(z) and not np.array_equal(z,start) for z in seen)

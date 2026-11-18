@@ -60,6 +60,8 @@ def change_zone(window,action,piece=None,ref=None,point=None,side=None):
     cfg=window.view_settings
     if piece is not None:ref=(piece['layer'],piece['index'])
     if ref is None:return
+    overlay=getattr(window,'reconstruction_overlay',None)
+    displayed=(overlay.data() if overlay else (window.current_frame or {}).get('reconstruction')) or {}
     ignored=set(cfg.reconstruction_ignored);forced=set(cfg.reconstruction_forced)
     if action=='rotate_reset':
         updated=rotate(cfg,piece,side,None)
@@ -67,12 +69,12 @@ def change_zone(window,action,piece=None,ref=None,point=None,side=None):
         plan=piece.get('route_plan')
         if plan is None:return
         deleted=set(cfg.reconstruction_deleted);deleted.update(key(q['route_plan']) for q in piece.get('graph_members',(piece,)) if q.get('route_plan') is not None)
-        present=[q for q in (window.current_frame or {}).get('reconstruction',{}).get('pieces',()) if (q['layer'],q['index'])==ref and q.get('route_plan') is not None]
+        present=[q for q in displayed.get('pieces',()) if (q['layer'],q['index'])==ref and q.get('route_plan') is not None]
         if all(key(member['route_plan']) in deleted for q in present for member in q.get('graph_members',(q,))):ignored.add(ref)
         updated=replace(cfg,reconstruction_deleted=tuple(sorted(deleted)),reconstruction_ignored=tuple(sorted(ignored)))
     elif action=='add':
         ignored.discard(ref);forced.add(ref)
-        current=[q for q in (window.current_frame or {}).get('reconstruction',{}).get('pieces',()) if (q['layer'],q['index'])==ref and q.get('route_plan') is not None]
+        current=[q for q in displayed.get('pieces',()) if (q['layer'],q['index'])==ref and q.get('route_plan') is not None]
         current=[member for q in current for member in q.get('graph_members',(q,))]
         added=cfg.reconstruction_added
         # Restoring an empty/ignored shape creates its normal automatic zones.
@@ -116,7 +118,7 @@ def change_zone(window,action,piece=None,ref=None,point=None,side=None):
         else:
             import shapely
             from .selection import inverse_geometry
-            for q in (window.current_frame or {}).get('reconstruction',{}).get('pieces',()):
+            for q in displayed.get('pieces',()):
                 if (q['layer'],q['index'])==ref and q.get('ignored') and q['regions']['C'].covers(shapely.Point(point)):
                     point=inverse_geometry(shapely.Point(point),window.current_frame['rotation_centers'][q['die']],window.current_frame['states'][q['die']]).coords[0];break
             added=tuple(row for row in added if row[:2]!=ref)+((*ref,float(point[0]),float(point[1]),uuid.uuid4().hex[:12],'seed'),)
