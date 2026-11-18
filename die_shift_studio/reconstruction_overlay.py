@@ -7,17 +7,13 @@ import shapely
 from matplotlib.collections import LineCollection,PatchCollection
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
-from .reconstruction import normalize_via_refs,cut_identity_matches,transform
+from .reconstruction import normalize_via_refs,transform
 from .qt_compat import Qt,QtCore,QtWidgets as W
 from .reconstruction_events import zone_key,active_region,color_for,PALETTE,RANK
 
-REGION_COLORS={'move':'#2f7bd6','stay':'#c2571f'}
-REGION_LABELS={'move':'动区','stay':'静区'}
-COLORS={'A':'#edbb77','B':'#b6c8dd','C':'#a5c7bd'}
 CUT_COLOR='#237ab9'
 SECOND_CUT_COLOR=CUT_COLOR
 WARNING_COLOR='#b570b8'
-DRAG_FIRST_CUT=True
 
 
 def _lines(g):
@@ -144,7 +140,8 @@ class ReconstructionOverlay:
         return result
 
     def dragged_handle(self):
-        drag=self.w.cut_drag
+        drag=getattr(self.w,'cut_drag',None)
+        if drag is None:return None
         edit=drag.state or drag.retained
         if edit is None or edit.get('marker') is None:return None
         frame=self.w.current_frame
@@ -395,6 +392,10 @@ class CutDrag:
                 w.toolbar.pan()
             else:w.toolbar.zoom()
         event.reconstruction_cut_handled=True
+        resume=bool(w.preview_pending or any(not q.cancelled.is_set() for q in w.preview_workers) or w.transition.timer.isActive())
+        engine=w.engine
+        displayed=(w.current_frame or {}).get('reconstruction',{}).get('configuration')
+        solver=getattr(engine,'reconstructors',{}).get(displayed,getattr(engine,'reconstructor',None))
         w.stop_animation();w.cancel_previews();w.constraint_feedback.cancel()
         w.preview_ticket+=1;w.preview_pending=None;w._prepared_motion=None
         self._cancel_live();self.retained=None
@@ -403,7 +404,7 @@ class CutDrag:
             w.selection.press=None
             if w.selection.rubber is not None:w.selection.rubber.remove();w.selection.rubber=None
         self.state=dict(piece=piece,kind=kind,start=np.array([event.x,event.y]),moved=False,settings=w.view_settings,
-                        frame=w.current_frame,updated=w.view_settings,part=None,original_marker=shapely.LineString(xy) if np.linalg.norm(xy[-1]-xy[0])>1e-8 else shapely.Point(xy[0]),
+                        frame=w.current_frame,solver=solver,resume_preview=resume,updated=w.view_settings,part=None,original_marker=shapely.LineString(xy) if np.linalg.norm(xy[-1]-xy[0])>1e-8 else shapely.Point(xy[0]),
                         handle_offset=(xy.mean(axis=0)-np.asarray(piece['extra_cut' if kind=='extra' else 'moved_cut'].coords[0]) if piece['extra_cut' if kind=='extra' else 'moved_cut'].geom_type=='Point' else np.zeros(2)))
         self.state['draft']=(overlay.draft_frame,overlay.draft_data,overlay.draft_key)
         # Drag from the actual press point, not the projection of a tilted or
@@ -517,14 +518,13 @@ class CutDrag:
         self.w.statusBar().showMessage(f"边界旋转 {math.degrees(angled['angles'][side]):.1f}°；右键可撤销旋转")
 
     def _live(self,part):
-        w=self.w
-        if w.engine is None or w.engine.reconstructor is None:return
-        from .reconstruction_route import part_key
         state=self.state
+        if state['solver'] is None:return
+        from .reconstruction_route import part_key
         key=(state['updated'].reconstruction_key(),part_key(part))
         if state.get('live_key')==key:return
         state['live_key']=key
-        self.pending=(state,key,state['updated'],w.engine.reconstructor,state.get('marker'))
+        self.pending=(state,key,state['updated'],state['solver'],state.get('marker'))
         self._start_live()
 
     def _start_live(self):
@@ -602,7 +602,9 @@ class CutDrag:
             updated=commit_merges(updated,{'reconstruction':state['live_result']},ref=(state['piece']['layer'],state['piece']['index']))
         changed=updated.reconstruction_key()!=w.view_settings.reconstruction_key()
         if not changed:
-            self._cancel_live();overlay.clear_hover();overlay.draw();w.render_scene();return
+            self._cancel_live();overlay.clear_hover();overlay.draw();w.render_scene()
+            if state['resume_preview']:w.request_preview(quiet=True,pose_change=True)
+            return
         self.retained=state
         w.view_settings=updated
         if updated.reconstruction_auto:
@@ -621,13 +623,14 @@ class CutDrag:
         if self.state is None:return False
         w=self.w;overlay=w.reconstruction_overlay
         w.canvas.reconstruction_drag_active=False
-        original=self.state['frame'];saved=self.state['draft']
+        original=self.state['frame'];saved=self.state['draft'];resume=self.state['resume_preview']
         self.state=None;self.latest=None;self.timer.stop()
         w.current_frame=original
         overlay.draft_frame,overlay.draft_data,overlay.draft_key=saved
         overlay.clear_hover();overlay.stamp=None
         if redraw:
             overlay.draw();w.fill_issues();w.drc_overlay.draw();w.render_scene()
+            if resume:w.request_preview(quiet=True,pose_change=True)
         return True
     def leave(self,event=None):
         if self.state is None:self.w.reconstruction_overlay.clear_hover()
