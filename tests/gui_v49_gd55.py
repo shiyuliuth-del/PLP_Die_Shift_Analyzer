@@ -27,7 +27,8 @@ def event(name,p,step=0):
  x,y=w.ax.transData.transform(p);w.canvas.callbacks.process(name,MouseEvent(name,w.canvas,x,y,button='up' if step else 1,step=step));app.processEvents()
 try:
  project=json.loads((ROOT/'Jobs/GD55/GD55.dshift.json').read_text());project['gds_path']=str(ROOT/'Jobs/GD55/GD55_1105.gds');project.pop('saved_results',None)
- project['extreme_view']=dict(mode='focus',filter_problems=False);project['settings'].update(animation_enabled=False);project['overlays']={'reconstruction':False};path=folder/'case.dshift.json';path.write_text(json.dumps(project))
+ # The V49 drag fixture targets two cuts selected by the automatic policy.
+ project['extreme_view']=dict(mode='focus',filter_problems=False);project['settings'].update(animation_enabled=False,reconstruction_die_mode='auto');project['overlays']={'reconstruction':False};path=folder/'case.dshift.json';path.write_text(json.dumps(project))
  w.load_project(path);wait();w.run_evaluation();wait();w.problem_filter.setCurrentIndex(0);wait();w.reconstruction_toggle.setChecked(True);wait()
  sources=w.geometry_cache.layers['5/0']['geometry']
  for target in ((2003.,1368.),(-101.8,-726.)):
