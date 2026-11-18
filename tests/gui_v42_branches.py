@@ -73,6 +73,10 @@ try:
  initial=w.cut_drag.state['piece'];plan=initial['route_plan'];a,b=initial['interval']
  cursor=plan.route.interpolate(min(b-25.,plan.length*.6)).coords[0]
  event('motion_notify_event',cursor);w.cut_drag._tick();assert w.cut_drag.state['part'] is not None
+ deadline=time.monotonic()+15
+ while w.current_frame is w.cut_drag.state['frame'] and time.monotonic()<deadline:
+  app.processEvents();time.sleep(.003)
+ assert w.current_frame is not w.cut_drag.state['frame']
  assert not w.current_frame['reconstruction']['constraints_complete']
  assert all(v['geometry'].is_valid for v in w.current_frame['reconstruction']['replacements']['5/0'])
  # Starting the debounce task after the foreground clears its active engine
