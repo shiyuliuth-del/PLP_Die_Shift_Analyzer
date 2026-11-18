@@ -64,6 +64,27 @@ class V52Tests(unittest.TestCase):
                 self.assertEqual(len(loaded.layers['5/0']),1)
                 self.assertFalse(has_short(shapely.Polygon(loaded.layers['5/0'][0]),.01))
 
+    def test_filtered_node_edit_can_save_reopen_and_restore(self):
+        from die_shift_studio.area_filter import apply, canonical_project
+        from die_shift_studio.core import GDSData
+        from die_shift_studio.gds_shapes import edited_snapshot, shape_nodes, node_fingerprint
+        tiny=np.asarray(box(-2,-2,-1.99,-1.99).exterior.coords)
+        source=np.array([(0,0),(4,0),(4,.004),(4,4),(0,4)],float)
+        raw=GDSData('fixture.gds','digest','TOP',['TOP'],.001,{'5/0':[tiny,source]})
+        filtered,project=apply(raw,{'parameters':dict(minimum_area_um2=.5,minimum_edge_um=.01)})
+        kind,nodes,_=shape_nodes(filtered,'5/0',0)
+        edit=dict(layer='5/0',index=0,nodes=(nodes+[2.,0.]).tolist(),original=node_fingerprint(kind,nodes))
+        saved=canonical_project(filtered,dict(project,node_edits=[edit]))
+        self.assertEqual(saved['node_edits'][0]['index'],1)
+        changed,local=apply(edited_snapshot(raw,saved['node_edits']),saved)
+        self.assertEqual(len(changed.node_edits),1)
+        self.assertEqual(changed.node_edits[0]['index'],0)
+        self.assertEqual(canonical_project(changed,local)['node_edits'],saved['node_edits'])
+        self.assertEqual(canonical_project(changed,dict(local,node_edits=[]))['node_edits'],[])
+        _,before,_=shape_nodes(changed._source_snapshot,'5/0',0)
+        _,after,_=shape_nodes(changed,'5/0',0)
+        np.testing.assert_allclose(before,nodes);np.testing.assert_allclose(after,nodes+[2.,0.])
+
     def test_internal_manual_box_grows_transversally_without_touching_pads(self):
         plan=SimpleNamespace(source=box(-3,-5,103,5),tolerance=.001,width=10.,
                              route=LineString([(0,0),(100,0)]),length=100.,

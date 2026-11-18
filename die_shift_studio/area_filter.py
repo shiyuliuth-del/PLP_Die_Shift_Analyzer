@@ -61,15 +61,45 @@ def apply(data,project):
             else:meta=descriptions[i]
             mapping[key,i]=len(values);indices.append(i);values.append(xy);metadata.append(meta)
         out.layers[key]=values;out.shape_info[key]=metadata;out.area_indices[key]=indices
-    out.node_edits=[];out.edit_digest=hashlib.sha256((data.edit_digest+'|source-filters-v52|'+threshold.hex()+'|'+edge.hex()).encode()).hexdigest()
+    from .gds_shapes import shape_nodes,node_fingerprint
+    out.node_edits=[]
+    out.edit_digest=hashlib.sha256((data.edit_digest+'|source-filters-v52|'+threshold.hex()+'|'+edge.hex()).encode()).hexdigest()
     for attr in ('geometry_cache','prepared_case','prepared_auto','prepared_roles','_source_snapshot'):
         out.__dict__.pop(attr,None)
+    # Q works in the filtered index space. Give visible edits a filtered
+    # baseline for restore, while the unfiltered source remains authoritative
+    # for serialization and for edits hidden by the current filters.
+    visible=[q for q in data.node_edits if (q['layer'],q['index']) in mapping]
+    if visible:
+        original=getattr(data,'_source_snapshot',data)
+        baseline=copy.copy(out)
+        baseline.layers=dict(out.layers);baseline.shape_info=dict(out.shape_info)
+        touched={q['layer'] for q in visible}
+        for key in touched:
+            baseline.layers[key]=list(out.layers[key]);baseline.shape_info[key]=list(out.shape_info[key])
+        for q in visible:
+            key,old=q['layer'],q['index'];index=mapping[key,old]
+            xy=original.layers[key][old];meta=original.shape_info.get(key,[None]*len(original.layers[key]))[old]
+            g=filled_polygon(xy,True)
+            try:clean=contract(g,edge)
+            except ValueError:clean=g
+            if not clean.is_empty:
+                holes0=[r for r in clean.interiors if shapely.Polygon(r).area>=threshold]
+                if clean is not g or len(holes0)!=len(clean.interiors):
+                    xy=winding_outline(shapely.Polygon(clean.exterior,holes0))
+                    meta=dict(kind='polygon',winding=bool(holes0),nodes=xy.copy())
+            baseline.layers[key][index]=xy;baseline.shape_info[key][index]=meta
+            kind,nodes,_=shape_nodes(baseline,key,index)
+            _,after,_=shape_nodes(out,key,index)
+            out.node_edits.append(dict(layer=key,index=index,original=node_fingerprint(kind,nodes),nodes=after.tolist()))
+        baseline.node_edits=[]
+        out._source_snapshot=baseline
     out._sanitized_token=tuple((k,id(v),len(v)) for k,v in out.layers.items())
     out.import_warnings=list(data.import_warnings)+[f'最小面积 {threshold:g} μm²：移除 {removed} 个图形，填去 {holes} 个小孔洞。源文件未改动。']
     out.import_warnings.append(f'最短边长 {edge:g} μm：处理 {shortened} 个图形。')
     if invalid:
         out.import_warnings.append(f'{len(invalid)} 个轮廓删除短边后无有效几何，已忽略：'+', '.join(invalid[:20]))
-    p=remap_project(project,mapping);p['node_edits']=[]
+    p=remap_project(project,mapping);p['node_edits']=out.node_edits
     return out,p
 
 
@@ -78,11 +108,21 @@ def canonical_project(data,project):
     from .gds_shapes import shape_nodes,node_fingerprint
     mapping={(k,i):old for k,rows in data.area_indices.items() for i,old in enumerate(rows)}
     p=remap_project(project,mapping);base=data._area_base
-    edits={(q['layer'],q['index']):dict(q) for q in base.node_edits}
+    originals={(q['layer'],q['index']):dict(q) for q in base.node_edits}
+    displayed={(q['layer'],q['index']):q for q in data.node_edits}
+    visible={(key,old) for (key,_),old in mapping.items()}
+    edits={ref:row for ref,row in originals.items() if ref not in visible}
     source=getattr(base,'_source_snapshot',base)
     for q in project.get('node_edits',()):
-        key=q['layer'];index=mapping[key,q['index']]
-        kind,xy,_=shape_nodes(source,key,index)
-        edits[key,index]=dict(q,index=index,original=node_fingerprint(kind,xy))
+        key=q['layer'];ref=(key,q['index']);index=mapping[ref];rawref=(key,index)
+        if ref in displayed and q==displayed[ref]:
+            edits[rawref]=originals[rawref]
+            continue
+        kind,xy,meta=shape_nodes(source,key,index)
+        _,_,shown_meta=shape_nodes(data,*ref)
+        row=dict(q,index=index,original=node_fingerprint(kind,xy))
+        if meta and meta.get('kind')!='polygon' and shown_meta and shown_meta.get('kind')=='polygon':
+            row['outline_mode']=True
+        edits[rawref]=row
     p['node_edits']=[edits[key] for key in sorted(edits)]
     return p
