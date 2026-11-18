@@ -95,6 +95,7 @@ class Window(W.QMainWindow):
         self.setWindowTitle('RealDataAnalyse ' + __version__)
         self.resize(1120, 860)
         self.worker = None
+        self.completion_dialog = None
         self.pending_close = False
         self.page = 0
         self.project_root = None
@@ -693,14 +694,18 @@ class Window(W.QMainWindow):
         def done(value):
             if value['state'] != 'completed' or self.pending_close:
                 return
-            dialog = W.QMessageBox(self)
-            dialog.setIcon(W.QMessageBox.Icon.Information)
-            dialog.setWindowTitle('任务完成')
-            dialog.setTextFormat(QtCore.Qt.TextFormat.PlainText)
-            dialog.setText('最终 OAS 已保存')
-            dialog.setInformativeText(value['output'])
-            dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
-            dialog.open()
+            if self.completion_dialog is None:
+                dialog = W.QMessageBox(self)
+                option = getattr(getattr(W.QMessageBox, 'Option', None), 'DontUseNativeDialog', None)
+                if option is not None:
+                    dialog.setOption(option)
+                dialog.setIcon(W.QMessageBox.Icon.Information)
+                dialog.setWindowTitle('任务完成')
+                dialog.setTextFormat(QtCore.Qt.TextFormat.PlainText)
+                dialog.setText('最终 OAS 已保存')
+                self.completion_dialog = dialog
+            self.completion_dialog.setInformativeText(value['output'])
+            self.completion_dialog.open()
         self.execute(run, done, operation='批量计算与OAS输出')
 
     def command_changed(self, command):
