@@ -74,20 +74,26 @@ def frame(checker,states,replacements,settings,progress,owners=None,scopes=None)
         nets.append(net)
         deps=dependencies(who)
         if not wanted(deps):continue
+        checked=original if rigid else actual
         seen=set()
+        def add_rule(kind,g,required,angular=False):
+            world=m.moved(g,owner,states) if rigid else g
+            identity=kind,world.wkb
+            if identity in seen:return
+            seen.add(identity)
+            items.append(dict(layer=layers[0],layers=layers,geometry=world,kind=kind,net=key[1],refs=refs,
+                              owner=deps[0] if len(deps)==1 else -1,dependencies=deps,required_um=None if angular else required,
+                              required_deg=required if angular else None,_measurement_dbu=m.data.dbu_um,_measurement_copper=actual))
+        angle=getattr(settings,'drc_min_angle_deg',0) if enabled(settings,'angle') else 0.
+        mixed=len(rules)>1
+        if angle and mixed:
+            for kind,g in checker.cached(checked,0.,0.,angle):add_rule(kind,g,angle,angular=True)
         for role,(width,space) in rules.items():
-            # Different declared rules on the same physical net are tested on
-            # its complete copper, so artificial role seams are not DRC edges.
-            region=shapely.union_all([r['node']['poly'] if rigid else r['geometry'] for r in rows if r['role']==role])
-            for kind,g in checker.cached(original if rigid else actual,width if enabled(settings,'width') else 0.,space if enabled(settings,'space') else 0.,getattr(settings,'drc_min_angle_deg',0) if enabled(settings,'angle') else 0.):
-                if len(rules)>1 and not g.intersects(region):continue
-                world=m.moved(g,owner,states) if rigid else g;identity=kind,world.wkb
-                if identity in seen:continue
-                seen.add(identity)
-                required=width if kind=='线宽不足' else space if kind=='线距不足' else getattr(settings,'drc_min_angle_deg',0)
-                items.append(dict(layer=layers[0],layers=layers,geometry=world,kind=kind,net=key[1],refs=refs,
-                                  owner=deps[0] if len(deps)==1 else -1,dependencies=deps,required_um=required if kind!='最小内角不足' else None,
-                                  required_deg=required if kind=='最小内角不足' else None,_measurement_dbu=m.data.dbu_um,_measurement_copper=actual))
+            # Different declared rules on a net still see its complete copper.
+            region=shapely.union_all([r['node']['poly'] if rigid else r['geometry'] for r in rows if r['role']==role]) if mixed else None
+            for kind,g in checker.cached(checked,width if enabled(settings,'width') else 0.,space if enabled(settings,'space') else 0.,0. if mixed else angle):
+                if kind=='最小内角不足':add_rule(kind,g,angle,angular=True)
+                elif region is None or g.intersects(region):add_rule(kind,g,width if kind=='线宽不足' else space)
     tree=shapely.STRtree([n['geometry'] for n in nets]);maximum=max((n['space'] for n in nets),default=0.)
     for i,a in enumerate(nets if enabled(settings,'space') else ()):
         cancel_check()

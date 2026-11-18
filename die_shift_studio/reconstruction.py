@@ -331,7 +331,7 @@ class Reconstructor:
             from .reconstruction_clusters import anchor_clusters,inward_routes
             fixed=anchor_clusters(source,fixed,land,self._rule_width,self.tol)
             land_all=land
-            base=dict(layer=layer,index=index,owner=owner,refs=refs,source=original_source,land=land,net=net,mine=mine,anchors=fixed)
+            base=dict(layer=layer,index=index,owner=owner,refs=refs,source=original_source,land=land,net=net,mine=mine,anchors=fixed,ownership_seam=seam)
             def build_source(source,land,fixed,moving=None,pair_route=False):
                 moving=mine if moving is None else moving
                 local_base=dict(base,routing_source=source,land=land,anchors=fixed,mine=moving,refs=normalize_via_refs((v['key'],v['index']) for v in moving))
@@ -748,7 +748,7 @@ class Reconstructor:
                 near=far=moved_cut=None;a=b=0.;valid=False
             shift=float(np.linalg.norm(self.model.moved(shapely.Point(entry['mine'][0]['center']),owner,states).coords[0]-entry['mine'][0]['center']))
             feature=features.setdefault((layer,index),dict(source=source,pieces=[],net=entry['net']))
-            piece=dict(strict_box=part.get('strict_box'),box_invalid=part.get('box_invalid',False),graph_branch=entry.get('graph_branch',False) or part.get('box_complex',False),moving_nominal=entry.get('moving_nominal') if not part.get('box_complex') else plan.land,fixed_nominal=entry.get('fixed_nominal') if not part.get('box_complex') else shapely.union_all(plan.anchors),ignored=entry.get('ignored',False),ignored_following=entry.get('following',False),die=owner,layer=layer,index=index,net=entry['net'],via_refs=entry['refs'],vias=[v[1] for v in entry['refs']],
+            piece=dict(ownership_seam=entry.get('ownership_seam',EMPTY),strict_box=part.get('strict_box'),box_invalid=part.get('box_invalid',False),graph_branch=entry.get('graph_branch',False) or part.get('box_complex',False),moving_nominal=entry.get('moving_nominal') if not part.get('box_complex') else plan.land,fixed_nominal=entry.get('fixed_nominal') if not part.get('box_complex') else shapely.union_all(plan.anchors),ignored=entry.get('ignored',False),ignored_following=entry.get('following',False),die=owner,layer=layer,index=index,net=entry['net'],via_refs=entry['refs'],vias=[v[1] for v in entry['refs']],
                        fallback_regions=fallback if part.get('near') is not None else None,connection_failed=bool(error) or not valid,
                        missing_region=part['A'] if part.get('strict_box') is not None or getattr(plan,'plane_domain',False) else missing_area(part,plan,self.model.bound.centers[owner],states[owner]) if plan is not None and part.get('near') is not None else source,
                        moving_handle_endpoint=(transform(shapely.Point(plan.route.coords[0]),self.model.bound.centers[owner],states[owner]) if plan is not None else None),
@@ -774,9 +774,9 @@ class Reconstructor:
         for (layer,index),feature in features.items():
             ps=feature['pieces'];source=feature['source']
             owners=sorted({q['die'] for q in ps}|{v['owner'] for v in self.vias_by_target.get((layer,index),()) if v['owner']>=0})
-            compose_key=('composed-continuity',self.rules.identity,layer,index,quick,self.settings.reconstruction_style,
+            compose_key=('composed-continuity-v54',self.rules.identity,layer,index,quick,self.settings.reconstruction_style,self.settings.reconstruction_boundary_mode,
                          tuple((owner,states[owner].tobytes(),self.model.bound.centers[owner].tobytes()) for owner in owners),
-                         tuple((q['route_identity'],q['interval'],q['boundary_angles'],q.get('ignored'),q.get('ignored_following'),q['endpoint_weights']) for q in ps))
+                         tuple((q['route_identity'],q['interval'],q['boundary_angles'],q.get('ignored'),q.get('ignored_following'),q['endpoint_weights'],q['strict_box'].wkb if q.get('strict_box') is not None else None) for q in ps))
             saved=self.geometry_pool.get(compose_key)
             if saved is None:
                 geometry,occupied=compose_feature(source,ps,self.tol,feature_moves(ps,states,self.settings.reconstruction_style))

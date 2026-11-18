@@ -1,3 +1,11 @@
+# V54 外轮廓与重构分叉
+
+`geometry_rules.corner_angles` 只测已合并铜形的外环，`current_drc` 按物理网络共享角度见证。候选布局的边界横截面仍用于切口样式评分，二者输入不同。
+
+`branch_regions` 将 `reconstruction_ownership` 的归属接缝保留为名义锚点。去掉数值毛边的控制柄只负责显示和命中；连线选用匹配的完整原始截面。串联和分叉动区按各自刚体边界求位移。零位不重新构造连线形状。
+
+`topology_checks.same_connections` 按原材料分量核对孔洞及端孔分组。`topology_routing` 在近邻接缝可以补实际铜并重新验收。最终最近线距按物理层建索引、按网复用，避免每个动区都重建树。
+
 # V53 重构预演交接
 
 `reconstruction_overlay.display_material` 从 `replacements` 获取画布底图，和当前全层 DRC、GDS/OAS 出口使用同一份实际铜。A 区着色裁到实际铜；诊断断口单独绘制。ABC 导出仍使用各区定义。
