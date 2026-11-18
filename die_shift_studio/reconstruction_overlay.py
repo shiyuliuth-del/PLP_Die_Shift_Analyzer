@@ -55,7 +55,7 @@ class ReconstructionOverlay:
     def stage(self):
         w=self.w;frame=w.current_frame
         if not frame or not frame.get('reconstruction') or not getattr(w,'engine',None):return
-        cfg=w.view_settings;previous=w.engine.reconstructor.settings
+        cfg=w.view_settings;previous=w.preview_settings()
         if cfg.reconstruction_key()==previous.reconstruction_key():
             self.draft_frame=self.draft_data=self.draft_key=None;self.stamp=None;return
         if self.draft_frame is frame and self.draft_key==cfg.reconstruction_key():return
@@ -298,7 +298,7 @@ class ReconstructionOverlay:
                 _,tip,offset,font=position;color=PALETTE[status]
                 put(w,self.labels,count,text,tip,offset,font,color,np.asarray(to_rgb(color))*.64,color);count+=1
         for a in self.labels[count:]:a.set_visible(False)
-    def pick(self,x,y,tolerance):
+    def pick(self,x,y,tolerance,*,handles_only=False):
         if not self.active():return None
         point=shapely.Point(x,y)
         hit_geometry=getattr(self,'hit_geometry',None)
@@ -310,6 +310,7 @@ class ReconstructionOverlay:
                     distance=_segment_distance(xy,x,y)
                     if best is None or distance<best[0]:best=(distance,q,xy,kind)
             if best and best[0]<=tolerance:return best[1:]
+        if handles_only:return None
         for q in self.pieces():
             if q.get('problem_region') is not None and q['problem_region'].covers(point):return q,None,'problem'
             if q['bridge'].covers(point):return q,None,'bridge'
@@ -409,9 +410,10 @@ class CutDrag:
         w.statusBar().showMessage('拖动共用动区边界；另一端保持不动，松开后更新所有工况。')
     def move(self,event):
         if self.state is None:
-            if self.w.reconstruction_toggle.isChecked() and event.inaxes is self.w.ax and event.xdata is not None:self.w.reconstruction_overlay.highlight(self.w.reconstruction_overlay.pick(event.xdata,event.ydata,self._tolerance()))
+            if self.w.reconstruction_toggle.isChecked() and event.inaxes is self.w.ax and event.xdata is not None:self.w.reconstruction_overlay.highlight(self.w.reconstruction_overlay.pick(event.xdata,event.ydata,self._tolerance(),handles_only=True))
             else:self.w.reconstruction_overlay.clear_hover()
             return
+        if self.w.navigation.drag is not None:return
         if event.xdata is None or event.ydata is None:return
         if not self.state['moved'] and np.linalg.norm(np.array([event.x,event.y])-self.state['start'])<2:return
         self.state['moved']=True;self.state['rotated_only']=False;self.latest=np.array([event.xdata,event.ydata])
@@ -561,7 +563,7 @@ class CutDrag:
         frame=dict(frame,drc=[],drc_locations=[],drc_pending=True)
         self.w.current_frame=frame;self.w.fill_issues();self.w.drc_overlay.draw();self.state['accepted_settings']=self.state['updated'];self.state['accepted_part']=self.state['part'];return True
     def release(self,event):
-        if self.state is None:return
+        if self.state is None or event.button!=1:return
         if event.xdata is not None and event.ydata is not None and self.state['moved'] and not self.state.get('rotated_only'):self.latest=np.array([event.xdata,event.ydata])
         self._tick();state=self.state
         self._cancel_live()

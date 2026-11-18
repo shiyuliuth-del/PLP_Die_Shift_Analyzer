@@ -1432,7 +1432,7 @@ class MainWindow(W.QMainWindow):
         self.filter_changed(pending_ok=True)
         if self.reconstruction_toggle.isChecked():
             self.statusBar().showMessage('重构预演：建立原图共用动区，核对全部离散极端；两端可独立拖动…')
-            self.request_preview()
+            self.request_preview(pose_change=True)
         else:
             # Refresh the displayed frame after removing the reconstruction overlay.
             if self.result is not None:self.request_preview()
@@ -1863,7 +1863,7 @@ class MainWindow(W.QMainWindow):
     def cancel_previews(self):
         for worker in self.preview_workers:worker.cancelled.set()
     def request_preview(self,direct=False,settle=False,quiet=False,pose_change=False):
-        if getattr(self, 'reconstruction_pending', False) and not pose_change:
+        if getattr(self, 'reconstruction_pending', False) and self.reconstruction_toggle.isChecked() and not pose_change:
             return
         if self.remote_locked or getattr(self,'requested_measured',False):return
         self._preview_quiet=bool(quiet)
