@@ -182,9 +182,11 @@ class MeasuredOutput(QtCore.QObject):
         batch=self.batch
         self.batch=None
         batch['executor'].shutdown(wait=False,cancel_futures=True)
-        if batch.get('processes'):
-            batch['processes'].close()
-        batch['store'].close()
+        try:
+            if batch.get('processes'):
+                batch['processes'].close()
+        finally:
+            batch['store'].close()
 
     def tick(self):
         w=self.w
@@ -369,7 +371,7 @@ class MeasuredOutput(QtCore.QObject):
             # Separate CPU-bound reconstruction and native caches across
             # processes for large lots, bounded by the same CPU/memory budget.
             process_memory=max(320,per_lane+160)
-            process_lanes=min(lanes,int(memory*.8)//process_memory)
+            process_lanes=min(lanes,int(memory*.8)//process_memory,61 if os.name=='nt' else lanes)
             use_processes=(policy=='omit_failed_regions' and process_lanes>=2
                            and requested_count>=max(16,process_lanes*3))
             if use_processes:
