@@ -11,7 +11,7 @@ import threading
 import time
 import uuid
 
-from die_shift_studio.jobs import atomic_save
+from die_shift_studio.jobs import REALDATA_DIRECTORY, atomic_save, provision_project
 from .excel import import_files
 from .instances import connect
 from .projects import inside, template_file
@@ -124,8 +124,9 @@ class Plans:
     def add(self, snapshot):
         plan_id = uuid.uuid4().hex
         root = Path(snapshot.get('folder') or self.path.parent).resolve()
-        output = root/'Output'/f'{root.name}.oas'
-        database = root/'Tasks'/'Plans'/plan_id/'run.sqlite'
+        workspace = root / REALDATA_DIRECTORY
+        output = workspace/'Output'/f'{root.name}.oas'
+        database = workspace/'Tasks'/'Plans'/plan_id/'run.sqlite'
         with Lease(str(self.path)+'.execution'):
             with closing(self.db()) as db, db:
                 db.execute('insert into plans(id,folder,snapshot,output,output_key,database_path) values(?,?,?,?,?,?)',
@@ -203,10 +204,13 @@ class Plans:
 def materialize(row, stop):
     snapshot = row['snapshot']
     root = Path(snapshot['folder']).resolve()
-    workspace = inside(root, Path('Cache')/'Plans'/row['id'])
+    area = Path(row['output']).parent.parent
+    if area != root:
+        provision_project(root)
+    workspace = inside(root, area/'Cache'/'Plans'/row['id'])
     workspace.mkdir(parents=True, exist_ok=True)
     source = next(item for item in snapshot['inputs'] if item['path'] == snapshot['source'])
-    cache = inside(root, 'Cache/Inputs'); cache.mkdir(parents=True, exist_ok=True)
+    cache = inside(root, area/'Cache'/'Inputs'); cache.mkdir(parents=True, exist_ok=True)
     cached = cache/(source['sha256']+Path(source['path']).suffix.lower())
     if not cached.exists():
         fd, name = tempfile.mkstemp(prefix='.input-', dir=cache)
@@ -270,16 +274,19 @@ class PlanRunner:
             # A previous process may have published the OAS just before losing
             # the queue acknowledgement. Recover that receipt without recomputing.
             database = Path(row['database_path'])
+            workspace = Path(row['output']).parent.parent
             if database.is_file():
                 with closing(sqlite3.connect(database.as_uri()+'?mode=ro', uri=True)) as db:
                     meta = {k: json.loads(v) for k,v in db.execute('select key,value from meta')}
                 record = meta.get('publish')
                 if record and Path(row['output']).is_file() and sha256(row['output'], self.stop) == record['sha256']:
+                    configure_logging(workspace)
+                    if self.trace: self.trace.set_root(workspace)
                     return Runner(database, meta['config']['endpoint'], meta['config']['project'], row['output'], stop=self.stop, trace=self.trace,template=snapshot.get('template')).run()
             validate(snapshot, row['output'], check_hash=True, stop=self.stop)
-            configure_logging(Path(snapshot['folder']))
-            if self.trace: self.trace.set_root(snapshot['folder'])
             project = materialize(row, self.stop)
+            configure_logging(workspace)
+            if self.trace: self.trace.set_root(workspace)
             if not database.exists():
                 selected = [item for item in snapshot['files'] if item['enabled']]
                 profiles = None if snapshot.get('shared_mapping',True) else {item['path']: item.get('profile',snapshot['profile']) for item in selected}

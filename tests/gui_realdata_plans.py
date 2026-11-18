@@ -6,6 +6,7 @@ import shutil
 import sys
 import tempfile
 import time
+from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from die_shift_studio.qt_compat import QtCore, QtGui, QtWidgets as W, BINDING
 if BINDING=='PyQt6':from PyQt6.QtTest import QTest
@@ -46,6 +47,11 @@ with tempfile.TemporaryDirectory(prefix='rda-plans-gui-') as name:
         panel.refresh()
         assert panel.table.item(0,0).background().color().name()=='#d9efdf'
         assert panel.table.item(1,0).background().color().name()=='#f8d9d7'
+        with patch('RealDataAnalyse.gui.PlanRunner') as runner:
+            runner.return_value.run.return_value = dict(state='completed', completed=1)
+            w.start_plans();wait(w)
+            runner.return_value.run.assert_called_once()
+            assert not any(dialog.isVisible() for dialog in w.findChildren(W.QMessageBox))
         for table in (w.file_view,w.profile,w.table,panel.table):assert not table.verticalHeader().isHidden()
         # Send actual mouse events to each drag handle, including the plan panel.
         left=getattr(QtCore.Qt,'MouseButton',QtCore.Qt).LeftButton
@@ -71,8 +77,8 @@ with tempfile.TemporaryDirectory(prefix='rda-plans-gui-') as name:
         import threading,json
         from RealDataAnalyse.excel import import_files
         from RealDataAnalyse.storage import Ledger
-        database=folder/'Tasks'/'table-check.sqlite'
-        import_files(sorted((folder/'Excel').glob('*.xlsx')),database,3,3,threading.Event())
+        database=folder/'RealDataAnalyse/Tasks/table-check.sqlite'
+        import_files(sorted((folder/'RealDataAnalyse/Excel').glob('*.xlsx')),database,3,3,threading.Event())
         ledger=Ledger(database)
         try:
             with ledger.db:ledger.db.execute("update packages set state='committed_with_issues',result=? where seq=1",(json.dumps(dict(drc_count=3,connection_failure_count=1,error_rectangles=2,partial_output=True)),))

@@ -6,6 +6,7 @@ from pathlib import Path
 import threading
 import time
 
+from die_shift_studio.jobs import REALDATA_DIRECTORY
 from die_shift_studio.qt_compat import QtCore, QtGui, QtWidgets as W, Signal
 from . import __version__
 from .excel import DEFAULT_PROFILE, HEADERS, import_files
@@ -475,8 +476,8 @@ class Window(W.QMainWindow):
         endpoint, timeout = self.endpoint.text(), self.timeout.value()
         def load(stop, progress):
             config = load_folder(folder)
-            configure_logging(Path(config['folder']))
-            self.conversation.set_root(config['folder'])
+            configure_logging(config['workspace'])
+            self.conversation.set_root(config['workspace'])
             if link:
                 try:
                     config['info'] = self.linked_project(endpoint, config['project'], stop, progress, timeout, config['output'])
@@ -502,7 +503,7 @@ class Window(W.QMainWindow):
             for name, value in config['controls'].items():
                 if name in ('dies', 'workers', 'memory', 'retries', 'timeout'):
                     getattr(self, name).setValue(int(value))
-            self.logger = configure_logging(self.project_root)
+            self.logger = configure_logging(config['workspace'])
             self.page = 0
             self.table.setRowCount(0)
             if not config.get('controls', {}).get('timeout'):
@@ -645,7 +646,9 @@ class Window(W.QMainWindow):
     def do_import(self):
         try:
             files, profile = self.persist()
-            target = inside(self.project_root, self.database.text())
+            workspace = inside(self.project_root, REALDATA_DIRECTORY)
+            target = inside(workspace, 'Tasks/measurements.sqlite')
+            output = inside(workspace, Path('Output') / f'{self.project_root.name}.oas')
             if target.exists():
                 import uuid
                 target = target.with_name(target.stem + '_' + time.strftime('%Y%m%d_%H%M%S') + '_' + uuid.uuid4().hex[:6] + '.sqlite')
@@ -657,6 +660,7 @@ class Window(W.QMainWindow):
         dies, workers = self.dies.value(), self.workers.value()
         def done(value):
             self.database.setText(value['database'])
+            self.output.setText(str(output))
             self.page = 0
             self.persist()
         self.execute(lambda stop, progress: import_files(files, target, dies, workers, stop, progress, profile, profiles), done, operation='校验Excel并创建任务')
@@ -686,14 +690,27 @@ class Window(W.QMainWindow):
                     raise ValueError('Excel内容已修改，请先校验并创建新任务')
             return Runner(**kwargs, stop=stop, progress=progress, trace=self.conversation).run()
         self_die = self.dies.value()
-        self.execute(run, operation='批量计算与OAS输出')
+        def done(value):
+            if value['state'] != 'completed' or self.pending_close:
+                return
+            dialog = W.QMessageBox(self)
+            dialog.setIcon(W.QMessageBox.Icon.Information)
+            dialog.setWindowTitle('任务完成')
+            dialog.setTextFormat(QtCore.Qt.TextFormat.PlainText)
+            dialog.setText('最终 OAS 已保存')
+            dialog.setInformativeText(value['output'])
+            dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
+            dialog.open()
+        self.execute(run, done, operation='批量计算与OAS输出')
 
     def command_changed(self, command):
         args = dict(COMMANDS[command])
         if command == 'project.open':
             args['path'] = self.project.text()
         if command == 'output.configure':
-            args.update(output_directory=str(Path(self.output.text()).parent.parent / 'Cache' / 'Manual'), max_threads=self.workers.value(), max_memory_mb=self.memory.value())
+            if self.project_root is not None:
+                args['output_directory'] = str(self.project_root / REALDATA_DIRECTORY / 'Cache' / 'Manual')
+            args.update(max_threads=self.workers.value(), max_memory_mb=self.memory.value())
         if command in ('preview.submit', 'batch.submit'):
             args['dies'] = [dict(die=i + 1, dx_um=0, dy_um=0, angle_deg=0) for i in range(self.dies.value())]
         if command=='batch.begin' and self.template.text().strip():
@@ -724,7 +741,8 @@ class Window(W.QMainWindow):
             if command == 'output.configure':
                 if self.project_root is None:
                     raise ValueError('请先选择项目文件夹')
-                directory = inside(self.project_root, args['output_directory'])
+                cache = inside(self.project_root, f'{REALDATA_DIRECTORY}/Cache')
+                directory = inside(cache, args['output_directory'])
                 directory.mkdir(parents=True, exist_ok=True)
                 args['output_directory'] = str(directory)
         except (OSError, ValueError) as exc:
@@ -853,7 +871,14 @@ class Window(W.QMainWindow):
 
     def start_plans(self):
         self.show_plans()
-        self.execute(lambda stop,progress:PlanRunner(self.plan_store,stop,progress,self.conversation).run(), operation='顺序执行计划任务')
+        workspace = self.project_root / REALDATA_DIRECTORY if self.project_root is not None else installation()
+        def run(stop, progress):
+            try:
+                return PlanRunner(self.plan_store, stop, progress, self.conversation).run()
+            finally:
+                configure_logging(workspace)
+                self.conversation.set_root(workspace)
+        self.execute(run, operation='顺序执行计划任务')
 
     def closeEvent(self, event):
         if self.worker:

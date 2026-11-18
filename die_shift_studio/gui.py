@@ -2577,7 +2577,9 @@ class MainWindow(W.QMainWindow):
         path=Path(path).resolve();gds=Path(self.data.path).resolve()
         # Windows cannot express a relative path between different volumes or UNC shares.
         portable=gds.anchor.casefold()==path.anchor.casefold() and gds.is_relative_to(installation_root())
-        from .jobs import local_source
+        from .jobs import local_source,provision_project
+        if not path.exists():
+            provision_project(path.parent)
         source=local_source(path,gds)
         from .area_filter import canonical_project
         project=dict(canonical_project(self.data,self.project_settings()),gds_path=source)

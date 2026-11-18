@@ -10,6 +10,7 @@ import time
 import uuid
 
 from die_shift_studio.local_ipc import call
+from die_shift_studio.jobs import measured_workspace
 
 
 def installation():
@@ -177,7 +178,7 @@ class Transport:
         self.endpoint.parent.mkdir(parents=True, exist_ok=True)
         command = [str(app)] if app.suffix.lower() == '.exe' else [sys.executable, str(app)]
         command += ['--project', str(project), '--measured-output', '--ipc-endpoint', str(self.endpoint)]
-        logs = project.parent / 'logs'
+        logs = measured_workspace(project) / 'logs'
         logs.mkdir(parents=True, exist_ok=True)
         with (logs / 'RealDataAnalyse-child.log').open('ab') as stream:
             self.process = subprocess.Popen(command, cwd=app.parent, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT,

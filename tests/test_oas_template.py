@@ -56,7 +56,7 @@ assert [label.text for label in top.get_labels()] == ['MARK'] * 4
             env = dict(os.environ, QT_QPA_PLATFORM='offscreen')
             env.pop('DIE_SHIFT_NATIVE_BACKEND', None)
             output = subprocess.run(
-                [sys.executable, '-c', script, str(root/'Jobs/GD55/GD55_Template.gds'),
+                [sys.executable, '-c', script, str(root/'Jobs/GD55/RealDataAnalyse/Template/GD55_Template.gds'),
                  str(Path(temp)/'result.oas')],
                 cwd=root, env=env, capture_output=True, text=True, timeout=60,
             )

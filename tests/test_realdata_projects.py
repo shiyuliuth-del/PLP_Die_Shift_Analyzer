@@ -25,7 +25,7 @@ class Projects(unittest.TestCase):
         self.assertEqual(len(data['files']), 3)
         data['files'][1]['enabled'] = False
         save_folder(self.folder, data['project'], data['files'], data['database'], data['output'], DEFAULT_PROFILE, {'workers': 5})
-        raw = json.loads((self.folder/'RealDataAnalyse.project.json').read_text())
+        raw = json.loads((self.folder/'RealDataAnalyse/RealDataAnalyse.project.json').read_text())
         self.assertFalse(Path(raw['project']).is_absolute())
         moved = self.root/'moved'
         shutil.copytree(self.folder, moved)
@@ -57,8 +57,8 @@ class Projects(unittest.TestCase):
             load_folder(self.folder)
         external_dir = self.root/'outside-excel'
         external_dir.mkdir()
-        shutil.rmtree(self.folder/'Excel')
-        (self.folder/'Excel').symlink_to(external_dir, target_is_directory=True)
+        shutil.rmtree(self.folder/'RealDataAnalyse/Excel')
+        (self.folder/'RealDataAnalyse/Excel').symlink_to(external_dir, target_is_directory=True)
         source = self.root/'outside.xlsx'; source.write_bytes(b'measurements')
         with self.assertRaisesRegex(ValueError, '文件必须位于'):
             copy_excel(self.folder, [source], threading.Event())
@@ -74,7 +74,7 @@ class Projects(unittest.TestCase):
         save_folder(folder,config['project'],files,config['database'],config['output'],config['profile'],{},
                     template=config['template'])
         removed.unlink()
-        added=folder/'Excel'/'NewInput.xlsx'
+        added=folder/'RealDataAnalyse/Excel/NewInput.xlsx'
         shutil.copyfile(hidden,added)
         loaded=load_folder(folder)
         self.assertEqual({Path(row['path']).name:row['enabled'] for row in loaded['files']},
@@ -102,6 +102,41 @@ class Projects(unittest.TestCase):
         project.write_text('user changes')
         install_case(destination)
         self.assertEqual(project.read_text(), 'user changes')
+
+    def test_new_project_discovers_dropped_inputs(self):
+        from die_shift_studio.jobs import provision_project
+        config = load_folder(self.folder)
+        new = self.root / 'new'
+        workspace = provision_project(new)
+        for source in (Path(config['project']), self.folder / 'GD55_1105.gds'):
+            shutil.copy(source, new)
+        template = shutil.copy(config['template'], workspace / 'Template')
+        excel = shutil.copy(config['files'][0]['path'], workspace / 'Excel')
+        shutil.copy(config['files'][1]['path'], new)
+        loaded = load_folder(new)
+        self.assertEqual(loaded['template'], template)
+        self.assertEqual([record['path'] for record in loaded['files']], [excel])
+        self.assertEqual(Path(loaded['database']).parent, workspace / 'Tasks')
+        self.assertEqual(Path(loaded['output']).parent, workspace / 'Output')
+
+    def test_flat_project_retains_existing_task_paths(self):
+        config = load_folder(self.folder)
+        workspace = Path(config['workspace'])
+        (workspace / 'Excel').replace(self.folder / 'Excel')
+        Path(config['template']).replace(self.folder / 'legacy.gds')
+        shutil.rmtree(workspace)
+        database = self.folder / 'Tasks' / 'last.sqlite'
+        database.parent.mkdir()
+        database.write_bytes(b'original journal')
+        settings = self.folder / 'RealDataAnalyse.project.json'
+        settings.write_text(json.dumps(dict(template='legacy.gds', database='Tasks/last.sqlite',
+                                            output='Output/legacy.oas')), encoding='utf8')
+        loaded = load_folder(self.folder)
+        self.assertEqual(len(loaded['files']), 3)
+        self.assertEqual(Path(loaded['database']), database)
+        self.assertEqual(Path(loaded['output']), self.folder / 'Output/legacy.oas')
+        self.assertEqual(Path(loaded['template']), self.folder / 'legacy.gds')
+        self.assertEqual(database.read_bytes(), b'original journal')
 
     def test_different_sheet_header_and_columns_per_excel(self):
         from openpyxl import load_workbook

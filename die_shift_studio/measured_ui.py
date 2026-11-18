@@ -94,7 +94,9 @@ class MeasuredOutput(QtCore.QObject):
     def submit(self,command,fn,kind='',job=None):
         if not self.running and not self.w._tasks:self.w.task_control.checkpoint()
         key=job or self.new_job(command);event=threading.Event();gen=self.generation
-        issue_path=(self.w.project_path.parent if self.w.project_path else self.w.jobs_dir)/'Cache'/'MeasuredDiagnostics.sqlite'
+        from .jobs import measured_workspace
+        area=measured_workspace(self.w.project_path) if self.w.project_path else self.w.jobs_dir
+        issue_path=area/'Cache'/'MeasuredDiagnostics.sqlite'
         self.running[key]=(event,gen,kind);self.jobs[key]['status']='running'
         def work():
             try:

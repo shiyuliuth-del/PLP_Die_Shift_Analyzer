@@ -124,9 +124,11 @@ class Contracts(unittest.TestCase):
     def test_snapshot_materialization_uses_project_cache(self):
         ident=self.plans.add(capture(self.config,self.stop));row=self.plans.get(ident)
         project=materialize(row,self.stop)
-        self.assertTrue(project.is_relative_to(self.root/'Cache'))
+        self.assertTrue(project.is_relative_to(self.root/'RealDataAnalyse/Cache/Plans'))
         self.assertTrue((project.parent/json.loads(project.read_text())['gds_path']).is_file())
-        self.assertFalse((self.root/'Tasks/Inputs').exists())
+        self.assertTrue(Path(row['database_path']).is_relative_to(self.root/'RealDataAnalyse/Tasks/Plans'))
+        self.assertTrue(Path(row['output']).is_relative_to(self.root/'RealDataAnalyse/Output'))
+        self.assertFalse((self.root/'RealDataAnalyse/Tasks/Inputs').exists())
     def test_ordered_queue_skips_invalid_continues_after_error_and_never_repeats_completed(self):
         ids=[self.plans.add(capture(self.config,self.stop)) for _ in range(4)]
         self.plans.update(ids[1],status='error',severity='error')
