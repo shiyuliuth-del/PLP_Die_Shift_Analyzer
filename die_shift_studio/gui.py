@@ -1692,7 +1692,7 @@ class MainWindow(W.QMainWindow):
                     if title!='宽度足够' or self.width_sufficient_toggle.isChecked():
                         handles.append(Patch(facecolor='none',edgecolor=tint(color,modes['截面']),label=title))
         if self.reconstruction_toggle.isChecked():
-            from .reconstruction_overlay import COLORS,CUT_COLOR,SECOND_CUT_COLOR,WARNING_COLOR
+            from .reconstruction_overlay import CUT_COLOR,SECOND_CUT_COLOR,WARNING_COLOR
             from .reconstruction_events import PALETTE
             handles += [Patch(facecolor=PALETTE[k],alpha=.66,label=title) for k,title in [('red','动区连线失败'),('yellow','动区存在 DRC 违例'),('green','动区通过检查'),('pending','动区待核验')]]
             handles += [Patch(facecolor=COLORS[k],alpha=.66,label={'B':'C','C':'B'}[k]+' '+title) for k,title in [('B','静区'),('C','平移区')]]
