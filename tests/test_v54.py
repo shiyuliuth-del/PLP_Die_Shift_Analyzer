@@ -48,6 +48,18 @@ class V54Tests(unittest.TestCase):
         finally:
             e.close()
 
+    def test_angle_candidate_query_matches_reported_witnesses(self):
+        from die_shift_studio.geometry_rules import has_angle_violation
+        copper = shapely.union_all([
+            shapely.Polygon([(0, 0), (50, 0), (50, 40), (0, 40), (-50, 20)]),
+            shapely.Polygon([(300, 0), (350, 0), (350, 40), (300, 40), (240, 10)]),
+        ])
+        for angle in (0, 60, 90, 120):
+            witnesses = angle_regions(copper,angle,.001)
+            self.assertEqual(has_angle_violation(copper,angle,.001),not witnesses.is_empty)
+            for region in (box(-52,17,-45,25),box(239,10,242,12),box(30,10,150,30)):
+                self.assertEqual(has_angle_violation(copper,angle,.001,region),witnesses.intersects(region))
+
     def test_virtual_ownership_seam_anchors_two_independent_zones(self):
         source = box(-20, -12, 220, 12)
         moving = Point(0, 0).buffer(6)
