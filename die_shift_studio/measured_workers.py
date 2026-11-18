@@ -2,6 +2,7 @@
 from concurrent.futures import ProcessPoolExecutor, TimeoutError as FutureTimeout
 from concurrent.futures.process import BrokenProcessPool
 import multiprocessing
+import os
 import queue
 
 from .resources import cancellation_scope, cancel_check, serial_scope
@@ -21,7 +22,7 @@ def _initialize(inputs, stop, status, memory_mb):
 
 def _compute(rows, policy, slot):
     import psutil
-    process = psutil.Process()
+    parent = psutil.Process(os.getppid())
     last_check = -1
 
     def progress(percent, _message):
@@ -30,8 +31,14 @@ def _compute(rows, policy, slot):
         _status[slot] = int(percent)
         if percent >= last_check + 5:
             last_check = percent
-            if process.memory_info().rss > _memory:
-                raise MemoryError('独立计算进程超过单路内存预算')
+            used = 0
+            for process in parent.children(recursive=True):
+                try:
+                    used += process.memory_info().rss
+                except psutil.NoSuchProcess:
+                    continue
+            if used > _memory:
+                raise MemoryError('独立计算进程超过批次共享内存预算')
 
     with cancellation_scope(_stop), serial_scope():
         _, snapshot, details = _session.run(rows,progress,preview=False,output_policy=policy)

@@ -381,7 +381,7 @@ class MeasuredOutput(QtCore.QObject):
             if use_processes:
                 from .measured_workers import BatchWorkers
                 try:
-                    self.batch['processes']=BatchWorkers(self.session,lanes,int(memory*.8)//lanes)
+                    self.batch['processes']=BatchWorkers(self.session,lanes,int(memory*.8))
                 except Exception:
                     self.close_batch()
                     raise
@@ -408,7 +408,8 @@ class MeasuredOutput(QtCore.QObject):
                         progress(n,message)
                         if batch['baseline']:
                             import psutil
-                            if psutil.Process().memory_info().rss-batch['baseline']>batch['memory_mb']*1024**2:
+                            budget=batch['memory_mb']//5 if batch['processes'] else batch['memory_mb']
+                            if psutil.Process().memory_info().rss-batch['baseline']>budget*1024**2:
                                 with batch['lock']:batch['store'].flush()
                                 raise MemoryError('批次增量内存超过配置上限；已分段暂存，任务未输出，请降低并发或提高预算')
                     try:

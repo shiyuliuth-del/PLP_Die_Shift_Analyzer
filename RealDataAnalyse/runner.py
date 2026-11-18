@@ -183,6 +183,7 @@ class Runner:
         begin = t.request('batch.begin', request, request_id=uuid.uuid5(uuid.UUID(run), f'begin:{attempt}').hex, stop=self.stop)['result']
         batch = begin['batch_id']
         lanes = max(1,min(self.workers,int(begin['threads'])))
+        self.actual_lanes = lanes
         # Keep a small server-side queue filled while completed receipts are
         # delivered and persisted. The server still owns the compute limit.
         window = lanes if self.timeout else max(lanes,min(lanes*2,int(begin.get('queue_limit',lanes))))
@@ -436,7 +437,7 @@ class Runner:
                         if retry >= self.retries:
                             raise
                         if isinstance(exc, RemoteError) and exc.kind == 'MemoryError':
-                            self.workers = max(1, self.workers // 2)
+                            self.workers = max(1,min(self.workers,getattr(self,'actual_lanes',self.workers))//2)
                         self.note(f'等待后补算整批（剩余自动重试{self.retries - retry}次）', 'WARNING')
                         if self.stop.wait(min(5, retry + 1)):
                             raise InterruptedError('用户停止')
