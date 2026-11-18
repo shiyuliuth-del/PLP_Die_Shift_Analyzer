@@ -31,7 +31,7 @@ class StopToken:
 
 class Runner:
     def __init__(self, database, endpoint, project, output, workers=4, memory_mb=2048,
-                 retries=3, timeout=0, stop=None, progress=lambda _: None, transport=None, trace=None):
+                 retries=3, timeout=0, stop=None, progress=lambda _: None, transport=None, trace=None, template=None, expected_template_sha256=None):
         self.database = Path(database).resolve()
         self.output = Path(output).absolute()
         if self.output.suffix.lower() != '.oas' or self.output.is_symlink():
@@ -40,6 +40,14 @@ class Runner:
         self.managed_output = self.output.parent.name.lower() == 'output'
         self.cache = self.output.parent.parent / 'Cache' if self.managed_output else self.output.parent / 'Cache'
         self.project = str(Path(project).resolve())
+        self.template = None
+        self.template_sha256 = expected_template_sha256
+        if template:
+            from .projects import template_file
+            root = self.output.parent.parent if self.managed_output else Path(self.project).parent
+            self.template = str(template_file(root, template))
+            if Path(self.template) == self.output:
+                raise ValueError('输出不得覆盖模板图纸')
         self.endpoint = str(Path(endpoint).resolve())
         if not 1 <= workers <= 64 or not 128 <= memory_mb <= 1048576 or not 0 <= retries <= 10 or timeout < 0:
             raise ValueError('并发、内存、重试或超时设置超出范围')
@@ -129,7 +137,7 @@ class Runner:
                     return
                 self.last_progress = now
                 fraction = sum(min(99, max(0, u.get('current', 0))) / 100 for u in self.active_progress.values())
-                text = f'批次{attempt} · 完成{self.completed_count}/{self.total} · 并行{len(self.active_progress)} · 封装{seq} {update.get("text", "计算中")}'
+                text = f'批次{attempt} · 完成{self.completed_count}/{self.total} · 已提交{len(self.active_progress)} · 封装{seq} {update.get("text", "计算中")}'
                 self.progress(dict(text=text, current=int((self.completed_count + fraction) * 100), total=self.total * 100))
         if isinstance(self.transport, Transport):
             result = self.transport.wait_task(task, stop, self.timeout, progress=report)
@@ -169,9 +177,18 @@ class Runner:
             raise FileExistsError('批次暂存名已经存在，拒绝覆盖')
         ledger.set('stage', str(stage))
         t.request('output.configure', {'output_directory': str(directory), 'max_threads': self.workers, 'max_memory_mb': self.memory_mb}, stop=self.stop)
-        begin = t.request('batch.begin', {'filename': stage_name, 'client_id': run, 'output_policy': 'omit_failed_regions'}, request_id=uuid.uuid5(uuid.UUID(run), f'begin:{attempt}').hex, stop=self.stop)['result']
+        request = dict(filename=stage_name,client_id=run,output_policy='omit_failed_regions',package_count=ledger.get('count'))
+        if self.template:
+            request.update(template_path=self.template,template_sha256=self.template_sha256)
+        begin = t.request('batch.begin', request, request_id=uuid.uuid5(uuid.UUID(run), f'begin:{attempt}').hex, stop=self.stop)['result']
         batch = begin['batch_id']
-        lanes = max(1, min(self.workers, int(begin['threads'])))
+        lanes = max(1,min(self.workers,int(begin['threads'])))
+        self.actual_lanes = lanes
+        # Keep a small server-side queue filled while completed receipts are
+        # delivered and persisted. The server still owns the compute limit.
+        window = lanes if self.timeout else max(lanes,min(lanes*2,int(begin.get('queue_limit',lanes))))
+        if self.template and begin.get('template_sha256') != self.template_sha256:
+            raise ValueError('配套预演软件未确认模板图纸')
         ledger.set('batch', batch)
         if begin.get('output_policy') != 'omit_failed_regions':
             raise ValueError('预演软件不支持局部问题输出与ERROR层，请使用配套新版本')
@@ -189,7 +206,7 @@ class Runner:
         ledger.set('state', 'running')
         with ledger.db:
             ledger.db.execute("update packages set state='pending',task=null,result=null")
-        self.note(f'批次{attempt}：{ledger.get("count")}封装；请求并发{self.workers}，服务实际线程{begin["threads"]}')
+        self.note(f'批次{attempt}：{ledger.get("count")}封装；请求并发{self.workers}，服务实际{begin["threads"]}路（{begin.get("execution","threads")}）')
         abort = threading.Event()
         error = None
         pending = {}
@@ -201,13 +218,13 @@ class Runner:
         # Only O(workers) Futures; never enqueue the entire lot in Python.
         # An interrupted SELECT can retain a Windows file handle through the
         # exception traceback even after Connection.close(). Finalize it here.
-        with closing(cursor), ThreadPoolExecutor(max_workers=lanes, thread_name_prefix='rda-package') as pool:
+        with closing(cursor), ThreadPoolExecutor(max_workers=window, thread_name_prefix='rda-package') as pool:
             exhausted = False
             while pending or not exhausted:
                 if self.stop.is_set():
                     abort.set()
                     exhausted = True
-                while not exhausted and not abort.is_set() and len(pending) < lanes:
+                while not exhausted and not abort.is_set() and len(pending) < window:
                     row = cursor.fetchone()
                     if row is None:
                         exhausted = True
@@ -263,6 +280,8 @@ class Runner:
         if receipt.get('error_packages',0) != ledger.get('issue_packages',0) or receipt.get('error_rectangles',0) != ledger.get('error_rectangles',0):
             raise ValueError('OAS的ERROR标记数量与逐封装回执不一致')
         self.validate_failure_receipt(receipt)
+        if self.template and receipt.get('template_sha256')!=self.template_sha256:
+            raise ValueError('最终OAS缺少匹配的模板回执')
         from die_shift_studio.oas_validation import verify_crc
         self.progress(dict(text='OAS验证 · 流式CRC校验', current=0, total=1))
         if not verify_crc(stage, stop=self.stop):
@@ -382,6 +401,12 @@ class Runner:
                     if any(path.resolve().is_relative_to(self.output.parent) for path in protected):
                         raise ValueError('输入或任务记录位于Output内；请移至项目输入目录后创建任务')
                 config = dict(endpoint=self.endpoint, project=self.project, output=str(self.output))
+                if self.template:
+                    digest = sha256(self.template,self.stop)
+                    if self.template_sha256 is not None and digest!=self.template_sha256:
+                        raise ValueError('模板图纸内容已改变，请重新创建任务')
+                    self.template_sha256 = digest
+                    config.update(template=self.template,template_sha256=digest)
                 if ledger.get('config') and ledger.get('config') != config:
                     raise ValueError('继续任务须使用原入口、工程和输出路径')
                 if not ledger.get('config'):
@@ -412,7 +437,7 @@ class Runner:
                         if retry >= self.retries:
                             raise
                         if isinstance(exc, RemoteError) and exc.kind == 'MemoryError':
-                            self.workers = max(1, self.workers // 2)
+                            self.workers = max(1,min(self.workers,getattr(self,'actual_lanes',self.workers))//2)
                         self.note(f'等待后补算整批（剩余自动重试{self.retries - retry}次）', 'WARNING')
                         if self.stop.wait(min(5, retry + 1)):
                             raise InterruptedError('用户停止')

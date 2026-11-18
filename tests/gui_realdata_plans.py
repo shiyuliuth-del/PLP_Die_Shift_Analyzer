@@ -30,7 +30,7 @@ with tempfile.TemporaryDirectory(prefix='rda-plans-gui-') as name:
         assert not any(b.text()=='刷新记录' for b in w.findChildren(W.QPushButton))
         tabs=w.findChild(W.QTabWidget);assert [tabs.tabText(i) for i in range(tabs.count())][-2:]==['全部IPC命令调试','实时命令信息']
         w.open_folder(folder,link=False);wait(w)
-        assert w.sheet.text()=='Ordinary','bundled project must open ordinary independent poses by default'
+        assert w.sheet.text()=='Measurements','bundled project must open its sole Measurements sheet'
         w.sheet.setText('Diagnostic');w.workers.setValue(2)
         w.create_plan_button.click();wait(w)
         w.sheet.setText('Measurements');w.workers.setValue(3)
@@ -72,7 +72,7 @@ with tempfile.TemporaryDirectory(prefix='rda-plans-gui-') as name:
         from RealDataAnalyse.excel import import_files
         from RealDataAnalyse.storage import Ledger
         database=folder/'Tasks'/'table-check.sqlite'
-        import_files(sorted(folder.glob('*.xlsx')),database,3,3,threading.Event())
+        import_files(sorted((folder/'Excel').glob('*.xlsx')),database,3,3,threading.Event())
         ledger=Ledger(database)
         try:
             with ledger.db:ledger.db.execute("update packages set state='committed_with_issues',result=? where seq=1",(json.dumps(dict(drc_count=3,connection_failure_count=1,error_rectangles=2,partial_output=True)),))

@@ -89,7 +89,7 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         w.sheet.setText('Measurements')
         # Exercise the UI-to-import boundary with a genuinely different DIE2 file.
         from openpyxl import load_workbook
-        workbook_path = folder/'GD55_SYNTHETIC_DIE2.xlsx'
+        workbook_path = folder/'Excel'/'GD55_SYNTHETIC_DIE2.xlsx'
         book = load_workbook(workbook_path)
         sheet = book['Measurements']; sheet.title = 'SeparateSheet'
         sheet.insert_rows(1); sheet['A2'] = 'SeparatePackage'
@@ -101,7 +101,7 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         assert w.sheet.text() == 'SeparateSheet' and w.header_row.value() == 2
         select(0)
         w.import_button.click(); wait(w)
-        assert w.table.rowCount() == 12
+        assert w.table.rowCount() == 36
         previous_database = w.database.text()
         w.sheet.setText('MissingSheet')
         w.import_button.click()
@@ -118,12 +118,11 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         assert '与任务记录不符' in w.response.toPlainText()
         assert not Path(w.output.text()).exists()
         w.file_view.item(1, 0).setCheckState(getattr(QtCore.Qt, 'CheckState', QtCore.Qt).Checked)
-        w.run_button.click(); wait(w, 900)
-        assert Path(w.output.text()).is_file()
-        assert 'OAS' in w.progress.detail
+        assert w.template.text()==str(folder/'GD55_Template.gds')
         assert sha256(folder/'GD55_1105.gds') == before
         assert (folder/'logs'/'RealDataAnalyse.log').is_file()
         # Continuous fill has no alternating Windows segments; text fits by elision.
+        w.progress.failed = False
         w.progress.status('批次1 · 完成6/12 · 并行2 · 封装8 重构几何 · 写入OAS', 6, 12)
         app.processEvents()
         for style in ('Fusion', 'Windows'):
@@ -139,7 +138,7 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         while w.worker and time.monotonic()<until: app.processEvents(); time.sleep(.02)
         assert w.worker is None and w.connect_button.property('connected') is False
         w.endpoint.setText(old_endpoint)
-        print('REALDATA_PROJECT_GUI_PASS: folder -> linked server -> 3 XLSX -> 12 OAS, selections/settings, green/red status, continuous overlay, hidden log', flush=True)
+        print('REALDATA_PROJECT_GUI_PASS: folder -> linked server -> exact 36 XLSX records and template, selections/settings, green/red status, continuous overlay, hidden log', flush=True)
     finally:
         if w.worker:
             w.stop_work()

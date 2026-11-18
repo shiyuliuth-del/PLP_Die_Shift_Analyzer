@@ -14,7 +14,7 @@ import uuid
 from die_shift_studio.jobs import atomic_save
 from .excel import import_files
 from .instances import connect
-from .projects import inside
+from .projects import inside, template_file
 from .runner import Runner
 from .storage import Lease, sha256, configure_logging
 from .transport import default_endpoint
@@ -32,7 +32,11 @@ def capture(config, stop):
         snapshot['engineering'] = json.loads(project.read_text(encoding='utf8'))
         source = inside(root, snapshot['engineering']['gds_path'])
         paths = [source, *(Path(p['path']).resolve() for p in config['files'] if p['enabled'])]
-        for path in paths:
+        template = template_file(root,config.get('template'))
+        if template:
+            snapshot['template'] = str(template)
+            paths.append(template)
+        for path in dict.fromkeys(paths):
             inside(root, path)
             snapshot['inputs'].append(dict(path=str(path), sha256=sha256(path, stop), size=path.stat().st_size))
         snapshot['source'] = str(source)
@@ -271,7 +275,7 @@ class PlanRunner:
                     meta = {k: json.loads(v) for k,v in db.execute('select key,value from meta')}
                 record = meta.get('publish')
                 if record and Path(row['output']).is_file() and sha256(row['output'], self.stop) == record['sha256']:
-                    return Runner(database, meta['config']['endpoint'], meta['config']['project'], row['output'], stop=self.stop, trace=self.trace).run()
+                    return Runner(database, meta['config']['endpoint'], meta['config']['project'], row['output'], stop=self.stop, trace=self.trace,template=snapshot.get('template')).run()
             validate(snapshot, row['output'], check_hash=True, stop=self.stop)
             configure_logging(Path(snapshot['folder']))
             if self.trace: self.trace.set_root(snapshot['folder'])
@@ -300,7 +304,8 @@ class PlanRunner:
             if launched or transport.owns_descriptor(owned_pid, owned_birth):
                 owned = info['instance_id']; self.plans.update(plan_id, owned_instance=owned)
             return Runner(database, endpoint, project, row['output'], controls['workers'], controls['memory'], controls['retries'],
-                   controls['timeout'], self.stop, report, transport=transport, trace=self.trace).run()
+                   controls['timeout'], self.stop, report, transport=transport, trace=self.trace,
+                   template=snapshot.get('template'), expected_template_sha256=expected.get(snapshot.get('template'))).run()
         finally:
             if transport is not None and (owned or owned_pid):
                 end = time.monotonic()+120

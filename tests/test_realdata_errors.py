@@ -70,6 +70,24 @@ class ErrorContracts(unittest.TestCase):
    self.assertEqual(list(out.parent.iterdir()),[out])
    self.assertTrue(any(p.is_file() and p.read_bytes()==b'previous verified output' for p in (root/'Cache'/'History').rglob('*')))
 
+ def test_memory_retry_reduces_actual_lanes_not_requested_limit(self):
+  from RealDataAnalyse.transport import RemoteError
+  class LimitedService(FakeService):
+   limits=[]
+   def request(self,command,args=None,**kwargs):
+    response=super().request(command,args,**kwargs)
+    if command=='output.configure':
+     self.limits.append(args['max_threads'])
+    if command=='batch.submit' and self.begin_count==1 and args['cell'].endswith('001'):
+     self.tasks[response['task_id']]=RemoteError(dict(status='error',error=dict(type='MemoryError',message='shared budget')))
+    return response
+  with tempfile.TemporaryDirectory() as name:
+   root=Path(name).resolve();files=generate_example(root,count=3,die_count=2);db=root/'run.sqlite'
+   import_files(files,db,2,2,threading.Event());service=LimitedService(root)
+   result=Runner(db,root/'ipc.json',root/'case.json',root/'final.oas',workers=12,retries=1,transport=service).run()
+   self.assertEqual(result['state'],'completed')
+   self.assertEqual(service.limits,[12,1])
+
  def test_non_lock_catalogue_failure_preserves_old_output_without_retry(self):
   from RealDataAnalyse.transport import RemoteError
   class DiskFailure(FakeService):
