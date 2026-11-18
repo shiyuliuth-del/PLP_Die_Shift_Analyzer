@@ -108,8 +108,8 @@ class FixedRules:
         if enabled(self.cfg,'board') and self.board is not None and (not self.board.covers(g) or g.distance(self.board.boundary)<self.border-self.dbu*.001):return False
         if enabled(self.cfg,'keepout') and not self.keepout.is_empty and shapely.relate_pattern(g,self.keepout,'T********'):return False
         from .native_backend import any_violation
-        from .geometry_rules import angle_regions
-        if enabled(self.cfg,'angle') and not angle_regions(g,getattr(self.cfg,'drc_min_angle_deg',0),self.dbu).is_empty:return False
+        from .geometry_rules import has_angle_violation
+        if enabled(self.cfg,'angle') and has_angle_violation(g,getattr(self.cfg,'drc_min_angle_deg',0),self.dbu):return False
         return not ((enabled(self.cfg,'width') and any_violation('width',g.wkb,self.dbu,self.width)) or (enabled(self.cfg,'space') and any_violation('space',g.wkb,self.dbu,self.space)))
 
     def context(self,plan):
@@ -145,8 +145,8 @@ class FixedRules:
                 kinds.add('foreign');gap=copper.distance(other)
                 if copper.intersects(other):kinds.add('short')
                 amount+=(self.space-gap)/max(self.space,1e-12)+(copper.intersection(other).area/max(self.width*self.space,1e-12) if gap==0 else 0)
-        from .geometry_rules import angle_regions
-        if enabled(self.cfg,'angle') and not angle_regions(copper,getattr(self.cfg,'drc_min_angle_deg',0),self.dbu).intersection(active).is_empty:kinds.add('angle')
+        from .geometry_rules import has_angle_violation
+        if enabled(self.cfg,'angle') and has_angle_violation(copper,getattr(self.cfg,'drc_min_angle_deg',0),self.dbu,active):kinds.add('angle')
         from .drc_rules import violation_priority
         return (*violation_priority(kinds),amount)
 

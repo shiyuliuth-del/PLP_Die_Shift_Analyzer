@@ -11,7 +11,9 @@ from .resources import cancel_check
 from .reconstruction_route import parts
 
 
-def signature(g):return len(parts(g)),sum(len(p.interiors) for p in parts(g))
+def signature(g):
+    polygons=parts(g)
+    return len(polygons),sum(len(p.interiors) for p in polygons)
 
 
 def failure_message(rows):
@@ -22,7 +24,12 @@ def failure_message(rows):
 def covers_ports(g,ports,tol):
     # Full enclosure is a process rule. Electrical continuity requires a real
     # positive-area contact, not merely coincident boundaries or a marker line.
-    return all(p.intersection(g).area>tol*tol for p in ports)
+    if not len(ports):return True
+    ports=np.asarray(ports,dtype=object)
+    # Exact containment is common; calculate overlaps only at partially
+    # enclosed or missing ports. Tiny whole ports still need the area test.
+    inside=shapely.covers(g,ports)&(shapely.area(ports)>tol*tol)
+    return bool(np.all(shapely.area(shapely.intersection(g,ports[~inside]))>tol*tol))
 
 
 def separate_pair(a,b,source_a,source_b,ports_a,ports_b,tol,space=0.):
@@ -64,6 +71,26 @@ def separate_pair(a,b,source_a,source_b,ports_a,ports_b,tol,space=0.):
     return None if best is None else best[1:]
 
 
+def weld_interfaces(geometry,expected,tol):
+    """Create actual copper at sub-grid seams before trying a new route."""
+    components=parts(geometry)
+    if len(components)<=expected[0]:return None
+    tree=shapely.STRtree(components)
+    i,j=tree.query(components,predicate='dwithin',distance=2*tol)
+    patches=[]
+    for a,b in zip(i,j):
+        if b<=a:continue
+        # Add only the strip jointly adjacent to both existing components.
+        # Buffer-and-close of the complete copper would also change remote edges.
+        l,r=components[a],components[b]
+        shared=l.buffer(tol*2,quad_segs=2).intersection(r.buffer(tol*2,quad_segs=2))
+        if shared.area>tol*tol:patches.append(shared)
+    if not patches:return None
+    candidate=shapely.union_all([geometry,*patches],grid_size=tol)
+    if candidate.is_valid and signature(candidate)==expected:return candidate
+    return None
+
+
 def connected_candidate(source,current,ports,obstacles,board,width,tol,space=0.):
     """Clip foreign copper, then join separated material through real free space."""
     expected=signature(source);gap=max(tol*4,space)
@@ -85,6 +112,8 @@ def connected_candidate(source,current,ports,obstacles,board,width,tol,space=0.)
         return (not g.is_empty and g.is_valid and signature(g)==expected and covers_ports(g,ports,tol)
                 and not g.intersects(obstacles) and (board is None or board.buffer(tol).covers(g)))
     if acceptable(full):return full
+    welded=weld_interfaces(full,expected,tol)
+    if welded is not None and acceptable(welded):return welded
     # Keep every material component and its terminal identity. A connector is
     # accepted only when it decreases the component count without adding holes.
     if len(parts(full))<=expected[0] or expected[0]!=1:return None
@@ -130,7 +159,7 @@ def cached_connection(r,source,current,ports,obstacles,board,width,tol,space):
     """
     cancel_check()
     blobs=(source.wkb,current.wkb,tuple(p.wkb for p in ports),obstacles.wkb,None if board is None else board.wkb)
-    key=('electrical-local-repair-v49',*blobs,float(width),float(tol),float(space))
+    key=('electrical-local-repair-v54',*blobs,float(width),float(tol),float(space))
     value=r.geometry_pool.get(key)
     if value is not None:return None if value[0] is None else shapely.from_wkb(value[0])
     result=connected_candidate(source,current,ports,obstacles,board,width,tol,space)
@@ -233,7 +262,6 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
         # then cannot invalidate an otherwise identical local repair cache.
         return shapely.union_all([g.intersection(box) for other,g in objects.items() if nets[other][0]==nets[ref][0] and nets[other]!=nets[ref] and g.intersects(box)]+[r.rules.keepout.intersection(box),*[g.intersection(box) for g in foreign_hits(ref,box)]])
     def enters_keepout(g):return not r.rules.keepout.is_empty and shapely.relate_pattern(g,r.rules.keepout,'T********')
-    def valid(ref,g):return g.is_valid and signature(g)==signature(original[ref]) and covers_ports(g,ports[ref],r.tol) and preserves_box(ref,g)
     def attempt(ref,reason):
         if ref not in mutable or any(q.get('box_invalid') for q in by_ref.get(ref,())):return None
         foreign=obstacles(ref)
@@ -245,14 +273,16 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
             for targets in (enclosed,ports[ref]):
                 candidate=cached_connection(r,original[ref],objects[ref],targets,foreign,r.rules.board,r._rule_width,r.tol,space)
                 if candidate is None:continue
+                if original[ref].geom_type!='Polygon' and not same_connections(
+                        original[ref],candidate,[g for _,g in terminals[ref]],ports[ref],r.tol):continue
                 if targets is enclosed and not all(candidate.buffer(r.tol*.1).covers(g) for g in enclosed):continue
                 if any(q.get('strict_box') is not None for q in by_ref.get(ref,())):
                     allowed=shapely.union_all([q['regions']['A'] for q in by_ref[ref]])
                     if candidate.symmetric_difference(objects[ref]).difference(allowed.buffer(r.tol*2)).area>r.tol*r.tol:continue
                 return candidate,reason
         return None
-    from .topology_checks import inspect_many,foreign_pairs
-    checked=inspect_many(r,objects,original,ports,manual_masks,manual_before)
+    from .topology_checks import inspect_many,foreign_pairs,same_connections
+    checked=inspect_many(r,objects,original,ports,manual_masks,manual_before,terminals)
     # Recover electrical discontinuities first; the actual posed foreign copper
     # is an obstacle even when full native DRC artwork was not requested.
     for number,ref in enumerate(sorted(mutable)):
@@ -276,7 +306,11 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
                 divided=None
                 for space in dict.fromkeys((r.rule_space,r.rule_space*.5,0.)):
                     candidate=separate_pair(objects[left],objects[right],original[left],original[right],ports[left],ports[right],r.tol,space)
-                    if candidate is not None and all(not foreign_hits(ref,g) and preserves_box(ref,g) for ref,g in zip((left,right),candidate)):
+                    if candidate is not None and all(
+                            not foreign_hits(ref,g) and preserves_box(ref,g) and
+                            (original[ref].geom_type=='Polygon' or same_connections(
+                                original[ref],g,[p for _,p in terminals[ref]],ports[ref],r.tol))
+                            for ref,g in zip((left,right),candidate)):
                         divided=candidate;break
                 if divided is not None:
                     for ref,g in zip((left,right),divided):
@@ -289,7 +323,7 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
             if not candidates:continue
             _,ref,g,reason=min(candidates,key=lambda item:(item[0],item[1]));objects[ref]=g;changed.add(ref);_adopt(by_ref[ref],g,r.tol,reason);progressed=True
         if not progressed:break
-    if changed:checked.update(inspect_many(r,{ref:objects[ref] for ref in changed},original,ports,manual_masks,manual_before))
+    if changed:checked.update(inspect_many(r,{ref:objects[ref] for ref in changed},original,ports,manual_masks,manual_before,terminals))
     previous_percent=-1
     for number,ref in enumerate(sorted(objects)):
         percent=70+round(20*number/max(1,len(objects)))
@@ -326,13 +360,22 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
 
 
 def spacing(r,out,pieces):
-    geos=r.rules.geometries(out);tables={}
-    for key in {r.rules.refnet[q['layer'],q['index']] for q in pieces}:
-        others=[(k,g) for k,g in geos.items() if k[0]==key[0] and k!=key]
-        tables[key]=(others,shapely.STRtree([g for k,g in others]))
+    geos=r.rules.geometries(out);planes={}
+    for key,g in geos.items():
+        if not g.is_empty:planes.setdefault(key[0],[]).append((key,g))
+    tables={plane:(values,shapely.STRtree([g for key,g in values])) for plane,values in planes.items() if len(values)>1}
+    measured={}
     for q in pieces:
-        key=r.rules.refnet[q['layer'],q['index']];others,tree=tables[key]
-        if not others:continue
-        i=int(tree.nearest(geos[key]));net,other=others[i];distance=geos[key].distance(other)
-        q.update(clearance_um=distance,conflict=distance<r.rule_space-r.tol,conflict_net=net[1],
-                 conflict_link=shapely.get_coordinates(shapely.shortest_line(geos[key],other)).tolist())
+        key=r.rules.refnet[q['layer'],q['index']]
+        table=tables.get(key[0]);copper=geos[key]
+        if table is None or copper.is_empty:continue
+        if key not in measured:
+            values,tree=table
+            # First include exact coincident geometry from a different net.
+            hits=[j for j in tree.query(copper,predicate='intersects') if values[int(j)][0]!=key]
+            indices=hits if hits else tree.query_nearest(copper,exclusive=True)
+            net,other=values[int(min(indices))]
+            distance=copper.distance(other)
+            measured[key]=dict(clearance_um=distance,conflict=distance<r.rule_space-r.tol,conflict_net=net[1],
+                               conflict_link=shapely.get_coordinates(shapely.shortest_line(copper,other)).tolist())
+        q.update(measured[key])

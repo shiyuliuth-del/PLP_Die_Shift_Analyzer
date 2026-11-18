@@ -47,6 +47,7 @@ def associate(pieces,violations,tol):
     found={zone_key(q):[] for q in pieces}
     by_net=defaultdict(list);unscoped=[]
     for row in violations:
+        if row.get('phase')=='original' and row['kind']=='最小内角不足':continue
         net=row.get('net')
         if not net:unscoped.append(row)
         else:

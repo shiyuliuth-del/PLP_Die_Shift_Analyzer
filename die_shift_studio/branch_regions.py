@@ -43,7 +43,11 @@ def interior_interfaces(source,domain,rigid,tolerance):
     return straight(shapely.line_merge(shapely.union_all(lines)),tolerance)
 
 
-def transition_domains(source,rows,tol):
+def path_sections(rows):
+    return [q['route_plan'].partition(*q['interval'],q.get('boundary_angles',(0.,0.))) for q in rows]
+
+
+def transition_domains(source,rows,tol,sections=None):
     """Split by every real seam before classifying path interiors.
 
     Unioning whole per-path partitions swallowed unrelated forks/terminals.
@@ -51,31 +55,64 @@ def transition_domains(source,rows,tol):
     """
     from shapely.ops import split,substring
     if any(q.get('strict_box') is not None for q in rows):
-        return shapely.union_all([q['nominal_regions']['A'] for q in rows])
-    components=parts(source);intervals=[];blades=[]
-    for row in rows:
+        active=shapely.union_all([q['nominal_regions']['A'] for q in rows])
+        return active,parts(source.difference(active))
+    components=parts(source);intervals=[];blades={}
+    if sections is None:sections=path_sections(rows)
+    for row,part in zip(rows,sections):
         plan=row['route_plan'];a,b=row['interval'];eps=min(tol*8,(b-a)*.05)
         if b-a>tol:intervals.append(substring(plan.route,a+eps,b-eps))
-        part=plan.partition(a,b,row.get('boundary_angles',(0.,0.)))
         if part is None:continue
         for name in ('near','far'):
             face=part[name]
             if face.geom_type!='LineString':continue
             xy=np.asarray(face.coords);v=xy[-1]-xy[0];v/=max(np.linalg.norm(v),tol)
-            blades.append(shapely.LineString([xy[0]-v*tol*32,xy[-1]+v*tol*32]))
-    for blade in blades:
+            blade=shapely.LineString([xy[0]-v*tol*32,xy[-1]+v*tol*32])
+            blades.setdefault(blade.normalize().wkb,blade)
+    for blade in blades.values():
         components=[piece for g in components for piece in (parts(split(g,blade)) if g.intersects(blade) else [g])]
-    return shapely.union_all([g for g in components if any(g.intersection(line).length>tol*4 for line in intervals)])
+    selected=[];rigid=[]
+    for g in components:
+        target=selected if any(g.intersection(line).length>tol*4 for line in intervals) else rigid
+        target.append(g)
+    # Keep the split cells. Re-differencing their union from the original
+    # outline can weld independent rigid branches along an ulp-wide residue.
+    return shapely.union_all(selected),rigid
+
+
+def merge_rigid_cells(cells,tol):
+    """Rejoin split cells that share a material edge, never a point."""
+    if len(cells)<2:return cells
+    tree=shapely.STRtree(cells);a,b=tree.query(cells,predicate='dwithin',distance=tol*.05)
+    boundaries=[g.boundary for g in cells];parents=list(range(len(cells)))
+    def root(i):
+        while parents[i]!=i:i=parents[i]
+        return i
+    for i,j in zip(a,b):
+        if j<=i:continue
+        left,right=root(i),root(j)
+        if left==right:continue
+        edge=boundaries[i].intersection(boundaries[j].buffer(tol*.05))
+        if edge.length>tol*8:parents[right]=left
+    groups={}
+    for i,g in enumerate(cells):groups.setdefault(root(i),[]).append(g)
+    return [group[0] if len(group)==1 else shapely.union_all(group) for group in groups.values()]
 
 
 def assemble(r,source,rows,states):
     from .reconstruction import transform
-    owner=rows[0]['die'];pose=states[owner];center=r.model.bound.centers[owner]
+    from .straight_controls import leaves,representative
+    owner=rows[0]['die'];pose=states[owner];center=r.model.bound.centers[owner];shifted=bool(np.any(pose))
     moving=shapely.union_all([q['moving_nominal'] for q in rows]);fixed=shapely.union_all([q['fixed_nominal'] for q in rows])
-    active=transition_domains(source,rows,r.tol);rigid=[];known={}
+    sections=path_sections(rows)
+    active,rigid_cells=transition_domains(source,rows,r.tol,sections);rigid=[];known={}
+    seam=shapely.union_all([q['ownership_seam'] for q in rows if 'ownership_seam' in q])
+    # The boundary with independently owned copper stays anchored in source
+    # coordinates. It is a real interface even without a fixed via on this half.
+    fixed=shapely.union_all([fixed,seam])
     physical_moving=shapely.union_all([g for q in rows for g in getattr(q['route_plan'],'terminal_vias',((moving,),(fixed,)))[0]])
-    physical_fixed=shapely.union_all([g for q in rows for g in getattr(q['route_plan'],'terminal_vias',((moving,),(fixed,)))[1]])
-    for g in parts(source.difference(active)):
+    physical_fixed=shapely.union_all([seam,*[g for q in rows for g in getattr(q['route_plan'],'terminal_vias',((moving,),(fixed,)))[1]]])
+    for g in merge_rigid_cells(rigid_cells,r.tol):
         # Enclosure masks may overlap a cut by a sub-DBU sliver. Only actual
         # terminal bodies decide ownership; those masks cannot swallow a fork.
         m=g.intersection(physical_moving).area>r.tol*r.tol;f=g.intersection(physical_fixed).area>r.tol*r.tol
@@ -108,7 +145,7 @@ def assemble(r,source,rows,states):
     c=shapely.union_all([rigid[i] for i in mobile]);b=shapely.union_all([rigid[i] for i in static])
     cposed=shapely.union_all([clean_overlay(transform(rigid[i],center,pose*values[i]),r.tol) for i in mobile]);style=r.settings.reconstruction_style
     def deform(g,ids):
-        if not np.any(pose):return g
+        if not shifted:return g
         dense=shapely.segmentize(g,max(r.tol*8,min(r._rule_width/3,5.)))
         def coordinates(xy):
             points=shapely.points(xy);distances=np.asarray([shapely.distance(points,rigid[i]) for i in ids])
@@ -122,26 +159,20 @@ def assemble(r,source,rows,states):
             return np.column_stack([co*v[:,0]-si*v[:,1],si*v[:,0]+co*v[:,1]])+center+fraction[:,None]*pose[:2]
         return shapely.transform(dense,coordinates)
     result=[]
+    from shapely.ops import substring
+    paths=[]
+    for q,part in zip(rows,sections):
+        left,right=q['interval'];trim=min(r.tol*4,(right-left)*.05)
+        paths.append((q,part,substring(q['route_plan'].route,left+trim,right-trim)))
     for domain_index,(group,ids) in enumerate(zip(domains,neighbours)):
-        from shapely.ops import substring
-        members=[q for q in rows if (q.get('strict_box') is not None and group.intersection(q['nominal_regions']['A']).area>r.tol*r.tol) or group.intersection(substring(q['route_plan'].route,q['interval'][0]+r.tol*4,q['interval'][1]-r.tol*4)).length>r.tol*4]
+        contributors=[(q,part) for q,part,line in paths
+                      if (q.get('strict_box') is not None and group.intersection(q['nominal_regions']['A']).area>r.tol*r.tol)
+                      or group.intersection(line).length>r.tol*4]
+        members=[q for q,part in contributors]
         if not members or not ids:continue
-        q=dict(members[0]);posed=deform(group,ids);valid=posed.is_valid and posed.geom_type=='Polygon'
-        flow_steps=0
-        if not valid:
-            from .continuous_warp import domain
-            alternative,flow_steps=domain(group,[rigid[i] for i in ids],[values[i] for i in ids],center,pose,r._rule_width,r.tol)
-            if alternative is None:
-                # Large common copper can contain overlapping moving/fixed
-                # landing reservations. Those overlapping virtual reservations
-                # cannot both be rigid. Preserve the real material interfaces;
-                # terminal coverage is checked on the resulting physical net.
-                physical=[i for i in ids if i<physical_count]
-                if physical:alternative,flow_steps=domain(group,[rigid[i] for i in physical],[values[i] for i in physical],center,pose,r._rule_width,r.tol)
-            if alternative is not None:posed=alternative;valid=True
-        if any(q.get('box_invalid') for q in members):valid=False
-        if not valid:posed=shapely.Polygon()
+        q=dict(members[0]);posed=None;flow_steps=0
         high=max(values[i] for i in ids);low=min(values[i] for i in ids)
+        guides=[shapely.union_all([part[name] for _,part in contributors if part is not None]) for name in ('near','far')]
         def face(weight,side):
             # Difference/union can leave ulp-different seam coordinates. A
             # display-only sub-DBU neighbourhood recovers the real line; isolated
@@ -163,24 +194,47 @@ def assemble(r,source,rows,states):
                     terminals.append(terminal)
             return shapely.union_all([seam,*terminals])
         nearcut,farcut=face(high,0),face(low,1)
+        def full_blade(cut,side):
+            # The trimmed selection artwork must never shorten the copper
+            # connector. Reuse the original complete material cross-section.
+            blades=[part[side] for _,part in contributors if part is not None and part[side].geom_type=='LineString']
+            if not blades:return cut
+            blade=min(blades,key=lambda g:g.hausdorff_distance(cut))
+            return blade if blade.hausdorff_distance(cut)<=r.tol*12 else cut
         # A common trunk with exactly two material seams is a normal strip,
         # even if several terminal paths share it. Use endpoint-matched curves
         # instead of a distance field which can pinch its two sides inward.
-        if style in ('linear','arc') and nearcut.geom_type=='LineString' and farcut.geom_type=='LineString' and high>1-1e-10 and low<1e-10 and not any(m.get('strict_box') is not None for m in members):
+        if shifted and style in ('linear','arc') and nearcut.geom_type=='LineString' and farcut.geom_type=='LineString' and high>1-1e-10 and low<1e-10 and not any(m.get('strict_box') is not None for m in members):
             from .connection_curves import endpoint_active
-            plan=q['route_plan'];part=dict(A=group,B=b,C=c,near=nearcut,far=farcut,a=q['interval'][0],b=q['interval'][1],angles=q.get('boundary_angles',(0.,0.)))
+            plan=q['route_plan'];part=dict(A=group,B=b,C=c,near=full_blade(nearcut,'near'),far=full_blade(farcut,'far'),a=q['interval'][0],b=q['interval'][1],angles=q.get('boundary_angles',(0.,0.)))
             try:
                 candidate=endpoint_active(part,plan,center,pose,style)
                 # Keep only a connected, valid candidate, preserving branch
                 # material outside this transition; final whole-net guard runs.
-                if candidate.is_valid and candidate.geom_type=='Polygon' and not candidate.is_empty:posed=candidate;valid=True
+                if candidate.is_valid and candidate.geom_type=='Polygon' and not candidate.is_empty:posed=candidate
             except (ValueError,shapely.errors.GEOSException):pass
+        if posed is None:posed=deform(group,ids)
+        valid=posed.is_valid and posed.geom_type=='Polygon'
+        if not valid:
+            from .continuous_warp import domain
+            alternative,flow_steps=domain(group,[rigid[i] for i in ids],[values[i] for i in ids],center,pose,r._rule_width,r.tol)
+            if alternative is None:
+                # Large common copper can contain overlapping moving/fixed
+                # landing reservations. Those overlapping virtual reservations
+                # cannot both be rigid. Preserve the real material interfaces;
+                # terminal coverage is checked on the resulting physical net.
+                physical=[i for i in ids if i<physical_count]
+                if physical:alternative,flow_steps=domain(group,[rigid[i] for i in physical],[values[i] for i in physical],center,pose,r._rule_width,r.tol)
+            if alternative is not None:posed=alternative;valid=True
+        if any(q.get('box_invalid') for q in members):valid=False
+        if not valid:posed=shapely.Polygon()
         # Whole-pad controls are physical terminal locations. Floating material
         # weights apply to interface lines, never to the terminal itself.
-        from .straight_controls import representative
         near_original,far_original=nearcut,farcut
-        nearcut=representative(near_original,far_original,r.tol);farcut=representative(far_original,nearcut,r.tol)
-        if nearcut.geom_type=='Point' and farcut.geom_type=='Point':nearcut=representative(near_original,farcut,r.tol)
+        nearcut=representative(near_original,far_original,r.tol,focus=guides[0] if not guides[0].is_empty else None)
+        # Each side follows its material section and its own source route.
+        remaining=[g for g in leaves(far_original,r.tol) if nearcut.is_empty or g.hausdorff_distance(nearcut)>r.tol*8]
+        farcut=representative(shapely.GeometryCollection(remaining),nearcut,r.tol,focus=guides[1] if not guides[1].is_empty else None)
         if nearcut.geom_type in ('Point','MultiPoint'):high=1.
         if farcut.geom_type in ('Point','MultiPoint'):low=0.
         q.update(regions=dict(A=posed,B=b,C=cposed),nominal_regions=dict(A=group,B=b,C=c),
@@ -203,7 +257,7 @@ def consolidate(r,pieces,states):
         else:other.append(q)
     for rows in groups.values():
         source=rows[0]['route_plan'].source
-        cache_key=('branch-assembly-local-intervals-v51',r.rules.identity,r.settings.reconstruction_style,
+        cache_key=('branch-assembly-local-intervals-v54',r.rules.identity,r.settings.reconstruction_style,
                    tuple(r.model.bound.centers[rows[0]['die']]),states[rows[0]['die']].tobytes(),
                    tuple((q['route_identity'],q['interval'],q['boundary_angles'],tuple(q['nominal_regions'][k].wkb for k in 'ABC')) for q in rows))
         cached=r.geometry_pool.get(cache_key)
