@@ -117,13 +117,14 @@ with tempfile.TemporaryDirectory(prefix='rda-error-output-') as temp:
     cell=layout.cell('G_ERROR_'+payload['cell']+f'_DIE_{die}')
     actual=k.Region(cell.begin_shapes_rec(error_index)) if cell else k.Region()
     assert (actual^expected.get(die,k.Region())).is_empty(),(package,die,'marker location differs from full catalogue')
-    assert actual.count()==len(unique.get(die,())),(package,die,'duplicate/missing rectangles')
     if cell:
      pcell=payload_cells[cell.name]
      for ref in pcell.references:
       assert abs(ref.rotation)>0,'Subgrid ERROR lost its rotation'
       retained_subgrid_angles+=1
-     for polygon in pcell.get_polygons():
+     polygons=pcell.get_polygons()
+     assert len(polygons)==len(unique.get(die,())),(package,die,'duplicate/missing polygons')
+     for polygon in polygons:
       assert len(polygon.points)==4,'ERROR must remain a quadrilateral'
     for shape in (cell.shapes(error_index).each() if cell else []):
      assert shape.is_box() or (shape.is_polygon() and shape.polygon.num_points_hull()==4),'ERROR must retain four oriented corners'
