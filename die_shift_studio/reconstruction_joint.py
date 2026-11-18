@@ -144,12 +144,12 @@ def remember(r,states,frame):
 
 
 def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
-    from .reconstruction_events import zone_key,active_region,current_failures
+    from .reconstruction_events import zone_key,active_region,current_failures,zone_severity,RANK
     from .width_keepout import routing_violations
     from .width_summary import strongest
     from .width_witness import edge_witness
     from .width_analysis import BLOCKED
-    records=defaultdict(set);reasons=defaultdict(set);locations=defaultdict(dict);witnesses={};zones_seen=set();scene_records=set();connection_records=set()
+    records=defaultdict(set);reasons=defaultdict(set);severity={};witnesses={};zones_seen=set();scene_records=set();connection_records=set()
     routing_lines={};routing_witnesses={};routing_factors=[];binary=r.p.target_nsigma in (0.,math.inf);repairs=0
     from .evaluation_scope import digits_for
     visits=(digits_for(grid,i) for i in indices) if indices is not None else product(*(range(n) for n in grid.radices))
@@ -170,7 +170,7 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
         if workers>1:
             solver=getattr(local,'solver',None)
             if solver is None:
-                solver=Reconstructor(r.model,r.p,r.settings,plan_pool=clone_plan_pool(r.plan_pool),geometry_pool=r.geometry_pool)
+                solver=Reconstructor(r.model,r.p,r.settings,plan_pool=clone_plan_pool(r.plan_pool),geometry_pool=r.geometry_pool,reference=r)
                 solver._plans=clone_plan_pool({'current':r._plans})['current']
                 solver.auto_following=set(r.auto_following);solver.auto_ignored=dict(r.auto_ignored);solver.safe_vias=dict(r.safe_vias)
                 solver._envelopes=getattr(r,'_envelopes',{})
@@ -196,9 +196,10 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
             key=zone_key(q);zones_seen.add(key);rows=q.get('rule_witnesses',())
             if not rows and not q.get('connection_failed'):continue
             records[key].add(clause);reasons[key].update(q.get('problem_reasons',()))
-            g=shapely.union_all([v['geometry'] for v in rows]) if rows else active_region(q)
-            if not g.is_empty:locations[key][g.wkb]=g
-            score=(int(q.get('connection_failed',False)),g.area,-index)
+            rank=zone_severity(q,rows)
+            if RANK[rank]>RANK[severity.get(key,'green')]:severity[key]=rank
+            g=max((v['geometry'] for v in rows if v.get('phase')!='original'),key=lambda g:g.area,default=active_region(q))
+            score=(RANK[rank],g.area,-index)
             if key not in witnesses or score>witnesses[key]['score']:witnesses[key]=dict(index=index,choices=tuple(digits),score=score,kinds=q.get('problem_reasons',()),geometry=g)
         edges=routing_violations(r.model,states,r.p,r.settings,frame['replacements'])
         if edges:routing_factors.append(clause)
@@ -208,7 +209,7 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
     for key in zones_seen:
         clauses=tuple(sorted(records[key],key=lambda q:q.allowed));idx=ProblemIndex(grid,clauses)
         zones[key]=dict(complete=True,has_failure=bool(clauses),clauses=clauses,failing_states=idx.total+idx.zero,kinds=tuple(sorted(reasons[key])),
-                        witness=witnesses.get(key),markers=shapely.union_all(list(locations[key].values())),
+                        witness=witnesses.get(key),severity=severity.get(key,'green'),
                         probability=dict(lower=0.,upper=1.,certified=False,reason='有限离散极端不能证明连续概率上界'))
     return dict(complete=True,grid=grid,grid_key=tuple(v.tobytes() for v in grid.locals),zones=zones,
                 routing_summary=dict(lines=routing_lines,witnesses=routing_witnesses,red_factors=routing_factors),

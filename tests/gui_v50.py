@@ -1,7 +1,8 @@
 """V50 actual Qt controls, manual compute, rulers and project-isolated artists."""
-import os,sys,time,tempfile,json
+import os,sys,time,tempfile,json,threading
 from pathlib import Path
 from dataclasses import asdict
+from unittest.mock import patch
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 ROOT=Path(__file__).resolve().parents[1];sys.path[:0]=[str(ROOT),str(ROOT/'tests')]
 import numpy as np,gdstk,shapely
@@ -57,7 +58,28 @@ try:
   xy=np.asarray(q[kind].centroid.coords[0]);w.set_view(xy,400,240);w.plot_layout(preserve=True);w.canvas.draw()
   event('button_press_event',xy);assert w.cut_drag.state is not None
   target=xy+q['route_plan'].tangent(q['interval'][side])*delta
-  event('motion_notify_event',target);w.cut_drag._tick();event('button_release_event',target)
+  from die_shift_studio.reconstruction_zones import live_serial
+  started=threading.Event();resume=threading.Event()
+  def delayed(*args,**kw):
+   started.set()
+   if not resume.wait(5):raise TimeoutError('did not release the local preview')
+   return live_serial(*args,**kw)
+  with patch('die_shift_studio.reconstruction_zones.live_serial',side_effect=delayed):
+   try:
+    event('motion_notify_event',target);w.cut_drag._tick()
+    assert started.wait(2),'manual mode did not start the live geometry preview'
+    drag=w.cut_drag.state;marker=drag['marker']
+    assert w.current_frame is old and w.reconstruction_overlay.hover.get_visible()
+    assert not any(w.reconstruction_overlay.owns_handle(p,k,drag) for p,k,g in w.reconstruction_overlay.hit_items)
+    # Simulate a late full frame and a catalogue refresh during the gesture.
+    w.present_frame(dict(old));w.filter_changed()
+    assert w.current_frame is old and w.cut_drag.state['marker'] is marker
+    event('button_release_event',target)
+   finally:resume.set()
+   end=time.monotonic()+15
+   while w.cut_drag.worker is not None and time.monotonic()<end:app.processEvents();time.sleep(.005)
+   assert w.cut_drag.worker is None
+   assert w.reconstruction_overlay.draft_key==w.view_settings.reconstruction_key()
   assert w.current_frame is old and w.reconstruction_pending
  staged=next(row for row in w.view_settings.reconstruction_intervals if row[4]==q['route_plan'].identity)
  assert abs(staged[-2]-original_interval[0])>1 and abs(staged[-1]-original_interval[1])>1

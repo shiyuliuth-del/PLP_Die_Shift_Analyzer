@@ -158,10 +158,11 @@ def normalize_edits(values):
     return {k:tuple(v) for k,v in result.items()}
 
 
-def commit_merges(settings,frame):
+def commit_merges(settings,frame,ref=None):
     """Absorbed serial zones must not reappear on later edits or Job reload."""
     rows=list(settings.reconstruction_intervals);deleted=set(settings.reconstruction_deleted)
     for q in (frame or {}).get('reconstruction',{}).get('pieces',()):
+        if ref is not None and (q['layer'],q['index'])!=ref:continue
         plan=q.get('route_plan')
         if plan is None or not getattr(plan,'merged_keys',()):continue
         deleted.update(plan.merged_keys)

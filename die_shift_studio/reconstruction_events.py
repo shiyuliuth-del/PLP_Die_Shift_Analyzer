@@ -14,8 +14,8 @@ from .resources import parallel_map,cancel_check,resource_profile,native_phase_p
 from .extreme_filter import PoseClause,ProblemIndex
 from .reconstruction_route import EMPTY
 
-PALETTE={'red':'#df737d','yellow':'#edbb77','green':'#b8d8c0','gray':'#d5d8dd','pending':'#edbb77'}
-RANK={'gray':0,'green':1,'yellow':2,'pending':2,'red':3}
+PALETTE={'red':'#ed9fa4','yellow':'#f3d493','green':'#b8d8c0','pending':'#d9dde2'}
+RANK={'pending':0,'green':1,'yellow':2,'red':3}
 
 
 def zone_key(q):return q['layer'],int(q['index']),int(q['die']),q.get('route_identity')
@@ -45,18 +45,24 @@ def support(q,tol,via=False,original=False):
 def associate(pieces,violations,tol):
     """Attribute pre/post rule witnesses only where they intersect the A region."""
     found={zone_key(q):[] for q in pieces}
+    by_net=defaultdict(list);unscoped=[]
+    for row in violations:
+        net=row.get('net')
+        if not net:unscoped.append(row)
+        else:
+            for key in ((net,) if isinstance(net[0],str) else set(net)):by_net[key].append(row)
     for q in pieces:
         shape=support(q,tol);original=None
-        for row in violations:
-            own=(q['layer'].split('/')[0],q.get('net'));net=row.get('net')
-            affected=(net,) if net and isinstance(net[0],str) else net
-            if affected is not None and own not in affected:continue
+        own=(q['layer'].split('/')[0],q.get('net'))
+        for row in (*by_net.get(own,()),*unscoped):
+            layers=row.get('layers',(q['layer'],))
+            if q['layer'] not in layers:continue
             subject=shape
             if row.get('phase')=='original':
                 if original is None:original=support(q,tol,original=True)
                 subject=original
-            g=row['geometry'];layers=row.get('layers',(q['layer'],))
-            if q['layer'] in layers and not subject.is_empty and subject.intersects(g):
+            g=row['geometry']
+            if not subject.is_empty and subject.intersects(g):
                 found[zone_key(q)].append(dict(row,geometry=g.intersection(subject),kind=('原始动区：' if row.get('phase')=='original' else '')+row['kind']))
         if q.get('connection_failed',False):
             found[zone_key(q)].append(dict(kind=q.get('warning') or '连接未完成',geometry=active_region(q),connection=True,layers=(q['layer'],)))
@@ -75,21 +81,23 @@ def scene_failure(frame):
     return bool(frame.get('violations')) or bool(frame.get('hard_failures')) or bool(current_failures(frame))
 
 
-def color_for(q,bank,nominal,level,inside=True):
-    key=zone_key(q);row=(bank or {}).get('zones',{}).get(key)
-    bad=bool(q.get('rule_witnesses')) or bool(q.get('connection_failed'))
-    # Bound must refer to this exact geometry/configuration and continuous law.
-    low=bool(row and row['has_failure'] and row.get('probability',{}).get('certified') and inside and 0<level<math.inf and (bank or {}).get('scale_nsigma',level)==level and row['probability']['upper']<=row['probability']['threshold'])
-    if nominal and row and row['has_failure']:
-        if not low:return 'red'
-        # Aggregate the colours of ALL poses: safe poses remain yellow when a
-        # different pose fails, so yellow outranks low-probability gray.
-        return 'yellow' if row['failing_states']<(bank or {}).get('package_states',math.inf) else 'gray'
-    if not nominal and bad:return 'gray' if low else 'red'
-    if row and row['complete']:
-        if row['has_failure']:return 'yellow'
-        return 'green' if q.get('valid',True) else 'pending'
-    return 'red' if bad else 'pending'
+def zone_severity(q, rows=None):
+    """Use faults in the displayed copper, separately from probability."""
+    if q.get('connection_failed'):return 'red'
+    if rows is None:rows=q.get('rule_witnesses',())
+    if any(row.get('phase')!='original' and not row.get('connection') for row in rows):
+        return 'yellow'
+    return 'green'
+
+
+def color_for(q,bank,nominal,*,checked=True):
+    if nominal:
+        row=(bank or {}).get('zones',{}).get(zone_key(q))
+        if row and row.get('complete') and bank.get('complete'):
+            return row.get('severity','pending')
+        return 'pending'
+    if not checked:return 'pending'
+    return zone_severity(q)
 
 
 def _compact(q):
@@ -183,7 +191,7 @@ def scan(r,grid,progress=lambda *_:None,source_cache=None):
         return source_cache.get_or_compute(token,lambda:build_uncached(ref))
     bundles=dict(parallel_map(build,refs,progress=lambda n,total:progress(12+round(28*n/max(1,total)),f'重构逐图形几何 {n}/{total}')))
     from . import reconstruction_joint
-    r._joint_catalog=(tuple(v.tobytes() for v in grid.locals),bundles)
+    r._joint_catalog=((tuple(v.tobytes() for v in grid.locals),None),bundles)
     if reconstruction_joint.needed(r,bundles,grid):return reconstruction_joint.scan(r,grid,bundles,lambda n,t:progress(40+round(n*.6),t))
     from .width_keepout import routing_violations
     from .width_witness import edge_witness
@@ -210,7 +218,7 @@ def scan(r,grid,progress=lambda *_:None,source_cache=None):
             term=PoseClause(((owner,(all_digits[owner],)),) if owner>=0 else ())
             routing_factors.append(term)
             strongest(routing_lines,[(row['layer'],i) for i in row['indices']],BLOCKED,None,binary,routing_witnesses,edge_witness(row,grid.index(all_digits),r.model,states))
-    records=defaultdict(set);witnesses={};locations=defaultdict(dict);reasons=defaultdict(set);zone_defs={};scene_records=set();connection_records=set();record_lock=threading.Lock()
+    records=defaultdict(set);witnesses={};severity={};reasons=defaultdict(set);zone_defs={};scene_records=set();connection_records=set();record_lock=threading.Lock()
     for bundle in bundles.values():
         for v in bundle['values'].values():
             for q in v['pieces']:zone_defs.setdefault(zone_key(q),q)
@@ -225,11 +233,12 @@ def scan(r,grid,progress=lambda *_:None,source_cache=None):
         for q in pieces:
             key=zone_key(q);issues=rows.get(key,())
             if not issues:continue
-            geo=shapely.union_all([v['geometry'] for v in issues if not v['geometry'].is_empty])
-            score=(sum(v.get('connection',False) for v in issues),float(geo.area),-index)
+            rank=zone_severity(q,issues)
+            geo=max((v['geometry'] for v in issues),key=lambda g:g.area,default=EMPTY)
+            score=(RANK[rank],float(geo.area),-index)
             with record_lock:
                 records[key].add(term);reasons[key].update(v['kind'] for v in issues)
-                if not geo.is_empty:locations[key][geo.wkb]=geo
+                if RANK[rank]>RANK[severity.get(key,'green')]:severity[key]=rank
                 if key not in witnesses or score>witnesses[key]['score']:
                     witnesses[key]=dict(index=index,choices=tuple(all_digits),score=score,kinds=tuple(v['kind'] for v in issues),geometry=geo)
     def get(ref,digits_by_owner):
@@ -305,9 +314,8 @@ def scan(r,grid,progress=lambda *_:None,source_cache=None):
     zones={}
     for key,q in zone_defs.items():
         local=tuple(sorted(records[key],key=lambda c:c.allowed));idx=ProblemIndex(grid,local)
-        geos=list(locations.get(key,{}).values());marks=shapely.union_all(geos) if geos else EMPTY
         zones[key]=dict(complete=True,has_failure=bool(local),clauses=local,failing_states=idx.total+idx.zero,
-                        kinds=tuple(sorted(reasons[key])),witness=witnesses.get(key),markers=marks,
+                        kinds=tuple(sorted(reasons[key])),witness=witnesses.get(key),severity=severity.get(key,'green'),
                         probability=dict(lower=0.,upper=1.,certified=False,reason='有限离散极端不能证明连续概率上界'))
     progress(100,'全部离散重构极端已核验')
     return dict(complete=True,routing_summary=dict(lines=routing_lines,witnesses=routing_witnesses,red_factors=routing_factors),grid_key=tuple(v.tobytes() for v in grid.locals),grid=grid,zones=zones,

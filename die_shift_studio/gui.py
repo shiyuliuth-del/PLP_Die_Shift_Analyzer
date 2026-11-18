@@ -1248,6 +1248,7 @@ class MainWindow(W.QMainWindow):
         self.statusBar().showMessage(message)
         self.refresh_extreme_colors(frame)
     def present_frame(self,frame):
+        if self.cut_drag.state is not None:return
         if frame and frame.get('diagnostic_only'):
             from .topology_routing import failure_message
             self.log_bus.emit(failure_message(frame['reconstruction']['hard_failures']),'ERROR')
@@ -1350,13 +1351,14 @@ class MainWindow(W.QMainWindow):
         for button in (self.region_move,):
             button.blockSignals(True);button.setChecked(False);button.blockSignals(False)
 
-    def defer_reconstruction(self):
+    def defer_reconstruction(self,stage=True):
         self.reconstruction_pending=True;self.stop_animation();self.cancel_previews()
         self.preview_ticket+=1;self.preview_pending=None
         self.constraint_feedback.cancel()
         if hasattr(self,'reconstruction_yield'):self.reconstruction_yield.reset()
         try:
-            self.reconstruction_overlay.stage();self.reconstruction_overlay.draw();self.canvas.draw_idle()
+            if stage:self.reconstruction_overlay.stage()
+            self.reconstruction_overlay.draw();self.canvas.draw_idle()
         except Exception as exc:self.log_bus.emit(f'待计算动区预览未生成：{exc}')
         self.statusBar().showMessage('重构修改待应用；点击“重构计算”统一计算。')
 
@@ -1575,12 +1577,13 @@ class MainWindow(W.QMainWindow):
         analysis=frame.get('width_analysis') if frame and self.width_toggle.isChecked() else None
         modes=self.view_settings.width_display if analysis is not None else {}
         self.width_hidden_sources={k for k,r in roles.items() if modes.get(r if r in modes else '其他')=='hide'}
+        reconstruction=self.reconstruction_overlay.data() if self.reconstruction_toggle.isChecked() else None
         for rank,key in enumerate(order):
             values=frame['layers'][key]['polygons'] if frame and key in frame['layers'] else self.data.layers[key]
             role=roles[key];sty=self.style_for(key,role);visible=self.visible_boxes[key].isChecked()
             polys=values
             ids=self.viewport_index.query(key,self.view_bounds,states) if visible else np.empty(0,int)
-            replacements=frame.get('reconstruction',{}).get('replacements',{}).get(key,[]) if frame and self.reconstruction_toggle.isChecked() else []
+            replacements=(reconstruction or {}).get('replacements',{}).get(key,())
             hidden={i for q in replacements for i in q['indices']}
             if hidden:ids=np.array([i for i in ids if i not in hidden],int)
             mode=modes.get(role,modes.get('其他','show'))
@@ -1691,7 +1694,7 @@ class MainWindow(W.QMainWindow):
         if self.reconstruction_toggle.isChecked():
             from .reconstruction_overlay import COLORS,CUT_COLOR,SECOND_CUT_COLOR,WARNING_COLOR
             from .reconstruction_events import PALETTE
-            handles += [Patch(facecolor=PALETTE[k],alpha=.66,label=title) for k,title in [('red','动区违规'),('yellow','当前通过 / 其他极端风险'),('green','所选组合均通过'),('gray','低概率满足要求')]]
+            handles += [Patch(facecolor=PALETTE[k],alpha=.66,label=title) for k,title in [('red','动区连线失败'),('yellow','动区存在 DRC 违例'),('green','动区通过检查'),('pending','动区待核验')]]
             handles += [Patch(facecolor=COLORS[k],alpha=.66,label={'B':'C','C':'B'}[k]+' '+title) for k,title in [('B','静区'),('C','平移区')]]
             handles += [Line2D([],[],color=CUT_COLOR,lw=2,label='运动侧边界 / 整孔盘蓝点'),Line2D([],[],color=SECOND_CUT_COLOR,lw=2,label='固定侧边界 / 整孔盘蓝点'),Patch(facecolor='#dd5790',edgecolor='#bc386d',alpha=.45,label='动区自身风险 · 选中查看')]
         if self.current_frame and self.current_frame.get('motion_issues'):handles.append(Line2D([],[],color='#bf862c',ls='--',label='运动归属未定：保持名义位置'))
@@ -1881,6 +1884,7 @@ class MainWindow(W.QMainWindow):
     def cancel_previews(self):
         for worker in self.preview_workers:worker.cancelled.set()
     def request_preview(self,direct=False,settle=False,quiet=False,pose_change=False):
+        if getattr(self.cut_drag,'state',None) is not None:return
         if getattr(self, 'reconstruction_pending', False) and self.reconstruction_toggle.isChecked() and not pose_change:
             return
         if self.remote_locked or getattr(self,'requested_measured',False):return
@@ -2157,17 +2161,20 @@ class MainWindow(W.QMainWindow):
                 summary=engine.width_summary(progress)
             progress(100,'方案评估与极端状态校验完成')
             return r,case,actual_cache,connections,catalog,engine,summary
-        def accepted(value):
-            if data is not self.data:return
+        def accepted(value,waited_for_drag=False):
+            if data is not self.data or self._closing:return
             if rev!=self.revision:
                 self.log_bus.emit('评估快照已过期：排队计算最新参数，旧任务不会覆盖结果');self._coverage_pending=True;self.coverage_timer.start();return
+            if self.cut_drag.state is not None:
+                QtCore.QTimer.singleShot(50,lambda:accepted(value,True))
+                return
             self.log_bus.emit('评估结果已应用：版本代号 '+str(rev))
             r,self.case,self.geometry_cache,self.connections,catalog,engine,summary=value
             if group is not self.cache_group:return
             group.engines[(engine.signature,id(engine))]=engine
-            self.display_result(r,catalog,preserve=automatic,summary=summary)
+            self.display_result(r,catalog,preserve=automatic or waited_for_drag,summary=summary,retain_frame=waited_for_drag)
         self.start_worker(work,accepted,interactive=True)
-    def display_result(self,r,catalog=None,preserve=False,summary=None):
+    def display_result(self,r,catalog=None,preserve=False,summary=None,retain_frame=False):
         saved=(self.active_preview,self.manual_states,self.preview_page)
         self.cache_group.last_assessment=(self.assessment_identity(self.data,self.roles(),self.ordered_layers(),self.params(),self.view_settings),r)
         from .session_cache import logical_fingerprint
@@ -2181,7 +2188,8 @@ class MainWindow(W.QMainWindow):
         self.extremes=catalog if catalog is not None else ExtremeCatalog(self.case,self.params())
         self.focus_extremes=RepresentativeExtremes.from_result(self.case,self.params(),r,self.extremes)
         self.risk_extremes=RepresentativeExtremes(self.case,self.params(),self.extremes,risk_indices=r.get('risk_indices',()))
-        self.active_preview=None;self.owner_cache=None;self.engine=None;self.current_frame=None
+        self.active_preview=None;self.owner_cache=None
+        if not retain_frame:self.engine=None;self.current_frame=None
         self.show_extreme_page(saved[-1] if preserve else self._initial_extreme_page,redraw=False)
         self.fill_issues()
         self._analysis_result=r;self.histogram_dirty=True
@@ -2298,7 +2306,7 @@ class MainWindow(W.QMainWindow):
         job.start(QtCore.QThread.Priority.LowPriority if hasattr(QtCore.QThread,'Priority') else QtCore.QThread.LowPriority)
 
     def filter_changed(self,pending_ok=False):
-        if self.loading or self.extremes is None:return
+        if self.loading or self.extremes is None or self.cut_drag.state is not None:return
         current=self.active_preview;manual=self.manual_states
         self.show_extreme_page(self.preview_page,redraw=False)
         row=next((i for i,(index,_) in enumerate(self.page_items,1) if index==current),0)
@@ -2307,7 +2315,7 @@ class MainWindow(W.QMainWindow):
             self.active_preview=current
             self.extreme_table.blockSignals(True);self.extreme_table.setCurrentCell(row,0);self.extreme_table.blockSignals(False)
         elif current is not None:
-            if pending_ok and ((self.reconstruction_toggle.isChecked() and self.reconstruction_yield.evidence is None) or (self.coupled_view() and self._coupled_data is None) or (self.width_toggle.isChecked() and self._width_grid_summary is None)):
+            if self.reconstruction_toggle.isChecked() or (pending_ok and ((self.coupled_view() and self._coupled_data is None) or (self.width_toggle.isChecked() and self._width_grid_summary is None))):
                 self.active_preview=current;self.leave_extreme_selection()
             else:self.select_preview(0,0)
 
@@ -2437,6 +2445,7 @@ class MainWindow(W.QMainWindow):
 
     def select_preview(self,row,column,*_):
         if self.loading:return
+        if self.cut_drag.state is not None:self.cut_drag.cancel(redraw=False)
         if hasattr(self,'mouse_die'):
             self.mouse_die.cancel_pending();self.mouse_die.exit()
         self.reconstruction_overlay.clear_hover()

@@ -33,7 +33,7 @@ try:
  assert w.view_settings.reconstruction_boundary_mode=='wide'
  w.manual_states=np.array([[8.,5.,.003]]);w.request_preview();wait()
  frame=w.current_frame;w.show_issues.setChecked(False);w.plot_layout(preserve=True)
- assert not w.reconstruction_overlay.constraints.get_visible() and not w.reconstruction_overlay.problem_points.get_visible()
+ assert not any(a.get_visible() for a in (w.drc_overlay.area,w.drc_overlay.points,w.drc_overlay.links))
  w.show_issues.setChecked(True);wait()
  # A queued statistics task is not a completed result, even before its
  # worker appears in the active-task registry.

@@ -83,7 +83,8 @@ class ReconstructionYieldDisplay:
             if 'evidence' in value and self.evidence is not value['evidence']:
                 self.evidence=value['evidence'];self.w._problem_tag=None
                 self.w.filter_changed(pending_ok=True)
-                self.w.reconstruction_overlay.stamp=None;self.w.plot_layout(preserve=True)
+                if self.w.cut_drag.state is None:
+                    self.w.reconstruction_overlay.draw();self.w.render_scene()
             if 'yield' in value:self.bank=value['yield'];self.render()
         def failed(text):
             if self.key==key and not worker.cancelled.is_set():self.w.width_yield.label.set_extra('重构良率 · 无法计算',text.split('Traceback')[0])

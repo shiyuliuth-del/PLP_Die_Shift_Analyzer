@@ -1,3 +1,9 @@
+# V53 重构预演交接
+
+`reconstruction_overlay.display_material` 从 `replacements` 获取画布底图，和当前全层 DRC、GDS/OAS 出口使用同一份实际铜。A 区着色裁到实际铜；诊断断口单独绘制。ABC 导出仍使用各区定义。
+
+`CutDrag` 按下时作废旧视图代次，立即更新移动端控制柄并从静态绘图移除该柄。局部计算只使用本源名义线路、端孔和当前姿态。鼠标松开时提交设置，手动模式的最后一帧可异步补画。禁止把拖动草稿用于电连接通过判定或制造输出。`reconstruction_events` / `reconstruction_joint` 在当前目录内聚合 A 区最严重状态，共用同一规则指纹。`FixedRules.check` 按物理层分批查询空间索引，独立求解器复用只读名义规则数据和端孔定义。
+
 V50续检优化：extreme_validation把大重点目录按真实DIE依赖分解，只投影所选行；不构造729份带表格量测的显示帧。检查类别也用于旧机械/接口状态计数，不能仅从新DRC表隐藏。实际值量测仅交互显示，measured_core批量保留全部规则/见证但不量表格尺寸。完整删空铜的boundary可为None，partial_output先判断差集为空。
 
 nul7123复现入口：tools/verify_v50_nul.py与tools/verify_v50_nul_mouse.py，均传入用户外部工程JSON；不附私人图纸。具体本轮证据和首次失败保留于V50_VALIDATION，不为发布而循环扩大检查。

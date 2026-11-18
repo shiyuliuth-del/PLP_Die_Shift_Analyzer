@@ -116,8 +116,9 @@ try:
  # V40 explicitly replaces the old QMenu by the same on-canvas selected callout as width.
  combo=w.setting_fields['reconstruction_style'];combo.setCurrentIndex(combo.findData('linear'));wait()
  w.manual_states=np.array([[8000.,8000.,0.],[0,0,0]]);w.request_preview();wait(expect_diagnostic=True)
- bad=next(p for p in w.current_frame['reconstruction']['pieces'] if p.get('problem_reasons'))
- center=bad['problem_region'].representative_point().coords[0]
+ from die_shift_studio.reconstruction_events import active_region
+ bad=next(p for p in w.current_frame['reconstruction']['pieces'] if p.get('connection_failed'))
+ center=active_region(bad).representative_point().coords[0]
  w.ax.set_xlim(center[0]-60,center[0]+60);w.ax.set_ylim(center[1]-60,center[1]+60);w.plot_layout(preserve=True);w.canvas.draw()
  assert w.reconstruction_overlay.problems.get_visible()
  # The real click must open the problem menu, not a detached custom panel.
@@ -125,7 +126,7 @@ try:
  pick=next((xy for xy in [center,*candidates[::max(1,len(candidates)//20)]] if (hit:=w.reconstruction_overlay.pick(*xy,w.cut_drag._tolerance())) and hit[2]=='problem'),None)
  assert pick is not None
  event('button_press_event',pick);event('button_release_event',pick);app.processEvents()
- assert any(a.get_visible() and '当前存在违规' in a.get_text() for a in w.reconstruction_overlay.labels)
+ assert any(a.get_visible() and '线路无法保持连通' in a.get_text() for a in w.reconstruction_overlay.labels)
  assert not any(isinstance(a,W.QMenu) and a.isVisible() for a in app.topLevelWidgets())
  w.escape_action();app.processEvents()
  w.fit_plot();w.plot_layout(preserve=True);w.canvas.draw()

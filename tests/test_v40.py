@@ -1,5 +1,5 @@
 from dataclasses import replace,asdict
-import itertools,json,math,tempfile,time,threading,unittest
+import itertools,json,tempfile,time,threading,unittest
 from pathlib import Path
 import numpy as np
 import shapely
@@ -37,22 +37,36 @@ class Reconstruction40Tests(unittest.TestCase):
                 self.assertTrue(some_bad);self.assertEqual(bank['geometry_checks'],3)
             finally:e.close()
 
-    def test_all_safe_is_green_other_failure_is_yellow_and_nominal_is_red(self):
+    def test_zone_colour_follows_checked_pose_and_completed_catalogue(self):
         e,_,c=fixture()
         try:
             r=e.reconstructor;bank=scan(r,ExtremeCatalog(c,e.p));q=r.frame(np.zeros((1,3)))['pieces'][0]
-            self.assertEqual(color_for(q,bank,False,6),'green')
-            row=bank['zones'][zone_key(q)];row.update(has_failure=True)
-            self.assertEqual(color_for(q,bank,False,6),'yellow');self.assertEqual(color_for(q,bank,True,6),'red')
-            row['probability']=dict(certified=True,upper=1e-10,threshold=1e-9)
-            self.assertEqual(color_for(q,bank,True,6),'yellow')
-            row['failing_states']=bank['package_states'];self.assertEqual(color_for(q,bank,True,6),'gray')
-            bad=dict(q,rule_witnesses=[{'kind':'线距不足'}]);self.assertEqual(color_for(bad,bank,False,6),'gray')
-            self.assertEqual(color_for(q,bank,True,0),'red');self.assertEqual(color_for(q,bank,True,math.inf),'red')
-            row['probability']['certified']=False
-            self.assertEqual(color_for(q,bank,True,6),'red')
-            self.assertEqual(color_for(q,None,False,6),'pending')
+            row=bank['zones'][zone_key(q)]
+            self.assertEqual(color_for(q,bank,False,checked=False),'pending')
+            self.assertEqual(color_for(q,None,True),'pending')
+            for severity in ('green','yellow','red'):
+                row['severity']=severity
+                row['probability']=dict(certified=True,upper=1e-10,threshold=1e-9)
+                self.assertEqual(color_for(q,bank,True),severity)
+                self.assertEqual(color_for(q,bank,False),'green')
+            bad=dict(q,rule_witnesses=[{'kind':'线距不足'}])
+            self.assertEqual(color_for(bad,bank,False),'yellow')
+            self.assertEqual(color_for(dict(bad,connection_failed=True),bank,False),'red')
+            self.assertEqual(color_for(q,dict(bank,complete=False),True),'pending')
         finally:e.close()
+
+    def test_canvas_replacement_retains_real_continuity_material(self):
+        from die_shift_studio.reconstruction_overlay import display_material
+        copper=box(0,0,100,10)
+        q=dict(layer='5/0',index=0,regions=dict(A=box(30,0,50,10),B=box(60,0,100,10),C=box(0,0,30,10)))
+        data=dict(pieces=(q,),replacements={'5/0':[dict(indices=(0,),geometry=copper)]})
+        actual,_=display_material(data,['5/0'])
+        self.assertIs(actual['5/0',0],copper)
+        self.assertGreater(copper.difference(shapely.union_all(list(q['regions'].values()))).area,0.)
+        self.assertEqual(display_material(data,())[0],{})
+        failed=shapely.MultiPolygon([box(0,0,40,10),box(60,0,100,10)])
+        data['replacements']['5/0'][0]['geometry']=failed
+        self.assertIs(display_material(data,['5/0'])[0]['5/0',0],failed)
 
     def test_rigid_side_fault_does_not_colour_active_region_v41(self):
         e,_,_=fixture()
