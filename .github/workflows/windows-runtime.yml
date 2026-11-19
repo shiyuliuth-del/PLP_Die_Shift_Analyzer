@@ -74,6 +74,10 @@ on:
       - '.github/workflows/windows-runtime.yml'
   workflow_dispatch:
     inputs:
+      resume_v55_context:
+        description: 'Continue V55 at the updated one-line context menu and run the remaining Windows stages'
+        type: boolean
+        default: false
       resume_v55_tail:
         description: 'Continue V55 from manual box checks and validate the remaining Windows release stages'
         type: boolean
@@ -134,7 +138,7 @@ jobs:
           python -m venv .venv
           .\.venv\Scripts\python -m pip install -r requirements.txt ezdxf
       - name: V47 measured commands, compact focus and saved geometry regression
-        if: ${{ inputs.resume_v55_tail != true && inputs.resume_v53_tail != true && inputs.resume_v52_client != true && inputs.resume_v52_tail != true && inputs.resume_v51 != true && inputs.resume_v50 != true && inputs.resume_v50_tail != true }}
+        if: ${{ inputs.resume_v55_context != true && inputs.resume_v55_tail != true && inputs.resume_v53_tail != true && inputs.resume_v52_client != true && inputs.resume_v52_tail != true && inputs.resume_v51 != true && inputs.resume_v50 != true && inputs.resume_v50_tail != true }}
         shell: cmd
         run: |
           .\.venv\Scripts\python -m unittest discover -s tests -p test_v47.py -v
@@ -172,7 +176,7 @@ jobs:
           "DSA_TEST_SOURCE=$source" >> $env:GITHUB_ENV
           "DIE_SHIFT_PYTHON=$py" >> $env:GITHUB_ENV
       - name: Verify ordered plans, output isolation and bounded IPC conversation
-        if: ${{ inputs.resume_v55_tail != true && inputs.resume_v53_tail != true && inputs.resume_v52_client != true && inputs.resume_v52_tail != true && inputs.resume_v51 != true && inputs.resume_v50 != true && inputs.resume_v50_tail != true }}
+        if: ${{ inputs.resume_v55_context != true && inputs.resume_v55_tail != true && inputs.resume_v53_tail != true && inputs.resume_v52_client != true && inputs.resume_v52_tail != true && inputs.resume_v51 != true && inputs.resume_v50 != true && inputs.resume_v50_tail != true }}
         shell: cmd
         run: |
           set PYTHONPATH=.;tests
@@ -184,7 +188,7 @@ jobs:
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" tests/gui_realdata_instances.py
       - name: Verify partial measured output, ERROR layer and expanded GD55
-        if: ${{ inputs.resume_v55_tail != true && inputs.resume_v53_tail != true && inputs.resume_v52_client != true && inputs.resume_v52_tail != true && inputs.resume_v51 != true && inputs.resume_v50 != true && inputs.resume_v50_tail != true }}
+        if: ${{ inputs.resume_v55_context != true && inputs.resume_v55_tail != true && inputs.resume_v53_tail != true && inputs.resume_v52_client != true && inputs.resume_v52_tail != true && inputs.resume_v51 != true && inputs.resume_v50 != true && inputs.resume_v50_tail != true }}
         shell: cmd
         run: |
           set PYTHONPATH=.;tests
@@ -200,7 +204,7 @@ jobs:
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" tests/gui_realdata_errors.py
       - name: Verify V50 output, pair coverage, DRC policy and interaction contracts
-        if: ${{ inputs.resume_v53_tail != true && inputs.resume_v52_client != true && inputs.resume_v52_tail != true && inputs.resume_v51 != true && inputs.resume_v50 != true && inputs.resume_v50_tail != true }}
+        if: ${{ inputs.resume_v55_context != true && inputs.resume_v53_tail != true && inputs.resume_v52_client != true && inputs.resume_v52_tail != true && inputs.resume_v51 != true && inputs.resume_v50 != true && inputs.resume_v50_tail != true }}
         shell: cmd
         run: |
           set PYTHONPATH=.;tests
@@ -217,7 +221,7 @@ jobs:
           "%DIE_SHIFT_PYTHON%" tests/gui_v50.py
           if errorlevel 1 exit /b 1
       - name: Verify V49 reconstruction rules, ruler and GD55 interactions
-        if: ${{ inputs.resume_v53_tail != true && inputs.resume_v52_client != true && inputs.resume_v52_tail != true && inputs.resume_v51 != true && inputs.resume_v50 != true && inputs.resume_v50_tail != true }}
+        if: ${{ inputs.resume_v55_context != true && inputs.resume_v53_tail != true && inputs.resume_v52_client != true && inputs.resume_v52_tail != true && inputs.resume_v51 != true && inputs.resume_v50 != true && inputs.resume_v50_tail != true }}
         shell: cmd
         run: |
           set PYTHONPATH=.;tests
@@ -236,20 +240,20 @@ jobs:
           "%DIE_SHIFT_PYTHON%" tests/gui_v49_gd55.py
           if errorlevel 1 exit /b 1
       - name: Locate the Windows C++ compiler for the interface test
-        if: ${{ inputs.resume_v53_tail != true && inputs.resume_v52_client != true && inputs.resume_v52_tail != true && inputs.resume_v51 != true && inputs.resume_v50_tail != true }}
+        if: ${{ inputs.resume_v55_context != true && inputs.resume_v53_tail != true && inputs.resume_v52_client != true && inputs.resume_v52_tail != true && inputs.resume_v51 != true && inputs.resume_v50_tail != true }}
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           if (-not $vs) { throw 'MSVC not found' }
           "DSA_VCVARS=$vs\VC\Auxiliary\Build\vcvars64.bat" >> $env:GITHUB_ENV
       - name: Check the native ABI and kernel arithmetic with a CPU test driver
-        if: ${{ inputs.resume_v53_tail != true && inputs.resume_v52_client != true && inputs.resume_v52_tail != true && inputs.resume_v51 != true && inputs.resume_v50_tail != true }}
+        if: ${{ inputs.resume_v55_context != true && inputs.resume_v53_tail != true && inputs.resume_v52_client != true && inputs.resume_v52_tail != true && inputs.resume_v51 != true && inputs.resume_v50_tail != true }}
         shell: cmd
         run: |
           call "%DSA_VCVARS%" >nul
           "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_v32.py -v
       - name: Verify V45 current copper DRC and lazy compact GUI
-        if: ${{ inputs.resume_v53_tail != true && inputs.resume_v52_client != true && inputs.resume_v52_tail != true && inputs.resume_v51 != true && inputs.resume_v50_tail != true }}
+        if: ${{ inputs.resume_v55_context != true && inputs.resume_v53_tail != true && inputs.resume_v52_client != true && inputs.resume_v52_tail != true && inputs.resume_v51 != true && inputs.resume_v50_tail != true }}
         shell: cmd
         run: |
           set PYTHONPATH=.;tests
@@ -257,7 +261,7 @@ jobs:
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" tests/gui_v45.py
       - name: Verify hardware preference and pending Qt worker shutdown
-        if: ${{ inputs.resume_v53_tail != true && inputs.resume_v52_client != true && inputs.resume_v52_tail != true && inputs.resume_v51 != true && inputs.resume_v50_tail != true }}
+        if: ${{ inputs.resume_v55_context != true && inputs.resume_v53_tail != true && inputs.resume_v52_client != true && inputs.resume_v52_tail != true && inputs.resume_v51 != true && inputs.resume_v50_tail != true }}
         shell: cmd
         run: '"%DIE_SHIFT_PYTHON%" tests/gui_v32.py'
       - name: Verify joint width probabilities and context menu

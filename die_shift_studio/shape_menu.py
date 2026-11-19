@@ -31,7 +31,7 @@ def show_shape_menu(window,event,point):
     menu=W.QMenu(window.canvas)
     if len(refs)==1:
         key,i=refs[0];kind,xy,_=shape_nodes(window.data,key,i)
-        summary=f'{key} #{i+1} · {kind} · {len(xy)} 个节点'
+        summary=f'{key} #{i+1} · {kind} · {len(xy)} 个名义节点'
     else:
         summary=f'已选 {len(refs)} 个图形 · {len({k for k,_ in refs})} 层'
     menu.addAction(summary).setEnabled(False)
