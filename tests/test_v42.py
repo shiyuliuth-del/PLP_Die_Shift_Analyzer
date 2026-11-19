@@ -93,10 +93,10 @@ class V42Tests(unittest.TestCase):
   try:
    q=e.frame(np.zeros((1,3)))['reconstruction']['pieces'][0];plan=q['route_plan'];a,b=q['interval']
    self.assertFalse(plan.pad_hit((600,300),1))
-   self.assertTrue(plan.pad_hit((600,0),1))
+   self.assertFalse(plan.pad_hit((600,0),1))
    at=plan.snap(plan.fixed_start+1,1,a)
    self.assertLess(at,plan.length)
-   self.assertEqual(plan.snap(plan.fixed_start+10,1,a),plan.length)
+   self.assertEqual(plan.snap(plan.fixed_start+10,1,a),at)
    stopped=plan.edit_pose(a,b,1,plan.length,e.bound.centers[0],np.zeros(3),'c2',cursor=(600,300))[0]
    self.assertNotEqual(stopped['far'].geom_type,'Point')
   finally:e.close()

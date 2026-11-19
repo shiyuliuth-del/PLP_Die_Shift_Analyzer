@@ -1,7 +1,6 @@
 """Metal adjacency, downward ownership tracing and real moving/fixed interfaces."""
 import numpy as np
 import shapely
-from shapely.geometry import Polygon
 from shapely.strtree import STRtree
 from .resources import parallel_map
 from .layer_roles import PHYSICAL,MOVING,canonical_roles
@@ -31,7 +30,10 @@ class Connections:
         sanitize_data(data);self.data=data;self.roles=canonical_roles(roles)
         self.order=stack_order(data,self.roles,order);self.links=[]
         self.outgoing={k:{} for k in data.layers};self.incoming={k:{} for k in data.layers}
-        self.geometry=geometries if geometries is not None else {k:np.array([Polygon(a) for a in v],object) for k,v in data.layers.items()}
+        if geometries is None:
+            from .fast_preview import polygons_from_arrays
+            geometries=dict(parallel_map(lambda item:(item[0],polygons_from_arrays(item[1])),data.layers.items()))
+        self.geometry=geometries
         planes={}
         for key in self.order:
             if self.roles.get(key) in PHYSICAL:planes.setdefault(key.split('/')[0],[]).append(key)
@@ -46,8 +48,9 @@ class Connections:
         self.same_plane=UnionFind(len(self.nodes))
         for ids in self.plane_nodes:
             polygons=np.array([self.nodes[i][2] for i in ids],object);tree=STRtree(polygons)
-            for start in range(0,len(ids),512):
-                a,b=tree.query(polygons[start:start+512],predicate='intersects')
+            block=min(512,max(1,1_000_000//max(1,len(ids))))
+            for start in range(0,len(ids),block):
+                a,b=tree.query(polygons[start:start+block],predicate='intersects')
                 for i,j in zip(a+start,b):
                     if i<j:self.same_plane.union(ids[i],ids[j])
         self.components={};self._component_geometry={}
@@ -59,8 +62,9 @@ class Connections:
             lp=np.array([q[2] for q in lower],object);tree=STRtree(lp);found=[]
             for uk in up:
                 upper=self.geometry[uk]
-                for start in range(0,len(upper),512):
-                    pairs=tree.query(upper[start:start+512],predicate='intersects')
+                block=min(512,max(1,1_000_000//len(lp)))
+                for start in range(0,len(upper),block):
+                    pairs=tree.query(upper[start:start+block],predicate='intersects')
                     if not pairs.size:continue
                     ui=pairs[0]+start;li=pairs[1]
                     valid=shapely.area(shapely.intersection(upper[ui],lp[li]))>max(1e-12,data.dbu_um**2*.01)

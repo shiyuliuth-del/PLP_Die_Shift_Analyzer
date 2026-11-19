@@ -172,6 +172,7 @@ def assemble(r,source,rows,states):
         if not members or not ids:continue
         q=dict(members[0]);posed=None;flow_steps=0
         high=max(values[i] for i in ids);low=min(values[i] for i in ids)
+        if high-low<=1e-10 and high<=1e-10:continue  # fixed-to-fixed copper has no moving terminal
         guides=[shapely.union_all([part[name] for _,part in contributors if part is not None]) for name in ('near','far')]
         def face(weight,side):
             # Difference/union can leave ulp-different seam coordinates. A
@@ -188,7 +189,7 @@ def assemble(r,source,rows,states):
                 endpoint=plan.route.coords[0 if side==0 else -1]
                 landing=plan.land if side==0 else shapely.union_all(plan.anchors)
                 whole=(s==0 if side==0 else abs(s-plan.length)<=r.tol)
-                if getattr(plan,'pad_modes',(True,True))[side] and (whole or landing.difference(group).area<=r.tol*r.tol):
+                if side==0 and getattr(plan,'pad_modes',(True,False))[0] and (whole or landing.difference(group).area<=r.tol*r.tol):
                     actual=getattr(plan,'terminal_vias',((),()))[side]
                     terminal=min(actual,key=lambda g:g.distance(shapely.Point(endpoint))).centroid if actual else shapely.Point(endpoint)
                     terminals.append(terminal)
@@ -236,7 +237,10 @@ def assemble(r,source,rows,states):
         remaining=[g for g in leaves(far_original,r.tol) if nearcut.is_empty or g.hausdorff_distance(nearcut)>r.tol*8]
         farcut=representative(shapely.GeometryCollection(remaining),nearcut,r.tol,focus=guides[1] if not guides[1].is_empty else None)
         if nearcut.geom_type in ('Point','MultiPoint'):high=1.
-        if farcut.geom_type in ('Point','MultiPoint'):low=0.
+        if farcut.is_empty or nearcut.is_empty:
+            # A disconnected Boolean remnant is not another editable zone.
+            # The source composition retains unassigned material as B.
+            continue
         q.update(regions=dict(A=posed,B=b,C=cposed),nominal_regions=dict(A=group,B=b,C=c),
                  bridge=posed,movable=c,moved=cposed,fixed=b,immovable=b,span=group,
                  moved_cut=transform(nearcut,center,pose*high),cut=nearcut,extra_cut=transform(farcut,center,pose*low),endpoint_weights=(high,low),
@@ -253,11 +257,11 @@ def assemble(r,source,rows,states):
 def consolidate(r,pieces,states):
     groups={};other=[]
     for q in pieces:
-        if q.get('graph_branch'):groups.setdefault((q['layer'],q['index'],q['die']),[]).append(q)
+        if q.get('graph_branch') and q.get('route_plan') is not None:groups.setdefault((q['layer'],q['index'],q['die'],q['route_plan'].source.wkb),[]).append(q)
         else:other.append(q)
     for rows in groups.values():
         source=rows[0]['route_plan'].source
-        cache_key=('branch-assembly-local-intervals-v54',r.rules.identity,r.settings.reconstruction_style,
+        cache_key=('branch-assembly-local-intervals-v55',r.rules.identity,r.settings.reconstruction_style,
                    tuple(r.model.bound.centers[rows[0]['die']]),states[rows[0]['die']].tobytes(),
                    tuple((q['route_identity'],q['interval'],q['boundary_angles'],tuple(q['nominal_regions'][k].wkb for k in 'ABC')) for q in rows))
         cached=r.geometry_pool.get(cache_key)

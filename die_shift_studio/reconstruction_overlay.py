@@ -68,11 +68,11 @@ class ReconstructionOverlay:
             self.draft_frame=self.draft_data=self.draft_key=None;self.stamp=None;return
         if self.draft_frame is frame and self.draft_key==cfg.reconstruction_key():return
         refs=set();data=frame['reconstruction'];geo=w.engine.reconstructor.model.cache.layers
-        for name in ('ignored','following','forced','angles','intervals','added','deleted','regions','boxes','cuts','extra_cuts','second_cuts','dropped_cuts'):
+        for name in ('ignored','following','forced','angles','intervals','added','deleted','regions','boxes','angle_boxes','box_excluded','cuts','extra_cuts','second_cuts','dropped_cuts'):
             field='reconstruction_'+name
             for row in set(getattr(cfg,field))^set(getattr(previous,field)):
-                if name in ('boxes','regions'):
-                    g=shapely.Polygon(row[1]) if name=='boxes' else shapely.box(*row[1]);layer=row[0]
+                if name in ('boxes','angle_boxes','regions'):
+                    g=shapely.Polygon(row[1]) if name!='regions' else shapely.box(*row[1]);layer=row[0]
                     refs.update((layer,i) for i in np.flatnonzero(shapely.intersects(geo[layer]['geometry'],g)))
                 else:refs.add(tuple(row[:2]))
         from .reconstruction_zones import live_serial
@@ -220,6 +220,7 @@ class ReconstructionOverlay:
                 region_groups.setdefault((*ref,'A',status),{})[id(gactive)]=gactive
                 if status=='red':red.append(patch(gactive))
                 if q.get('routing_recovered'):warnings.append(patch(gactive))
+            if q.get('box_invalid'):continue
             for kind,target,dot_list,line_list in (('moved','moved_cut',dots,first),('extra','extra_cut',far_dots,second)):
                 face=self.handles.get((self._key(q),kind),q.get(target))
                 if self.owns_handle(q,kind,edit):
@@ -453,7 +454,7 @@ class CutDrag:
                 projection=plan.drag_projection(route_cursor,state['projection'],state['projection_cursor'])
                 state['projection']=projection;state['projection_cursor']=route_cursor.copy()
                 from .manual_regions import move_side
-                edit=move_side(state['settings'],plan,state['nominal_press'],cursor,piece.get('strict_box')) if any(layer==plan.layer and plan.source.intersects(shapely.Polygon(verts)) for layer,verts in state['settings'].reconstruction_boxes) else None
+                edit=move_side(state['settings'],plan,state['nominal_press'],cursor,piece.get('strict_box')) if piece.get('strict_box') is not None else None
                 if edit:state['updated'],part=edit
                 else:
                     part,clamped=plan.edit_pose(*piece['interval'],which,state['press_interval']+projection-state['press_projection'],frame['rotation_centers'][owner],frame['states'][owner],self.w.view_settings.reconstruction_style,cursor=route_cursor)
@@ -667,11 +668,11 @@ class RegionSelect:
     """Draw an oriented selection and seed cuts on the intersected sources."""
     def __init__(self,window):
         self.w=window;self.mode=None;self.state=None;self.rect=None
-        for name,fn in [('button_press_event',self.press),('motion_notify_event',self.move),('button_release_event',self.release),('scroll_event',self.scroll)]:window.canvas.mpl_connect(name,fn)
+        for name,fn in [('button_press_event',self.press),('motion_notify_event',self.move),('scroll_event',self.scroll)]:window.canvas.mpl_connect(name,fn)
     def set_mode(self,mode):
         if mode is not None and self.mode is None:
             self.previous_cursor=self.w.canvas.cursor()
-            self.w.canvas.setCursor(getattr(Qt,'CursorShape',Qt).SizeAllCursor)
+            self.w.canvas.setCursor(getattr(Qt,'CursorShape',Qt).CrossCursor)
         if mode is None:
             if self.mode is not None:self.w.canvas.setCursor(self.previous_cursor)
             self._drop()
@@ -703,6 +704,9 @@ class RegionSelect:
         if selection is not None:
             selection.press=None
             if selection.rubber is not None:selection.rubber.remove();selection.rubber=None
+        if self.state is not None:
+            self._finish(point)
+            return
         self.state=dict(anchor=point,current=point,angle=0.);self.w.canvas.region_rotating=True
         from matplotlib.patches import Polygon
         self.rect=Polygon(np.repeat(point[None,:],4,axis=0),facecolor='#6ca5ce',edgecolor='#287bb2',alpha=.25,lw=1,linestyle='--',zorder=20)
@@ -714,14 +718,19 @@ class RegionSelect:
         point=self._point(event);delta=-math.radians(2)*event.step;c,t=math.cos(delta),math.sin(delta)
         self.state['anchor']=point+np.array([[c,-t],[t,c]])@(self.state['anchor']-point)
         self.state['current']=point;self.state['angle']+=delta;self.draw()
-    def release(self,event):
-        if self.state is None or event.button!=1:return
-        if self._point(event) is not None:self.state['current']=self._point(event)
+    def _finish(self,point):
+        self.state['current']=point
         vertices=self.vertices();layers=self._layers();self._drop()
         if abs(shapely.Polygon(vertices).area)<1e-12 or not layers:return
-        rows=list(self.w.view_settings.reconstruction_boxes)
-        rows.extend((layer,tuple(tuple(map(float,v)) for v in vertices)) for layer in layers)
-        self.w.view_settings=replace(self.w.view_settings,reconstruction_boxes=tuple(rows))
+        field='reconstruction_angle_boxes' if self.w.view_settings.reconstruction_box_mode=='aligned' else 'reconstruction_boxes'
+        rows=(*getattr(self.w.view_settings,field),*((layer,tuple(tuple(map(float,v)) for v in vertices)) for layer in layers))
+        removed=set(self.w.view_settings.reconstruction_box_excluded)
+        if removed:
+            geo=self.w.geometry_cache.layers
+            polygon=shapely.Polygon(vertices)
+            removed={ref for ref in removed if ref[0] not in layers or ref[1]>=len(geo[ref[0]]['geometry'])
+                     or not geo[ref[0]]['geometry'][ref[1]].intersects(polygon)}
+        self.w.view_settings=replace(self.w.view_settings,**{field:rows},reconstruction_box_excluded=tuple(sorted(removed)))
         self.w.invalidate_reconstruction_edit();self.w.request_preview(quiet=True)
         self.w.statusBar().showMessage('已提交框选动区；必要时在原选框周围延伸至可用边界')
     def _layers(self):

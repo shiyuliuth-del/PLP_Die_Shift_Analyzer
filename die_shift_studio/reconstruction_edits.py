@@ -53,18 +53,28 @@ def project_click(piece,point):
     return a+(b-a)*fraction
 
 
-def change_zone(window,action,piece=None,ref=None,point=None,side=None):
+def change_zone(window,action,piece=None,ref=None,point=None,side=None,refs=()):
     if getattr(window,"remote_locked",False):return
     """Apply one source-bound edit; all poses share the resulting settings key."""
     import uuid
     cfg=window.view_settings
     if piece is not None:ref=(piece['layer'],piece['index'])
-    if ref is None:return
+    if ref is None and action!='delete_all':return
     overlay=getattr(window,'reconstruction_overlay',None)
     displayed=(overlay.data() if overlay else (window.current_frame or {}).get('reconstruction')) or {}
     ignored=set(cfg.reconstruction_ignored);forced=set(cfg.reconstruction_forced)
     if action=='rotate_reset':
         updated=rotate(cfg,piece,side,None)
+    elif action=='delete_all':
+        refs={tuple(ref) for ref in refs}
+        if not refs:return
+        fields=('reconstruction_intervals','reconstruction_angles','reconstruction_deleted','reconstruction_added',
+                'reconstruction_cuts','reconstruction_extra_cuts','reconstruction_second_cuts','reconstruction_dropped_cuts')
+        edits={name:tuple(row for row in getattr(cfg,name) if row[:2] not in refs) for name in fields}
+        updated=replace(cfg,**edits,reconstruction_ignored=tuple(sorted(ignored|refs)),
+                        reconstruction_forced=tuple(sorted(forced-refs)),
+                        reconstruction_following=tuple(sorted(set(cfg.reconstruction_following)-refs)),
+                        reconstruction_box_excluded=tuple(sorted(set(cfg.reconstruction_box_excluded)|refs)))
     elif action=='delete':
         plan=piece.get('route_plan')
         if plan is None:return

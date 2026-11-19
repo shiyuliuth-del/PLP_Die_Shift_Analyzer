@@ -194,12 +194,14 @@ class FixedRules:
     def check(self,replacements,states,progress=lambda *_:None):
         if not self.cfg.drc_checks:progress(100,'尺寸DRC未启用');return []
         geos=self.geometries(replacements);out=[];keys=list(geos)
+        linked={(layer,i):row['motion_owner'] for layer,rows in (replacements or {}).items() for row in rows if 'motion_owner' in row for i in row['indices']}
         layers={key:tuple(sorted({r[0] for r in self.nets[key]})) for key in keys}
         planes=defaultdict(list)
         for n,key in enumerate(keys):
             cancel_check()
             progress(round(70*n/max(1,len(keys))),'检查重构线宽、线距与包围量')
-            for kind,g in self.local(key,geos[key],states):
+            ports=[(ref,linked.get(ref,owner),required) for ref,owner,required in self.vias[key]] if linked else None
+            for kind,g in self.local(key,geos[key],states,ports):
                 out.append(dict(kind=kind,geometry=g,layers=layers[key],net=key))
             planes[key[0]].append(key)
         if enabled(self.cfg,'space'):

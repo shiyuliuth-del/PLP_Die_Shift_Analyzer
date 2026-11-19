@@ -27,10 +27,12 @@ def frame(checker,states,replacements,settings,progress,owners=None,scopes=None)
     m=checker.model;p=checker.p;clearances=effective_clearances(p,settings);dbu=m.data.dbu_um;states=np.asarray(states,float)
     def dependencies(values):return tuple(sorted(v for v in values if v>=0))
     def wanted(deps):return (scopes is None or deps in scopes) and (owners is None or bool(set(deps).intersection(owners)))
-    replacements=replacements or {};overrides={};groups=defaultdict(list);items=[]
+    replacements=replacements or {};overrides={};linked={};groups=defaultdict(list);items=[]
     for layer,rows in replacements.items():
         for row in rows:
-            for i in row['indices']:overrides[layer,i]=row['geometry']
+            for i in row['indices']:
+                overrides[layer,i]=row['geometry']
+                if 'motion_owner' in row:linked[layer,i]=row['motion_owner']
     if not hasattr(checker,'templates'):
         base=defaultdict(list)
         for node in m.nodes:
@@ -48,7 +50,7 @@ def frame(checker,states,replacements,settings,progress,owners=None,scopes=None)
     proved={}
     for ref,g in overrides.items():
         node=m.nodes[m.ids[ref]];normalized=g.normalize()
-        for owner in dict.fromkeys([node['owner'],*sorted(checker.rigid_candidates.get(ref,()))]):
+        for owner in dict.fromkeys([linked.get(ref,node['owner']),*sorted(checker.rigid_candidates.get(ref,()))]):
             expected=m.moved(node['poly'],owner,states)
             # Verify coordinates, not area or bounding boxes. A copper edit
             # that merely resembles a translated source cannot reuse its DRC.
@@ -129,8 +131,8 @@ def frame(checker,states,replacements,settings,progress,owners=None,scopes=None)
         checker.enclosures=catalogue
     catalogue=checker.enclosures
     for (ref,plane,role),receivers in (catalogue.items() if enabled(settings,'enclosure') else ()):
-        cancel_check();node=m.nodes[m.ids[ref]];owner=node['owner']
-        deps=dependencies({owner,*[m.nodes[m.ids[target]]['owner'] for target in receivers]})
+        cancel_check();node=m.nodes[m.ids[ref]];owner=linked.get(ref,node['owner'])
+        deps=dependencies({owner,*[proved.get(target,m.nodes[m.ids[target]]['owner']) for target in receivers]})
         if not wanted(deps):continue
         same=all((target not in overrides or target in proved) and proved.get(target,m.nodes[m.ids[target]]['owner'])==owner for target in receivers)
         enclosure=clearances.moving_annulus_um if role=='运动RDL' else clearances.annulus_um
@@ -152,7 +154,7 @@ def frame(checker,states,replacements,settings,progress,owners=None,scopes=None)
     from .width_keepout import violations as keepout_violations
     for row in [*(edge_violations(m,states,p,settings,replacements,owners) if enabled(settings,'board') else ()),*(keepout_violations(m,states,replacements) if enabled(settings,'keepout') else ())]:
         refs=[(row['layer'],i) for i in row.get('indices',(row.get('index',0),))]
-        deps=dependencies({m.nodes[m.ids[ref]]['owner'] for ref in refs if ref in m.ids})
+        deps=dependencies({linked.get(ref,m.nodes[m.ids[ref]]['owner']) for ref in refs if ref in m.ids})
         if wanted(deps):items.append(dict(row,dependencies=deps,owner=deps[0] if len(deps)==1 else -1))
     # Mechanical clearances use the same signed dimensional tolerance and
     # report local witnesses rather than a whole DIE-sized error rectangle.

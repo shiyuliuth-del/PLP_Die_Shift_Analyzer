@@ -217,8 +217,8 @@ def read_gds(path, top_name=None, progress: Callable=lambda *_: None):
     if not path.is_file():
         raise ValueError("GDS文件不存在："+str(path))
     progress(5,"读取GDS/OAS并换算为μm")
-    digest=hashlib.sha256(path.read_bytes()).hexdigest()
-    with path.open('rb') as stream:magic=stream.read(13)
+    with path.open('rb') as stream:
+        magic=stream.read(13)
     if magic.startswith(b'%SEMI-OASIS'):
         lib=gdstk.read_oas(path,unit=1e-6);precision=lib.precision
     else:
@@ -234,6 +234,10 @@ def read_gds(path, top_name=None, progress: Callable=lambda *_: None):
     if name not in names:
         raise ValueError("选定Cell不是该GDS的顶层："+name)
     cell=next(c for c in tops if c.name==name)
+    hasher=hashlib.sha256()
+    with path.open('rb') as stream:
+        for chunk in iter(lambda:stream.read(1024*1024),b''):hasher.update(chunk)
+    digest=hasher.hexdigest()
     _expanded_count(cell)
     progress(30,"展开层次、阵列、旋转和镜像")
     from .gds_shapes import import_shapes
@@ -248,11 +252,12 @@ def read_gds(path, top_name=None, progress: Callable=lambda *_: None):
     from .gds_merge import merge_import
     data=merge_import(data)
     from .recognition import recognize,TAGS
-    tags={};ambiguous=set()
+    from collections import defaultdict
+    tags={};ambiguous=set();layer_keys=defaultdict(list)
+    for key in layers:layer_keys[int(key.split('/')[0])].append(key)
     for label in cell.get_labels(apply_repetitions=True,depth=None):
         role=TAGS.get(label.text.strip().upper()) or TAGS.get(label.text.strip())
-        keys=[key for key in layers if key.split('/')[0]==str(label.layer)]
-        if role and len(keys)==1:
+        if role and len(keys:=layer_keys[label.layer])==1:
             key=keys[0]
             if key in tags and tags[key]!=role:ambiguous.add(key)
             tags[key]=role

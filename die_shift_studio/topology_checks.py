@@ -26,7 +26,7 @@ def inspect_many(r,objects,original,ports,manual_masks,manual_before,terminal_so
     start=0
     for i,ref in enumerate(refs):
         end=start+len(ports[ref])
-        nominal=tuple(p.wkb for _,p in terminal_sources[ref]) if original[ref].geom_type!='Polygon' else ()
+        nominal=tuple(p.wkb for _,_,p in terminal_sources[ref]) if original[ref].geom_type!='Polygon' else ()
         key=('electrical-check-v54',current[i],originals[i],tuple(terminals[start:end]),nominal,
              keepout,r.tol,manual_masks[ref].wkb if ref in manual_masks else None,
              manual_before[ref].wkb if ref in manual_before else None)

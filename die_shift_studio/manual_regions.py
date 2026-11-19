@@ -59,7 +59,11 @@ def partition(plan,polygon):
     near=seam(c,a) if not c.is_empty else shapely.LineString()
     far=seam(d,b) if not d.is_empty else shapely.LineString()
     if near.is_empty:near=shapely.Point(plan.route.coords[0]);a=0.
-    if far.is_empty:far=shapely.Point(plan.route.coords[-1]);b=plan.length
+    if far.is_empty:
+        # A trapped box remains a visible diagnostic, with no fixed-side dot.
+        b=plan.fixed_side(b)
+        far=plan.section(b) or shapely.LineString()
+        ambiguous=True
     angles=[]
     for edge,s in ((near,a),(far,b)):
         if edge.geom_type!='LineString':angles.append(0.);continue
@@ -122,14 +126,18 @@ def usable_partition(plan, polygon):
             if part[name].geom_type == 'Point' and not any(part['A'].intersects(g) for g in ports):
                 return False
         return not part['A'].is_empty
-    if good(initial) or initial is None:
+    if good(initial) or not plan.source.intersects(polygon):
         return initial
 
     xy = shapely.get_coordinates(polygon)
     s = plan.route.project(polygon.representative_point())
-    direction = np.asarray(plan.tangent(s))
-    if not np.linalg.norm(direction):
-        return initial
+    tangent = np.asarray(plan.tangent(s))
+    rect = shapely.get_coordinates(polygon.minimum_rotated_rectangle)
+    edges = np.diff(rect,axis=0)
+    lengths = np.linalg.norm(edges,axis=1)
+    if not len(lengths) or min(lengths)<=0:return initial
+    directions=edges/lengths[:,None]
+    direction=directions[int(np.argmax(abs(directions@tangent)))]
     basis = np.column_stack((direction, [-direction[1], direction[0]]))
     center = np.asarray(plan.route.interpolate(s).coords[0])
     local = (xy-center)@basis
@@ -147,3 +155,23 @@ def usable_partition(plan, polygon):
         if good(result):
             return result
     return initial
+
+
+
+def aligned_partition(plan,polygon):
+    """Use the selected copper to find the interval, leaving blade angles dynamic."""
+    selected=plan.route.intersection(polygon)
+    if selected.is_empty:
+        selected=plan.source.intersection(polygon)
+    xy=shapely.get_coordinates(selected)
+    if not len(xy):return None
+    marks=shapely.line_locate_point(plan.route,shapely.points(xy))
+    lo,hi=float(marks.min()),float(marks.max())
+    if hi-lo<plan.tolerance*2:lo-=plan.tolerance*8;hi+=plan.tolerance*8
+    for expansion in (0.,plan.guard,plan.guard*4):
+        a=plan.snap(max(0.,lo-expansion),0,plan.length,allow_pad=True)
+        b=plan.snap(min(plan.length,hi+expansion),1,a,allow_pad=False)
+        if b>a:
+            result=plan.partition(a,b)
+            if result is not None:return result
+    return None

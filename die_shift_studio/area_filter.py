@@ -20,7 +20,7 @@ def remap_project(project,mapping):
         return rows
     for name in ('ignored_width_lines','ignored_reconstruction'):
         if p.get(name):p[name]['refs']=[(k,ref(k,i)) for k,i in p[name]['refs'] if ref(k,i) is not None]
-    for name in ('reconstruction_ignored','reconstruction_following','reconstruction_forced','reconstruction_added',
+    for name in ('reconstruction_ignored','reconstruction_following','reconstruction_box_excluded','reconstruction_fixed_via_follows','reconstruction_forced','reconstruction_added',
                  'reconstruction_angles','reconstruction_deleted','reconstruction_intervals',
                  'reconstruction_cuts','reconstruction_extra_cuts','reconstruction_second_cuts','reconstruction_dropped_cuts'):
         rows=[]

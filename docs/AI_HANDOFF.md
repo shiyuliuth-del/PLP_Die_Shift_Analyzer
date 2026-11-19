@@ -1,3 +1,13 @@
+# V55 导入、分叉与固定孔联动
+
+gds_merge.merge_import 分层处理、以有界查询块识别同层实体接触并维护稳定源索引。geometry_errors.sanitize_data 批量校验规则多边形，逐形状保留孔洞修复和错误见证。stack.Connections 复用已编译的图层几何。大批量实测进程上限来自 CPU、可用内存、工程上限与预计任务数量。
+
+branch_regions.assemble 排除固定侧之间的等势区域和没有相对控制截面的残余铜。parallel_zones.coordinate 给相邻等宽长直段协调切口，只更新当前预演中的路线副本。固定侧禁用圆点，旧端点通过 RoutePlan.fixed_side 转成实际截面。
+
+manual_regions 分别持久化自由框及符合角度框。右键删除全部动区移除该源的手动区间、角度和添加记录，并记录对该源的框覆盖例外，避免误删其他图形的框。ignored_motion.linked_fixed_vias 按连接追踪，联动位姿单独加入最终铜替换列表。topology_routing 在补偿前已按最终过孔位置校核端孔。
+
+extreme_validation.catalogue_status 从未分页的计算范围及事件目录折叠零位行状态。开发回归见 tests/test_v55.py，GD55_1119 使用用户原始工程，交接说明见[V55使用说明](V55_使用说明.md)。
+
 # V54 外轮廓与重构分叉
 
 `geometry_rules.corner_angles` 只测已合并铜形的外环，`current_drc` 按物理网络共享角度见证。候选布局的边界横截面仍用于切口样式评分，二者输入不同。

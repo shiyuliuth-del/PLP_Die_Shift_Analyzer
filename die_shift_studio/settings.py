@@ -86,6 +86,11 @@ class ViewSettings:
     contact_box_budget:int=2048
     reconstruction_regions:tuple=()
     reconstruction_boxes:tuple=()
+    reconstruction_angle_boxes:tuple=()
+    reconstruction_box_mode:str="free"
+    reconstruction_fixed_via_mode:str="off"
+    reconstruction_fixed_via_follows:tuple=()
+    reconstruction_box_excluded:tuple=()
 
     # 重构预演初始参数
     # Manual cut planes, one per chain, written as
@@ -184,7 +189,9 @@ class ViewSettings:
                     intervals.append((str(layer),int(index),int(owner),refs,str(fingerprint),a,b))
             except (TypeError,ValueError):continue
         values['reconstruction_intervals']=tuple(intervals)
-        for name in ('reconstruction_ignored','reconstruction_following'):
+        if 'reconstruction_fixed_via_mode' not in values and values.get('reconstruction_link_fixed_vias') is True:
+            values['reconstruction_fixed_via_mode']='global'
+        for name in ('reconstruction_ignored','reconstruction_following','reconstruction_fixed_via_follows','reconstruction_box_excluded'):
             refs=values.get(name,())
             if not isinstance(refs,(list,tuple)) or any(not isinstance(r,(list,tuple)) or len(r)!=2 or not isinstance(r[0],str) or type(r[1]) is not int or r[1]<0 for r in refs):raise ValueError('忽略重构图形编号无效')
             values[name]=tuple(sorted(set(tuple(r) for r in refs)))
@@ -196,7 +203,8 @@ class ViewSettings:
             if key in values:
                 values[key]=cls._normalize_cuts(values[key])
         from .manual_regions import normalize as normalize_boxes
-        values['reconstruction_boxes']=normalize_boxes(values.get('reconstruction_boxes',()))
+        for name in ('reconstruction_boxes','reconstruction_angle_boxes'):
+            values[name]=normalize_boxes(values.get(name,()))
         values['reconstruction_regions']=cls._normalize_regions(values.get('reconstruction_regions',()))
         values['reconstruction_dropped_cuts']=cls._normalize_dropped(values.get('reconstruction_dropped_cuts',()))
         values['width_display']=normalize_display(values.get('width_display',{}))
@@ -211,7 +219,7 @@ class ViewSettings:
                  'probability_interpolation':('nearest','bilinear','bicubic'),
                  'probability_cmap':('blue','teal','amber','rose','YlGnBu','BuPu','viridis','cividis','plasma','magma','turbo'),
                  'animation_strategy':('prepared','stream'),'evaluation_scope':('all','focus','risk'),'reconstruction_die_mode':('auto','follow','stationary'),
-                 'space_scope':('moving','package')}
+                 'space_scope':('moving','package'),'reconstruction_box_mode':('free','aligned'),'reconstruction_fixed_via_mode':('off','global','individual')}
         for key,allowed in choices.items():
             if getattr(q,key) not in allowed:raise ValueError('无效设置：'+key)
         limits={'width_yield_decimals':(0,12),'width_label_decimals':(0,6),'width_label_font_pt':(6,24),'drc_tolerance_um':(-10000,10000),'probability_gamma':(.1,1.),'contact_marker_size':(.1,10000),'unadapted_marker_size':(.1,10000),'drc_min_angle_deg':(1,179),'sample_exponent':(8,18),'random_seed':(0,2147483647),'quadrature_order':(5,81),
@@ -252,10 +260,10 @@ class ViewSettings:
 
     def reconstruction_key(self):
         """Everything the reconstruction result depends on besides the pose."""
-        return (True,'nominal-route-continuity-v54',self.reconstruction_die_mode,self.drc_checks,self.evaluation_scope,self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_pad_trigger_um,self.reconstruction_ignored,self.reconstruction_following,self.drc_tolerance_um,self.drc_min_angle_deg,
+        return (True,'nominal-route-continuity-v55',self.reconstruction_die_mode,self.reconstruction_fixed_via_mode,self.reconstruction_fixed_via_follows,self.reconstruction_box_excluded,self.drc_checks,self.evaluation_scope,self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_pad_trigger_um,self.reconstruction_ignored,self.reconstruction_following,self.drc_tolerance_um,self.drc_min_angle_deg,
                 self.reconstruction_corner_guard_um,tuple(self.reconstruction_intervals),
                 self.reconstruction_forced,self.reconstruction_angles,self.reconstruction_deleted,self.reconstruction_added,
-                tuple(self.reconstruction_regions),tuple(self.reconstruction_boxes),tuple(self.reconstruction_cuts),
+                tuple(self.reconstruction_regions),tuple(self.reconstruction_boxes),tuple(self.reconstruction_angle_boxes),tuple(self.reconstruction_cuts),
                 tuple(self.reconstruction_extra_cuts),tuple(self.reconstruction_second_cuts),
                 tuple(self.reconstruction_dropped_cuts))
     def deformation_key(self):

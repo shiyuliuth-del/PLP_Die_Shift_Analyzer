@@ -121,14 +121,20 @@ def live_serial(original,settings,old,ref,draft=False):
         local=rebuilt.frame(old['states'],targets={ref},diagnostics=False,quick=True,_raw=True)
         data=old['reconstruction']
         rows=[q for q in data['pieces'] if (q['layer'],q['index'])!=ref]+local['pieces']
-        changed={k:[v for v in values if not (k==ref[0] and ref[1] in v['indices'])] for k,values in data['replacements'].items()}
+        changed={k:[v for v in values if not (k==ref[0] and ref[1] in v['indices']) and (draft or 'motion_owner' not in v)] for k,values in data['replacements'].items()}
+        changed={k:values for k,values in changed.items() if values}
         for k,values in local['replacements'].items():
             changed.setdefault(k,[]).extend(values)
         if draft:
             repaired,blocked=(),()
         else:
             from .topology_routing import resolve
+            if settings.reconstruction_fixed_via_mode!='off':
+                # A local edit can change the motion of a shared fixed via.
+                rebuilt._plans=[q for q in original._plans if (q['layer'],q['index'])!=ref]+list(rebuilt._plans or ())
             changed,rows,repaired,blocked=resolve(rebuilt,changed,rows,old['states'])
+            from .ignored_motion import add_linked_geometry
+            changed=add_linked_geometry(rebuilt,changed,old['states'])
     finally:
         rebuilt.close()
     return dict(old,_reconstruction_changed_refs=tuple(sorted({ref,*repaired})),reconstruction=dict(data,configuration=settings.reconstruction_key(),pieces=rows,replacements=changed,violations=[],constraints_complete=False,repair_refs=repaired,hard_failures=blocked,electrically_valid=not bool(blocked)))

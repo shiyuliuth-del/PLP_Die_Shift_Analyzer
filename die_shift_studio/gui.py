@@ -202,7 +202,7 @@ class MainWindow(W.QMainWindow):
         self.space_data=None;self.space_artists=[];self.space_stamp=None;self.space_colorbar=None;self._resizing=False
         self._issue_table_stamp=None;self.dirty=False;self.manual_states=None;self.evaluation_motions={};self.probability_data=None;self.probability_artists=[];self.probability_stamp=None;self.legend=None;self.zone_artists=[];self.invalid_artists=[]
         from .dxf_settings import DxfSettings
-        self.dxf_settings=DxfSettings();self.ignored_width_lines=frozenset();self.dxf_directory='';self.view_settings=ViewSettings();self.setting_fields={};self.layer_styles={};self.histogram_dirty=False
+        self.dxf_settings=DxfSettings();self.ignored_width_lines=frozenset();self.dxf_directory='';self.view_settings=ViewSettings(reconstruction_auto=False);self.setting_fields={};self.layer_styles={};self.histogram_dirty=False
         self.coverage_timer=QtCore.QTimer(self);self.coverage_timer.setSingleShot(True);self.coverage_timer.setInterval(180);self.coverage_timer.timeout.connect(self.refresh_coverage)
         self._coverage_pending=False;self._evaluation_requested=False;self._motion_intent=None;self.motion_worker=None;self.motion_pending=None;self.motion_generation=0;self.replacement_artists={};self._plotting=False;self.viewport_index=None;self._viewport_stamp=None
         self.issue_navigation=QtCore.QTimer(self);self.issue_navigation.setSingleShot(True);self.issue_navigation.setInterval(0);self.issue_navigation.timeout.connect(lambda:self.locate_issue(self.issue_table.currentRow(),0))
@@ -563,11 +563,15 @@ class MainWindow(W.QMainWindow):
         row=W.QWidget();rv=W.QHBoxLayout(row);rv.setContentsMargins(0,0,0,0)
         self.region_move=W.QPushButton('框选动区');self.region_move.setCheckable(True)
         self.region_move.toggled.connect(lambda on:self.region_mode('move',on))
-        self.region_move.setToolTip('在名义图形上框选动区；必要时延伸至源铜边界。按住左键滚轮旋转，Esc退出。')
+        self.region_move.setToolTip('在名义图形上单击起点和终点；滚轮旋转，Esc取消。必要时延伸至源铜边界。')
         clear_cuts=W.QPushButton('清除全部手动切口');clear_cuts.clicked.connect(self.clear_manual_cuts)
         delete_cut=W.QPushButton('删除切口');delete_cut.clicked.connect(self.delete_selected_cut)
         for button in (self.region_move,clear_cuts,delete_cut):rv.addWidget(button)
         recon.addRow(row)
+        choices['reconstruction_box_mode']=[('自由','free'),('符合边界角度','aligned')]
+        choice(recon,'reconstruction_box_mode','框选边界')
+        choices['reconstruction_fixed_via_mode']=[('关闭','off'),('全局模式','global'),('分别处理','individual')]
+        choice(recon,'reconstruction_fixed_via_mode','整块随动联动固定过孔')
 
         choices['reconstruction_style']=[('直线','linear'),('一阶','c1'),('二阶','c2'),('圆弧','arc')]
         choice(recon,'reconstruction_style','连接样式')
@@ -578,7 +582,7 @@ class MainWindow(W.QMainWindow):
         self.setting_fields['reconstruction_grid_nodes'].setToolTip('完整有限网格，按区间概率质量积分；增大节点可检查连续空间误差。不是等概率极端计数。')
         live=W.QCheckBox('实时反馈动区变化');self.setting_fields['reconstruction_live']=live;recon.addRow(live);live.toggled.connect(self.settings_changed)
         spin(recon,'reconstruction_corner_guard_um','拐角吸附预留 / μm',0,1000,2)
-        recon.addRow(label('动区沿原图追溯路径定义，所有姿态共用。两端蓝色边界分别拖动；圆点表示对应孔盘纳入动区。'))
+        recon.addRow(label('动区沿原图追溯路径定义，所有姿态共用。两端蓝色边界分别拖动；圆点仅用于运动过孔侧。'))
         from .drc_policy import build as build_drc_policy
         build_drc_policy(self,page)
         drawing=group('接触标记');
@@ -1015,16 +1019,23 @@ class MainWindow(W.QMainWindow):
     def load_gds(self,path,top=None,project=None,project_path=None):
         self.exit_region_mode();current_area=self.fields['minimum_area_um2'].value();current_edge=self.fields['minimum_edge_um'].value()
         def read_and_prepare(progress):
-            data=read_gds(path,top,progress)
+            data=read_gds(path,top,lambda n,t:progress(round(n*.7),t))
             if isinstance(data,dict):return data
-            settings=project if project and (not project.get('sha256') or project['sha256']==data.sha256) else {'schema_version':5,'parameters':{'minimum_area_um2':current_area,'minimum_edge_um':current_edge}}
+            settings=project if project and (not project.get('sha256') or project['sha256']==data.sha256) else {'schema_version':5,'parameters':{'minimum_area_um2':current_area,'minimum_edge_um':current_edge},'settings':{'reconstruction_auto':False}}
             from .gds_merge import restore_project_geometry
             data,settings=restore_project_geometry(data,settings);data.restored_project=settings
             roles=settings.get('roles',data.auto_roles)
-            progress(35,'构建几何索引与图层缓存');data.geometry_cache=GeometryCache(data)
+            progress(73,'构建几何索引与图层缓存');data.geometry_cache=GeometryCache(data)
             data.prepared_roles=roles;data.prepared_auto=automatic_parameters(data,roles)
-            try:data.prepared_case=build_case(data,roles,layer_order=settings.get('layer_order'))
+            progress(91,'构建名义金属连通与芯片归属')
+            try:
+                from .stack import Connections
+                if '封装边框' in roles.values() and '芯片边框' in roles.values():
+                    connections=Connections(data,roles,settings.get('layer_order'),data.geometry_cache.geometries)
+                    data.prepared_case=build_case(data,roles,connections=connections)
+                else:data.prepared_case=None
             except ValueError:data.prepared_case=None
+            progress(100,'导入完成')
             return data
         def accepted(data):
             settings=project
@@ -1054,7 +1065,7 @@ class MainWindow(W.QMainWindow):
             data=edited_snapshot(data,project.get('node_edits',[]))
         for message in data.import_warnings:self.log_bus.emit(message,'WARNING')
         for message in getattr(data,'merge_notes',()):self.log_bus.emit(message)
-        cache_settings=ViewSettings.from_dict(project.get('settings'))
+        cache_settings=ViewSettings.from_dict(project.get('settings')) if project else ViewSettings(reconstruction_auto=False)
         cache_id=logical_fingerprint((str(Path(project_path or data.path).resolve()),data.sha256,data.top_name))
         self._project_cache_root=Path(project_path).resolve().parent/'Cache'/'runtime' if project_path else None
         self.switch_project_cache(cache_id,cache_settings.cache_max_entries)
@@ -1077,7 +1088,7 @@ class MainWindow(W.QMainWindow):
             self._initial_extreme_page=view['page']-1
             for title,header in self.setting_sections.items():header.setChecked(title in project.get('expanded_settings',[]))
             for title,header in self.process_sections.items():header.setChecked(title in project.get('expanded_process',[]))
-            self.view_settings=replace(ViewSettings.from_dict(project.get('settings')),evaluation_scope=self.grid_mode.currentData(),reconstruction_ignored=tuple(sorted(restored_width_ignores(project,data,'ignored_reconstruction'))));self.load_view_settings();self.layer_styles=project.get('layer_styles',{})
+            self.view_settings=replace(cache_settings,evaluation_scope=self.grid_mode.currentData(),reconstruction_ignored=tuple(sorted(restored_width_ignores(project,data,'ignored_reconstruction'))));self.load_view_settings();self.layer_styles=project.get('layer_styles',{})
             for name,value in project_overlays(project).items():
                 toggle=self.overlay_widget(name)
                 toggle.blockSignals(True)
@@ -1342,7 +1353,7 @@ class MainWindow(W.QMainWindow):
             self.rulers.exit()
             if self.shown_states is not None and np.any(self.shown_states):self.manual_preview.restore()
             self.region_select.set_mode(mode)
-            self.statusBar().showMessage('拖动方框设置手动区域；按 Escape 退出')
+            self.statusBar().showMessage('单击确定框选起点和终点；滚轮旋转，按 Esc 取消')
         else:self.region_select.set_mode(None)
 
     def exit_region_mode(self):
@@ -1402,12 +1413,12 @@ class MainWindow(W.QMainWindow):
     def clear_manual_cuts(self,*_):
         extras=getattr(self.view_settings,'reconstruction_extra_cuts',())
         dropped=getattr(self.view_settings,'reconstruction_dropped_cuts',())
-        if not any((self.view_settings.reconstruction_cuts,extras,dropped,self.view_settings.reconstruction_second_cuts,self.view_settings.reconstruction_intervals,self.view_settings.reconstruction_angles,self.view_settings.reconstruction_deleted,self.view_settings.reconstruction_added,self.view_settings.reconstruction_boxes)):return
+        if not any((self.view_settings.reconstruction_cuts,extras,dropped,self.view_settings.reconstruction_second_cuts,self.view_settings.reconstruction_intervals,self.view_settings.reconstruction_angles,self.view_settings.reconstruction_deleted,self.view_settings.reconstruction_added,self.view_settings.reconstruction_boxes,self.view_settings.reconstruction_angle_boxes)):return
         from dataclasses import replace
         # Also restores the automatic cuts that were deleted, so one button undoes
         # every hand edit of the cut lines.
         self.view_settings=replace(self.view_settings,reconstruction_cuts=(),
-                                   reconstruction_extra_cuts=(),reconstruction_second_cuts=(),reconstruction_dropped_cuts=(),reconstruction_intervals=(),reconstruction_angles=(),reconstruction_deleted=(),reconstruction_added=(),reconstruction_forced=(),reconstruction_boxes=())
+                                   reconstruction_extra_cuts=(),reconstruction_second_cuts=(),reconstruction_dropped_cuts=(),reconstruction_intervals=(),reconstruction_angles=(),reconstruction_deleted=(),reconstruction_added=(),reconstruction_forced=(),reconstruction_boxes=(),reconstruction_angle_boxes=(),reconstruction_box_excluded=())
         self.invalidate_reconstruction_edit()
         self.statusBar().showMessage('已清除全部手动切口，并恢复被删除的自动切口')
         self.request_preview()
@@ -2385,7 +2396,13 @@ class MainWindow(W.QMainWindow):
         rows=[(0,None),*[(i,item) for i,(_,item) in enumerate(self.page_items,1)]]
         current_key=(frame['states'].tobytes() if frame is not None else None)
         current=frame_status(frame) if current_key is not None else {}
-        version=(id(self.reconstruction_yield.evidence),id(self.result),self.dirty,current_key,tuple(current.items()),self.reconstruction_toggle.isChecked(),self.preview_page)
+        catalog=self.scoped_catalog() or self.extremes
+        scope_key=(id(catalog),id(factors),id(self.reconstruction_yield.evidence),self.reconstruction_toggle.isChecked(),self.dirty)
+        if getattr(self,'_zero_scope_key',None)!=scope_key:
+            from .extreme_validation import catalogue_status
+            self._zero_scope_status=catalogue_status(self.extremes,catalog,factors,self.reconstruction_yield.evidence if not self.dirty else None,reconstruct=self.reconstruction_toggle.isChecked())
+            self._zero_scope_key=scope_key
+        version=(scope_key,id(self.result),self.dirty,current_key,tuple(current.items()),self.reconstruction_toggle.isChecked(),self.preview_page)
         if getattr(self,'_paint_pass',None)==version:return
         self._paint_pass=version
         for row,item in rows:
@@ -2408,9 +2425,10 @@ class MainWindow(W.QMainWindow):
                 if item and key==current_key and frame and frame.get('reconstruction',{}).get('constraints_complete'):
                     from .reconstruction_events import scene_failure
                     status=dict(checked=True,safe=not (frame.get('drc') or frame['reconstruction'].get('hard_failures')),drc=len(frame.get('drc',())),connection_failures=len(frame['reconstruction'].get('hard_failures',())),reason='按当前实际铜DRC和连接检查')
+            if item is None:status=self._zero_scope_status
             safe=status.get('safe') is True
             if status.get('checked') and 'drc' in status:safe=status['drc']==0 and not status.get('connection_failures')
-            check=('通过已检查规则' if safe else '存在已检查的问题' if status.get('safe') is False else '未作完整校验') if item else '名义位置 / 全局判定'
+            check=('通过已检查规则' if safe else '存在已检查的问题' if status.get('safe') is False else '未作完整校验') if item else '名义位置 / 当前组合最严重结果'
             if not item:
                 zero=(self.result or {}).get('nominal_discrete_check',{}) if not self.dirty else {}
                 if zero.get('checked'):check+=' · 零位几何'+('通过' if zero['safe'] else '存在问题')
@@ -2419,7 +2437,7 @@ class MainWindow(W.QMainWindow):
             signature=(check,safe,failed,known)
             if self._extreme_paint.get(row)==signature:continue
             self._extreme_paint[row]=signature
-            brush=QtGui.QBrush(QtGui.QColor('#fbe7e7' if failed else '#eaf5ed' if safe else '#fff3d9')) if known or failed else QtGui.QBrush()
+            brush=QtGui.QBrush(QtGui.QColor('#fbe7e7' if failed else '#eaf5ed' if safe else '#fff3d9')) if known or failed else QtGui.QBrush(QtGui.QColor('#f2f3f5')) if not item and self.reconstruction_toggle.isChecked() else QtGui.QBrush()
             detail=f'{check}；浅绿：已检查无问题；浅黄：尺寸DRC违规但连通；浅红：重构连接失败。未检查行不着色。'
             for col in range(self.extreme_table.columnCount()):
                 cell=self.extreme_table.item(row,col)
@@ -2545,6 +2563,12 @@ class MainWindow(W.QMainWindow):
     def show_shape_menu(self,event,point):
         from .shape_menu import show_shape_menu
         show_shape_menu(self,event,point)
+
+    def change_fixed_via_following(self,refs,following):
+        if self.remote_locked or self.view_settings.reconstruction_fixed_via_mode!='individual':return
+        old=set(self.view_settings.reconstruction_fixed_via_follows);refs=set(refs)
+        self.view_settings=replace(self.view_settings,reconstruction_fixed_via_follows=tuple(sorted(old|refs if following else old-refs)))
+        self.invalidate_reconstruction_edit();self.request_preview(quiet=True)
 
     def change_reconstruction_mode(self,refs,following):
         if getattr(self,'remote_locked',False):return

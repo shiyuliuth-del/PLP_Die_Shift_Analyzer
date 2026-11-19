@@ -93,10 +93,9 @@ try:
   app.processEvents();time.sleep(.02);values.append(w.reconstruction_overlay.hover.get_markersize())
  assert .4<max(values)-min(values)<=.65
  qboth=drag(qpoint,1,qpoint['route_plan'].length)
- assert qboth['extra_cut'].geom_type=='Point'
- point=np.array(w.reconstruction_overlay.handle_geometries([qboth])[w.reconstruction_overlay._key(qboth),'extra'].coords[0]);event('motion_notify_event',point)
- app.processEvents();assert w.reconstruction_overlay.pulse_timer.isActive()
- assert w.reconstruction_overlay.hover.get_marker()=='o'
+ assert qboth['extra_cut'].geom_type=='LineString'
+ assert qboth['moved_cut'].geom_type=='Point'
+ assert qboth['interval'][1]<qboth['route_plan'].fixed_start
  qpoint=drag(qboth,1,qboth['route_plan'].fixed_start-80)
  assert qpoint['extra_cut'].geom_type=='LineString'
  q2=drag(qpoint,0,100)

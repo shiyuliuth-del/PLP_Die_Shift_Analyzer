@@ -49,10 +49,31 @@ def sanitize_data(data):
     if getattr(data,'_sanitized_token',None)==token:return data
     if not hasattr(data,'ignored_geometry'):data.ignored_geometry=[]
     if not hasattr(data,'repaired_geometry'):data.repaired_geometry=[]
-    for key,arrays in list(data.layers.items()):
-        valid=[];metadata=[]
+    from .resources import parallel_iter,resource_profile,cancel_check
+    def validate(job):
+        key,arrays,first=job
+        valid=[];metadata=[];repairs=[];ignored=[]
         source=getattr(data,'shape_info',{}).get(key,[])
-        for index,array in enumerate(arrays):
+        cancel_check()
+        regular={}
+        for offset,array in enumerate(arrays):
+            index=first+offset
+            meta=source[index] if index<len(source) else None
+            if isinstance(array,np.ndarray) and array.ndim==2 and array.shape[1]==2 and len(array)>=3 and not (meta and meta.get('winding')):
+                regular.setdefault(len(array),[]).append(offset)
+        polygons={}
+        for indices in regular.values():
+            coords=np.asarray([arrays[i] for i in indices],dtype=float)
+            finite=np.isfinite(coords).all(axis=(1,2))&(np.abs(coords).max(axis=(1,2))<=1e9)
+            valid_indices=np.asarray(indices)[finite]
+            batch=shapely.polygons(coords[finite])
+            valid_batch=shapely.is_valid(batch)&(shapely.area(batch)>0)
+            polygons.update(zip(valid_indices,valid_batch))
+        for offset,array in enumerate(arrays):
+            index=first+offset;meta=source[index] if index<len(source) else None
+            if polygons.get(offset,False):
+                valid.append(array);metadata.append(meta)
+                continue
             points=np.asarray(array,dtype=float);reason=''
             try:
                 if points.ndim!=2 or points.shape[1]!=2 or len(points)<3:raise ValueError('无法构成二维多边形')
@@ -68,14 +89,22 @@ def sanitize_data(data):
                 reason=shapely.is_valid_reason(poly)
                 repaired,info=repair_gds_polygon(points,data.dbu_um)
                 valid.extend(repaired);metadata.extend([None]*len(repaired))
-                data.repaired_geometry.append(dict(layer=key,index=index+1,reason=reason,bounds=list(poly.bounds),**info))
+                repairs.append(dict(layer=key,index=index+1,reason=reason,bounds=list(poly.bounds),**info))
                 continue
             except (ValueError,RuntimeError,shapely.errors.GEOSException) as error:reason+='；'+str(error)
             finite=points[np.isfinite(points).all(axis=1)] if points.ndim==2 and points.shape[1]==2 else np.empty((0,2))
             if len(finite):bounds=[*finite.min(axis=0),*finite.max(axis=0)]
             else:bounds=[0.,0.,0.,0.];reason+='；无可定位有限坐标，原点提示框'
-            data.ignored_geometry.append(dict(layer=key,index=index+1,reason=reason,bounds=list(map(float,bounds)),points=points.copy()))
-        data.layers[key]=valid
-        if source:data.shape_info[key]=metadata
+            ignored.append(dict(layer=key,index=index+1,reason=reason,bounds=list(map(float,bounds)),points=points.copy()))
+        return key,valid,metadata,repairs,ignored
+    jobs=[(key,arrays[first:first+1024],first) for key,arrays in data.layers.items() for first in range(0,len(arrays),1024)]
+    profile=resource_profile()
+    if len(jobs)<=2:profile=dict(profile,workers=1)
+    layers={key:[] for key in data.layers};shapes={key:[] for key in data.layers if data.shape_info.get(key)}
+    for key,arrays,metadata,repairs,ignored in parallel_iter(validate,jobs,profile):
+        layers[key].extend(arrays)
+        if key in shapes:shapes[key].extend(metadata)
+        data.ignored_geometry.extend(ignored);data.repaired_geometry.extend(repairs)
+    data.layers.update(layers);data.shape_info.update(shapes)
     data._sanitized_token=tuple((k,id(v),len(v)) for k,v in data.layers.items())
     return data
