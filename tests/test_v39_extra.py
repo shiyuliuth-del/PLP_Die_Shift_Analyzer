@@ -75,16 +75,18 @@ class V39ExtraTests(unittest.TestCase):
             self.assertEqual(a.geometry_id,b.geometry_id)
             self.assertTrue(all(x.equals(y) for x,y in zip(GeometryCache(a).layers['5/0']['geometry'],GeometryCache(b).layers['5/0']['geometry'])))
 
-    def test_both_endpoint_whole_pad_modes_keep_both_landings(self):
+    def test_legacy_fixed_endpoint_becomes_line_and_keeps_both_landings(self):
         e,_,_=fixture()
         try:
             q=e.reconstructor.frame(np.zeros((1,3)))['pieces'][0];plan=q['route_plan']
             part=plan.partition(0,plan.length)
-            self.assertEqual(part['near'].geom_type,'Point');self.assertEqual(part['far'].geom_type,'Point')
+            self.assertEqual(part['near'].geom_type,'Point');self.assertEqual(part['far'].geom_type,'LineString')
             for style in ('linear','c1','c2','arc'):
                 g,error=warp(part,plan,np.zeros(2),np.array([20.,10.,.01]),style)
-                self.assertIsNone(error,(style,error));self.assertTrue(g['B'].is_empty and g['C'].is_empty)
-                self.assertLess(Point(600,0).buffer(29).difference(g['A']).area,.001)
+                self.assertIsNone(error,(style,error));self.assertFalse(g['B'].is_empty);self.assertTrue(g['C'].is_empty)
+                final=shapely.union_all(list(g.values()))
+                self.assertEqual(final.geom_type,'Polygon')
+                self.assertLess(Point(600,0).buffer(29).difference(final).area,.001)
             back,_=plan.edit(0,plan.length,1,400);self.assertEqual(back['a'],0);self.assertLess(back['b'],plan.fixed_start)
         finally:e.close()
 
@@ -156,10 +158,13 @@ class V39ConnectionTests(unittest.TestCase):
             self.assertEqual(copper.geom_type,'Polygon');self.assertTrue(copper.is_valid)
             painted=shapely.union_all([g for q in qs for g in q['regions'].values()])
             self.assertLess(copper.symmetric_difference(painted).area,.001)
-            # A merged domain has one pickable dot for the closest fixed port
-            # (either terminal in this symmetric fixture); both remain connected.
-            actual=shapely.get_coordinates(qs[0]['extra_cut'])
-            self.assertEqual(actual.shape,(1,2));self.assertAlmostEqual(actual[0,0],600.);self.assertAlmostEqual(abs(actual[0,1]),200.)
+            # The moving pad can use a dot. The fixed port control is a
+            # straight material cross-section, even in a legacy saved job.
+            self.assertEqual(qs[0]['moved_cut'].geom_type,'Point')
+            self.assertEqual(qs[0]['extra_cut'].geom_type,'LineString')
+            actual=qs[0]['extra_cut']
+            self.assertLess(min(actual.distance(Point(600,y)) for y in (-200,200)),60.)
+            self.assertTrue(frame['electrically_valid'])
             for y in (-200,200):self.assertTrue(copper.covers(Point(600.,y)))
             settings,part=e.reconstructor.edited(members[0],1,members[0]['route_plan'].route.interpolate(members[0]['route_plan'].length-100).coords[0])
             self.assertEqual(len(settings.reconstruction_intervals),2)

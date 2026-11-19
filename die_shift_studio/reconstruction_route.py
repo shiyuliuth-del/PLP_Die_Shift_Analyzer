@@ -227,6 +227,7 @@ class RoutePlan:
         return (self.xy[i+1]-self.xy[i])/max(self.lengths[i],1e-12)
 
     def pad_hit(self,cursor,which):
+        if which!=0:return False
         if cursor is None:return True
         terminals=getattr(self,'terminal_vias',None)
         if terminals is None:return True
@@ -264,15 +265,13 @@ class RoutePlan:
     def snap(self,s,which,other,allow_pad=True):
         eps=max(self.tolerance*8,1e-4)
         lo=0. if which==0 else max(other+eps,self.land_end+eps)
-        hi=min(other-eps,self.fixed_start-eps) if which==0 else self.length
+        hi=min(other-eps,self.fixed_start-eps) if which==0 else self.fixed_start-eps
         if hi<lo:return lo
         s=float(np.clip(s,lo,hi))
         margin=getattr(self,'pad_trigger',0.)
-        modes=getattr(self,'pad_modes',(True,True))
+        modes=getattr(self,'pad_modes',(True,False))
         if which==0 and s<=self.land_end+eps:
             return 0. if allow_pad and modes[0] and s<=max(0.,self.land_end-margin) else min(hi,self.land_end+eps)
-        if which==1 and s>=self.fixed_start-eps:
-            return self.length if allow_pad and modes[1] and s>=min(self.length,self.fixed_start+margin) else max(lo,self.fixed_start-eps)
         for corner,radius in self.corners:
             if corner-radius<s<corner+radius:
                 options=[x for x in (corner-radius,corner+radius) if lo<=x<=hi]
@@ -308,14 +307,17 @@ class RoutePlan:
         self.cache[key]=result
         return result
 
+    def fixed_side(self,s):
+        # Convert legacy saved whole-fixed paths to the last real line cut.
+        return min(float(s),self.fixed_start-max(self.tolerance*8,1e-4))
+
     def partition(self,a,b,angles=(0.,0.)):
         """Return disjoint A/B/C and their real shared boundaries, or no partition."""
-        if abs(b-self.length)<=self.tolerance*.01:
-            moving_plus=self.source;far=shapely.Point(self.route.coords[-1]);b_shape=EMPTY
-        else:
-            outer=self.prefix(b,angles[1])
-            if outer is None:return None
-            moving_plus,far,b_shape=outer
+        b=self.fixed_side(b)
+        if a>=b:return None
+        outer=self.prefix(b,angles[1])
+        if outer is None:return None
+        moving_plus,far,b_shape=outer
         if a==0.:
             c=EMPTY;near=shapely.Point(self.route.coords[0]);a_shape=moving_plus
         else:

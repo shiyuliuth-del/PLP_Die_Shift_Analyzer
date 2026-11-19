@@ -224,9 +224,13 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
                 original[ref]=r.model.nodes[r.model.ids[ref]]['poly'];nets[ref]=key;terminals[ref]=[]
                 for via,owner,required in r.rules.vias[key]:
                     physical=r.model.nodes[r.model.ids[via]]['poly']
-                    if original[ref].intersection(physical).area>r.tol*r.tol:terminals[ref].append((owner,physical))
+                    if original[ref].intersection(physical).area>r.tol*r.tol:terminals[ref].append((via,owner,physical))
         r._topology_inputs=inputs=(original,nets,terminals)
     original,nets,terminals=inputs
+    from .ignored_motion import linked_owners
+    linked,link_failures=linked_owners(r,states)
+    def actual_owner(node):
+        return linked.get((node['key'],node['index']),node['owner'])
     # GEOS prepared predicates have mutable native indexes. Frame geometries
     # can also have been prepared by a different overlay/worker; keep native
     # query operands private to this invocation, including nominal copper.
@@ -236,17 +240,17 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
         for row in rows:
             for i in row['indices']:objects[layer,i]=private(row['geometry'])
     mutable={ref for ref,rows in by_ref.items() if any(not q.get('ignored') for q in rows)}
-    for ref in objects:ports[ref]=[private(r.model.moved(physical,owner,states)) for owner,physical in terminals[ref]]
+    for ref in objects:ports[ref]=[private(r.model.moved(physical,linked.get(via,owner),states)) for via,owner,physical in terminals[ref]]
     manual_masks={ref:shapely.union_all([q['regions']['A'] for q in rows]) for ref,rows in by_ref.items() if any(q.get('strict_box') is not None for q in rows)}
     manual_before={ref:objects[ref] for ref in manual_masks}
     def preserves_box(ref,g):
         return ref not in manual_masks or g.symmetric_difference(manual_before[ref]).difference(manual_masks[ref].buffer(r.tol*2)).area<=r.tol*r.tol
-    changed=set();blocked=[];external={};immutable={}
+    changed=set();blocked=list(link_failures);external={};immutable={}
     for ref,values in ports.items():
         external.setdefault(nets[ref][0],[]).extend((nets[ref],g) for g in values)
     for node in r.model.nodes:
         if r.model.roles[node['key']]=='固定RDL':continue
-        key=(node['key'].split('/')[0],node['net']);g=private(r.model.moved(node['poly'],node['owner'],states))
+        key=(node['key'].split('/')[0],node['net']);g=private(r.model.moved(node['poly'],actual_owner(node),states))
         external.setdefault(key[0],[]).append((key,g));immutable.setdefault(key[0],[]).append((node,g))
     external={plane:(values,shapely.STRtree([g for net,g in values])) for plane,values in external.items()}
     def foreign_hits(ref,g):
@@ -274,7 +278,7 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
                 candidate=cached_connection(r,original[ref],objects[ref],targets,foreign,r.rules.board,r._rule_width,r.tol,space)
                 if candidate is None:continue
                 if original[ref].geom_type!='Polygon' and not same_connections(
-                        original[ref],candidate,[g for _,g in terminals[ref]],ports[ref],r.tol):continue
+                        original[ref],candidate,[g for _,_,g in terminals[ref]],ports[ref],r.tol):continue
                 if targets is enclosed and not all(candidate.buffer(r.tol*.1).covers(g) for g in enclosed):continue
                 if any(q.get('strict_box') is not None for q in by_ref.get(ref,())):
                     allowed=shapely.union_all([q['regions']['A'] for q in by_ref[ref]])
@@ -336,9 +340,9 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
         blocked.extend(((left,'异网实体接触仍无法避让'),(right,'异网实体接触仍无法避让')))
     for plane,values in immutable.items():
         for node,g in values:
-            if r.model.roles[node['key']]=='运动RDL' and enters_keepout(g):blocked.append(((node['key'],node['index']),'运动RDL进入禁布区，无法通过固定RDL改线消除'))
+            if (r.model.roles[node['key']]=='运动RDL' or (node['key'],node['index']) in linked) and enters_keepout(g):blocked.append(((node['key'],node['index']),'运动RDL进入禁布区，无法通过固定RDL改线消除'))
         nodes=[n for n,g in values]
-        if len({n['owner'] for n in nodes})<2:continue
+        if len({actual_owner(n) for n in nodes})<2:continue
         actual=[g for n,g in values];tree=shapely.STRtree(actual)
         for i,g in enumerate(actual):
             for j in tree.query(g,predicate='intersects'):

@@ -25,9 +25,10 @@ class PlaneRoute(RoutePlan):
         return part,clamped
 
     def partition(self,a,b,angles=(0.,0.)):
+        b=self.fixed_side(b)
         if not 0<=a<b<=self.length:return None
         c=EMPTY if a==0 else self.half(a,angles[0])
-        fixed=EMPTY if b==self.length else self.source.difference(self.half(b,angles[1]))
+        fixed=self.source.difference(self.half(b,angles[1]))
         overlap=c.intersection(fixed)
         if overlap.area>self.tolerance**2:
             # Intersecting infinite cut planes at a bend cannot turn their
@@ -37,7 +38,7 @@ class PlaneRoute(RoutePlan):
         active=self.source.difference(shapely.union_all([c,fixed]))
         if active.is_empty:return None
         near=shapely.Point(self.route.coords[0]) if a==0 else active.boundary.intersection(c.boundary)
-        far=shapely.Point(self.route.coords[-1]) if b==self.length else active.boundary.intersection(fixed.boundary)
+        far=active.boundary.intersection(fixed.boundary)
         if near.is_empty or far.is_empty:return None
         return dict(A=active,B=fixed,C=c,near=near,far=far,a=a,b=b,angles=tuple(angles))
 
@@ -50,9 +51,10 @@ def candidate(base,lines,r):
         plan.pad_trigger=r.settings.reconstruction_pad_trigger_um
         fixed=tuple(v['poly'] for v in r.stays if v['net']==base['net'] and plan.source.intersects(v['poly']))
         plan.terminal_vias=(tuple(v['poly'] for v in base['mine']),fixed)
-        plan.pad_modes=tuple(any(g.buffer(r.p.annulus_um).covers(shapely.Point(route.coords[0 if side==0 else -1])) for g in values) for side,values in enumerate(plan.terminal_vias))
+        physical=tuple(any(g.buffer(r.p.annulus_um).covers(shapely.Point(route.coords[0 if side==0 else -1])) for g in values) for side,values in enumerate(plan.terminal_vias))
+        plan.pad_modes=(physical[0],False)
         for side,values in enumerate(plan.terminal_vias):
-            if not values or not plan.pad_modes[side]:continue
+            if not values or not physical[side]:continue
             endpoint=shapely.Point(route.coords[-1 if side else 0]);pad=min(values,key=endpoint.distance)
             marks=terminal_marks(route,pad.buffer(r.p.annulus_um))
             if len(marks):

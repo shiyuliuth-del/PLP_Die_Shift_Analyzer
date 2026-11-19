@@ -63,6 +63,11 @@ def prepare(r,grid,progress=lambda *_:None,*,indices=None):
 
 def needed(r,bundles,grid=None):
     from .reconstruction_events import compatible_candidates
+    mode=r.settings.reconstruction_fixed_via_mode
+    if mode!='off':
+        from .ignored_motion import linked_fixed_vias
+        ports=linked_fixed_vias(r,r._plans or ())
+        if ports and (mode=='global' or ports.keys()&set(r.settings.reconstruction_fixed_via_follows)):return True
     tables=[]
     for ref,b in bundles.items():
         if any(q.get('connection_failed') for v in b['values'].values() for q in v['pieces']):return True
@@ -124,6 +129,8 @@ def scene(r,grid,bundles,digits,diagnostics=True):
             alternate=dict(alternate,violations=r.rules.check(alternate['replacements'],states),original_violations=r.rules.nominal_check(),constraints_complete=True)
             decorate_problems(alternate)
         return states,alternate
+    from .ignored_motion import add_linked_geometry
+    out=add_linked_geometry(r,out,states)
     frame=dict(replacements=out,pieces=pieces,violations=r.rules.check(out,states) if diagnostics else [],original_violations=r.rules.nominal_check() if diagnostics else (),dbu_um=r.tol,
                repair_refs=repaired,hard_failures=blocked,electrically_valid=not bool(blocked))
     decorate_problems(frame);return states,frame

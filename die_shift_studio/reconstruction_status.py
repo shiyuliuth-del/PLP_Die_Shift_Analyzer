@@ -133,11 +133,11 @@ class ConstraintFeedback:
                 con=Connections(data,roles,order,cache.geometries);case=build_case(data,roles,connections=con)
                 model=ContactModel(data,case,roles,con,cache,parameters=p)
                 self.context=(key,FixedRules(model,p,cfg))
-            if cfg.reconstruction_boundary_mode!='perpendicular':
+            if cfg.reconstruction_fixed_via_mode!='off' or cfg.reconstruction_boundary_mode!='perpendicular':
                 from .reconstruction import Reconstructor
                 rebuilt=Reconstructor(self.context[1].model,p,cfg,plan_pool=pool)
                 try:
-                    if not changed:return rebuilt.frame(frame['states'],progress=progress)
+                    if not changed or cfg.reconstruction_fixed_via_mode!='off':return rebuilt.frame(frame['states'],progress=progress)
                     if local_pool is not None:
                         from .reconstruction_zones import expand
                         rebuilt.auto_following=set(current.auto_following);rebuilt.auto_ignored=dict(current.auto_ignored);rebuilt.safe_vias=dict(current.safe_vias)

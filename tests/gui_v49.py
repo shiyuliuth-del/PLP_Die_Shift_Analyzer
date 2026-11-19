@@ -53,7 +53,9 @@ try:
  event('scroll_event',(220,70),button='up',step=10)
  assert w.region_select.state is not None and np.isclose(w.region_select.state['angle'],-np.pi/9)
  np.testing.assert_allclose([w.ax.get_xlim(),w.ax.get_ylim()],limits)
- expected=w.region_select.vertices().copy();event('button_release_event',(220,70));wait()
+ expected=w.region_select.vertices().copy();event('button_release_event',(220,70))
+ assert not w.view_settings.reconstruction_boxes
+ event('button_press_event',(220,70));event('button_release_event',(220,70));wait()
  stored=w.view_settings.reconstruction_boxes[-1];np.testing.assert_allclose(stored[1],expected,atol=.01)
  for q in w.current_frame['reconstruction']['pieces']:
   source=w.geometry_cache.layers[q['layer']]['geometry'][q['index']]

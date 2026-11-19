@@ -54,34 +54,64 @@ def merge_import(data):
     from .fast_preview import polygons_from_arrays
     raw=copy.copy(data);raw.layers={k:list(v) for k,v in data.layers.items()};raw.shape_info={k:list(v) for k,v in data.shape_info.items()}
     out=copy.copy(data);out.layers={};out.shape_info={};out.merge_sources={};out.raw_to_merged={};out.merge_notes=[]
-    for key,arrays in raw.layers.items():
+    from .resources import parallel_iter,resource_profile,cancel_check
+    def merge_layer(item):
+        key,arrays=item
         geos=polygons_from_arrays(arrays);parent=list(range(len(geos)))
         def root(i):
             while parent[i]!=i:parent[i]=parent[parent[i]];i=parent[i]
             return i
         tree=shapely.STRtree(geos)
-        for i,g in enumerate(geos):
-            for j in tree.query(g,predicate='intersects'):
-                j=int(j)
-                if j<=i:continue
-                overlap=g.intersection(geos[j])
-                if overlap.area>1e-14 or overlap.length>max(data.dbu_um*.01,1e-10):
-                    a,b=root(i),root(j)
+        minimum=max(data.dbu_um*.01,1e-10)
+        block=min(1024,max(1,1_000_000//max(1,len(geos))))
+        for first in range(0,len(geos),block):
+            cancel_check()
+            i,j=tree.query(geos[first:first+block],predicate='intersects')
+            i+=first
+            keep=i<j;i,j=i[keep],j[keep]
+            for start in range(0,len(i),4096):
+                end=start+4096;left,right=i[start:end],j[start:end]
+                overlap=shapely.intersection(geos[left],geos[right])
+                adjacent=(shapely.area(overlap)>1e-14)|(shapely.length(overlap)>minimum)
+                for a,b in zip(left[adjacent],right[adjacent]):
+                    a,b=root(int(a)),root(int(b))
                     if a!=b:parent[max(a,b)]=min(a,b)
         groups=defaultdict(list)
         for i in range(len(geos)):groups[root(i)].append(i)
-        result=[];metadata=[];sources=[];source=raw.shape_info.get(key,[None]*len(arrays))
-        for ids in sorted(groups.values(),key=lambda v:v[0]):
+        result=[];metadata=[];sources=[];source=raw.shape_info.get(key,())
+        ordered=sorted(groups.values(),key=lambda v:v[0])
+        pairs=np.asarray([ids for ids in ordered if len(ids)==2],dtype=int).reshape(-1,2)
+        unions=shapely.union(geos[pairs[:,0]],geos[pairs[:,1]])
+        if np.any(shapely.get_type_id(unions)!=3):raise ValueError(f'图层 {key} 的连接碎片未形成唯一面')
+        exteriors=shapely.get_exterior_ring(unions)
+        clockwise=~shapely.is_ccw(exteriors)
+        if np.any(clockwise):exteriors[clockwise]=shapely.reverse(exteriors[clockwise])
+        counts=shapely.get_num_coordinates(exteriors)
+        coordinates=shapely.get_coordinates(exteriors)
+        offsets=np.r_[0,np.cumsum(counts)]
+        holes=shapely.get_num_interior_rings(unions);pair_index=0
+        for ids in ordered:
             if len(ids)==1:points=arrays[ids[0]];meta=source[ids[0]] if ids[0]<len(source) else None
             else:
-                g=shapely.union_all(geos[ids])
-                if g.geom_type!='Polygon':raise ValueError(f'图层 {key} 的连接碎片未形成唯一面')
-                points=winding_outline(g)
-                meta=dict(kind='polygon',winding=True,nodes=points.copy()) if g.interiors else None
-            index=len(result);result.append(points);metadata.append(meta);sources.append(tuple(ids))
-            for old in ids:out.raw_to_merged[key,old]=index
+                if len(ids)==2:
+                    rings=holes[pair_index]
+                    points=(winding_outline(unions[pair_index]) if rings else coordinates[offsets[pair_index]:offsets[pair_index+1]-1].copy())
+                    pair_index+=1
+                else:
+                    g=shapely.union_all(geos[ids])
+                    if g.geom_type!='Polygon':raise ValueError(f'图层 {key} 的连接碎片未形成唯一面')
+                    rings=len(g.interiors)
+                    points=winding_outline(g) if rings else np.asarray(orient(g,sign=1.).exterior.coords)[:-1].copy()
+                meta=dict(kind='polygon',winding=True,nodes=points.copy()) if rings else None
+            result.append(points);metadata.append(meta);sources.append(tuple(ids))
+        return key,result,metadata,sources
+    profile=resource_profile()
+    if sum(map(len,raw.layers.values()))<2000:profile=dict(profile,workers=1)
+    for key,result,metadata,sources in parallel_iter(merge_layer,raw.layers.items(),profile):
         out.layers[key]=result;out.shape_info[key]=metadata;out.merge_sources[key]=sources
-        if len(result)<len(arrays):out.merge_notes.append(f'图层 {key}：{len(arrays)} 个源片 Merge 为 {len(result)} 个完整图形（点接触不合并）。')
+        out.raw_to_merged.update(((key,old),index) for index,ids in enumerate(sources) for old in ids)
+        count=len(raw.layers[key])
+        if len(result)<count:out.merge_notes.append(f'图层 {key}：{count} 个源片 Merge 为 {len(result)} 个完整图形（点接触不合并）。')
     out._legacy_snapshot=raw;out.geometry_indexing='merged-v39'
     out.legacy_node_edits=list(getattr(raw,'node_edits',[]));out.node_edits=[]
     out.edit_digest=hashlib.sha256(json.dumps([out.merge_sources,out.legacy_node_edits],sort_keys=True,separators=(',',':')).encode()).hexdigest()
@@ -111,7 +141,7 @@ def restore_project_geometry(data,project):
         for name in ('reconstruction_cuts','reconstruction_extra_cuts','reconstruction_second_cuts','reconstruction_dropped_cuts'):
             cfg[name]=[(l,ref(l,i),vias(v),*tail) for l,i,v,*tail in cfg.get(name,())]
         cfg['reconstruction_intervals']=[(l,ref(l,i),owner,vias(v),identity,a,b) for l,i,owner,v,identity,a,b in cfg.get('reconstruction_intervals',())]
-        for name in ('reconstruction_forced','reconstruction_ignored','reconstruction_following'):
+        for name in ('reconstruction_forced','reconstruction_ignored','reconstruction_following','reconstruction_box_excluded','reconstruction_fixed_via_follows'):
             cfg[name]=[(l,ref(l,i)) for l,i in cfg.get(name,())]
         for name in ('reconstruction_angles','reconstruction_deleted'):
             cfg[name]=[(l,ref(l,i),owner,vias(v),identity,*tail) for l,i,owner,v,identity,*tail in cfg.get(name,())]

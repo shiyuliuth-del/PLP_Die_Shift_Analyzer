@@ -55,7 +55,7 @@ def main():
                  patch.object(w.reconstruction_overlay,'draw'):
                 w.reconstruction_toggle.blockSignals(True);w.reconstruction_toggle.setChecked(True);w.reconstruction_toggle.blockSignals(False)
                 w.region_move.click();assert w.region_select.mode=='move'
-                mouse('button_press_event',40,40);mouse('motion_notify_event',50,50);mouse('button_release_event',50,50)
+                mouse('button_press_event',40,40);mouse('button_release_event',40,40);mouse('motion_notify_event',50,50);mouse('button_press_event',50,50);mouse('button_release_event',50,50)
                 assert len(w.view_settings.reconstruction_boxes)==1
                 assert preview.called
                 saved_regions=w.view_settings.reconstruction_boxes

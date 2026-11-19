@@ -51,6 +51,16 @@ def _compose_feature(source,ps,tolerance,moving):
         for q in ps:q.update(valid=False,connection_failed=True,warning=reason,regions=dict(A=EMPTY,B=source,C=EMPTY),bridge=EMPTY,moved=EMPTY,fixed=source)
         geometry=source
     else:
+        graph=any(q.get('graph_members') for q in ps)
+        if moving and graph:
+            # Quantize every physical branch on the same layout grid before
+            # union. Keep the drawn A/B/C and the exported material consistent.
+            fixed=shapely.set_precision(fixed,tolerance)
+            for q in ps:
+                for tag,geometry_key,area_key in (('A','bridge','bridge_area_um2'),('C','moved','moved_area_um2')):
+                    material=shapely.set_precision(q['regions'][tag],tolerance)
+                    q['regions'][tag]=q[geometry_key]=material
+                    q[area_key]=material.area
         for q in ps:q['fixed']=fixed;q['regions']['B']=fixed;q['fixed_area_um2']=fixed.area
         geometry=shapely.union_all([fixed,*[q['regions'][k] for q in ps for k in 'AC']],grid_size=tolerance if moving else None)
     # With no material motion and a source-preserving style, partition overlay
@@ -73,7 +83,7 @@ def _compose_feature(source,ps,tolerance,moving):
                 owner['regions']['A']=owner['regions']['A'].union(hole);owner['bridge']=owner['regions']['A']
                 owner['seam_repair_area_um2']=owner.get('seam_repair_area_um2',0.)+hole.area
                 owner['bridge_area_um2']=owner['bridge'].area
-        if repairs:geometry=shapely.union_all([geometry,*repairs])
+        if repairs:geometry=shapely.union_all([fixed,*[q['regions'][k] for q in ps for k in 'AC']])
     mismatch=(len(parts(geometry))!=len(parts(source)) or sum(len(q.interiors) for q in parts(geometry))!=sum(len(q.interiors) for q in parts(source)))
     if mismatch and all(q['regions']['A'].is_empty for q in ps):
         for q in ps:q.update(valid=False,connection_failed=True,warning='独立刚体分支已断开；当前没有可适配动区')
@@ -185,9 +195,13 @@ class Reconstructor:
         self.geometry_pool=geometry_pool if geometry_pool is not None else EphemeralCache(
             budget=geometry_mb*1024**2,max_entries=max(4096,128*geometry_mb))
         from .manual_regions import boxes_by_source
-        self.source_boxes=(reference.source_boxes if reference is not None and reference.settings.reconstruction_boxes==settings.reconstruction_boxes
-                           else boxes_by_source(model,settings.reconstruction_boxes))
-        self.box_refs=set(self.source_boxes)
+        def boxes(field,previous):
+            values=getattr(settings,field)
+            return getattr(reference,previous) if reference is not None and getattr(reference.settings,field)==values else boxes_by_source(model,values)
+        self.source_boxes=boxes('reconstruction_boxes','source_boxes')
+        self.angle_boxes=boxes('reconstruction_angle_boxes','angle_boxes')
+        excluded=set(settings.reconstruction_box_excluded)
+        self.box_refs=(self.source_boxes.keys() | self.angle_boxes.keys())-excluded
         self.box_partitions={};self._entry_catalogue=None;self._entries_by_ref={}
 
         self.cuts={(str(l),int(i),normalize_via_refs(v)):(nx,ny,x,y) for l,i,v,nx,ny,x,y in settings.reconstruction_cuts}
@@ -315,7 +329,11 @@ class Reconstructor:
             original_source=self.model.cache.layers[layer]['geometry'][index]
             from .reconstruction_ownership import divide
             allocation=divide(original_source.wkb,tuple((v['owner'],v['poly'].wkb) for v in all_vias),self._rule_width,self.tol)
-            source,seam=allocation.get(owner,(original_source,shapely.Polygon()))
+            domains=allocation.get(owner,[(original_source,shapely.Polygon())])
+            return [entry for source,seam in domains
+                    for local in ([v for v in mine if source.intersection(v['poly']).area>self.tol*self.tol],)
+                    if local for entry in build_domain(layer,index,owner,local,all_vias,original_source,source,seam,bool(allocation))]
+        def build_domain(layer,index,owner,mine,all_vias,original_source,source,seam,allocated):
             refs=normalize_via_refs((v['key'],v['index']) for v in mine)
             net=int(self.model.nodes[self.model.ids[layer,index]]['net'])
             from .landing_geometry import embedded_pad
@@ -348,31 +366,38 @@ class Reconstructor:
                 if len(moving)>1:
                     start=np.asarray(land.centroid.coords[0]);stop_all=shapely.union_all(fixed).centroid
                     if source.covers(shapely.Point(start)) and source.covers(stop_all):pairs.insert(0,(start,np.asarray(stop_all.coords[0])))
-                if len(moving)>1:pairs=inward_routes(source,moving)+pairs
-                else:pairs+=inward_routes(source,moving)
+                with_manual=any(row[:2]==(layer,index) for name in ('reconstruction_intervals','reconstruction_angles','reconstruction_deleted','reconstruction_added') for row in getattr(self.settings,name,()))
+                pairs.extend(inward_routes(source,moving))
                 seen=set();traced=[]
+                real_fixed=tuple(v['poly'] for v in self.stays if v['net']==net and v['poly'].intersects(source) and any(a.intersects(v['poly']) for a in fixed))
+                found_physical=False
                 for start,endpoint in pairs:
+                    if found_physical and not with_manual and all(not g.dwithin(shapely.Point(endpoint),self.tol) for g in real_fixed):continue
                     line=trace(source,start,endpoint,self._rule_width)
                     if line is not None and line.wkb in seen:continue
                     if line is not None:seen.add(line.wkb)
                     if line is None:continue
                     traced.append(line)
                     plan=RoutePlan(layer,index,owner,local_base['refs'],source,line,land,tuple(fixed),self.tol,self.settings.reconstruction_corner_guard_um,memo_budget=memo_budget)
-                    terminal_fixed=tuple(v['poly'] for v in self.stays if v['net']==net and source.intersects(v['poly']) and any(a.intersects(v['poly']) for a in fixed))
+                    terminal_fixed=real_fixed
                     plan.terminal_vias=(tuple(v['poly'] for v in moving),terminal_fixed)
-                    plan.pad_modes=tuple(any(g.buffer(self.p.annulus_um).covers(shapely.Point(line.coords[0 if side==0 else -1])) for g in values) for side,values in enumerate(plan.terminal_vias))
+                    physical_start=any(g.dwithin(shapely.Point(line.coords[0]),self.tol) for g in plan.terminal_vias[0])
+                    plan.physical_end=any(g.dwithin(shapely.Point(line.coords[-1]),self.tol) for g in terminal_fixed)
+                    plan.pad_modes=(physical_start,False)
                     plan.pad_trigger=self.settings.reconstruction_pad_trigger_um
                     # Opposite moving terminals share a nominal middle seam. Neither
                     # owner's transition may consume the other owner's half-route.
                     opposite_owner=any(v['owner']!=owner and stop.intersects(v['poly']) for v in all_vias)
-                    if not allocation and (opposite_owner or not any(v['net']==net and source.intersects(v['poly']) for v in self.stays)):
+                    if not allocated and (opposite_owner or not any(v['net']==net and source.intersects(v['poly']) for v in self.stays)):
                         plan.fixed_start=(plan.land_end+plan.fixed_start)*.5
                     mu,bounds=mean_and_bounds(self.p.for_die(owner),len(self.model.bound.centers))
                     radius=float(np.linalg.norm(shapely.get_coordinates(source)-self.model.bound.centers[owner],axis=1).max())
                     travel=float(np.linalg.norm(np.abs(mu[:2])+bounds[:2])+2*radius*np.sin(min(np.pi,abs(mu[2])+bounds[2])/2))
                     if pair_route:plan.preferred_land=land_all
                     partition=plan.choose(travel)
-                    if partition is not None:candidates.append((not bool(plan.warning),partition['b']-partition['a'],plan))
+                    if partition is not None:
+                        candidates.append((not bool(plan.warning),partition['b']-partition['a'],plan))
+                        found_physical|=plan.physical_end and len(plan.xy)>2
                 if not candidates:
                     from .plane_route import candidate
                     alternative=candidate(local_base,traced,self)
@@ -389,9 +414,10 @@ class Reconstructor:
                 saved=[q for q in candidates if q[2].identity in roots]
                 if saved:candidates=saved
                 else:
-                    if pair_route:
-                        physical=[row for row in candidates if all(row[2].pad_modes)]
-                        if physical:candidates=physical
+                    # Inward chords are useful for wide copper, but their end
+                    # can stop before a real bend and create an uneditable tail.
+                    physical=[row for row in candidates if row[2].physical_end]
+                    if physical:candidates=physical
                     from .parallel_zones import alignment
                     aligned=[row for row in candidates if alignment(row[2])>=np.cos(np.deg2rad(5))]
                     if aligned:candidates=aligned
@@ -498,7 +524,7 @@ class Reconstructor:
         # Route construction is pose-independent and reused after every handle edit.
         from .session_cache import logical_fingerprint
         base_key=logical_fingerprint((self.model.data.geometry_id,self.model.roles,self.model.connections.order,
-                                'source-routes-v52',self.settings.evaluation_scope=='risk',self.rules.identity,bool(getattr(self,'measured_only',False)),self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
+                                'source-routes-v55-branches',self.settings.evaluation_scope=='risk',self.rules.identity,bool(getattr(self,'measured_only',False)),self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
         # Forcing/editing one source must not rebuild every source path. Mine
         # membership includes enclosure filtering; all-via ownership controls
         # allocation. Existing path identities survive later manual edits.
@@ -517,7 +543,7 @@ class Reconstructor:
         from .reconstruction_zones import expand
         self._base_plans=[entry for key in keys for entry in self.plan_pool[key]]
         from .parallel_zones import coordinate
-        coordinate(self,self._base_plans)
+        self._base_plans=coordinate(self,self._base_plans)
         self._plans=expand(self,[e for e in self._base_plans if (e['layer'],e['index']) not in self.settings.reconstruction_ignored or (e['layer'],e['index']) in self.box_refs])
         from .ignored_motion import entries as ignored_entries
         self._plans.extend(ignored_entries(self))
@@ -540,13 +566,14 @@ class Reconstructor:
         plan=entry['plan']
         if plan is None:return None,False
         ref=tuple(plan.key[:2])
-        if ref in self.box_refs:
+        if ref in self.box_refs and ref in self.source_boxes:
             from .manual_regions import usable_partition
             key=plan.key,plan.identity
             if key not in self.box_partitions:
                 self.box_partitions[key]=usable_partition(plan,self.source_boxes[ref])
             part=self.box_partitions[key]
-            if part is not None:return part,True
+            if part is not None and not part['box_invalid']:return part,True
+            if part is not None and ref not in self.angle_boxes:return part,True
         if 'merged_part' in entry:return entry['merged_part'],True
         a,b=plan.nominal_first,plan.nominal_second;manual=False
         for l,i,owner,refs,identity,left,right in self.settings.reconstruction_intervals:
@@ -558,6 +585,13 @@ class Reconstructor:
                     if adjusted is not None:
                         a,b=adjusted['a'],adjusted['b'];manual=True
                         if not self.settings.reconstruction_regions:return adjusted,True
+        if ref in self.box_refs and ref in self.angle_boxes:
+            from .manual_regions import aligned_partition
+            key=plan.key,plan.identity,'aligned'
+            if key not in self.box_partitions:
+                self.box_partitions[key]=aligned_partition(plan,self.angle_boxes[ref])
+            part=self.box_partitions[key]
+            if part is not None:return part,True
         if entry.get('seeded') and not self.settings.reconstruction_regions:
             from .reconstruction_edits import apply_angles
             return apply_angles(self.settings,plan,plan.partition(a,b)),True
@@ -635,6 +669,8 @@ class Reconstructor:
             alternate=self._raw_frame(states,deformation,lambda n,t:progress(65+round(n*.1),t),True,diagnostics=False)
             ao,ap,ac,ab=resolve(self,alternate['replacements'],alternate['pieces'],states,lambda n,t:progress(75+round(n*.15),t))
             if len(ab)<len(blocked):raw,out,pieces,changed,blocked=alternate,ao,ap,ac,ab
+        from .ignored_motion import add_linked_geometry
+        out=add_linked_geometry(self,out,states)
         result=dict(raw,replacements=out,pieces=pieces,repair_refs=changed,hard_failures=blocked,
                     electrically_valid=not bool(blocked),constraints_complete=bool(diagnostics))
         result['violations']=self.rules.check(out,states,lambda n,t:progress(90+round(n*.09),t)) if diagnostics else []
@@ -748,7 +784,7 @@ class Reconstructor:
                 near=far=moved_cut=None;a=b=0.;valid=False
             shift=float(np.linalg.norm(self.model.moved(shapely.Point(entry['mine'][0]['center']),owner,states).coords[0]-entry['mine'][0]['center']))
             feature=features.setdefault((layer,index),dict(source=source,pieces=[],net=entry['net']))
-            piece=dict(ownership_seam=entry.get('ownership_seam',EMPTY),strict_box=part.get('strict_box'),box_invalid=part.get('box_invalid',False),graph_branch=entry.get('graph_branch',False) or part.get('box_complex',False),moving_nominal=entry.get('moving_nominal') if not part.get('box_complex') else plan.land,fixed_nominal=entry.get('fixed_nominal') if not part.get('box_complex') else shapely.union_all(plan.anchors),ignored=entry.get('ignored',False),ignored_following=entry.get('following',False),die=owner,layer=layer,index=index,net=entry['net'],via_refs=entry['refs'],vias=[v[1] for v in entry['refs']],
+            piece=dict(ownership_seam=entry.get('ownership_seam',EMPTY),strict_box=part.get('strict_box'),box_invalid=part.get('box_invalid',False),graph_branch=entry.get('graph_branch',False) or part.get('box_complex',False),moving_nominal=entry.get('moving_nominal') if not part.get('box_complex') else plan.land,fixed_nominal=entry.get('fixed_nominal') if not part.get('box_complex') else shapely.union_all(plan.anchors),ignored=entry.get('ignored',False),ignored_following=entry.get('following',False),follow_owners=entry.get('follow_owners',(owner,)),die=owner,layer=layer,index=index,net=entry['net'],via_refs=entry['refs'],vias=[v[1] for v in entry['refs']],
                        fallback_regions=fallback if part.get('near') is not None else None,connection_failed=bool(error) or not valid,
                        missing_region=part['A'] if part.get('strict_box') is not None or getattr(plan,'plane_domain',False) else missing_area(part,plan,self.model.bound.centers[owner],states[owner]) if plan is not None and part.get('near') is not None else source,
                        moving_handle_endpoint=(transform(shapely.Point(plan.route.coords[0]),self.model.bound.centers[owner],states[owner]) if plan is not None else None),
@@ -774,7 +810,7 @@ class Reconstructor:
         for (layer,index),feature in features.items():
             ps=feature['pieces'];source=feature['source']
             owners=sorted({q['die'] for q in ps}|{v['owner'] for v in self.vias_by_target.get((layer,index),()) if v['owner']>=0})
-            compose_key=('composed-continuity-v54',self.rules.identity,layer,index,quick,self.settings.reconstruction_style,self.settings.reconstruction_boundary_mode,
+            compose_key=('composed-continuity-v55',self.rules.identity,layer,index,quick,self.settings.reconstruction_style,self.settings.reconstruction_boundary_mode,
                          tuple((owner,states[owner].tobytes(),self.model.bound.centers[owner].tobytes()) for owner in owners),
                          tuple((q['route_identity'],q['interval'],q['boundary_angles'],q.get('ignored'),q.get('ignored_following'),q['endpoint_weights'],q['strict_box'].wkb if q.get('strict_box') is not None else None) for q in ps))
             saved=self.geometry_pool.get(compose_key)

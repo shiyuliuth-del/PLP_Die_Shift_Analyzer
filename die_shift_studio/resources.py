@@ -1,5 +1,6 @@
 """Hardware-aware bounded concurrency; native geometry/FFT jobs release the GIL."""
 import os
+import sys
 import threading
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor,ProcessPoolExecutor,as_completed
@@ -57,7 +58,7 @@ def resource_profile():
     budget=max(1,min(int(available/1024**2) if cap_mb else int(available*.35/1024**2),cap_mb or 2**31))
     workers=max(1,min(cpu,threads or max(1,cpu-max(2,(cpu+9)//10)),budget//384))
     profile=dict(cpu=cpu,total_memory_mb=round(total/1024**2),available_memory_mb=round(available/1024**2),workers=workers,worker_capacity=workers,
-                memory_budget_mb=budget,process_workers=max(1,min(4,workers,budget//768)),
+                memory_budget_mb=budget,process_workers=max(1,min(workers,budget//768,61 if sys.platform=='win32' else cpu)),
                 policy='预留至少2个逻辑CPU（大机器约10%）与65%可用内存；原生几何/FFT使用线程；大型独立原图DRC与RDL候选搜索使用spawn进程；小任务串行')
     from .scheduling import constrain
     return constrain(profile)

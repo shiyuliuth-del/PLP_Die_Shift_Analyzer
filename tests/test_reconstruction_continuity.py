@@ -15,7 +15,8 @@ class ContinuityTests(unittest.TestCase):
   part,_=plan.edit_pose(50,150,0,25,[0,0],np.zeros(3),'c2',cursor=(25,0))
   self.assertEqual(part['a'],0.)
   part,_=plan.edit_pose(50,150,1,175,[0,0],np.zeros(3),'c2',cursor=(175,0))
-  self.assertEqual(part['b'],plan.length)
+  self.assertLess(part['b'],plan.fixed_start)
+  self.assertEqual(part['far'].geom_type,'LineString')
   self.assertFalse(plan.pad_hit((100,100),1))
 
  def test_close_return_leg_cannot_steal_arclength(self):
@@ -31,8 +32,8 @@ class ContinuityTests(unittest.TestCase):
  def test_point_hit_is_bound_to_corresponding_terminal(self):
   route=LineString([(0,0),(200,0)]);source=box(-30,-30,230,30)
   plan=RoutePlan('2/0',0,0,(),source,route,Point(0,0).buffer(30),(Point(200,0).buffer(30),Point(120,0).buffer(30)),.001,3.)
-  plan.terminal_vias=((Point(0,0).buffer(10),),(Point(200,0).buffer(10),Point(120,0).buffer(10)))
-  self.assertTrue(plan.pad_hit((180,0),1));self.assertFalse(plan.pad_hit((120,0),1))
+  plan.terminal_vias=((Point(0,0).buffer(10),Point(120,0).buffer(10)),(Point(200,0).buffer(10),))
+  self.assertTrue(plan.pad_hit((15,0),0));self.assertFalse(plan.pad_hit((120,0),0))
 
  def test_branch_pick_preserves_selected_side(self):
   from die_shift_studio.branch_regions import editable_piece
