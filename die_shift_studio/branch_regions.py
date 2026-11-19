@@ -151,7 +151,11 @@ def assemble(r,source,rows,states):
             points=shapely.points(xy);distances=np.asarray([shapely.distance(points,rigid[i]) for i in ids])
             power={'linear':1,'c1':2,'c2':3,'arc':2}[style]
             weights=np.maximum(distances,r.tol*1e-6)**(-power);weights/=weights.sum(axis=0)
-            fraction=np.asarray([values[i] for i in ids])@weights
+            motions=np.asarray([values[i] for i in ids])
+            fraction=motions@weights
+            nearest=np.argmin(distances,axis=0)
+            on_seam=np.min(distances,axis=0)<=r.tol*.05
+            fraction[on_seam]=motions[nearest[on_seam]]
             from .preview import rigid_transform
             # Interpolated angle and translation match each floating rigid block
             # exactly at its boundary; smoothing order sets the endpoint slope.

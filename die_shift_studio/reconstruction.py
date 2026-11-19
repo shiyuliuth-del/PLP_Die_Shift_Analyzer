@@ -51,6 +51,16 @@ def _compose_feature(source,ps,tolerance,moving):
         for q in ps:q.update(valid=False,connection_failed=True,warning=reason,regions=dict(A=EMPTY,B=source,C=EMPTY),bridge=EMPTY,moved=EMPTY,fixed=source)
         geometry=source
     else:
+        graph=any(q.get('graph_members') for q in ps)
+        if moving and graph:
+            # Quantize every physical branch on the same layout grid before
+            # union. Keep the drawn A/B/C and the exported material consistent.
+            fixed=shapely.set_precision(fixed,tolerance)
+            for q in ps:
+                for tag,geometry_key,area_key in (('A','bridge','bridge_area_um2'),('C','moved','moved_area_um2')):
+                    material=shapely.set_precision(q['regions'][tag],tolerance)
+                    q['regions'][tag]=q[geometry_key]=material
+                    q[area_key]=material.area
         for q in ps:q['fixed']=fixed;q['regions']['B']=fixed;q['fixed_area_um2']=fixed.area
         geometry=shapely.union_all([fixed,*[q['regions'][k] for q in ps for k in 'AC']],grid_size=tolerance if moving else None)
     # With no material motion and a source-preserving style, partition overlay
@@ -73,7 +83,7 @@ def _compose_feature(source,ps,tolerance,moving):
                 owner['regions']['A']=owner['regions']['A'].union(hole);owner['bridge']=owner['regions']['A']
                 owner['seam_repair_area_um2']=owner.get('seam_repair_area_um2',0.)+hole.area
                 owner['bridge_area_um2']=owner['bridge'].area
-        if repairs:geometry=shapely.union_all([geometry,*repairs])
+        if repairs:geometry=shapely.union_all([fixed,*[q['regions'][k] for q in ps for k in 'AC']])
     mismatch=(len(parts(geometry))!=len(parts(source)) or sum(len(q.interiors) for q in parts(geometry))!=sum(len(q.interiors) for q in parts(source)))
     if mismatch and all(q['regions']['A'].is_empty for q in ps):
         for q in ps:q.update(valid=False,connection_failed=True,warning='独立刚体分支已断开；当前没有可适配动区')
