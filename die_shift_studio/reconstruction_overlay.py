@@ -724,13 +724,20 @@ class RegionSelect:
         if abs(shapely.Polygon(vertices).area)<1e-12 or not layers:return
         field='reconstruction_angle_boxes' if self.w.view_settings.reconstruction_box_mode=='aligned' else 'reconstruction_boxes'
         rows=(*getattr(self.w.view_settings,field),*((layer,tuple(tuple(map(float,v)) for v in vertices)) for layer in layers))
-        removed=set(self.w.view_settings.reconstruction_box_excluded)
-        if removed:
-            geo=self.w.geometry_cache.layers
-            polygon=shapely.Polygon(vertices)
-            removed={ref for ref in removed if ref[0] not in layers or ref[1]>=len(geo[ref[0]]['geometry'])
-                     or not geo[ref[0]]['geometry'][ref[1]].intersects(polygon)}
-        self.w.view_settings=replace(self.w.view_settings,**{field:rows},reconstruction_box_excluded=tuple(sorted(removed)))
+        settings=self.w.view_settings
+        geometry=self.w.geometry_cache.layers
+        polygon=shapely.Polygon(vertices)
+        def selected(ref):
+            key,index=ref
+            return key in layers and index<len(geometry[key]['geometry']) and geometry[key]['geometry'][index].intersects(polygon)
+        removed=tuple(ref for ref in settings.reconstruction_box_excluded if not selected(ref))
+        changes={field:rows,'reconstruction_box_excluded':removed}
+        if field=='reconstruction_angle_boxes':
+            # The new box takes precedence over existing cuts on sources it
+            # selects. Future drags then become the explicit per-route edits.
+            for name in ('reconstruction_intervals','reconstruction_angles'):
+                changes[name]=tuple(row for row in getattr(settings,name) if not selected(row[:2]))
+        self.w.view_settings=replace(settings,**changes)
         self.w.invalidate_reconstruction_edit();self.w.request_preview(quiet=True)
         self.w.statusBar().showMessage('已提交框选动区；必要时在原选框周围延伸至可用边界')
     def _layers(self):

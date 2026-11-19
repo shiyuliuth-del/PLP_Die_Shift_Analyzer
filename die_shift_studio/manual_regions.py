@@ -59,14 +59,11 @@ def partition(plan,polygon):
     near=seam(c,a) if not c.is_empty else shapely.LineString()
     far=seam(d,b) if not d.is_empty else shapely.LineString()
     if near.is_empty:near=shapely.Point(plan.route.coords[0]);a=0.
-    if far.is_empty:
-        # A trapped box remains a visible diagnostic, with no fixed-side dot.
-        b=plan.fixed_side(b)
-        far=plan.section(b) or shapely.LineString()
-        ambiguous=True
+    # Trapped boxes remain visible diagnostics with no fixed-side dot.
+    if far.is_empty:ambiguous=True
     angles=[]
     for edge,s in ((near,a),(far,b)):
-        if edge.geom_type!='LineString':angles.append(0.);continue
+        if edge.is_empty or edge.geom_type!='LineString':angles.append(0.);continue
         u=np.asarray(edge.coords[-1])-edge.coords[0];v=plan.tangent(s);normal=np.array([-v[1],v[0]])
         angle=math.atan2(u[1],u[0])-math.atan2(normal[1],normal[0]);angles.append((angle+math.pi/2)%math.pi-math.pi/2)
     return dict(A=active,B=d,C=c,near=near,far=far,a=a,b=b,angles=tuple(angles),manual_angles=(True,True),strict_box=polygon,
