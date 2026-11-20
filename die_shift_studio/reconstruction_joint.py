@@ -214,7 +214,7 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
     # Keep GEOS and the native DRC backend private for sustained joint scans.
     isolated=0
     if bundles is not None and total>=64:
-        packed=sum(shapely.get_num_coordinates(v['geometry'])*32 for table in bundles.values() for v in table['values'].values())
+        packed=sum(int(shapely.get_num_coordinates(v['geometry']))*32 for table in bundles.values() for v in table['values'].values())
         estimate=max(192*1024**2,packed*4)
         isolated=min(profile['process_workers'],profile['memory_budget_mb']*1024**2//estimate,total)
     with ExitStack() as cleanup:
