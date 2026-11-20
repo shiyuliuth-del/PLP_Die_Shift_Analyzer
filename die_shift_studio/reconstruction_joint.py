@@ -202,7 +202,8 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
         else:
             states=np.asarray([v[d] for v,d in zip(grid.locals,digits)])
             frame=solver.frame(states)
-        return digits,states,frame
+        edges=routing_violations(r.model,states,r.p,r.settings,frame['replacements'])
+        return digits,states,frame,edges
     import time
     completed=0;last_update=time.monotonic()
     def idle():
@@ -210,10 +211,21 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
         if time.monotonic()-last_update>=3.:
             progress(round(100*completed/total),f'电连接补偿后联合核验 {completed:,}/{total:,} · 正在核验剩余姿态')
             last_update=time.monotonic()
+    # Keep GEOS and the native DRC backend private for sustained joint scans.
+    isolated=0
+    if bundles is not None and total>=64:
+        packed=sum(shapely.get_num_coordinates(v['geometry'])*32 for table in bundles.values() for v in table['values'].values())
+        estimate=max(192*1024**2,packed*4)
+        isolated=min(profile['process_workers'],profile['memory_budget_mb']*1024**2//estimate,total)
     with ExitStack() as cleanup:
       cleanup.callback(lambda:[s.close() for s in solvers])
-      values=parallel_iter(evaluate,visits,dict(profile,workers=workers),ordered=False,idle=idle);cleanup.callback(values.close)
-      for digits,states,frame in values:
+      if isolated:
+        from .reconstruction_workers import isolated_scenes
+        values=isolated_scenes(r,grid,bundles,visits,isolated,idle)
+      else:
+        values=parallel_iter(evaluate,visits,dict(profile,workers=workers),ordered=False,idle=idle)
+      cleanup.callback(values.close)
+      for digits,states,frame,edges in values:
         cancel_check()
         repairs+=bool(frame['repair_refs'])
         remember(r,states,frame)
@@ -229,7 +241,6 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
             g=max((v['geometry'] for v in rows if v.get('phase')!='original'),key=lambda g:g.area,default=active_region(q))
             score=(RANK[rank],g.area,-index)
             if key not in witnesses or score>witnesses[key]['score']:witnesses[key]=dict(index=index,choices=tuple(digits),score=score,kinds=q.get('problem_reasons',()),geometry=g)
-        edges=routing_violations(r.model,states,r.p,r.settings,frame['replacements'])
         if edges:routing_factors.append(clause)
         for row in edges:strongest(routing_lines,[(row['layer'],i) for i in row['indices']],BLOCKED,None,binary,routing_witnesses,edge_witness(row,index,r.model,states))
         completed+=1;last_update=time.monotonic()

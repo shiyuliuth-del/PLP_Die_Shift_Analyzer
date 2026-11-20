@@ -8,8 +8,9 @@ from shapely.geometry.polygon import orient
 from .resources import cancel_check
 
 
-def triangulated_path(poly,start,end):
+def triangulated_path(poly,start,end,tolerance=0.):
     """Connect points through the shared edges of an interior triangular mesh."""
+    from shapely.affinity import translate
     from shapely.errors import GEOSException,UnsupportedGEOSVersionError
     triangulate=getattr(shapely,'constrained_delaunay_triangles',None)
     if triangulate is None:return None
@@ -18,7 +19,13 @@ def triangulated_path(poly,start,end):
         poly=next((g for g in shapely.get_parts(poly) if g.geom_type=='Polygon' and g.covers(start_point) and g.covers(end_point)),None)
         if poly is None:return None
     if not poly.covers(start_point) or not poly.covers(end_point):return None
-    try:triangles=shapely.get_parts(triangulate(poly))
+    if shapely.get_num_coordinates(poly)>2048:return None
+    origin=np.asarray(poly.bounds[:2]);local=translate(poly,*(-origin))
+    start=np.asarray(start)-origin;end=np.asarray(end)-origin
+    start_point,end_point=shapely.Point(start),shapely.Point(end)
+    try:
+        if tolerance:local=shapely.set_precision(local,tolerance*.25)
+        triangles=shapely.get_parts(triangulate(local))
     except (GEOSException,UnsupportedGEOSVersionError):return None
     if not len(triangles):return None
     xy=shapely.get_coordinates(triangles).reshape(-1,4,2)[:,:3]
@@ -44,7 +51,7 @@ def triangulated_path(poly,start,end):
             points=[end]
             while index in previous:
                 index,middle=previous[index];points.append(middle)
-            line=shapely.LineString([start,*points[::-1]])
+            line=shapely.LineString(np.asarray([start,*points[::-1]])+origin)
             return line if poly.covers(line) else None
         for other,cost,middle in graph[index]:
             value2=value+cost

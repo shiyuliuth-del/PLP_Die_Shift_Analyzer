@@ -21,8 +21,8 @@ class Landing:
 
 def pad_loss(copper, pads, tol):
     """Ignore area changes below the possible one-grid rounding strip."""
-    return sum(max(0., pad.difference(copper).area - pad.length * tol)
-               for pad in pads)
+    return sum(max(0., shapely.difference(pad,copper,grid_size=tol).area - pad.length * tol)
+               for pad in pads if not copper.covers(pad))
 
 
 def transition_defects(geometry,zones,width_rule,min_angle,tol):

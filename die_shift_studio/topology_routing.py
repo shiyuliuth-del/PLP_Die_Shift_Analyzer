@@ -59,8 +59,8 @@ def separate_pair(a,b,source_a,source_b,ports_a,ports_b,tol,space=0.,protected=(
                 edge0=c-n*gap/2;edge1=c+n*gap/2
                 ha=shapely.Polygon([edge0-u*size,edge0+u*size,edge0+u*size-n*size,edge0-u*size-n*size])
                 hb=shapely.Polygon([edge1-u*size,edge1+u*size,edge1+u*size+n*size,edge1-u*size+n*size])
-                ga=shapely.union_all(parts(a.difference(patch.difference(ha))),grid_size=tol)
-                gb=shapely.union_all(parts(b.difference(patch.difference(hb))),grid_size=tol)
+                ga=shapely.union_all(parts(shapely.difference(a,shapely.difference(patch,ha,grid_size=tol),grid_size=tol)),grid_size=tol)
+                gb=shapely.union_all(parts(shapely.difference(b,shapely.difference(patch,hb,grid_size=tol),grid_size=tol)),grid_size=tol)
                 if (not ga.is_empty and not gb.is_empty and ga.is_valid and gb.is_valid
                     and signature(ga)==signature(source_a) and signature(gb)==signature(source_b)
                     and covers_ports(ga,ports_a,tol) and covers_ports(gb,ports_b,tol)
@@ -159,8 +159,8 @@ def connected_candidate(source,current,ports,obstacles,board,width,tol,space=0.,
                     local=domain.intersection(shapely.box(x0-margin,y0-margin,x1+margin,y1+margin))
                     def routes():
                         if domain.covers(ends):yield ends;return
-                        if not local.equals(domain):yield triangulated_path(local,start,end)
-                        yield triangulated_path(domain,start,end)
+                        if not local.equals(domain):yield triangulated_path(local,start,end,tol)
+                        yield triangulated_path(domain,start,end,tol)
                         if not local.equals(domain):yield trace(local,start,end,diameter,visibility_budget=4096)
                         yield trace(domain,start,end,diameter,visibility_budget=8192)
                     for line in routes():
@@ -332,7 +332,7 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
         cancel_check();progress(round(40*number/max(1,len(mutable))),f'核验实际连接 {number+1}/{len(mutable)} · {ref[0]} #{ref[1]+1}')
         current=objects[ref]
         collided=foreign_hits(ref,current)
-        missing=bool(np.any(states) and not all(p.difference(current).area<=p.length*r.tol for p in protected[ref]))
+        missing=bool(np.any(states) and pad_loss(current,protected[ref],r.tol)>0.)
         already_connected=checked[ref][0] and not checked[ref][1] and not collided and not any(q.get('connection_failed') for q in by_ref[ref])
         if already_connected and not missing:continue
         candidate=attempt(ref,'保连通补偿：已调整连接轮廓，工艺规则另检',pad_only=already_connected)

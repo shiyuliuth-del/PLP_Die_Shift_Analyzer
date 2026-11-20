@@ -73,6 +73,25 @@ class V58Tests(unittest.TestCase):
         self.assertTrue(region.covers(path))
         self.assertGreater(path.length,70.)
 
+    def test_spawned_joint_lane_matches_in_process_copper_evidence(self):
+        from die_shift_studio.evaluation_scope import focused_catalog,digits_for
+        from die_shift_studio.reconstruction_joint import prepare,scene
+        from die_shift_studio.reconstruction_workers import isolated_scenes
+        e,_,_=two_ended()
+        try:
+            r=e.reconstructor;grid,indices=focused_catalog(r.model,r.p,scope='focus')
+            indices=indices[:2];bundles=prepare(r,grid,indices=indices)
+            poses=[tuple(digits_for(grid,i)) for i in indices]
+            expected={digits:scene(r,grid,bundles,digits)[1] for digits in poses}
+            with closing(isolated_scenes(r,grid,bundles,poses,1,lambda:None)) as values:
+                actual={digits:frame for digits,_,frame,_ in values}
+            self.assertEqual(set(actual),set(expected))
+            for digits,frame in actual.items():
+                self.assertEqual(frame['hard_failures'],expected[digits]['hard_failures'])
+                self.assertEqual(frame['violations'],bool(expected[digits]['violations']))
+                self.assertEqual(frame['repair_refs'],expected[digits]['repair_refs'])
+        finally:e.close()
+
     def test_deletion_keeps_both_physical_ends_and_persists(self):
         e, cfg, _ = two_ended()
         try:
