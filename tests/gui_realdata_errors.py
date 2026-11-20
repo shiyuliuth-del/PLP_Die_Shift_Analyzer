@@ -51,6 +51,7 @@ with tempfile.TemporaryDirectory(prefix='rda-error-output-') as temp:
   layout=k.Layout();layout.read(str(output));top=layout.top_cell();assert top.name=='TopCell';assert sum(1 for inst in top.each_inst() if inst.cell.name.startswith('Package_'))==count
   assert sum(1 for inst in top.each_inst() if inst.cell.name=='G_TEMPLATE')==1
   error_indices=[i for i in layout.layer_indexes() if layout.get_info(i).name=='ERROR'];assert len(error_indices)==1;error_index=error_indices[0]
+  serious_indices=[i for i in layout.layer_indexes() if layout.get_info(i).name=='ERROR2'];assert len(serious_indices)==1;serious_index=serious_indices[0]
   server_info=call(endpoint,'info')['result'];board=server_info['board_bounds_um']
   assert server_info['parameters']['minimum_area_um2']==1
   assert json.loads(Path(project_config['project']).read_text())['settings']['drc_tolerance_um']==.5
@@ -71,7 +72,7 @@ with tempfile.TemporaryDirectory(prefix='rda-error-output-') as temp:
   expected_board.merge();assert not expected_board.is_empty()
   expected_fail=k.Region()
   payload_cells={c.name:c for c in gdstk.read_oas(output).cells}
-  issue_packages=0;rectangles=0;failed=[];rotated=0;retained_subgrid_angles=0
+  issue_packages=0;rectangles=0;serious_rectangles=0;failed=[];rotated=0;retained_subgrid_angles=0
   for seq,package,payload,receipt,state in rows:
    assert receipt['fixed_rdl_drc_checked'] is True
    assert payload['position_um']==excel_rows[package]['position_um']
@@ -102,37 +103,46 @@ with tempfile.TemporaryDirectory(prefix='rda-error-output-') as temp:
 
    # Complete-catalogue/ownership audit. Independent orientation and pose
    # expectations are covered by test_oriented_oas_errors' two-reader fixtures.
-   expected={};unique={}
-   for die,blobs in error_rectangles(issues,server_info['die_count'],layout.dbu,with_placements=True).items():
-    region=k.Region();keys=set()
-    for blob,offset,angle in blobs:
-     xy=np.rint(shapely.get_coordinates(shapely.from_wkb(blob))/layout.dbu).astype(np.int64)
-     polygon=k.Polygon([k.Point(int(x),int(y)) for x,y in xy])
-     if angle:
-      transform=k.ICplxTrans(1.,angle,False,round(offset[0]/layout.dbu),round(offset[1]/layout.dbu))
-      polygon=polygon.transformed(transform)
-     region.insert(polygon);keys.add((blob,offset,angle))
-    expected[die]=region;unique[die]=keys
-   for die in range(server_info['die_count']+1):
-    cell=layout.cell('G_ERROR_'+payload['cell']+f'_DIE_{die}')
-    actual=k.Region(cell.begin_shapes_rec(error_index)) if cell else k.Region()
-    assert (actual^expected.get(die,k.Region())).is_empty(),(package,die,'marker location differs from full catalogue')
-    if cell:
-     pcell=payload_cells[cell.name]
-     for ref in pcell.references:
-      assert abs(ref.rotation)>0,'Subgrid ERROR lost its rotation'
-      retained_subgrid_angles+=1
-     polygons=pcell.get_polygons()
-     assert len(polygons)==len(unique.get(die,())),(package,die,'duplicate/missing polygons')
-     for polygon in polygons:
-      assert len(polygon.points)==4,'ERROR must remain a quadrilateral'
-    for shape in (cell.shapes(error_index).each() if cell else []):
-     assert shape.is_box() or (shape.is_polygon() and shape.polygon.num_points_hull()==4),'ERROR must retain four oriented corners'
-     if shape.is_polygon() and shape.polygon.area()<shape.bbox().area():rotated+=1
-   assert receipt['error_rectangles']==sum(len(s) for s in unique.values())
+   counts={}
+   for label,layer_index in (('ERROR',error_index),('ERROR2',serious_index)):
+    markers=[issue for issue in issues if (issue['severity']=='serious')==(label=='ERROR2')]
+    expected={};unique={}
+    for die,blobs in error_rectangles(markers,server_info['die_count'],layout.dbu,with_placements=True).items():
+     region=k.Region();keys=set()
+     for blob,offset,angle in blobs:
+      xy=np.rint(shapely.get_coordinates(shapely.from_wkb(blob))/layout.dbu).astype(np.int64)
+      polygon=k.Polygon([k.Point(int(x),int(y)) for x,y in xy])
+      if angle:
+       transform=k.ICplxTrans(1.,angle,False,round(offset[0]/layout.dbu),round(offset[1]/layout.dbu))
+       polygon=polygon.transformed(transform)
+      region.insert(polygon);keys.add((blob,offset,angle))
+     expected[die]=region;unique[die]=keys
+    for die in range(server_info['die_count']+1):
+     cell=layout.cell(f'G_{label}_'+payload['cell']+f'_DIE_{die}')
+     actual=k.Region(cell.begin_shapes_rec(layer_index)) if cell else k.Region()
+     assert (actual^expected.get(die,k.Region())).is_empty(),(package,die,'marker location differs from full catalogue')
+     if cell:
+      pcell=payload_cells[cell.name]
+      for ref in pcell.references:
+       assert abs(ref.rotation)>0,'Subgrid ERROR lost its rotation'
+       retained_subgrid_angles+=1
+      polygons=pcell.get_polygons()
+      assert len(polygons)==len(unique.get(die,())),(package,die,'duplicate/missing polygons')
+      for polygon in polygons:
+       assert len(polygon.points)==4,'ERROR must remain a quadrilateral'
+     for shape in (cell.shapes(layer_index).each() if cell else []):
+      assert shape.is_box() or (shape.is_polygon() and shape.polygon.num_points_hull()==4),'ERROR must retain four oriented corners'
+      if shape.is_polygon() and shape.polygon.area()<shape.bbox().area():rotated+=1
+    counts[label]=sum(len(items) for items in unique.values())
+   assert receipt['error_rectangles']==sum(counts.values())
+   assert receipt['error2_rectangles']==counts['ERROR2']
+   if receipt['connection_failure_count']:
+    assert counts['ERROR2']>0,'Failed connections require a severe marker'
+   serious_rectangles+=counts['ERROR2']
    issue_packages+=bool(issues);rectangles+=receipt['error_rectangles']
   assert outcome['issue_packages']==issue_packages and outcome['error_rectangles']==rectangles
   assert outcome['failed_packages']==len(failed)
+  assert outcome['error2_rectangles']==serious_rectangles>0
   assert (k.Region(top.begin_shapes_rec(fail_index))^expected_fail).is_empty(),'FAIL contains extra/missing package outlines'
   assert {'GD55_034','GD55_035','GD55_036'}.issubset(failed),failed
   assert not rows[0][3]['connection_failure_count'],rows[0][3]

@@ -51,6 +51,7 @@ with tempfile.TemporaryDirectory(prefix='rda-plans-gui-') as name:
             runner.return_value.run.return_value = dict(state='completed', completed=1)
             w.start_plans();wait(w)
             runner.return_value.run.assert_called_once()
+            assert all(label in w.progress.toolTip() for label in ('开始 ', '结束 ', '耗时 '))
             assert not any(dialog.isVisible() for dialog in w.findChildren(W.QMessageBox))
         for table in (w.file_view,w.profile,w.table,panel.table):assert not table.verticalHeader().isHidden()
         # Send actual mouse events to each drag handle, including the plan panel.
@@ -81,11 +82,12 @@ with tempfile.TemporaryDirectory(prefix='rda-plans-gui-') as name:
         import_files(sorted((folder/'RealDataAnalyse/Excel').glob('*.xlsx')),database,3,3,threading.Event())
         ledger=Ledger(database)
         try:
-            with ledger.db:ledger.db.execute("update packages set state='committed_with_issues',result=? where seq=1",(json.dumps(dict(drc_count=3,connection_failure_count=1,error_rectangles=2,partial_output=True)),))
+            with ledger.db:ledger.db.execute("update packages set state='committed_with_issues',result=? where seq=1",(json.dumps(dict(drc_count=3,connection_failure_count=1,error_rectangles=3,error2_rectangles=1,partial_output=True)),))
         finally:ledger.close()
         w.database.setText(str(database));w.refresh()
         assert w.table.item(0,3).text()=='已输出（含问题）'
         assert '连接失败 1项' in w.table.item(0,4).text() and 'ERROR矩形 2个' in w.table.item(0,4).text()
+        assert 'ERROR2矩形 1个' in w.table.item(0,4).text()
         assert w.command.findText('task.issues')>=0
         w.command.setCurrentText('batch.begin')
         assert json.loads(w.args.toPlainText())['output_policy']=='omit_failed_regions'

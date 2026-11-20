@@ -98,6 +98,12 @@ class Ledger:
         with self.db:
             self.db.execute('insert or replace into meta values(?,?)', (key, dumps(value)))
 
+    def store_receipts(self, rows, counts):
+        with self.db:
+            self.db.executemany('update packages set state=?,task=?,result=? where seq=?', rows)
+            self.db.executemany('insert or replace into meta values(?,?)',
+                                ((key, dumps(value)) for key, value in counts.items()))
+
     def event(self, message, level='INFO'):
         with self.db:
             self.db.execute('insert into events(created,level,message) values(?,?,?)', (time.time(), level, message))

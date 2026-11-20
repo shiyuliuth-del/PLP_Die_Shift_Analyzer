@@ -57,8 +57,9 @@ def main():
     source=parser.parse_args().source_root.resolve()
     binary=source/'dist'/'Die_Shift_Analyze.exe'
     assert (source/'dist'/'Jobs'/'GD55'/'GD55.dshift.json').is_file()
-    for item in (source/'Jobs'/'GD55').rglob('*'):
-        if item.is_file():assert (source/'dist'/item.relative_to(source)).read_bytes()==item.read_bytes()
+    for case in ('GD55', 'SH22'):
+        for item in (source/'Jobs'/case).rglob('*'):
+            if item.is_file():assert (source/'dist'/item.relative_to(source)).read_bytes()==item.read_bytes()
     from PyInstaller.archive.readers import CArchiveReader
     archive=CArchiveReader(str(binary));pyz=next(n for n in archive.toc if n.lower().endswith('.pyz'))
     modules=archive.open_embedded_archive(pyz).toc
@@ -122,6 +123,8 @@ def main():
         shutil.copy2(source/'dist'/client.name,client)
         normal_launch(client,cwd,'RealDataAnalyse '+__version__)
         paired_env=dict(ipc_env,REALDATA_TEST_EXE=str(client))
+        subprocess.run([sys.executable,str(ROOT/'tests/gui_sh22_measurements.py')],cwd=ROOT,
+                       env=dict(paired_env,SH22_TEST_CASE=str(source/'Jobs/SH22')),check=True,timeout=330)
         # Repeat fresh processes/lots: a previous Windows-only invocation exited
         # unsuccessfully without a captured receipt. Every run must pass; this
         # is a lifecycle regression, never a retry that hides an earlier failure.

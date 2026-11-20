@@ -79,13 +79,13 @@ class V50Tests(unittest.TestCase):
   geometry=shapely.union_all([a,b,tiny]);_adopt([q],geometry,.001,'test')
   self.assertLess(q['regions']['A'].bounds[2],10.01)
   self.assertLess(shapely.union_all(list(q['regions'].values())).symmetric_difference(geometry).area,1e-8)
- def test_manual_box_overrides_ignored_and_uses_straight_blades(self):
+ def test_manual_box_uses_straight_blades_and_ignore_removes_region(self):
   from test_v49_reconstruction import V49ReconstructionTests
   from die_shift_studio.manual_regions import partition
   e,_,_=V49ReconstructionTests().fixture()
   try:
    polygon=shapely.box(80,-30,180,15)
-   cfg=replace(e.reconstructor.settings,reconstruction_ignored=(('5/0',0),),reconstruction_boxes=(('5/0',tuple(polygon.exterior.coords)[:4]),))
+   cfg=replace(e.reconstructor.settings,reconstruction_boxes=(('5/0',tuple(polygon.exterior.coords)[:4]),))
    e.configure_reconstruction(True,cfg);r=e.reconstructor;frame=r.frame(np.zeros((1,3)),diagnostics=False,_raw=True)
    rows=[q for q in frame['pieces'] if q['layer']=='5/0' and q['index']==0]
    self.assertTrue(rows);self.assertFalse(any(q.get('ignored') for q in rows))
@@ -95,6 +95,11 @@ class V50Tests(unittest.TestCase):
     for key in ('moved_cut','extra_cut'):
      for line in shapely.get_parts(q[key]):
       if line.geom_type=='LineString':self.assertLess(line.hausdorff_distance(shapely.LineString([line.coords[0],line.coords[-1]])),1e-6)
+   e.configure_reconstruction(True,replace(cfg,reconstruction_ignored=(('5/0',0),)))
+   ignored=e.reconstructor.frame(np.zeros((1,3)),diagnostics=False,_raw=True)
+   rows=[q for q in ignored['pieces'] if q['layer']=='5/0' and q['index']==0]
+   self.assertTrue(rows);self.assertTrue(all(q.get('ignored') for q in rows))
+   self.assertTrue(all(q['nominal_regions']['A'].is_empty for q in rows))
   finally:e.close()
  def test_explicit_partial_output_can_remove_the_entire_failed_region(self):
   from test_v49_reconstruction import V49ReconstructionTests
@@ -112,7 +117,7 @@ class V50Tests(unittest.TestCase):
   from shapely.geometry import LineString,Point,box
   source=shapely.union_all([LineString([(0,y),(300,y)]).buffer(10) for y in (-40,40)]+[LineString([(x,-40),(x,40)]).buffer(10) for x in (150,)])
   shapes={'127/0':[box(-200,-200,500,200)],'128/0':[box(-40,-80,40,80)],'3/0':[Point(0,y).buffer(8) for y in (-40,40)],'4/0':[Point(0,y).buffer(3) for y in (-40,40)],'5/0':[source],'6/0':[Point(300,y).buffer(3) for y in (-40,40)]}
-  polygon=box(80,-100,220,100);cfg=ViewSettings(reconstruction_boxes=(('5/0',tuple(polygon.exterior.coords)[:4]),),reconstruction_ignored=(('5/0',0),))
+  polygon=box(80,-100,220,100);cfg=ViewSettings(reconstruction_boxes=(('5/0',tuple(polygon.exterior.coords)[:4]),))
   e,_,_=make_engine(shapes,Parameters(single_bound_x_um=5,single_bound_y_um=5,bound_angle_deg=0,line_width_um=10,line_space_um=5,annulus_um=5,moving_annulus_um=3),cfg)
   try:
    f=e.reconstructor.frame(np.zeros((1,3)),diagnostics=False,_raw=True);rows=f['pieces'];active=shapely.union_all([q['nominal_regions']['A'] for q in rows])

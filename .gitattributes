@@ -17,6 +17,9 @@ Jobs/GD55 -export-ignore
 Jobs/GD55/** -export-ignore
 Jobs/GD55_1119 -export-ignore
 Jobs/GD55_1119/** -export-ignore
+Jobs/SH22 -export-ignore
+Jobs/SH22/** -export-ignore
+Jobs/SH22/**/*.csv -text
 docs export-ignore
 examples export-ignore
 figures export-ignore

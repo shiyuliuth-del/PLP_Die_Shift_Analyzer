@@ -60,14 +60,27 @@ def validate(snapshot, output, check_hash=False, stop=None):
     if target.exists() and not target.is_file():
         raise ValueError('输出位置不是普通文件')
     controls = snapshot['controls']
-    if not 1 <= controls['dies'] <= 10000 or not 1 <= controls['workers'] <= 64 or not 128 <= controls['memory'] <= 1048576 or not 0 <= controls['retries'] <= 10 or not 0 <= controls['timeout'] <= 86400:
+    if (not 1 <= controls['dies'] <= 10000 or not 0 <= controls['workers'] <= 64
+            or (controls['memory'] != 0 and not 128 <= controls['memory'] <= 1048576)
+            or not 0 <= controls['retries'] <= 10 or not 0 <= controls['timeout'] <= 86400):
         raise ValueError('任务资源参数超出范围')
     selected = [p for p in snapshot['files'] if p['enabled']]
-    if len(selected) != controls['dies'] or len({p['path'] for p in selected}) != len(selected):
+    measurement = snapshot.get('measurement')
+    if len({p['path'] for p in selected}) != len(selected):
+        raise ValueError('测量文件不得重复')
+    suffixes = ('.xlsx',)
+    if measurement:
+        from .measurements import SUFFIXES
+        excel = inside(root, measurement['root'])
+        dies = {Path(p['path']).resolve().parent for p in selected}
+        if len(dies) != controls['dies'] or any(die.parent != excel for die in dies):
+            raise ValueError('计划所选测量文件须覆盖各芯片目录')
+        suffixes = SUFFIXES
+    elif len(selected) != controls['dies']:
         raise ValueError('所选Excel须与DIE数量一致，且不得重复')
     for item in selected:
-        if Path(item['path']).suffix.lower() != '.xlsx':
-            raise ValueError('当前适配器仅支持.xlsx')
+        if Path(item['path']).suffix.lower() not in suffixes:
+            raise ValueError('测量文件格式与导入模式不符')
         profile = snapshot['profile'] if snapshot.get('shared_mapping', True) else item.get('profile', snapshot['profile'])
         if not profile.get('sheet') or not isinstance(profile.get('columns'), dict) or type(profile.get('header_row')) is not int or profile['header_row'] < 1:
             raise ValueError('工作表、表头行或列映射缺失')
@@ -287,17 +300,6 @@ class PlanRunner:
             project = materialize(row, self.stop)
             configure_logging(workspace)
             if self.trace: self.trace.set_root(workspace)
-            if not database.exists():
-                selected = [item for item in snapshot['files'] if item['enabled']]
-                profiles = None if snapshot.get('shared_mapping',True) else {item['path']: item.get('profile',snapshot['profile']) for item in selected}
-                import_files([item['path'] for item in selected], database, controls['dies'], controls['workers'], self.stop,
-                             lambda message: report(message,0,15), snapshot['profile'], profiles)
-            with closing(sqlite3.connect(database.as_uri()+'?mode=ro', uri=True)) as db:
-                batch_owner = json.loads(db.execute("select value from meta where key='run_id'").fetchone()[0])
-                sources = json.loads(db.execute("select value from meta where key='sources'").fetchone()[0])
-            expected = {item['path']: item['sha256'] for item in snapshot['inputs']}
-            if any(expected.get(item['path']) != item['sha256'] for item in sources):
-                raise ValueError('Excel在计划校验与导入之间发生变化；请重新创建计划')
             endpoint = default_endpoint().parent/('endpoint-plan-'+plan_id+'.json')
             def launched_callback(value):
                 nonlocal transport, owned_pid, owned_birth, owned
@@ -306,10 +308,32 @@ class PlanRunner:
                 transport = value; owned_pid = value.process.pid
                 owned_birth = psutil.Process(owned_pid).create_time()
                 self.plans.update(plan_id, owned_pid=owned_pid, owned_birth=owned_birth, owned_instance=None)
-            transport, info, launched = connect(project, endpoint, self.stop, lambda message: report(message,15,10),
-                                                 controls['timeout'], self.trace, exact=True, on_launch=launched_callback)
-            if launched or transport.owns_descriptor(owned_pid, owned_birth):
-                owned = info['instance_id']; self.plans.update(plan_id, owned_instance=owned)
+            def connect_plan():
+                nonlocal transport, owned
+                transport, info, launched = connect(project, endpoint, self.stop, lambda message: report(message,15,10),
+                                                     controls['timeout'], self.trace, exact=True, on_launch=launched_callback)
+                if launched or transport.owns_descriptor(owned_pid, owned_birth):
+                    owned = info['instance_id']; self.plans.update(plan_id, owned_instance=owned)
+                return info
+            if not database.exists():
+                selected = [item for item in snapshot['files'] if item['enabled']]
+                profiles = None if snapshot.get('shared_mapping',True) else {item['path']: item.get('profile',snapshot['profile']) for item in selected}
+                measurement = snapshot.get('measurement')
+                geometry = None
+                if measurement:
+                    from .measurements import nominal_geometry
+                    geometry = nominal_geometry(connect_plan())
+                import_files([item['path'] for item in selected], database, controls['dies'], controls['workers'], self.stop,
+                             lambda message: report(message,0,15), snapshot['profile'], profiles,
+                             measurement=measurement, geometry=geometry)
+            with closing(sqlite3.connect(database.as_uri()+'?mode=ro', uri=True)) as db:
+                batch_owner = json.loads(db.execute("select value from meta where key='run_id'").fetchone()[0])
+                sources = json.loads(db.execute("select value from meta where key='sources'").fetchone()[0])
+            expected = {item['path']: item['sha256'] for item in snapshot['inputs']}
+            if any(expected.get(item['path']) != item['sha256'] for item in sources):
+                raise ValueError('Excel在计划校验与导入之间发生变化；请重新创建计划')
+            if transport is None:
+                connect_plan()
             return Runner(database, endpoint, project, row['output'], controls['workers'], controls['memory'], controls['retries'],
                    controls['timeout'], self.stop, report, transport=transport, trace=self.trace,
                    template=snapshot.get('template'), expected_template_sha256=expected.get(snapshot.get('template'))).run()
@@ -387,7 +411,11 @@ class PlanRunner:
                     self.progress(str(exc))
                     if '队列停止' in str(exc): break
                 else:
-                    self.plans.update(plan_id, status='completed', severity='', progress=100, ended=time.time(), message=f'OAS已校验并提交；含问题{summary.get("issue_packages",0)}封装，ERROR矩形{summary.get("error_rectangles",0)}个，FAIL {summary.get("failed_packages",0)}封装')
+                    serious = summary.get('error2_rectangles', 0)
+                    ordinary = summary.get('error_rectangles', 0) - serious
+                    self.plans.update(plan_id, status='completed', severity='', progress=100, ended=time.time(),
+                                      message=f'OAS已校验并提交 · 含问题{summary.get("issue_packages",0)}封装 · '
+                                              f'ERROR {ordinary} · ERROR2 {serious} · FAIL {summary.get("failed_packages",0)}封装')
                     totals['completed'] += 1
         state = 'paused' if self.stop.is_set() else ('completed_with_errors' if totals['failed'] or totals['skipped'] else 'completed')
         return dict(state=state, **totals)

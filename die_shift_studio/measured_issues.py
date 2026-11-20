@@ -37,12 +37,15 @@ def _retry_locked(operation,deadline):
 
 def catalogue(frame,case,model=None):
     from .current_drc import locations
-    owners_by_net={}
-    if model is not None:
+    owners_by_net=getattr(model,'_measured_owners_by_net',None)
+    if owners_by_net is None:
+        owners_by_net={}
+    if model is not None and not hasattr(model,'_measured_owners_by_net'):
         for node in model.nodes:
             if node['owner']>=0:owners_by_net.setdefault(node['net'],set()).add(int(node['owner'])+1)
-    import shapely,math
-    from shapely.affinity import rotate
+        model._measured_owners_by_net=owners_by_net
+    import math,shapely
+    from shapely.affinity import translate
     rows=[];origin=np.asarray(case['board'].bounds[:2])
     for i,q in enumerate(frame['drc_locations'] if 'drc_locations' in frame else locations(frame.get('drc',()),measure=frame.get('measure_drc',True))):
         from .resources import cancel_check
@@ -53,24 +56,33 @@ def catalogue(frame,case,model=None):
         if model is not None:
             for ref in q.get('refs',()):
                 if tuple(ref) in model.ids:dies.update(owners_by_net.get(model.nodes[model.ids[tuple(ref)]]['net'],()))
-        # Construct around the actual witness. Single-owner markers align with
-        # its current DIE orientation; shared-net witnesses use their own MRR.
-        poses=frame.get('states')
-        angle=float(poses[next(iter(dies))-1,2]) if len(dies)==1 and poses is not None and next(iter(dies))<=len(poses) else 0.
-        witness=q['geometry'];margin=max(float(getattr(model.data,'dbu_um',.001)) if model is not None else .001,1e-6)
-        if len(dies)==1:
-            local=rotate(witness,-angle,origin=(0,0),use_radians=True)
-            lo=np.asarray(local.bounds[:2])-margin;hi=np.asarray(local.bounds[2:])+margin
-            rectangle=rotate(shapely.box(*lo,*hi),angle,origin=(0,0),use_radians=True)
-        else:
-            rectangle=witness.minimum_rotated_rectangle
-            if rectangle.geom_type!='Polygon':rectangle=witness.buffer(margin).minimum_rotated_rectangle
-            edge=np.diff(np.asarray(rectangle.exterior.coords),axis=0)[0];angle=math.atan2(edge[1],edge[0])
-        corners=np.asarray(rectangle.exterior.coords)[:4].tolist()
+        # Work near the witness instead of subtracting nearly equal large
+        # panel coordinates during the minimum-area fit.
+        witness=q['geometry']
+        anchor=np.asarray(bounds[:2])
+        local=translate(witness,-anchor[0],-anchor[1])
+        envelope=local.minimum_rotated_rectangle
+        edges=np.diff(shapely.get_coordinates(envelope),axis=0)
+        lengths=np.hypot(edges[:,0],edges[:,1])
+        edge=edges[np.argmax(lengths)] if len(lengths) and lengths.max()>0 else np.array([1.,0.])
+        unit=edge/np.hypot(*edge)
+        if unit[0]<0 or (unit[0]==0 and unit[1]<0):unit=-unit
+        basis=np.column_stack((unit,[-unit[1],unit[0]]))
+        xy=shapely.get_coordinates(local)@basis
+        lo=xy.min(axis=0);hi=xy.max(axis=0)
+        dbu=float(getattr(model.data,'dbu_um',.001)) if model is not None else .001
+        # A thin or linear witness needs at least one physical output grid
+        # interval to remain a nondegenerate polygon at this panel location.
+        pad=np.maximum(0.,dbu-(hi-lo))/2+np.finfo(float).eps*max(map(abs,bounds),default=1.)*16
+        lo-=pad;hi+=pad
+        corners=(np.array([[lo[0],lo[1]],[hi[0],lo[1]],[hi[0],hi[1]],[lo[0],hi[1]]])@basis.T+anchor).tolist()
+        angle=math.atan2(unit[1],unit[0])
+        severe=bool(q.get('connection_failure') or q.get('short_circuit'))
         rows.append(dict(die_ids=sorted(dies) or [0],number=i+1,kind=q['kind'],layers=list(q.get('layers',(q.get('layer',''),))),
                          bounds_um=bounds,point_um=point,marker_corners_um=corners,marker_angle_deg=math.degrees(angle),package_relative_bounds_um=(np.asarray(bounds)-np.tile(origin,2)).tolist(),
                          required_um=q.get('required_um'),required_deg=q.get('required_deg'),actual_um=q.get('actual_um'),actual_deg=q.get('actual_deg'),
-                         refs=[list(v) for v in q.get('refs',())],connection_failure=bool(q.get('connection_failure'))))
+                         refs=[list(v) for v in q.get('refs',())],connection_failure=bool(q.get('connection_failure')),
+                         short_circuit=bool(q.get('short_circuit')),severity='serious' if severe else 'drc'))
     return rows
 
 
