@@ -393,7 +393,11 @@ class Runner:
             ledger.db.execute("update packages set state=case when state in ('computed_with_issues','committed_with_issues') then 'committed_with_issues' else 'committed' end")
         ledger.set('state', 'completed')
         self.note(f'完成：{ledger.get("count")}封装，{self.output}，SHA-256 {digest}')
-        self.progress(dict(text=f'完成 · {ledger.get("count")}封装 · 含问题{ledger.get("issue_packages",0)}封装 · ERROR矩形{ledger.get("error_rectangles",0)}个 · FAIL {ledger.get("failed_packages",0)}封装 · OAS已提交', current=1, total=1))
+        serious = ledger.get('error2_rectangles', 0)
+        ordinary = ledger.get('error_rectangles', 0) - serious
+        self.progress(dict(text=f'完成 · {ledger.get("count")}封装 · 含问题{ledger.get("issue_packages",0)}封装 · '
+                                f'ERROR {ordinary} · ERROR2 {serious} · FAIL {ledger.get("failed_packages",0)}封装 · OAS已提交',
+                           current=1, total=1))
         return True
 
     def run(self):
