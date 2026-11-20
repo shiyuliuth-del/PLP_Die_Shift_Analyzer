@@ -201,6 +201,7 @@ class Reconstructor:
         self.source_boxes=boxes('reconstruction_boxes','source_boxes')
         self.angle_boxes=boxes('reconstruction_angle_boxes','angle_boxes')
         excluded=set(settings.reconstruction_box_excluded)
+        excluded.update(set(settings.reconstruction_ignored)&set(settings.reconstruction_following))
         self.box_refs=(self.source_boxes.keys() | self.angle_boxes.keys())-excluded
         self.box_partitions={};self._entry_catalogue=None;self._entries_by_ref={}
 
@@ -581,7 +582,8 @@ class Reconstructor:
         self._base_plans=[entry for key in keys for entry in self.plan_pool[key]]
         from .parallel_zones import coordinate
         self._base_plans=coordinate(self,self._base_plans)
-        self._plans=expand(self,[e for e in self._base_plans if (e['layer'],e['index']) not in self.settings.reconstruction_ignored])
+        ignored=set(self.settings.reconstruction_ignored)-self.box_refs
+        self._plans=expand(self,[e for e in self._base_plans if (e['layer'],e['index']) not in ignored])
         from .ignored_motion import entries as ignored_entries
         self._plans.extend(ignored_entries(self))
         return self._plans
