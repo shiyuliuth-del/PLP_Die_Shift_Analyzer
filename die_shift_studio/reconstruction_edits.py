@@ -80,8 +80,13 @@ def change_zone(window,action,piece=None,ref=None,point=None,side=None,refs=()):
         if plan is None:return
         deleted=set(cfg.reconstruction_deleted);deleted.update(key(q['route_plan']) for q in piece.get('graph_members',(piece,)) if q.get('route_plan') is not None)
         present=[q for q in displayed.get('pieces',()) if (q['layer'],q['index'])==ref and q.get('route_plan') is not None]
-        if all(key(member['route_plan']) in deleted for q in present for member in q.get('graph_members',(q,))):ignored.add(ref)
-        updated=replace(cfg,reconstruction_deleted=tuple(sorted(deleted)),reconstruction_ignored=tuple(sorted(ignored)))
+        box_excluded=set(cfg.reconstruction_box_excluded)
+        if all(key(member['route_plan']) in deleted for q in present for member in q.get('graph_members',(q,))):
+            ignored.add(ref)
+            if any(row[0]==ref[0] for row in (*cfg.reconstruction_boxes,*cfg.reconstruction_angle_boxes)):
+                box_excluded.add(ref)
+        updated=replace(cfg,reconstruction_deleted=tuple(sorted(deleted)),reconstruction_ignored=tuple(sorted(ignored)),
+                        reconstruction_box_excluded=tuple(sorted(box_excluded)))
     elif action=='add':
         ignored.discard(ref);forced.add(ref)
         current=[q for q in displayed.get('pieces',()) if (q['layer'],q['index'])==ref and q.get('route_plan') is not None]

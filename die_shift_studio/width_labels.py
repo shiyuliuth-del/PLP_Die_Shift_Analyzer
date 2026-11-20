@@ -18,9 +18,23 @@ class LabelLayout:
         self.viewport=np.asarray(ax.bbox.extents)/self.scale
         xy=shapely.get_coordinates(rectangles).reshape(-1,5,2)[:,:4]
         self.quads=ax.transData.transform(xy.reshape(-1,2)).reshape(-1,4,2)/self.scale
-        self.geometry=shapely.polygons(self.quads)
-        self.tree=STRtree(self.geometry) if avoid else None
+        self.quad_lo=self.quads.min(axis=1)
+        self.quad_hi=self.quads.max(axis=1)
+        self.axis_aligned=bool(len(self.quads) and np.all(
+            ((np.abs(self.quads[:,:,0]-self.quad_lo[:,None,0])<1e-5)|(np.abs(self.quads[:,:,0]-self.quad_hi[:,None,0])<1e-5))&
+            ((np.abs(self.quads[:,:,1]-self.quad_lo[:,None,1])<1e-5)|(np.abs(self.quads[:,:,1]-self.quad_hi[:,None,1])<1e-5))))
+        self.geometry=None if (avoid and self.axis_aligned) else shapely.polygons(self.quads)
+        self.avoid=bool(avoid)
+        self._tree=STRtree(self.geometry) if (avoid and not self.axis_aligned) else None
         self.labels=[];self.viable=None;self.occupied=None
+
+    @property
+    def tree(self):
+        if not self.avoid:return None
+        if self._tree is None:
+            if self.geometry is None:self.geometry=shapely.polygons(self.quads)
+            self._tree=STRtree(self.geometry)
+        return self._tree
 
     @staticmethod
     def summed(grid):
@@ -36,7 +50,7 @@ class LabelLayout:
         return (x1>x0)&(y1>y0)&((table[y1,x1]-table[y1,x0]-table[y0,x1]+table[y0,x0])>0)
 
     def prescreen(self,texts):
-        if self.tree is None or len(texts)<64:return
+        if not self.avoid or len(texts)<64:return
         # The actual gate corners, midpoints and centres are valid witnesses.
         # A prefix sum cheaply proves dense areas have no place for ANY label.
         half=np.array([self.half_size(t) for t in texts]);small=half.min(axis=0)
@@ -66,6 +80,20 @@ class LabelLayout:
             self.measurements[key]=half
         return self.measurements[key]
 
+    def _overlaps_quads(self,lo,hi):
+        if not self.avoid or not len(lo) or not len(self.quad_lo):return np.zeros(len(lo),bool)
+        if self.axis_aligned:
+            # Exact vectorized AABB check in chunks to keep memory tiny.
+            blocked=np.zeros(len(lo),bool)
+            for start in range(0,len(lo),128):
+                a,b=lo[start:start+128,None,:],hi[start:start+128,None,:]
+                blocked[start:start+128]=np.all((b>self.quad_lo)&(a<self.quad_hi),axis=2).any(axis=1)
+            return blocked
+        blocked=np.zeros(len(lo),bool)
+        hit,_=self.tree.query(shapely.box(*lo.T,*hi.T),predicate='intersects')
+        blocked[hit]=True
+        return blocked
+
     def place_selected(self,index,text):
         near=self.place(index,text)
         if near is not None:return near
@@ -74,16 +102,18 @@ class LabelLayout:
         half=self.half_size(text);low=self.viewport[:2]+half+1;high=self.viewport[2:]-half-1
         if np.any(high<low):return
         base=self.quads[index].mean(axis=0)
-        x=np.linspace(low[0],high[0],1+int(np.ceil((high[0]-low[0])/10)))
-        y=np.linspace(low[1],high[1],1+int(np.ceil((high[1]-low[1])/10)))
+        nx=min(28,1+int(np.ceil((high[0]-low[0])/10)))
+        ny=min(22,1+int(np.ceil((high[1]-low[1])/10)))
+        x=np.linspace(low[0],high[0],nx);y=np.linspace(low[1],high[1],ny)
         centers=np.stack(np.meshgrid(x,y),axis=-1).reshape(-1,2)
         lo,hi=centers-half,centers+half
         valid=np.ones(len(lo),bool)
-        for a,b in self.labels:valid &= ~((hi>a)&(lo<b)).all(axis=1)
+        if self.labels:
+            old=np.asarray(self.labels)
+            valid &= ~np.all((hi[:,None,:]>old[:,0])&(lo[:,None,:]<old[:,1]),axis=2).any(axis=1)
         ids=np.flatnonzero(valid)
-        if len(ids) and self.tree is not None:
-            blocked,_=self.tree.query(shapely.box(*lo[ids].T,*hi[ids].T),predicate='intersects')
-            valid[ids[blocked]]=False;ids=np.flatnonzero(valid)
+        if len(ids) and self.avoid:
+            valid[ids[self._overlaps_quads(lo[ids],hi[ids])]]=False;ids=np.flatnonzero(valid)
         if not len(ids):return
         i=ids[np.argmin(np.sum((centers[ids]-base)**2,axis=1))]
         self.labels.append((lo[i],hi[i]))
@@ -106,11 +136,17 @@ class LabelLayout:
         x=np.linspace(low[0],high[0],13);y=np.linspace(low[1],high[1],11)
         centers=np.vstack((near,np.stack(np.meshgrid(x,y),axis=-1).reshape(-1,2)))
         lo,hi=centers-half,centers+half;score=np.zeros(len(centers))
-        for a,b in self.labels:
-            score+=np.prod(np.maximum(0,np.minimum(hi,b)-np.maximum(lo,a)),axis=1)
-        if self.tree is not None:
-            candidates=shapely.box(*lo.T,*hi.T);i,j=self.tree.query(candidates,predicate='intersects')
-            if len(i):np.add.at(score,i,shapely.area(shapely.intersection(candidates[i],self.tree.geometries[j])))
+        if self.labels:
+            old=np.asarray(self.labels)
+            overlap=np.maximum(0.,np.minimum(hi[:,None,:],old[:,1])-np.maximum(lo[:,None,:],old[:,0]))
+            score+=np.prod(overlap,axis=2).sum(axis=1)
+        if self.avoid and len(self.quad_lo):
+            if self.axis_aligned:
+                overlap=np.maximum(0.,np.minimum(hi[:,None,:],self.quad_hi)-np.maximum(lo[:,None,:],self.quad_lo))
+                score+=np.prod(overlap,axis=2).sum(axis=1)
+            else:
+                candidates=shapely.box(*lo.T,*hi.T);i,j=self.tree.query(candidates,predicate='intersects')
+                if len(i):np.add.at(score,i,shapely.area(shapely.intersection(candidates[i],self.tree.geometries[j])))
         distance=np.sum((centers-base)**2,axis=1)
         i=int(np.lexsort((distance,score))[0]);self.labels.append((lo[i],hi[i]))
         tip=tuple(self.ax.transData.inverted().transform(base*self.scale))
@@ -122,9 +158,14 @@ class LabelLayout:
         if np.any(q.max(axis=0)<low) or np.any(q.min(axis=0)>high):return
         base=q.mean(axis=0)
         if np.any(base<low) or np.any(base>high):
-            part=shapely.intersection(self.geometry[index],shapely.box(*self.viewport))
-            if part.is_empty:return
-            base=shapely.get_coordinates(part.centroid)[0]
+            if self.axis_aligned:
+                lo_c=np.maximum(self.quad_lo[index],low);hi_c=np.minimum(self.quad_hi[index],high)
+                if np.any(hi_c<=lo_c):return
+                base=(lo_c+hi_c)*.5
+            else:
+                part=shapely.intersection(self.geometry[index],shapely.box(*self.viewport))
+                if part.is_empty:return
+                base=shapely.get_coordinates(part.centroid)[0]
         # Intersect each candidate ray with the real, possibly rotated gate.
         basis=np.column_stack([q[1]-q[0],q[3]-q[0]])
         if abs(np.linalg.det(basis))<1e-12:return
@@ -146,10 +187,8 @@ class LabelLayout:
             conflict=(np.all(hi[:,None,:]>old[:,0],axis=2) & np.all(lo[:,None,:]<old[:,1],axis=2))
             valid &= ~conflict.any(axis=1)
         indices=np.flatnonzero(valid)
-        if self.tree is not None and len(indices):
-            boxes=shapely.box(*lo[indices].T,*hi[indices].T)
-            overlaps,_=self.tree.query(boxes,predicate='intersects')
-            valid[indices[overlaps]]=False
+        if self.avoid and len(indices):
+            valid[indices[self._overlaps_quads(lo[indices],hi[indices])]]=False
         choices=np.flatnonzero(valid)
         if len(choices):
             i=choices[0];self.labels.append((lo[i],hi[i]))

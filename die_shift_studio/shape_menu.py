@@ -55,7 +55,8 @@ def show_shape_menu(window,event,point):
         selected={r for r in refs if roles.get(r[0])=='固定RDL'}
         solver=getattr(getattr(window,'engine',None),'reconstructor',None)
         frame=window.current_frame or {}
-        pieces=frame.get('reconstruction',{}).get('pieces',())
+        displayed=(window.reconstruction_overlay.data() if getattr(window,'reconstruction_overlay',None) else None) or frame.get('reconstruction') or {}
+        pieces=displayed.get('pieces',())
         zoned={(q['layer'],q['index']) for q in pieces if q.get('route_plan') is not None}
         if picked:
             piece,_,kind=picked
@@ -84,7 +85,7 @@ def show_shape_menu(window,event,point):
                 menu.addAction('固定过孔随动',lambda:via_follow(eligible-selected_vias,True))
             if eligible&selected_vias:
                 menu.addAction('固定过孔恢复静止',lambda:via_follow(eligible&selected_vias,False))
-        ignored=set(window.view_settings.reconstruction_ignored)|set((window.current_frame or {}).get('reconstruction',{}).get('auto_ignored',{}))
+        ignored=set(window.view_settings.reconstruction_ignored)|set(displayed.get('auto_ignored',{}))
         add=selected-ignored;remove=selected&ignored
         data=window.data;group=window.cache_group
         def change_reconstruction(items,value):

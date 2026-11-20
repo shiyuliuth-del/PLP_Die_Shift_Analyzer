@@ -17,15 +17,20 @@ class SceneRenderer:
         if not self.capturing:self.key=None;self.background=None;self.selection_background=None;self.selection_images.clear();self.unselected_key=None;self.feedback_background=None
 
     def draw_feedback(self,artist,key,legend=None):
-        """Pulse a handle without rerasterising copper or probability images."""
+        """Pulse a handle or region preview without rerasterising copper or probability images."""
+        artists=list(artist) if isinstance(artist,(list,tuple)) else [artist]
+        artists=[a for a in artists if a is not None]
+        if not artists:return
         stamp=(key,self.selection_key(legend))
         if self.feedback_background is None or self.feedback_background[0]!=stamp:
-            visible=artist.get_visible();artist.set_visible(False)
+            visible=[a.get_visible() for a in artists]
+            for a in artists:a.set_visible(False)
             self.draw(self.key or self.pending_key or ('feedback',stamp),legend)
             self.feedback_background=(stamp,self.canvas.copy_from_bbox(self.ax.bbox))
-            artist.set_visible(visible)
+            for a,v in zip(artists,visible):a.set_visible(v)
         self.canvas.restore_region(self.feedback_background[1])
-        if artist.get_visible():self.ax.draw_artist(artist)
+        for a in sorted((a for a in artists if a.get_visible()),key=lambda obj:obj.get_zorder()):
+            self.ax.draw_artist(a)
         self.canvas.blit(self.ax.bbox)
 
     def selection_key(self,legend):

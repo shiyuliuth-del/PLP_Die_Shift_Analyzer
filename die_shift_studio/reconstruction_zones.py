@@ -21,8 +21,11 @@ def expand(r,entries):
             if scope==['seed']:seeded[id(best)]=(x,y,identity)
             else:attached[id(best)].append((x,y,identity,scope))
     for entry in entries:
-        if (entry['layer'],entry['index']) in getattr(r,'box_refs',()):result.append(entry);continue
-        plan=entry['plan'];extras=attached.get(id(entry),());seed=seeded.get(id(entry))
+        plan=entry['plan']
+        if (entry['layer'],entry['index']) in getattr(r,'box_refs',()):
+            if plan is None or key(plan) not in r.settings.reconstruction_deleted:result.append(entry)
+            continue
+        extras=attached.get(id(entry),());seed=seeded.get(id(entry))
         if seed and plan is not None:
             x,y,identity=seed;child=copy.copy(plan);child.cache={};child.pose_memo=OrderedDict();child.memo_bytes=0
             child.identity=plan.identity+'~'+identity
@@ -114,9 +117,14 @@ def live_serial(original,settings,old,ref,draft=False):
     same_rules=(settings.drc_checks,settings.drc_tolerance_um,settings.drc_min_angle_deg)==(original.settings.drc_checks,original.settings.drc_tolerance_um,original.settings.drc_min_angle_deg)
     rebuilt=Reconstructor(original.model,original.p,settings,plan_pool=pool,reference=original if same_rules else None)
     rebuilt.vias_by_target={ref:original.vias_by_target[ref]} if ref in original.vias_by_target else {}
-    if base is not None and (not draft or (pool['local'] and ref not in rebuilt.box_refs and ref not in settings.reconstruction_ignored and ref not in original.settings.reconstruction_ignored and ref not in original.box_refs)):
+    rebuilt._envelopes=getattr(original,'_envelopes',None)
+    if base is not None:
         rebuilt.auto_following=set(original.auto_following);rebuilt.auto_ignored=dict(original.auto_ignored);rebuilt.safe_vias=dict(original.safe_vias)
-        rebuilt._envelopes=original._envelopes;rebuilt._plans=expand(rebuilt,pool['local'])
+        if ref in settings.reconstruction_ignored and ref not in rebuilt.box_refs:
+            from .ignored_motion import entries as ignored_entries
+            rebuilt._base_plans=[];rebuilt._plans=ignored_entries(rebuilt)
+        elif pool['local'] and (not draft or ref not in settings.reconstruction_ignored or ref in rebuilt.box_refs):
+            rebuilt._base_plans=list(pool['local']);rebuilt._plans=expand(rebuilt,pool['local'])
     try:
         local=rebuilt.frame(old['states'],targets={ref},diagnostics=False,quick=True,_raw=True)
         data=old['reconstruction']

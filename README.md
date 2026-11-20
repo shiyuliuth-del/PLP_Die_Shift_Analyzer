@@ -1,4 +1,6 @@
-# Die Shift Analyze V55
+# Die Shift Analyze V56
+
+V56 随包新增 `Jobs/GD55_1119` 测试案例，修复双 DIE 跨中点拖动、拐角截断、框选动区删除与重框选问题，新增框选动区落点标记、关闭自动计算时的图形暂存标记、视野外弹窗自动隐藏与重构预演性能优化。详见 [V56 使用说明](docs/V56_使用说明.md)。
 
 V55 加快 GDS/OAS 导入与金属连通识别，修复分叉、平行排线及拐角的动区边界，并增加固定过孔联动设置。详见 [V55 使用说明](docs/V55_使用说明.md)。
 
@@ -17,7 +19,7 @@ V50：芯片对重点组合、分叉边界修正、当前姿态GDS/OAS与旋转E
 软件分析Die-first封装的DIE平移与旋转，提供三方案初筛、实体覆盖与极端足迹、通道宽度风险、重构动区编辑、规则/联合模型良率、工程结果保存、GDS/OAS导入、实测IPC及批量OAS输出。长度均为μm，GDS/OAS只读，工程节点可编辑。
 
 - [实测IPC接口与注意事项](docs/MEASURED_OUTPUT_API.md) · [GD55-1105独立验证脚本](tools/verify_measured_gd55.py)
-- [用户操作](docs/V55_使用说明.md)
+- [用户操作](docs/V56_使用说明.md)
 - [AI交接：主要功能、代码地图、算法和后续重点](docs/AI_HANDOFF.md)
 - [现行设计合同](docs/DESIGN_REQUIREMENTS.md)
 - [已知边界](docs/KNOWN_ISSUES.md)
@@ -27,6 +29,6 @@ V50：芯片对重点组合、分叉边界修正、当前姿态GDS/OAS与旋转E
 
 Windows完整解压源码，RUN.bat启动，BUILD.bat在目标电脑用已有Python/PyInstaller构建两个相邻单文件EXE；Linux使用`python3 main.py`。依赖不锁定版本，运行不联网补装。缺少Python KLayout模块可调用已安装桌面KLayout，不捆绑整套软件。GPU失败回退CPU。
 
-正式Release为两个软件的联合源码ZIP与SHA-256，不单独发布RealDataAnalyse。随包 `Jobs/GD55` 提供源图纸、工程、实测模板和三份合成Excel。新建工程时自动创建主程序的 `Cache/` 和实测客户端的 `RealDataAnalyse/` 目录树。用户把实测输入放入 `RealDataAnalyse/Excel/` 和 `RealDataAnalyse/Template/`，实测结果保存在 `RealDataAnalyse/Output/`。工程JSON引用的.dsresults侧车需随用户项目保留。旧平铺工程可打开并在保存时迁移。
+正式Release为两个软件的联合源码ZIP与SHA-256，不单独发布RealDataAnalyse。随包 `Jobs/GD55` 与 `Jobs/GD55_1119` 提供公开测试案例。新建工程时自动创建主程序的 `Cache/` 和实测客户端的 `RealDataAnalyse/` 目录树。用户把实测输入放入 `RealDataAnalyse/Excel/` 和 `RealDataAnalyse/Template/`，实测结果保存在 `RealDataAnalyse/Output/`。工程JSON引用的.dsresults侧车需随用户项目保留。旧平铺工程可打开并在保存时迁移。
 
 验证入口：`python3 tools/check_contribution.py`、`python3 tools/package_release.py verify-source`。源码验收、Windows托管验证与工厂/GPU设备验收分别记录；完整有限网格不代表连续空间穷尽，模型良率不代表产线实测。
