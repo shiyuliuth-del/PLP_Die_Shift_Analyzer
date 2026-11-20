@@ -7,6 +7,8 @@ if __name__=='__main__':
     multiprocessing.freeze_support()
     try:
         from die_shift_studio.frozen_support import prepare_runtime,hide_owned_console,smoke
+        from die_shift_studio.reconstruction_workers import enable_spawn
+        enable_spawn()
         if not {'--smoke-test','--gpu-info'}.intersection(sys.argv):hide_owned_console()
         prepare_runtime()
         parser=argparse.ArgumentParser(description='Die Shift Analyze')

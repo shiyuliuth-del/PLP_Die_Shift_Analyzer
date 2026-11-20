@@ -212,16 +212,16 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
             progress(round(100*completed/total),f'电连接补偿后联合核验 {completed:,}/{total:,} · 正在核验剩余姿态')
             last_update=time.monotonic()
     # Keep GEOS and the native DRC backend private for sustained joint scans.
+    from . import reconstruction_workers
     isolated=0
-    if bundles is not None and total>=64:
+    if reconstruction_workers.spawn_enabled and bundles is not None and total>=64:
         packed=sum(int(shapely.get_num_coordinates(v['geometry']))*32 for table in bundles.values() for v in table['values'].values())
         estimate=max(192*1024**2,packed*4)
         isolated=min(profile['process_workers'],profile['memory_budget_mb']*1024**2//estimate,total)
     with ExitStack() as cleanup:
       cleanup.callback(lambda:[s.close() for s in solvers])
       if isolated:
-        from .reconstruction_workers import isolated_scenes
-        values=isolated_scenes(r,grid,bundles,visits,isolated,idle)
+        values=reconstruction_workers.isolated_scenes(r,grid,bundles,visits,isolated,idle)
       else:
         values=parallel_iter(evaluate,visits,dict(profile,workers=workers),ordered=False,idle=idle)
       cleanup.callback(values.close)

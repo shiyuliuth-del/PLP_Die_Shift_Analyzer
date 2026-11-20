@@ -5,6 +5,13 @@ import multiprocessing
 from .resources import cancel_check, cancellation_scope, serial_scope
 
 _worker = None
+spawn_enabled = False
+
+
+def enable_spawn():
+    """Opt in from an application entry point guarded by __main__."""
+    global spawn_enabled
+    spawn_enabled = True
 
 
 def _initialize(data, case, roles, order, cache, parameters, settings, plans, active, grid, bundles, stop):
