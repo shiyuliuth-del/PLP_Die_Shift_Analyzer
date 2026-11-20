@@ -14,6 +14,18 @@ from .reconstruction_events import zone_key,active_region,color_for,PALETTE,RANK
 CUT_COLOR='#237ab9'
 SECOND_CUT_COLOR=CUT_COLOR
 WARNING_COLOR='#b570b8'
+FOLLOW_COLOR='#c9b3eb'
+FOLLOW_ALPHA=.45
+LOW_PALETTE={'red':'#deb8bc','yellow':'#e3d5b2','green':'#c6d8cb','pending':'#dfe2e6'}
+STAGED_STYLE={
+    '忽略·随动':('#c9b3eb44','#7f4ec2'),
+    '忽略·静止':('#f3d49344','#b87c24'),
+    '取消忽略':('#b8d8c044','#2f8f5b'),
+    '删除动区':('#ed9fa444','#c44a3d'),
+    '删除全部动区':('#ed9fa444','#c44a3d'),
+    '固定过孔随动':('#c9b3eb55','#7f4ec2'),
+    '固定过孔静止':('#d9dde255','#6c7886'),
+}
 
 
 def _lines(g):
@@ -50,7 +62,7 @@ class ReconstructionOverlay:
         self.draft_frame=self.draft_data=self.draft_key=None;self.staged_overlay=None
         self.w=window;self.artists={};self.cuts=None;self.stamp=self.table_stamp=None
         self.selected=self.selected_kind=None;self.hover=None;self.hover_key=None
-        self.end_artists=[];self.region_artists=[];self.arrow_artists=[];self.path_cache={};self.handles={};self.union_cache={};self.labels=[];self.text_sizes={};self.zone_views={};self.zone_clips={}
+        self.end_artists=[];self.region_artists=[];self.arrow_artists=[];self.path_cache={};self.handles={};self.union_cache={};self.labels=[];self.staged_tags=[];self.text_sizes={};self.zone_views={};self.zone_low={};self.zone_clips={}
         self.pulse_timer=QtCore.QTimer(window);self.pulse_timer.setInterval(33);self.pulse_timer.timeout.connect(self.pulse)
     def active(self):return self.w.reconstruction_toggle.isChecked()
     @staticmethod
@@ -69,7 +81,19 @@ class ReconstructionOverlay:
         if self.draft_frame is frame and self.draft_key==cfg.reconstruction_key() and self.staged_overlay and self.staged_overlay.get('key')==cfg.reconstruction_key():return
         solver=getattr(getattr(w,'engine',None),'reconstructor',None)
         geo=solver.model.cache.layers if solver is not None else (w.geometry_cache.layers if getattr(w,'geometry_cache',None) is not None else {})
-        rdl_refs=set();via_refs=set();staged_boxes=[]
+        rdl_refs=set();via_refs=set();staged_boxes=[];actions={}
+        def tag(ref,label):
+            items=actions.setdefault(ref,[])
+            if label not in items:items.append(label)
+        cur_ignored=set(cfg.reconstruction_ignored);prev_ignored=set(previous.reconstruction_ignored)
+        cur_follow=set(cfg.reconstruction_following);prev_follow=set(previous.reconstruction_following)
+        for ref in sorted(cur_ignored-prev_ignored):
+            rdl_refs.add(ref);tag(ref,'忽略·随动' if ref in cur_follow else '忽略·静止')
+        for ref in sorted(prev_ignored-cur_ignored):
+            rdl_refs.add(ref);tag(ref,'取消忽略')
+        for ref in sorted(cur_follow^prev_follow):
+            rdl_refs.add(ref)
+            if ref in cur_ignored:tag(ref,'忽略·随动' if ref in cur_follow else '忽略·静止')
         for name in ('ignored','following','forced','angles','intervals','added','deleted','regions','boxes','angle_boxes','box_excluded','cuts','extra_cuts','second_cuts','dropped_cuts','fixed_via_follows'):
             field='reconstruction_'+name
             cur=set(getattr(cfg,field));prev=set(getattr(previous,field))
@@ -80,12 +104,20 @@ class ReconstructionOverlay:
                 if name in ('boxes','angle_boxes','regions'):
                     g=shapely.Polygon(row[1]) if name!='regions' else shapely.box(*row[1]);layer=row[0]
                     if layer in geo:
-                        rdl_refs.update((layer,int(i)) for i in np.flatnonzero(shapely.intersects(geo[layer]['geometry'],g)))
+                        for i in np.flatnonzero(shapely.intersects(geo[layer]['geometry'],g)):
+                            ref=(layer,int(i));rdl_refs.add(ref);tag(ref,'框选动区')
                 elif name=='fixed_via_follows':
-                    via_refs.add((str(row[0]),int(row[1])))
-                else:rdl_refs.add((str(row[0]),int(row[1])))
+                    ref=(str(row[0]),int(row[1]));via_refs.add(ref)
+                    tag(ref,'固定过孔随动' if row in cur else '固定过孔静止')
+                else:
+                    ref=(str(row[0]),int(row[1]));rdl_refs.add(ref)
+                    if name=='deleted' and row in cur:tag(ref,'删除动区')
+                    elif name=='added' and row in cur:tag(ref,'新增动区')
+                    elif name=='angles':tag(ref,'旋转边界')
+                    elif name in ('intervals','cuts','extra_cuts','second_cuts'):tag(ref,'调整动区')
+                    elif name=='box_excluded' and row in cur:tag(ref,'删除动区')
         all_refs=rdl_refs|via_refs
-        self.staged_overlay=dict(refs=all_refs,boxes=tuple(staged_boxes),key=cfg.reconstruction_key())
+        self.staged_overlay=dict(refs=all_refs,boxes=tuple(staged_boxes),actions={k:tuple(v) for k,v in actions.items()},key=cfg.reconstruction_key())
         if frame and frame.get('reconstruction') and solver is not None:
             data=frame['reconstruction']
             from .reconstruction_zones import live_serial
@@ -179,9 +211,10 @@ class ReconstructionOverlay:
         w=self.w
         if self.cuts is None or self.cuts.axes is not w.ax:
             self.artists={}
-            self.staged=PatchCollection([],facecolor='#5992b62a',edgecolor='#44698c',linestyles='--',linewidths=1.2,zorder=10);w.ax.add_collection(self.staged)
+            self.staged=PatchCollection([],facecolor='#5992b62a',edgecolor='#44698c',linestyles='--',linewidths=1.3,zorder=10);w.ax.add_collection(self.staged)
             self.warning=PatchCollection([],facecolor='none',edgecolor=WARNING_COLOR,linestyles='--',linewidths=.8,zorder=9.4);w.ax.add_collection(self.warning)
             self.problems=PatchCollection([],facecolor='none',edgecolor='#b92d39',alpha=.7,linewidths=.9,zorder=9.7);w.ax.add_collection(self.problems)
+            self.low_problems=PatchCollection([],facecolor='none',edgecolor='#b92d39',alpha=.28,linestyles=':',linewidths=.7,zorder=9.6);w.ax.add_collection(self.low_problems)
             self.cuts=LineCollection([],colors=CUT_COLOR,linewidths=2.2,zorder=11.5);w.ax.add_collection(self.cuts)
             self.second_cuts=LineCollection([],colors=SECOND_CUT_COLOR,linewidths=2.2,zorder=11.6);w.ax.add_collection(self.second_cuts)
             self.points=Line2D([],[],ls='none',marker='o',markersize=8,color=CUT_COLOR,markeredgecolor='white',markeredgewidth=.8,zorder=12);w.ax.add_line(self.points)
@@ -190,6 +223,7 @@ class ReconstructionOverlay:
         data=self.data() if self.active() else None;bank=self.risk_bank() if self.active() else None
         vis=tuple(k for k,v in w.visible_boxes.items() if v.isChecked());order=tuple(w.ordered_layers())
         nominal=bool((w.current_frame or {}).get('nominal_global'))
+        pose_low,pose_prob,threshold=w.is_low_probability_pose() if hasattr(w,'is_low_probability_pose') else (False,None,None)
         edit=self.dragged_handle() if data else None
         # During the gesture the moving handle is a single animated artist.
         # After release it is painted once in the static collection until the
@@ -197,14 +231,14 @@ class ReconstructionOverlay:
         dragging=edit is not None and w.cut_drag.state is edit
         edit_stamp=(id(edit),dragging,0 if dragging else id(edit['marker'])) if edit else None
         staged_info=self.staged_overlay if (self.active() and getattr(w,'reconstruction_pending',False)) else None
-        stamp=(id(data),id(bank),vis,w.view_bounds,order,nominal,edit_stamp,repr(w.layer_styles),id(staged_info))
+        stamp=(id(data),id(bank),vis,w.view_bounds,order,nominal,pose_low,threshold,edit_stamp,repr(w.layer_styles),id(staged_info))
         if stamp==self.stamp:self.draw_labels();return
         if self.stamp is not None and self.stamp[0]!=id(data) and edit is None:
             if self.hover is not None:self.hover.set_visible(False)
             self.pulse_timer.stop();self.hover_key=None
         w.scene_renderer.feedback_background=None
-        self.stamp=stamp;paths={};colors={};first=[];second=[];dots=[];far_dots=[];warnings=[];region_groups={};red=[]
-        old_unions=self.union_cache;self.union_cache={};old_cache=self.path_cache;self.path_cache={};self.zone_views={}
+        self.stamp=stamp;paths={};colors={};first=[];second=[];dots=[];far_dots=[];warnings=[];region_groups={};red=[];low_red=[]
+        old_unions=self.union_cache;self.union_cache={};old_cache=self.path_cache;self.path_cache={};self.zone_views={};self.zone_low={}
         old_clips=self.zone_clips;self.zone_clips={}
         def patch(g):
             previous=old_cache.get(id(g));item=previous if previous is not None and previous[0] is g else (g,w.geometry_patch(g))
@@ -226,6 +260,12 @@ class ReconstructionOverlay:
             edited=bool(edit and ref==(edit['piece']['layer'],edit['piece']['index']))
             status=color_for(q,bank,nominal,checked=verified or bool(unchecked and ref not in unchecked))
             if ref in unchecked or (edited and (dragging or not verified)):status='pending'
+            is_low=False
+            if status in ('red','yellow'):
+                if not nominal and pose_low:is_low=True
+                elif bank and threshold:
+                    prob=(bank.get('zones',{}).get(zone_key(q)) or {}).get('probability')
+                    if prob and prob.get('certified') and prob.get('upper',1.)<=threshold:is_low=True
             gactive=active_region(q)
             material=copper.get(ref)
             if material is not None and not gactive.is_empty and not q.get('connection_failed'):
@@ -233,10 +273,12 @@ class ReconstructionOverlay:
                 clip=old_clips.get(key)
                 if clip is None:clip=(material,gactive,gactive if material.covers(gactive) else material.intersection(gactive))
                 self.zone_clips[key]=clip;gactive=clip[2]
-            self.zone_views[zone_key(q)]=(q,status,gactive)
+            zk=zone_key(q)
+            self.zone_views[zk]=(q,status,gactive);self.zone_low[zk]=is_low
+            paint_status=('low_'+status) if is_low else status
             if not gactive.is_empty and _in_view(gactive.bounds,w.view_bounds):
-                region_groups.setdefault((*ref,'A',status),{})[id(gactive)]=gactive
-                if status=='red':red.append(patch(gactive))
+                region_groups.setdefault((*ref,'A',paint_status),{})[id(gactive)]=gactive
+                if status=='red':(low_red if is_low else red).append(patch(gactive))
                 if q.get('routing_recovered'):warnings.append(patch(gactive))
             if q.get('box_invalid'):continue
             for kind,target,dot_list,line_list in (('moved','moved_cut',dots,first),('extra','extra_cut',far_dots,second)):
@@ -260,12 +302,17 @@ class ReconstructionOverlay:
             if face.geom_type=='Point':(far_dots if kind=='extra' else dots).append(face.coords[0])
             else:(second if kind=='extra' else first).extend(_lines(face))
         self.hit_geometry=shapely.STRtree([g for _,_,g in self.hit_items])
-        for (layer,index,kind,status),values in sorted(region_groups.items(),key=lambda item:RANK.get(item[0][3],-1)):
+        for (layer,index,kind,status),values in sorted(region_groups.items(),key=lambda item:RANK.get(item[0][3].removeprefix('low_'),-1)):
             geos=tuple(values.values());cache_key=(layer,index,kind,status,tuple(values));previous=old_unions.get(cache_key)
             g=previous[1] if previous is not None and all(a is b for a,b in zip(previous[0],geos)) else (geos[0] if len(geos)==1 else shapely.union_all(geos))
             from matplotlib.colors import to_rgba
-            color=PALETTE[status] if kind=='A' else '#dfd5ed' if status=='following' else w.style_for(layer)['color']
-            alpha=.66 if kind=='A' else .20 if status=='following' else w.style_for(layer)['alpha']
+            if kind=='A':
+                low=status.startswith('low_');base=status.removeprefix('low_')
+                color=LOW_PALETTE[base] if low else PALETTE[base]
+                alpha=.24 if low else .66
+            else:
+                color=FOLLOW_COLOR if status=='following' else w.style_for(layer)['color']
+                alpha=FOLLOW_ALPHA if status=='following' else w.style_for(layer)['alpha']
             self.union_cache[cache_key]=(geos,g);paths.setdefault((layer,kind),[]).append(patch(g));colors.setdefault((layer,kind),[]).append(to_rgba(color,alpha))
         for key in paths:
             if key not in self.artists:
@@ -274,23 +321,47 @@ class ReconstructionOverlay:
             shapes=paths.get((layer,k),[]);artist.set_paths(shapes);artist.set_visible(bool(shapes));artist.set_facecolors(colors.get((layer,k),[]));artist.set_edgecolors('none')
             artist.set_alpha(None)
             artist.set_zorder(2+(order.index(layer) if layer in order else 0)/max(1,len(order))+.001*('BCA'.index(k)+1))
-        staged=[]
+        from matplotlib.colors import to_rgba
+        staged=[];staged_faces=[];staged_edges=[];tag_items=[]
         staged_refs=set((data or {}).get('draft_refs',()))
+        staged_actions=(staged_info or {}).get('actions',{})
         if staged_info:staged_refs.update(staged_info.get('refs',()))
         solver=getattr(getattr(w,'engine',None),'reconstructor',None)
         geo_layers=solver.model.cache.layers if solver is not None else (w.geometry_cache.layers if getattr(w,'geometry_cache',None) is not None else {})
-        for layer,index in staged_refs:
+        for layer,index in sorted(staged_refs):
             if layer in vis:
-                gs=[g for (l,i,kind,status),parts in region_groups.items() if (l,i)==(layer,index) and kind=='A' for g in parts.values()]
+                ref=(layer,index);ops=staged_actions.get(ref,())
+                face,edge=STAGED_STYLE.get(ops[-1],('#5992b633','#2b6ea3')) if ops else ('#5992b62a','#44698c')
+                gs=[g for (l,i,kind,status),parts in region_groups.items() if (l,i)==ref and kind=='A' for g in parts.values()]
                 if not gs and layer in geo_layers and index<len(geo_layers[layer]['geometry']):
                     gs=[geo_layers[layer]['geometry'][index]]
-                staged.extend(patch(g) for g in gs if not g.is_empty and _in_view(g.bounds,w.view_bounds))
+                visible_gs=[g for g in gs if not g.is_empty and _in_view(g.bounds,w.view_bounds)]
+                for g in visible_gs:
+                    staged.append(patch(g));staged_faces.append(to_rgba(face));staged_edges.append(to_rgba(edge))
+                if visible_gs and ops and len(tag_items)<12:
+                    anchor=visible_gs[0].representative_point()
+                    tag_items.append((anchor.x,anchor.y,'待算：'+' + '.join(ops),edge))
         if staged_info:
             for layer,box_poly in staged_info.get('boxes',()):
                 if layer in vis and not box_poly.is_empty and _in_view(box_poly.bounds,w.view_bounds):
-                    staged.append(patch(box_poly))
+                    staged.append(patch(box_poly));staged_faces.append(to_rgba('#5992b628'));staged_edges.append(to_rgba('#2b6ea3'))
         self.staged.set_paths(staged);self.staged.set_visible(bool(staged))
-        self.problems.set_paths(red);self.problems.set_visible(bool(red));self.warning.set_paths(warnings);self.warning.set_visible(bool(warnings))
+        if staged:
+            self.staged.set_facecolors(staged_faces);self.staged.set_edgecolors(staged_edges);self.staged.set_alpha(None)
+        for i,(tx,ty,label_text,edge_color) in enumerate(tag_items):
+            if i==len(self.staged_tags) or self.staged_tags[i].axes is not w.ax:
+                t=w.ax.text(tx,ty,label_text,fontsize=7.5,ha='center',va='center',zorder=16,clip_on=True,
+                            bbox=dict(boxstyle='round,pad=0.18',facecolor='white',edgecolor=edge_color,alpha=.90,lw=.9))
+                if i==len(self.staged_tags):self.staged_tags.append(t)
+                else:self.staged_tags[i]=t
+            else:
+                t=self.staged_tags[i];t.set_position((tx,ty));t.set_text(label_text)
+                t.get_bbox_patch().set_edgecolor(edge_color);t.set_visible(True)
+            t.set_color(edge_color)
+        for t in self.staged_tags[len(tag_items):]:t.set_visible(False)
+        self.problems.set_paths(red);self.problems.set_visible(bool(red))
+        self.low_problems.set_paths(low_red);self.low_problems.set_visible(bool(low_red))
+        self.warning.set_paths(warnings);self.warning.set_visible(bool(warnings))
         self.cuts.set_segments(first);self.cuts.set_visible(bool(first));self.second_cuts.set_segments(second);self.second_cuts.set_visible(bool(second))
         self.points.set_data(np.array(dots).T if dots else [[],[]]);self.points.set_visible(bool(dots))
         self.second_points.set_data(np.array(far_dots).T if far_dots else [[],[]]);self.second_points.set_visible(bool(far_dots))
@@ -335,6 +406,8 @@ class ReconstructionOverlay:
                 if witness and (nominal or not q.get('problem_reasons')):text+='\n代表工况：'+pose_text(bank['grid_key'],witness['index'])
                 else:
                     state=w.current_frame['states'][q['die']];text+=f"\nDX {state[0]:.2f} μm, DY {state[1]:.2f} μm, θ {math.degrees(state[2]):.2f}°"
+                if self.zone_low.get(key):
+                    text+='\n低概率工况（低于良率级别要求，已低亮显示）'
                 candidates.append((status,text));boxes.append(shapely.box(*gb))
         from .width_labels import LabelLayout
         from .canvas_callouts import put
@@ -396,7 +469,7 @@ class ReconstructionOverlay:
         self.w.cut_drag.retained=None
         self.staged_overlay=None
         self.clear_hover();self.stamp=None;self.handles={};self.zone_views={};self.zone_clips={};self.hit_items=[];self.hit_geometry=None
-        for artist in [*self.artists.values(),*self.labels,*self.end_artists,*self.region_artists,*self.arrow_artists,*[getattr(self,n,None) for n in ('staged','warning','problems','cuts','second_cuts','points','second_points')]]:
+        for artist in [*self.artists.values(),*self.labels,*self.staged_tags,*self.end_artists,*self.region_artists,*self.arrow_artists,*[getattr(self,n,None) for n in ('staged','warning','problems','low_problems','cuts','second_cuts','points','second_points')]]:
             if artist is not None:artist.set_visible(False)
         self.w.scene_renderer.external_draw(None)
 

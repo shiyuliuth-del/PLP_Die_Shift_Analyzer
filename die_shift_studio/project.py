@@ -63,6 +63,10 @@ def normalize_project(project):
     height=p.get('layer_table_height',300)
     if type(height) is not int or not 110<=height<=10000:raise ValueError('图层表高度须为110～10000像素')
     p['layer_table_height']=height
+    if 'selectability' in p:
+        sel=p['selectability']
+        if not isinstance(sel,dict) or any(not isinstance(k,str) or not isinstance(v,bool) for k,v in sel.items()):
+            raise ValueError('图层选中状态须为布尔映射')
     from .measurement_data import normalize as ruler_rows
     p['rulers']=ruler_rows(p.get('rulers',[]))
     sections=p.setdefault('expanded_settings',[])

@@ -34,7 +34,7 @@ class LayerDrag(QtCore.QObject):
                 widget=self.table.cellWidget(row,col)
                 if isinstance(widget,W.QCheckBox):widget.click()
                 elif isinstance(widget,W.QComboBox):widget.showPopup()
-                elif col==1:self.styleRequested.emit(row)
+                elif col==2:self.styleRequested.emit(row)
             return True
         return False
 

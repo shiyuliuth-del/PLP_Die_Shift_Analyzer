@@ -54,8 +54,10 @@ class GeometrySelection:
         marked=summary['lines'] if summary and w.view_settings.width_display['描边']!='hide' else {}
         locals_by_owner={};centers=w.rotation_centers() if w.shown_states is not None else None
         order={k:i for i,k in enumerate(w.ordered_layers())}
+        select_boxes=getattr(w,'selectable_boxes',None)
+        def selectable(k):return True if not select_boxes else (k in select_boxes and select_boxes[k].isChecked())
         for key,groups in self.groups.items():
-            if not w.visible_boxes[key].isChecked() or roles.get(key) in ('芯片边框','封装边框'):continue
+            if not w.visible_boxes[key].isChecked() or not selectable(key) or roles.get(key) in ('芯片边框','封装边框'):continue
             only_marked=key in getattr(w,'width_hidden_sources',())
             if only_marked and not marked:continue
             filled=only_marked or not point or w.style_for(key)['fill']
@@ -82,7 +84,7 @@ class GeometrySelection:
         if point and w.reconstruction_toggle.isChecked():
             from .reconstruction_events import active_region
             for q in w.reconstruction_overlay.pieces():
-                if active_region(q).covers(shape.centroid):
+                if selectable(q['layer']) and active_region(q).covers(shape.centroid):
                     ref=(q['layer'],q['index'])
                     if ref not in found:found.append(ref)
         return sorted(found,key=lambda ref:(w.layer_artists[ref[0]].get_zorder(),order[ref[0]],ref[1]),reverse=True)

@@ -193,7 +193,7 @@ class MainWindow(W.QMainWindow):
         from .session_cache import EphemeralCache
         self.space_motion_fields=EphemeralCache()
         self.session_values=self.cache_group.values;self.session_engines=self.cache_group.engines;self.retired_sessions=[];self.parked_groups=[];self.cache_clear_worker=None
-        self.fields={};self.role_boxes={};self.stage_hints={};self.visible_boxes={}
+        self.fields={};self.role_boxes={};self.stage_hints={};self.visible_boxes={};self.selectable_boxes={}
         self.loading=False;self.revision=0;self.extremes=None;self.active_preview=None;self.owner_cache=None;self.auto_values={}
         self.preview_page=0;self._initial_extreme_page=0;self.page_items=[];self._extreme_paint={};self.state_result=None;self.issue_artists=[];self.shift_artist=None
         self.rendered_layers={};self.layer_artists={};self._layer_keys=[];self.geometry_cache=None;self.connections=None
@@ -290,7 +290,7 @@ class MainWindow(W.QMainWindow):
         row=W.QHBoxLayout();row.addWidget(W.QLabel('顶层Cell'));self.top=W.QComboBox();self.top.currentTextChanged.connect(self.top_changed);row.addWidget(self.top,1);page.addLayout(row)
         self.open_gds_button=W.QPushButton('打开GDS/OAS');self.open_gds_button.setStyleSheet('QPushButton {background:#e5f2ee;color:#245e52;border:1px solid #a5c9bd;border-radius:4px;padding:5px;} QPushButton:hover {background:#d3e9e1;}');self.open_gds_button.clicked.connect(self.open_gds);page.addWidget(self.open_gds_button)
         self.layer_split=W.QSplitter(VERTICAL);self.layer_split.setChildrenCollapsible(False);page.addWidget(self.layer_split)
-        self.layer_table=table(['显示','层 / 类型','用途']);self.layer_table.setMinimumHeight(110);self.layer_split.addWidget(self.layer_table)
+        self.layer_table=table(['显示','选中','层 / 类型','用途']);self.layer_table.setMinimumHeight(110);self.layer_split.addWidget(self.layer_table)
         below=W.QWidget();below_layout=W.QVBoxLayout(below);below_layout.setContentsMargins(0,0,0,0);self.layer_split.addWidget(below)
         page=below_layout;self.layer_split.setSizes([300,300])
         self.layer_table.verticalHeader().setSectionsMovable(True)
@@ -1099,18 +1099,21 @@ class MainWindow(W.QMainWindow):
             self.layer_split.setSizes([project.get('layer_table_height',300),max(220,self.layer_split.height()-project.get('layer_table_height',300))])
             selected_roles=project.get('roles',data.auto_roles)
             self.stage_hints=project.get('stage_hints',{})
-            self.role_boxes={};self.visible_boxes={};self._layer_keys=stack_order(data,selected_roles,project.get('layer_order'))
+            self.role_boxes={};self.visible_boxes={};self.selectable_boxes={};self._layer_keys=stack_order(data,selected_roles,project.get('layer_order'))
             self.layer_table.setRowCount(0);self.layer_table.setRowCount(len(self._layer_keys))
             header=self.layer_table.verticalHeader()
             for i in range(header.count()):header.moveSection(header.visualIndex(i),i)
+            saved_sel=project.get('selectability',{})
             for i,key in enumerate(self._layer_keys):
                 role=selected_roles.get(key,'不参与');check=W.QCheckBox();check.setChecked(project.get('visibility',{}).get(key,role not in ('不参与','非金属图形')))
                 check.toggled.connect(lambda checked,k=key:self.visibility_changed(k));self.visible_boxes[key]=check;self.layer_table.setCellWidget(i,0,check);self.layer_drag.watch(check)
-                self.layer_table.setItem(i,1,W.QTableWidgetItem(key))
+                sel=W.QCheckBox();sel.setChecked(saved_sel.get(key,role=='固定RDL'))
+                sel.toggled.connect(lambda checked,k=key:self.selectability_changed(k));self.selectable_boxes[key]=sel;self.layer_table.setCellWidget(i,1,sel);self.layer_drag.watch(sel)
+                self.layer_table.setItem(i,2,W.QTableWidgetItem(key))
                 box=W.QComboBox();box.addItems(ROLES);box.setCurrentText(role)
-                self.role_boxes[key]=box;self.layer_table.setCellWidget(i,2,box);self.layer_drag.watch(box)
+                self.role_boxes[key]=box;self.layer_table.setCellWidget(i,3,box);self.layer_drag.watch(box)
                 box.currentTextChanged.connect(lambda _,k=key:self.role_changed(k))
-            for j,width in enumerate([38,100,200]):self.layer_table.setColumnWidth(j,width)
+            for j,width in enumerate([38,38,100,180]):self.layer_table.setColumnWidth(j,width)
             self.layer_table.horizontalHeader().setStretchLastSection(True)
             for key,w in self.fields.items():w.setValue(getattr(pars,key))
             self.reference_nsigma=pars.reference_nsigma;self.per_die_pivots=[list(v) for v in pars.die_pivots];self.pivot_editor.setValue([pars.rotation_center,pars.rotation_x_um,pars.rotation_y_um])
@@ -1140,10 +1143,19 @@ class MainWindow(W.QMainWindow):
             key=self.assessment_identity(data,self.roles(),self.ordered_layers(),self.params(),self.view_settings)
             if remembered[0]==key:self.display_result(remembered[1]);self.log_bus.emit('已恢复本次运行中此工程的评估缓存')
         if self.result is None and (self.width_toggle.isChecked() or self.reconstruction_toggle.isChecked()):self.request_preview()
+    def selectability_changed(self,key):
+        if self.loading or self.data is None:return
+        if not self.selectable_boxes[key].isChecked() and getattr(self,'selection',None):
+            kept=[item for item in self.selection.selected if item[0]!=key]
+            if len(kept)!=len(self.selection.selected):
+                self.selection.selected=kept;self.selection.draw()
     def role_changed(self,key):
         if self.loading:return
         self.stage_hints.pop(key,None)
-        self.visible_boxes[key].blockSignals(True);self.visible_boxes[key].setChecked(self.role_boxes[key].currentText()!='不参与');self.visible_boxes[key].blockSignals(False)
+        role=self.role_boxes[key].currentText()
+        self.visible_boxes[key].blockSignals(True);self.visible_boxes[key].setChecked(role!='不参与');self.visible_boxes[key].blockSignals(False)
+        if key in self.selectable_boxes:
+            self.selectable_boxes[key].blockSignals(True);self.selectable_boxes[key].setChecked(role=='固定RDL');self.selectable_boxes[key].blockSignals(False)
         old=self.motions();old[key]=default_motion(self.roles()[key]);self.case=None
         try:self.case=build_case(self.data,self.roles(),layer_order=self.ordered_layers())
         except ValueError:pass
@@ -1250,6 +1262,9 @@ class MainWindow(W.QMainWindow):
             ambiguous=(frame.get('reconstruction') or {}).get('summary',{}).get('regions_ambiguous',0)
             if ambiguous:
                 message+=f' · {ambiguous} 处手动动区归属不明确，未应用；请缩小框选范围，避开多个 DIE 的共同区域'
+            is_low,pose_prob,threshold=self.is_low_probability_pose()
+            if is_low:
+                message+=f' · 低概率极端（P≈{pose_prob:.3g} ≤ 门限 {threshold:.3g}，已低亮显示）'
         if frame and frame.get('motion_issues'):message+=f" · {len(frame['motion_issues'])}个运动图形归属待确认，已用橙色虚线标记"
         if frame and frame.get('width_analysis') and self.width_toggle.isChecked():
             q=frame['width_analysis']['counts'];message+=f" · 保宽足够 {q['宽度足够']}，需收窄 {q['需局部收窄']}，宽度不足 {q['宽度不足']}"
@@ -1659,7 +1674,7 @@ class MainWindow(W.QMainWindow):
         if hasattr(self,'width_overlay'):self.width_overlay.draw()
         if not getattr(self,'_in_animation',False) and not getattr(self,'_in_viewport',False):
             for i,key in enumerate(self._layer_keys):
-                sty=self.style_for(key);item=self.layer_table.item(i,1)
+                sty=self.style_for(key);item=self.layer_table.item(i,2)
                 if item:
                     background=QtGui.QColor(sty['color']).lighter(125);item.setForeground(QtGui.QColor('#ffffff' if background.lightnessF()<.55 else '#33465a'));item.setBackground(background);item.setToolTip(sty['label'])
                 self.role_boxes[key].setToolTip(roles[key])
@@ -1713,7 +1728,7 @@ class MainWindow(W.QMainWindow):
             from .reconstruction_overlay import CUT_COLOR,SECOND_CUT_COLOR
             from .reconstruction_events import PALETTE
             handles += [Patch(facecolor=PALETTE[k],alpha=.66,label=title) for k,title in [('red','动区连线失败'),('yellow','动区存在 DRC 违例'),('green','动区通过检查'),('pending','动区待核验')]]
-            handles.append(Patch(facecolor='#dfd5ed',alpha=.20,label='忽略重构 · 随动'))
+            handles.append(Patch(facecolor='#c9b3eb',alpha=.45,label='忽略重构 · 随动'))
             handles += [Line2D([],[],color=CUT_COLOR,lw=2,label='运动侧边界 / 整孔盘蓝点'),Line2D([],[],color=SECOND_CUT_COLOR,lw=2,label='固定侧边界 / 整孔盘蓝点')]
         if self.current_frame and self.current_frame.get('motion_issues'):handles.append(Line2D([],[],color='#bf862c',ls='--',label='运动归属未定：保持名义位置'))
         if getattr(self.data,'ignored_geometry',[]):handles.append(Line2D([],[],color='#d72b91',ls='--',lw=.7,label='忽略的无效图形'))
@@ -2441,11 +2456,18 @@ class MainWindow(W.QMainWindow):
                 if zero.get('checked'):check+=' · 零位几何'+('通过' if zero['safe'] else '存在问题')
             if status.get('reason'):check+=' · '+status['reason']
             failed=bool(status.get('connection_failures'));known=bool(status.get('checked'))
-            signature=(check,safe,failed,known)
+            row_index=self.page_items[row-1][0] if (item and 1<=row<=len(self.page_items)) else None
+            is_low,pose_prob,threshold=self.is_low_probability_pose(row_index) if (row_index is not None and self.reconstruction_toggle.isChecked()) else (False,None,None)
+            signature=(check,safe,failed,known,is_low)
             if self._extreme_paint.get(row)==signature:continue
             self._extreme_paint[row]=signature
-            brush=QtGui.QBrush(QtGui.QColor('#fbe7e7' if failed else '#eaf5ed' if safe else '#fff3d9')) if known or failed else QtGui.QBrush(QtGui.QColor('#f2f3f5')) if not item and self.reconstruction_toggle.isChecked() else QtGui.QBrush()
-            detail=f'{check}；浅绿：已检查无问题；浅黄：尺寸DRC违规但连通；浅红：重构连接失败。未检查行不着色。'
+            if known or failed:
+                color='#f4ecec' if (failed and is_low) else '#fbe7e7' if failed else '#eaf5ed' if safe else '#f6f1e4' if is_low else '#fff3d9'
+                brush=QtGui.QBrush(QtGui.QColor(color))
+            else:
+                brush=QtGui.QBrush(QtGui.QColor('#f2f3f5')) if not item and self.reconstruction_toggle.isChecked() else QtGui.QBrush()
+            low_note=f'（低概率 P≈{pose_prob:.3g} ≤ 门限 {threshold:.3g}，已低亮）' if is_low else ''
+            detail=f'{check}{low_note}；浅绿：已检查无问题；浅黄：尺寸DRC违规但连通；浅红：重构连接失败。未检查行不着色。'
             for col in range(self.extreme_table.columnCount()):
                 cell=self.extreme_table.item(row,col)
                 if cell is not None:
@@ -2453,6 +2475,20 @@ class MainWindow(W.QMainWindow):
                     old=cell.toolTip().split('\n校验：')[0];tip=old+'\n校验：'+detail
                     if cell.toolTip()!=tip:cell.setToolTip(tip)
 
+
+    def is_low_probability_pose(self,index=None):
+        """True when a discrete extreme pose has cell probability <= 2Φ(-target_nsigma)."""
+        if self.data is None or self.extremes is None:return False,None,None
+        if index is None:
+            if self.manual_states is not None or self.active_preview is None:return False,None,None
+            index=self.active_preview
+        try:p=self.params()
+        except ValueError:return False,None,None
+        if not (0<p.target_nsigma<math.inf):return False,None,None
+        threshold=p.failure_threshold
+        from .reconstruction_probability import pose_probability
+        prob=pose_probability(self.extremes,p,index)
+        return (prob is not None and prob<=threshold),prob,threshold
 
     def restore_preview(self):
         if self.data is None:return
@@ -2565,7 +2601,9 @@ class MainWindow(W.QMainWindow):
                     layer_table_height=max(110,self.layer_split.sizes()[0]),expanded_settings=[title for title,header in self.setting_sections.items() if header.isChecked()],
                     expanded_process=[title for title,header in self.process_sections.items() if header.isChecked()],manual_preview=self.manual_preview.state(),
                     overlays={name:self.overlay_widget(name).isChecked() for name in OVERLAY_DEFAULTS},layer_styles=self.layer_styles,
-                    visibility={k:w.isChecked() for k,w in self.visible_boxes.items()},motions=self.motions(),layer_order=self.ordered_layers())
+                    visibility={k:w.isChecked() for k,w in self.visible_boxes.items()},
+                    selectability={k:w.isChecked() for k,w in self.selectable_boxes.items()},
+                    motions=self.motions(),layer_order=self.ordered_layers())
 
     def show_shape_menu(self,event,point):
         from .shape_menu import show_shape_menu
@@ -2582,17 +2620,36 @@ class MainWindow(W.QMainWindow):
         else:
             self.statusBar().showMessage(f'已设置：{action}（{len(refs)} 个过孔）')
 
+    def _strip_ignored_zones(self,settings,refs):
+        """Automatically delete all movable regions on ignored fixed-RDL shapes."""
+        fields=('reconstruction_intervals','reconstruction_angles','reconstruction_deleted','reconstruction_added',
+                'reconstruction_cuts','reconstruction_extra_cuts','reconstruction_second_cuts','reconstruction_dropped_cuts')
+        edits={name:tuple(row for row in getattr(settings,name) if tuple(row[:2]) not in refs) for name in fields}
+        edits['reconstruction_forced']=tuple(sorted(set(settings.reconstruction_forced)-refs))
+        edits['reconstruction_box_excluded']=tuple(sorted(set(settings.reconstruction_box_excluded)|refs))
+        return edits
+
+    def _staged_summary(self,refs):
+        actions=((getattr(self.reconstruction_overlay,'staged_overlay',None) or {}).get('actions',{})) if hasattr(self,'reconstruction_overlay') else {}
+        parts=[]
+        for ref in sorted(refs)[:3]:
+            ops=actions.get(ref)
+            if ops:parts.append(f'{ref[0]} #{ref[1]+1}: ' + ' + '.join(ops))
+        return '；'.join(parts)
+
     def change_reconstruction_mode(self,refs,following):
         if getattr(self,'remote_locked',False):return
-        refs=set(refs);old=set(self.view_settings.reconstruction_following)
-        self.view_settings=replace(self.view_settings,reconstruction_following=tuple(sorted(old|refs if following else old-refs)),
+        refs={(k,int(i)) for k,i in refs};old=set(self.view_settings.reconstruction_following)
+        edits=self._strip_ignored_zones(self.view_settings,refs)
+        self.view_settings=replace(self.view_settings,**edits,reconstruction_following=tuple(sorted(old|refs if following else old-refs)),
                                    reconstruction_ignored=tuple(sorted(set(self.view_settings.reconstruction_ignored)|refs)))
         self.invalidate_reconstruction_edit();self.request_preview()
         mode='整块随动' if following else '整块静止'
         if getattr(self,'reconstruction_pending',False):
-            self.statusBar().showMessage(f'已暂存：忽略图形改为{mode}（{len(refs)} 个图形已标记，点击“重构计算”统一计算）')
+            summary=self._staged_summary(refs)
+            self.statusBar().showMessage(f'已暂存：{summary or ("忽略图形改为"+mode)}（点击“重构计算”统一计算）')
         else:
-            self.statusBar().showMessage(f'已设置：忽略图形为{mode}（{len(refs)} 个图形）')
+            self.statusBar().showMessage(f'已设置：忽略图形为{mode}（{len(refs)} 个图形，已自动删除动区）')
     def change_reconstruction_ignores(self,refs,ignore):
         if getattr(self,'remote_locked',False):return
         old=set(self.view_settings.reconstruction_ignored)
@@ -2600,16 +2657,20 @@ class MainWindow(W.QMainWindow):
         updated=old|refs if ignore else old-refs
         if updated==old and ignore:return
         extra={}
-        if not ignore:
+        if ignore:
+            extra.update(self._strip_ignored_zones(self.view_settings,refs))
+        else:
             extra['reconstruction_forced']=tuple(sorted(set(self.view_settings.reconstruction_forced)|refs))
             extra['reconstruction_deleted']=tuple(r for r in self.view_settings.reconstruction_deleted if r[:2] not in refs)
+            extra['reconstruction_following']=tuple(sorted(set(self.view_settings.reconstruction_following)-refs))
         self.view_settings=replace(self.view_settings,reconstruction_ignored=tuple(sorted(updated)),**extra)
         self.invalidate_reconstruction_edit();self.request_preview()
         if getattr(self,'reconstruction_pending',False):
+            summary=self._staged_summary(refs)
             action='忽略重构' if ignore else '取消忽略重构'
-            self.statusBar().showMessage(f'已暂存：{action}（{len(refs)} 个图形已标记，点击“重构计算”统一计算）')
+            self.statusBar().showMessage(f'已暂存：{summary or action}（点击“重构计算”统一计算）')
         elif ignore:
-            self.statusBar().showMessage(f'已忽略重构 {len(updated)} 个图形；保持源图，运动过孔仍按所属DIE运动。')
+            self.statusBar().showMessage(f'已忽略重构 {len(updated)} 个图形并自动删除其全部动区；运动过孔仍按所属DIE运动。')
         else:
             self.statusBar().showMessage(f'已取消忽略重构 {len(refs)} 个图形；重新参与重构预演。')
 

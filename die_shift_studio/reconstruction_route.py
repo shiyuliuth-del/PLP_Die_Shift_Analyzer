@@ -505,7 +505,8 @@ class RoutePlan:
         # Sufficient bound on smoothstep shear; an insufficient length remains
         # explicitly warned, never passed off as a guaranteed safe region.
         safe=[q for q in candidates if q[0]>2.5*max_travel]
-        best=min(safe or candidates,key=rank)
+        pool=safe or [q for q in candidates if q[0]>=max_travel] or candidates
+        best=min(pool,key=rank)
         self.nominal_first,self.nominal_second=best[1:3]
         if not safe:self.warning='动区长度小于全输入位移的保守过渡余量；需检查当前重构'
         return best[3]
@@ -641,18 +642,25 @@ def _warp_geometry(part,plan,center,state,style="c2",variant=0):
     if active.is_empty:return None,'动区退化为空图形'
     if not active.is_valid:return None,'动区发生折叠：'+shapely.is_valid_reason(active)
     raw={'A':active,'B':part['B'],'C':translated}
-    near=part['near'] if a==0 else shapely.transform(part['near'],lambda xy:rigid_transform(xy,center,state))
-    seams=[near,part['far']]
-    if part['near'].geom_type=='Point' or part['far'].geom_type=='Point':
-        from .connection_curves import connection_data
-        try:
-            effective,_,_,_,_,_,_,_=connection_data(part,plan,center,state)
-            seams.extend([shapely.transform(effective['near'],lambda xy:rigid_transform(xy,center,state)),effective['far']])
-        except ValueError:pass
-    seam=shapely.union_all(seams).buffer(plan.tolerance*2)
+    seam=None
     allowance=max(plan.tolerance**2,plan.source.area*1e-10)
     for x,y in (('A','B'),('A','C'),('B','C')):
-        overlap=raw[x].intersection(raw[y])
+        gx,gy=raw[x],raw[y]
+        if gx.is_empty or gy.is_empty:continue
+        bx,by=gx.bounds,gy.bounds
+        if bx[0]>by[2] or bx[2]<by[0] or bx[1]>by[3] or bx[3]<by[1]:continue
+        overlap=gx.intersection(gy)
+        if overlap.is_empty or (overlap.area<=allowance and overlap.length<=plan.tolerance*4):continue
+        if seam is None:
+            near=part['near'] if a==0 else shapely.transform(part['near'],lambda xy:rigid_transform(xy,center,state))
+            seams=[near,part['far']]
+            if part['near'].geom_type=='Point' or part['far'].geom_type=='Point':
+                from .connection_curves import connection_data
+                try:
+                    effective,_,_,_,_,_,_,_=connection_data(part,plan,center,state)
+                    seams.extend([shapely.transform(effective['near'],lambda xy:rigid_transform(xy,center,state)),effective['far']])
+                except ValueError:pass
+            seam=shapely.union_all(seams).buffer(plan.tolerance*2)
         outside=overlap.difference(seam)
         if outside.area>allowance or outside.length>plan.tolerance*4:return None,'动区与相邻区域在截面外相接或反向交叠'
     # Snap the JOINT copper once, rather than independently rounding two copies
@@ -661,6 +669,9 @@ def _warp_geometry(part,plan,center,state,style="c2",variant=0):
     expected_holes=sum(len(q.interiors) for q in parts(plan.source))
     holes=[shapely.Polygon(r) for q in parts(full) for r in q.interiors]
     if len(holes)>expected_holes:
+        if seam is None:
+            near=part['near'] if a==0 else shapely.transform(part['near'],lambda xy:rigid_transform(xy,center,state))
+            seam=shapely.union_all([near,part['far']]).buffer(plan.tolerance*2)
         repairs=[g for g in holes if g.area<=plan.tolerance*g.length and g.difference(seam).area<=plan.tolerance**2*.01]
         if repairs:full=shapely.union_all([full,*repairs])
     if len(parts(full))!=len(parts(plan.source)) or not full.is_valid or sum(len(q.interiors) for q in parts(full))!=expected_holes:

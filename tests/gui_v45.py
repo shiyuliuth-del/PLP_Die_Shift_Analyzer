@@ -26,7 +26,7 @@ def wait(timeout=180):
 try:
  assert [w.tabs.tabText(i) for i in range(w.tabs.count())]==['结果图形','结果分析']
  assert [w.preview_tabs.tabText(i) for i in range(w.preview_tabs.count())]==['极端情况','信息']
- assert w.layer_table.columnCount()==3 and w.gds_label.isReadOnly()
+ assert w.layer_table.columnCount()==4 and w.gds_label.isReadOnly()
  assert not any(q.text()=='DRC问题' for q in w.findChildren(W.QCheckBox))
  assert w.space_toggle.text()=='避让空间' and w.manual_button.text()=='手动偏移'
  assert all(not q.isChecked() for q in w.setting_sections.values())

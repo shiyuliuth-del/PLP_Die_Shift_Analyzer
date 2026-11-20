@@ -28,7 +28,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert window.job_combo.itemText(0)=='' and window.project_path is None
     assert window.windowTitle().startswith('Die Shift Analyze')
     assert all(b.text()!='打开工程' for b in window.findChildren(W.QPushButton))
-    assert not hasattr(window,'stage_boxes') and window.layer_table.columnCount()==3
+    assert not hasattr(window,'stage_boxes') and window.layer_table.columnCount()==4
     assert all(role=='不参与' for role in window.roles().values())
     for key,role in json.loads((ROOT/'examples/示例C_多芯片晶圆接口.json').read_text())['roles'].items():window.role_boxes[key].setCurrentText(role)
     wait_idle()
@@ -48,7 +48,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert window.gds_label.text().endswith('示例C_多芯片晶圆接口.gds')
     # Drag starts in the layer cell, not a row-number header. Preview reorders before release.
     header=window.layer_table.verticalHeader();before=window.ordered_layers();viewport=window.layer_table.viewport()
-    x=window.layer_table.columnViewportPosition(1)+15
+    x=window.layer_table.columnViewportPosition(2)+15
     row0=window._layer_keys.index('30/0');row1=window._layer_keys.index('31/0')
     y0=header.sectionViewportPosition(row0)+header.sectionSize(row0)//2;y1=header.sectionViewportPosition(row1)+header.sectionSize(row1)-3
     QTest.mousePress(viewport,Qt.LeftButton,pos=QtCore.QPoint(x,y0))
@@ -178,7 +178,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # Per-layer appearance and numerical settings persist without discarding analysis.
     from die_shift_studio.layer_controls import LayerStyleDialog
     with patch('die_shift_studio.gui.run_dialog',return_value=1),patch.object(LayerStyleDialog,'value',return_value=dict(color='#95b8d1',alpha=.35,fill=True,width=.8,linestyle='--')):
-        logical=window._layer_keys.index('40/0');point=window.layer_table.visualItemRect(window.layer_table.item(logical,1)).center()
+        logical=window._layer_keys.index('40/0');point=window.layer_table.visualItemRect(window.layer_table.item(logical,2)).center()
         QTest.mouseClick(window.layer_table.viewport(),Qt.LeftButton,pos=point);app.processEvents()
     assert window.layer_styles['40/0']['alpha']==.35 and window.layer_artists['40/0'].get_alpha()==.35
     window.setting_fields['space_cmap'].setCurrentIndex(window.setting_fields['space_cmap'].findData('cividis'));wait_idle()

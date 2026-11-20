@@ -76,9 +76,25 @@ def live_part(r,plan,part,center,pose):
     from .reconstruction import transform
     a=np.asarray(transform(part['near'],center,pose).centroid.coords[0]);b=np.asarray(part['far'].centroid.coords[0]);direction=b-a
     heading=math.atan2(direction[1],direction[0]);angles=[]
+    span=max(0.,float(part['b']-part['a']))
+    near_len=part['near'].length if part['near'].geom_type=='LineString' else 0.
+    far_len=part['far'].length if part['far'].geom_type=='LineString' else 0.
+    blade_height=max(near_len,far_len,1e-6)
+    # Prevent wide-plane blades from swinging across distant corners or crossing
+    # adjacent cuts: cap tilt so half-blade lateral sweep stays within 30% of span.
+    max_tilt=min(math.pi/3,math.atan2(.30*span,max(blade_height*.5,1e-6)))
+    if max_tilt<math.radians(1.):return part
     for i,s in enumerate((part['a'],part['b'])):
         tangent=plan.tangent(s);delta=(heading-math.atan2(tangent[1],tangent[0])+math.pi)%(2*math.pi)-math.pi
-        angles.append(float(np.clip(delta*(.5 if mode=='balanced' else 1.),-math.pi/3,math.pi/3)))
+        angles.append(float(np.clip(delta*(.5 if mode=='balanced' else 1.),-max_tilt,max_tilt)))
     for i,locked in enumerate(part.get('manual_angles',(False,False))):
         if locked:angles[i]=part['angles'][i]
-    return plan.partition(part['a'],part['b'],angles) or part
+    tilted=plan.partition(part['a'],part['b'],angles)
+    if tilted is None:return part
+    # Reject tilted blades that touch, cross, or sweep into a much wider neck.
+    if tilted['near'].geom_type=='LineString' and tilted['far'].geom_type=='LineString':
+        if tilted['near'].distance(tilted['far'])<max(plan.tolerance*8,.35*min(span,part['near'].distance(part['far']) if part['near'].geom_type=='LineString' and part['far'].geom_type=='LineString' else span)):
+            return part
+        if max(tilted['near'].length,tilted['far'].length)>blade_height*1.35+plan.tolerance*8:
+            return part
+    return tilted
