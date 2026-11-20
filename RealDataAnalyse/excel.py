@@ -97,7 +97,8 @@ def _read_file(path, profile, scratch, stop, progress):
         db.close()
 
 
-def import_files(paths, database, die_count, workers, stop, progress=lambda _: None, profile=None, profiles=None):
+def import_files(paths, database, die_count, workers, stop, progress=lambda _: None, profile=None, profiles=None,
+                 measurement=None, project=None, endpoint=None, geometry=None):
     """Build a new journal atomically; errors never create a runnable partial run."""
     profile = profile or DEFAULT_PROFILE
     paths = [Path(p).resolve() for p in paths]
@@ -113,8 +114,41 @@ def import_files(paths, database, die_count, workers, stop, progress=lambda _: N
             raise ValueError('请填写工作表与列映射')
         if any(not isinstance(value, str) for value in current['columns'].values()):
             raise ValueError('Excel列名须为文本')
-    if len(set(paths)) != len(paths) or len(paths) != die_count or not 1 <= die_count <= 10000:
+    if len(set(paths)) != len(paths) or not 1 <= die_count <= 10000 or (not measurement and len(paths) != die_count):
         raise ValueError('应选择每颗DIE各一个Excel；文件不得重复，数量须与工程一致')
+    if type(workers) is not int or not 0 <= workers <= 64:
+        raise ValueError('导入并发线程须为0（自动）或1～64')
+    if workers == 0:
+        from die_shift_studio.resources import resource_profile
+        workers = resource_profile()['workers']
+    if measurement:
+        from .measurements import folders, import_part, infer_die_indices, nominal_geometry, package_rows, table_file
+        directory = Path(measurement['root']).resolve()
+        die_folders = folders(directory)
+        explicit_order = measurement.get('die_order')
+        order = explicit_order or [folder.name for folder in die_folders]
+        if not isinstance(order, list) or any(not isinstance(name, str) for name in order):
+            raise ValueError('die_order须按工程DIE顺序列出芯片目录名')
+        if len(set(order)) != die_count or set(order) != {folder.name for folder in die_folders}:
+            raise ValueError('芯片目录数量或配置顺序与工程DIE数量不一致')
+        path_dies = {directory / name: index + 1 for index, name in enumerate(order)}
+        if {p.parent for p in paths} != set(path_dies) or not all(map(table_file, paths)):
+            raise ValueError('请为每颗芯片选择其目录下的CSV或XLSX文件')
+        scale = numeric(measurement.get('scale_um', 1000), '坐标到μm的比例')
+        tolerance = numeric(measurement.get('match_tolerance_um', 2), '封装匹配容差')
+        if scale <= 0 or tolerance <= 0:
+            raise ValueError('坐标比例与匹配容差须为正数')
+        if geometry is None:
+            from .instances import connect
+            from .transport import default_endpoint
+            if not project:
+                raise ValueError('生产导入须指定预演工程')
+            _, info, _ = connect(project, endpoint or default_endpoint(), stop, progress)
+            geometry = nominal_geometry(info)
+        if len(geometry['centers_um']) != die_count:
+            raise ValueError('芯片目录数量与图纸中的芯片边框数量不一致')
+    else:
+        geometry = None
     database = Path(database).resolve()
     if database.exists():
         raise ValueError('新任务数据库已存在，请选择新名称或使用继续任务')
@@ -126,58 +160,58 @@ def import_files(paths, database, die_count, workers, stop, progress=lambda _: N
         stage = Path(temp) / 'run.sqlite'
         ledger = Ledger(stage)
         try:
+            if geometry:
+                ledger.db.execute('create table production(r integer,c integer,die integer,tx real,ty real,ax real,ay real,angle real,dx real,dy real,source text,line integer)')
             with ThreadPoolExecutor(max_workers=max(1, min(workers, len(paths), 16)), thread_name_prefix='excel') as pool:
-                futures = [pool.submit(_read_file, p, profiles.get(str(p), profile), Path(temp) / f'{i}.sqlite', stop, progress) for i, p in enumerate(paths)]
+                futures = []
+                for i, path in enumerate(paths):
+                    arguments = (profiles.get(str(path), profile), Path(temp) / f'{i}.sqlite', stop, progress)
+                    futures.append(pool.submit(import_part, path, path_dies[path.parent], *arguments) if geometry
+                                   else pool.submit(_read_file, path, *arguments))
                 sources = []
                 for future in as_completed(futures):
                     info = future.result()
                     with closing(sqlite3.connect(info['scratch'])) as part:
                         try:
                             with ledger.db:
-                                ledger.db.executemany('insert into measurements values(?,?,?,?,?,?,?)', part.execute('select * from rows'))
+                                if geometry:
+                                    ledger.db.executemany('insert into production values(?,?,?,?,?,?,?,?,?,?,?,?)', part.execute('select * from poses'))
+                                else:
+                                    ledger.db.executemany('insert into measurements values(?,?,?,?,?,?,?)', part.execute('select * from rows'))
                         except sqlite3.IntegrityError:
                             raise ValueError('多个Excel重复同一DIE/封装记录') from None
                     sources.append({k: v for k, v in info.items() if k != 'scratch'})
                     progress(dict(text=f'Excel汇入 · {len(sources)}/{len(paths)}文件 · {info["path"]} · {info["rows"]}行', current=len(sources), total=len(paths)))
-            if sorted(v['die'] for v in sources) != list(range(1, die_count + 1)):
-                raise ValueError('DIE编号必须完整覆盖1至工程DIE数量，每个文件一颗')
-            missing = ledger.db.execute('select package,count(*) from measurements group by package having count(*) != ? limit 20', (die_count,)).fetchall()
-            if missing:
-                raise ValueError(f'封装缺少部分DIE记录，拒绝遗漏：{missing}')
-            conflict = ledger.db.execute('select package from measurements group by package having max(x)-min(x)>0.000001 or max(y)-min(y)>0.000001 limit 20').fetchall()
-            if conflict:
-                raise ValueError(f'同封装摆放坐标冲突：{conflict}')
-            # Disk ordered join: only one package's DIE rows in memory.
-            progress(dict(text='匹配封装 · 检查缺测、重复与摆放坐标', current=0, total=1))
-            package_total = ledger.db.execute('select count(distinct package) from measurements').fetchone()[0]
-            current = None
-            poses = []
-            seq = 0
-            def save():
-                nonlocal seq
-                if current is None:
-                    return
-                seq += 1
-                if seq == 1 or seq % 500 == 0 or seq == package_total:
-                    progress(dict(text=f'封装匹配 · {seq}/{package_total} · {die_count} DIE/封装', current=seq, total=package_total))
-                payload = dict(cell=f'Package_{seq:09d}', position_um=position, dies=poses)
-                ledger.db.execute('insert into packages(seq,package,cell,payload) values(?,?,?,?)', (seq, current, payload['cell'], dumps(payload)))
-            for package, x, y, pose in ledger.db.execute('select package,x,y,payload from measurements order by package,die'):
-                if stop.is_set():
-                    raise InterruptedError('已停止封装匹配')
-                if package != current:
-                    save()
-                    current, position, poses = package, [x, y], []
-                poses.append(json.loads(pose))
-            save()
-            ledger.db.commit()
-            ledger.set('sources', sorted(sources, key=lambda x: x['die']))
+            if geometry:
+                progress(dict(text='匹配封装 · 读取理论中心及全局坐标', current=0, total=1))
+                if not explicit_order:
+                    indices = infer_die_indices(ledger.db, geometry['centers_um'], scale, tolerance, stop)
+                    if any(i != j for i, j in indices.items()):
+                        cases = ' '.join(f'when {i} then {j}' for i, j in indices.items())
+                        ledger.db.execute(f'update production set die=case die {cases} end')
+                        for item in sources:
+                            item['die'] = indices[item['die']]
+                        order = [name for _, name in sorted((indices[i], name) for i, name in enumerate(order, 1))]
+                seq, skipped = package_rows(ledger.db, geometry, scale, tolerance, stop, progress)
+                if not seq:
+                    raise ValueError(f'没有可运行的完整实测封装（测量失败跳过 {skipped} 封装）')
+                ledger.db.execute('drop table production')
+                ledger.db.commit()
+                ledger.set('measurement', measurement)
+                ledger.set('nominal_geometry', geometry)
+                ledger.set('die_names', order)
+                ledger.set('skipped_packages', skipped)
+                if skipped:
+                    ledger.event(f'已跳过 {skipped} 个含测量失败记录的封装', 'WARNING')
+            else:
+                seq = join_legacy(ledger.db, sources, die_count, stop, progress)
+            ledger.set('sources', sorted(sources, key=lambda x: (x['die'], x['path'])))
             ledger.set('profile', profile)
             ledger.set('profiles', profiles)
             ledger.set('die_count', die_count)
             ledger.set('count', seq)
             ledger.set('state', 'imported')
-            ledger.event(f'导入完成：{die_count} DIE，{seq} 封装；所有封装记录完整匹配')
+            ledger.event(f'导入完成：{die_count} DIE，{seq} 封装；全部有效封装记录完整匹配')
             ledger.db.execute('pragma wal_checkpoint(TRUNCATE)')
         finally:
             ledger.close()
@@ -186,7 +220,46 @@ def import_files(paths, database, die_count, workers, stop, progress=lambda _: N
             raise InterruptedError('已停止导入；未发布任务数据库')
         __import__('os').link(stage, database)
     progress(dict(text=f'导入完成 · {len(paths)}文件 · {seq}封装 · {die_count} DIE', current=seq, total=seq))
-    return dict(packages=seq, dies=die_count, database=str(database))
+    result = dict(packages=seq, dies=die_count, database=str(database))
+    if geometry:
+        result.update(die_names=order, skipped_packages=skipped)
+    return result
+
+
+def join_legacy(db, sources, die_count, stop, progress):
+    if sorted(v['die'] for v in sources) != list(range(1, die_count + 1)):
+        raise ValueError('DIE编号必须完整覆盖1至工程DIE数量，每个文件一颗')
+    missing = db.execute('select package,count(*) from measurements group by package having count(*) != ? limit 20', (die_count,)).fetchall()
+    if missing:
+        raise ValueError(f'封装缺少部分DIE记录，拒绝遗漏：{missing}')
+    conflict = db.execute('select package from measurements group by package having max(x)-min(x)>0.000001 or max(y)-min(y)>0.000001 limit 20').fetchall()
+    if conflict:
+        raise ValueError(f'同封装摆放坐标冲突：{conflict}')
+    # Disk ordered join: only one package's DIE rows in memory.
+    progress(dict(text='匹配封装 · 检查缺测、重复与摆放坐标', current=0, total=1))
+    package_total = db.execute('select count(distinct package) from measurements').fetchone()[0]
+    current = None
+    poses = []
+    seq = 0
+    def save():
+        nonlocal seq
+        if current is None:
+            return
+        seq += 1
+        if seq == 1 or seq % 500 == 0 or seq == package_total:
+            progress(dict(text=f'封装匹配 · {seq}/{package_total} · {die_count} DIE/封装', current=seq, total=package_total))
+        payload = dict(cell=f'Package_{seq:09d}', position_um=position, dies=poses)
+        db.execute('insert into packages(seq,package,cell,payload) values(?,?,?,?)', (seq, current, payload['cell'], dumps(payload)))
+    for package, x, y, pose in db.execute('select package,x,y,payload from measurements order by package,die'):
+        if stop.is_set():
+            raise InterruptedError('已停止封装匹配')
+        if package != current:
+            save()
+            current, position, poses = package, [x, y], []
+        poses.append(json.loads(pose))
+    save()
+    db.commit()
+    return seq
 
 
 def generate_example(folder, count=24, die_count=3, pitch=(12000., 12000.)):

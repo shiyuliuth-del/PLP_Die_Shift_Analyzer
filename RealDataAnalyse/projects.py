@@ -8,6 +8,7 @@ import tempfile
 
 from die_shift_studio.jobs import REALDATA_DIRECTORY, atomic_save, provision_project
 from .excel import DEFAULT_PROFILE
+from .measurements import HEADINGS, folders, table_file
 from .storage import sha256
 
 SETTINGS = 'RealDataAnalyse.project.json'
@@ -17,6 +18,9 @@ GD55_INPUTS = ('GD55_1105.gds', 'GD55.dshift.json',
                    *(f'Excel/GD55_SYNTHETIC_DIE{die}.xlsx' for die in range(1, 4)),
                )))
 GD55_1119_INPUTS = ('GD55_1119.gds', 'GD55_1119.dshift.json')
+SH22_INPUTS = ('sh22.gds', 'SH22.dshift.json', f'{REALDATA_DIRECTORY}/{SETTINGS}',
+               *(f'{REALDATA_DIRECTORY}/Excel/{die}/Measurements_{part}.csv'
+                 for die in ('101', '102') for part in (1, 2)))
 
 
 def inside(folder, value):
@@ -64,6 +68,12 @@ def load_folder(folder):
     known = {inside(root,item['path']) for item in files}
     excluded = {inside(root,path) for path in saved.get('excluded_excel',[])}
     excel = workspace / 'Excel'
+    die_folders = [inside(excel, path) for path in folders(excel)]
+    measurement = None
+    if die_folders:
+        measurement = dict(saved.get('measurement') or {}, root=str(excel))
+        files = [item for item in files if inside(root, item['path']).parent in die_folders]
+        known = {inside(root, item['path']) for item in files}
     legacy_excel = inside(root, 'Excel')
     directories = [excel]
     legacy_selection = any(path.parent == legacy_excel for path in known)
@@ -71,10 +81,10 @@ def load_folder(folder):
         directories.append(legacy_excel)
     elif not had_workspace and 'files' not in saved and not manifest.is_file():
         directories.append(legacy_excel if legacy_excel.is_dir() else root)
-    for directory in directories:
+    for directory in die_folders or directories:
         for path in sorted(directory.iterdir()):
-            if path.is_file() and path.suffix.lower()=='.xlsx' and not path.name.startswith('~$'):
-                path = inside(root,path)
+            if table_file(path) and (measurement or path.suffix.lower() == '.xlsx'):
+                path = inside(directory,path)
                 if path not in known and path not in excluded:
                     files.append(dict(path=str(path),enabled=True))
                     known.add(path)
@@ -87,7 +97,7 @@ def load_folder(folder):
     normalized = []
     for item in files:
         path = inside(root, item['path'])
-        if path.parent in (excel, legacy_excel) and not path.is_file():
+        if path.parent in (excel, legacy_excel, *die_folders) and not path.is_file():
             continue
         entry = dict(path=str(path), enabled=bool(item.get('enabled', True)))
         if 'profile' in item:
@@ -98,12 +108,19 @@ def load_folder(folder):
     if not database.is_file():
         database = inside(workspace, 'Tasks/measurements.sqlite')
         output = inside(workspace, Path('Output') / f'{root.name}.oas')
+    controls = dict(saved.get('controls', {}))
+    if measurement:
+        controls['dies'] = len(die_folders)
+    default_profile = dict(DEFAULT_PROFILE, columns={label: label for label in HEADINGS}) if measurement else DEFAULT_PROFILE
+    profile = copy.deepcopy(saved.get('profile', default_profile))
+    if not measurement or not set(profile['columns']).intersection(HEADINGS):
+        profile = copy.deepcopy(default_profile if measurement else profile)
     return dict(folder=str(root), workspace=str(workspace), project=str(project), files=normalized,
                 template=str(template) if template else '', database=str(database), output=str(output),
-                profile=copy.deepcopy(saved.get('profile', DEFAULT_PROFILE)), controls=saved.get('controls', {}), shared_mapping=bool(saved.get('shared_mapping', True)))
+                profile=profile, controls=controls, shared_mapping=bool(saved.get('shared_mapping', True)), measurement=measurement)
 
 
-def save_folder(folder, project, files, database, output, profile, controls, shared_mapping=True, template=None):
+def save_folder(folder, project, files, database, output, profile, controls, shared_mapping=True, template=None, measurement=None):
     root = Path(folder).resolve()
     workspace = provision_project(root)
     def relative(path):
@@ -112,11 +129,12 @@ def save_folder(folder, project, files, database, output, profile, controls, sha
                    database=relative(database), output=relative(output), profile=profile, controls=controls, shared_mapping=shared_mapping)
     if template:
         payload['template'] = relative(template_file(root,template))
+    if measurement:
+        payload['measurement'] = {key: value for key, value in measurement.items() if key != 'root'}
     selected = {inside(root,item['path']) for item in files}
     payload['excluded_excel'] = [
-        relative(path) for directory in (workspace / 'Excel', inside(root, 'Excel'))
-        for path in sorted(directory.glob('*')) if path.is_file() and path.suffix.lower() == '.xlsx'
-        and not path.name.startswith('~$') and path.resolve() not in selected
+        relative(path) for directory in (workspace / 'Excel', inside(root, 'Excel'), *folders(workspace / 'Excel'))
+        for path in sorted(directory.glob('*')) if table_file(path) and path.resolve() not in selected
     ]
     atomic_save(inside(workspace, SETTINGS), payload)
 
@@ -185,7 +203,7 @@ def install_case(destination):
     root_jobs = Path(__file__).resolve().parents[1] / 'Jobs'
     jobs = Path(destination).resolve() / 'Jobs'
     jobs.mkdir(parents=True, exist_ok=True)
-    for folder, inputs in (('GD55', GD55_INPUTS), ('GD55_1119', GD55_1119_INPUTS)):
+    for folder, inputs in (('GD55', GD55_INPUTS), ('GD55_1119', GD55_1119_INPUTS), ('SH22', SH22_INPUTS)):
         source = root_jobs / folder
         target = jobs / folder
         if target.exists() or not source.is_dir():

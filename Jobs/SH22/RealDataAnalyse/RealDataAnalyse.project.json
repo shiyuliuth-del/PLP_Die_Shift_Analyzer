@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "measurement": {
+    "scale_um": 1000,
+    "die_order": [
+      "101",
+      "102"
+    ]
+  },
+  "controls": {
+    "workers": 0,
+    "memory": 0,
+    "retries": 3,
+    "timeout": 0
+  }
+}

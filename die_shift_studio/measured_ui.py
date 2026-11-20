@@ -358,7 +358,8 @@ class MeasuredOutput(QtCore.QObject):
             if template is not None:
                 occupied.update(template[1])
             error_layer=choose_error_layer(occupied)
-            failure_layer=choose_error_layer(occupied,reserved=[error_layer])
+            error2_layer=choose_error_layer(occupied,reserved=[error_layer])
+            failure_layer=choose_error_layer(occupied,reserved=[error_layer,error2_layer])
             profile=resource_profile();memory=self.options.memory_budget_mb(profile)
             per_lane=max(96,int(self.session.cache.bytes*24/1024**2));lanes=max(1,min(self.options.max_threads or profile['workers'],profile['workers'],int(memory*.7)//per_lane))
             if per_lane>memory:raise MemoryError(f'此图纸估计单任务需{per_lane} MB，超过批次内存限额{memory} MB')
@@ -378,8 +379,8 @@ class MeasuredOutput(QtCore.QObject):
                            and requested_count>=16)
             if use_processes:
                 lanes=process_lanes
-            self.batch=dict(id=uuid.uuid4().hex,client_id=client_id,store=Store(destination.parent,self.session.data.dbu_um,max(1024**2,memory*1024**2//5),checkpoint_destination=destination.with_name(destination.stem+'.'+uuid.uuid4().hex[:12]+'.partial.oas'),error_layer=error_layer,failure_layer=failure_layer,template=template),lock=threading.Lock(),path=destination,baseline=baseline,
-                            executor=ThreadPoolExecutor(max_workers=lanes,thread_name_prefix='dsa-batch'),processes=None,pending=set(),inflight=set(),completed=0,failed=0,failures=[],ending=False,lanes=lanes,memory_mb=memory,template_sha256=template_sha256,semaphore=threading.Semaphore(lanes),output_policy=policy)
+            self.batch=dict(id=uuid.uuid4().hex,client_id=client_id,store=Store(destination.parent,self.session.data.dbu_um,max(1024**2,memory*1024**2//5),checkpoint_destination=destination.with_name(destination.stem+'.'+uuid.uuid4().hex[:12]+'.partial.oas'),error_layer=error_layer,error2_layer=error2_layer,failure_layer=failure_layer,template=template),lock=threading.Lock(),path=destination,baseline=baseline,
+                            executor=ThreadPoolExecutor(max_workers=lanes + max(1,lanes//2) if use_processes else lanes,thread_name_prefix='dsa-batch'),processes=None,pending=set(),inflight=set(),completed=0,failed=0,failures=[],ending=False,lanes=lanes,memory_mb=memory,template_sha256=template_sha256,semaphore=threading.Semaphore(lanes),output_policy=policy)
             if use_processes:
                 from .measured_workers import BatchWorkers
                 try:
@@ -387,7 +388,7 @@ class MeasuredOutput(QtCore.QObject):
                 except Exception:
                     self.close_batch()
                     raise
-            return dict(status='completed',result=dict(batch_id=self.batch['id'],threads=lanes,execution='processes' if use_processes else 'threads',max_memory_mb=memory,queue_limit=lanes*4,template_sha256=template_sha256,output_policy=policy,error_layer=dict(layer=error_layer[0],datatype=error_layer[1],name='ERROR'),failure_layer=dict(layer=failure_layer[0],datatype=failure_layer[1],name='FAIL')))
+            return dict(status='completed',result=dict(batch_id=self.batch['id'],threads=lanes,execution='processes' if use_processes else 'threads',max_memory_mb=memory,queue_limit=lanes*4,template_sha256=template_sha256,output_policy=policy,error_layer=dict(layer=error_layer[0],datatype=error_layer[1],name='ERROR'),error2_layer=self.batch['store'].serious_layer_receipt(),failure_layer=dict(layer=failure_layer[0],datatype=failure_layer[1],name='FAIL')))
         if command=='batch.submit':
             batch=self.batch
             if batch is None or batch['ending']:raise RuntimeError('批次未开始或已结束接收')
@@ -427,20 +428,21 @@ class MeasuredOutput(QtCore.QObject):
                             from .measured_issues import place
                             exc.details=place(dict(exc.details,cell=name,position_um=position.tolist()),position)
                         raise
-                    from .measured_issues import place
-                    details=place(details,position)
-                    if details['connection_failure_count'] and not (batch['output_policy']=='omit_failed_regions' and details.get('partial_output') and details.get('omitted_region_count',0)>0):raise ValueError('存在未处理的连接失败，拒绝输出')
-                    cancel_check()
-                    store=batch['store']
-                    packet=store.prepare(name,layers,position,session.case['board'].bounds[:2],
-                                         errors=details['drc_issues'],die_count=len(session.case['dies']),
-                                         failure_outline=session.case['board'].wkb if details.get('connection_failure_count',0)>0 else None)
-                    cancel_check()
-                    with batch['lock']:
-                        markers=store.commit(packet)
-                        if batch['store'].count==1 or batch['store'].count%64==0:batch['store'].flush()
-                    return dict(cell=name,checkpoint=str(batch['store'].checkpoint_destination),checkpoint_cells=batch['store'].checkpoint_count,**markers,**details)
                 finally:batch['semaphore'].release()
+                from .measured_issues import place
+                details=place(details,position)
+                if details['connection_failure_count'] and not (batch['output_policy']=='omit_failed_regions' and details.get('partial_output') and details.get('omitted_region_count',0)>0):raise ValueError('存在未处理的连接失败，拒绝输出')
+                cancel_check()
+                store=batch['store']
+                packet=store.prepare(name,layers,position,session.case['board'].bounds[:2],
+                                     errors=details['drc_issues'],die_count=len(session.case['dies']),
+                                     failure_outline=session.case['board'].wkb if details.get('connection_failure_count',0)>0 else None)
+                cancel_check()
+                with batch['lock']:
+                    markers=store.commit(packet)
+                    if store.count==1 or store.count>=max(64,2*store.checkpoint_count):
+                        store.flush()
+                return dict(cell=name,checkpoint=str(batch['store'].checkpoint_destination),checkpoint_cells=batch['store'].checkpoint_count,**markers,**details)
             response=self.submit(command,produce,'batch.pose');batch['inflight'].add(response['task_id']);return response
         if command=='batch.end':
             batch=self.batch

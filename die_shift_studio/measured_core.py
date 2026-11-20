@@ -109,17 +109,17 @@ class Session:
         from .measured_issues import catalogue
         from .reconstruction_diagnostic import markers
         if not hasattr(r,'display_drc'):r.display_drc=GlobalDRC(model,p)
-        frame['drc']=r.display_drc.frame(states,result['replacements'],self.settings,lambda n,t:progress(70+round(n*.15),t))
-        frame['drc'].extend(markers(result,self.data.dbu_um));frame['measure_drc']=bool(preview);frame['drc_locations']=locations(frame['drc'],measure=preview)
-        issues=catalogue(frame,self.case,model)
+        frame['drc']=r.display_drc.frame(states,result['replacements'],self.settings,lambda n,t:progress(70+round(n*.15),t),electrical=True)
+        frame['drc'].extend(markers(result,self.data.dbu_um));frame['measure_drc']=bool(preview)
         original_failures=tuple(result.get('hard_failures',()));omissions=[]
         if original_failures and output_policy=='omit_failed_regions':
             from .partial_output import omit
             frame,omissions=omit(model,frame)
-            frame['drc'].extend(r.display_drc.frame(states,frame['reconstruction']['replacements'],self.settings,lambda n,t:progress(85+round(n*.1),t)))
+            frame['drc'].extend(r.display_drc.frame(states,frame['reconstruction']['replacements'],self.settings,lambda n,t:progress(85+round(n*.1),t),electrical=True))
             for q in omissions:
                 if q.get('quantization'):frame['drc'].append(dict(layer=q['layer'],layers=(q['layer'],),refs=((q['layer'],q['index']),),kind=q['reason'],geometry=shapely.box(*q['bounds_um']),connection_failure=True))
-            frame['drc_locations']=locations(frame['drc'],measure=preview);issues=catalogue(frame,self.case,model)
+        frame['drc_locations']=locations(frame['drc'],measure=preview,separate_shorts=True)
+        issues=catalogue(frame,self.case,model)
         if result.get('hard_failures') and output_policy=='strict':
             from .reconstruction_diagnostic import display,DiagnosticFailure
             from .topology_routing import failure_message

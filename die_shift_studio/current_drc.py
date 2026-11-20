@@ -19,9 +19,9 @@ def _matrix(model,owner,states):
     return np.r_[rotation.ravel(),c-rotation@c+[dx,dy]]
 
 
-def frame(checker,states,replacements,settings,progress,owners=None,scopes=None):
+def frame(checker,states,replacements,settings,progress,owners=None,scopes=None,*,electrical=False):
     from .drc_policy import enabled,ALL
-    if not getattr(settings,'drc_checks',ALL):progress(100,'所有尺寸DRC类别均未启用');return []
+    if not electrical and not getattr(settings,'drc_checks',ALL):progress(100,'所有尺寸DRC类别均未启用');return []
     from .drc import separation_region
     from .drc_rules import effective_clearances
     m=checker.model;p=checker.p;clearances=effective_clearances(p,settings);dbu=m.data.dbu_um;states=np.asarray(states,float)
@@ -96,14 +96,22 @@ def frame(checker,states,replacements,settings,progress,owners=None,scopes=None)
             for kind,g in checker.cached(checked,width if enabled(settings,'width') else 0.,space if enabled(settings,'space') else 0.,0. if mixed else angle):
                 if kind=='最小内角不足':add_rule(kind,g,angle,angular=True)
                 elif region is None or g.intersects(region):add_rule(kind,g,width if kind=='线宽不足' else space)
-    tree=shapely.STRtree([n['geometry'] for n in nets]);maximum=max((n['space'] for n in nets),default=0.)
-    for i,a in enumerate(nets if enabled(settings,'space') else ()):
+    spacing=enabled(settings,'space')
+    tree=shapely.STRtree([n['geometry'] for n in nets]);maximum=max((n['space'] for n in nets),default=0.) if spacing else 0.
+    for i,a in enumerate(nets if spacing or electrical else ()):
         cancel_check()
         for j in tree.query(a['geometry'],predicate='dwithin',distance=maximum):
             b=nets[int(j)]
             if j<=i or a['key'][0]!=b['key'][0]:continue
             deps=dependencies(a['owners']|b['owners'])
             if not wanted(deps):continue
+            if not spacing:
+                overlap=a['geometry'].intersection(b['geometry'])
+                if not overlap.is_empty:
+                    layers=tuple(sorted(set(a['layers']+b['layers'])))
+                    items.append(dict(layer=layers[0],layers=layers,geometry=overlap,kind='异网短接',short_circuit=True,
+                                      nets=(a['key'][1],b['key'][1]),refs=a['refs']+b['refs'],dependencies=deps))
+                continue
             space=max(a['space'],b['space'])
             if not a['geometry'].dwithin(b['geometry'],space):continue
             same=a['rigid'] and b['rigid'] and np.allclose(a['matrix'],b['matrix'],rtol=0,atol=dbu*1e-7)
@@ -180,11 +188,22 @@ def frame(checker,states,replacements,settings,progress,owners=None,scopes=None)
     return items
 
 
-def locations(items,measure=True):
+def locations(items,measure=True,*,separate_shorts=False):
     """Exactly one table row and one locator per connected witness component."""
+    def witnesses():
+        for item in items:
+            cancel_check()
+            pair=item.get('_measurement_pair')
+            if separate_shorts and pair is not None and item.get('nets'):
+                overlap=pair[0].intersection(pair[1])
+                if not overlap.is_empty:
+                    # An edge or point of contact still connects these nets.
+                    yield dict(item,geometry=overlap,kind='异网短接',short_circuit=True)
+                    yield dict(item,geometry=item['geometry'].difference(overlap),kind='线距不足')
+                    continue
+            yield item
     rows=[];seen=set()
-    for item in items:
-        cancel_check()
+    for item in witnesses():
         pending=[item['geometry']]
         while pending:
             geometry=pending.pop()
@@ -195,7 +214,7 @@ def locations(items,measure=True):
             if key in seen:continue
             seen.add(key)
             from .drc_actual import measured
-            rows.append(dict({k:v for k,v in item.items() if not k.startswith('_measurement')},**(measured(item,geometry) if measure else {}),geometry=geometry,point=list(geometry.representative_point().coords[0])))
+            rows.append(dict({k:v for k,v in item.items() if not k.startswith('_measurement')},**(measured(item,geometry) if measure and not item.get('short_circuit') else {}),geometry=geometry,point=list(geometry.representative_point().coords[0])))
     return sorted(rows,key=lambda q:(q.get('layer',''),q['kind'],tuple(q['point'])))
 
 

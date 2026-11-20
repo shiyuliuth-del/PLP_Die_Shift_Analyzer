@@ -47,6 +47,7 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         assert w.connect_button.text() == '连接状态' and w.start_button.text() == '启动预演软件'
         w.open_folder(folder)
         wait(w)
+        assert w.workers.value() == w.memory.value() == 0
         assert w.connect_button.property('connected') is True
         assert w.start_button.property('connected') is True
         assert w.file_view.rowCount() == 3 and w.profile.rowCount() == 9
@@ -124,6 +125,8 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
             runner.return_value.run.return_value = dict(state='completed', output=w.output.text())
             w.run_button.click(); wait(w)
             runner.return_value.run.assert_called_once()
+            assert all(label in w.progress.toolTip() for label in ('开始 ', '结束 ', '耗时 '))
+            assert w.progress.started is None and w.progress.end_time >= w.progress.start_time
             dialog = w.completion_dialog
             assert dialog.isVisible() and dialog.windowTitle() == '任务完成'
             assert w.completion_path.isReadOnly() and w.completion_path.text() == w.output.text()

@@ -51,6 +51,7 @@ with tempfile.TemporaryDirectory(prefix='rda-plans-gui-') as name:
             runner.return_value.run.return_value = dict(state='completed', completed=1)
             w.start_plans();wait(w)
             runner.return_value.run.assert_called_once()
+            assert all(label in w.progress.toolTip() for label in ('开始 ', '结束 ', '耗时 '))
             assert not any(dialog.isVisible() for dialog in w.findChildren(W.QMessageBox))
         for table in (w.file_view,w.profile,w.table,panel.table):assert not table.verticalHeader().isHidden()
         # Send actual mouse events to each drag handle, including the plan panel.
