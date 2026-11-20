@@ -266,13 +266,17 @@ def scan(r,grid,progress=lambda *_:None,source_cache=None):
             for q in ps:
                 key=zone_key(q)
                 if key not in templates:templates[key]=shapely.union_all([r.model.nodes[r.model.ids[tuple(ref)]]['poly'] for ref in q.get('via_refs',())])
+        from .ignored_motion import linked_owners
         for ref,owner,required in vias:
-            scope=tuple(sorted(set(axes)|({owner} if owner>=0 and grid.radices[owner]>1 else set())))
+            linked_zero,_=linked_owners(r,np.zeros((count,3)))
+            eff_owner=linked_zero.get(ref,owner)
+            scope=tuple(sorted(set(axes)|({eff_owner} if eff_owner>=0 and grid.radices[eff_owner]>1 else set())))
             for digits in product(*(range(grid.radices[o]) for o in scope)):
                 cancel_check();z=np.zeros((count,3));d=dict(zip(scope,digits))
                 for o,value in d.items():z[o]=grid.locals[o][value]
                 g,ps=table[tuple(d[o] for o in axes)]
-                missing=r.model.moved(required,owner,z).difference(g)
+                via_owner=linked_owners(r,z)[0].get(ref,owner) if r.settings.reconstruction_fixed_via_mode!='off' else owner
+                missing=r.model.moved(required,via_owner,z).difference(g)
                 if missing.area<=r.tol*r.tol:continue
                 placed=tuple(dict(q,moving_terminals=r.model.moved(templates[zone_key(q)],q['die'],z)) for q in ps)
                 rows=[dict(kind='孔盘包围不足',geometry=missing,layers=tuple({v[0] for v in component}),net=net)]

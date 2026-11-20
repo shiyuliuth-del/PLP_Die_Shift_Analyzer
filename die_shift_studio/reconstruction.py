@@ -288,8 +288,9 @@ class Reconstructor:
                 manual.update(self.settings.reconstruction_ignored)
                 manual.update(self.box_refs)
                 for ref,who in groups_by_ref.items():
-                    if len(who)!=1 or ref in manual:continue
+                    if len(who)!=1:continue
                     self.die_internal[ref]=who[0]
+                    if ref in manual:continue
                     self.auto_ignored[ref]=dict(certified=False,scope='DIE内动区判断',following=(mode=='follow'))
                     if mode=='follow':self.auto_following.add(ref)
         candidates=[item for item in self.vias_by_target.items() if item[0] not in self.die_internal]
@@ -543,7 +544,7 @@ class Reconstructor:
         # Route construction is pose-independent and reused after every handle edit.
         from .session_cache import logical_fingerprint
         base_key=logical_fingerprint((self.model.data.geometry_id,self.model.roles,self.model.connections.order,
-                                'source-routes-v56-branches',self.settings.evaluation_scope=='risk',self.rules.identity,bool(getattr(self,'measured_only',False)),self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
+                                'source-routes-v57-branches',self.settings.evaluation_scope=='risk',self.rules.identity,bool(getattr(self,'measured_only',False)),self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
         # Forcing/editing one source must not rebuild every source path. Mine
         # membership includes enclosure filtering; all-via ownership controls
         # allocation. Existing path identities survive later manual edits.
@@ -563,7 +564,7 @@ class Reconstructor:
         self._base_plans=[entry for key in keys for entry in self.plan_pool[key]]
         from .parallel_zones import coordinate
         self._base_plans=coordinate(self,self._base_plans)
-        self._plans=expand(self,[e for e in self._base_plans if (e['layer'],e['index']) not in self.settings.reconstruction_ignored or (e['layer'],e['index']) in self.box_refs])
+        self._plans=expand(self,[e for e in self._base_plans if (e['layer'],e['index']) not in self.settings.reconstruction_ignored])
         from .ignored_motion import entries as ignored_entries
         self._plans.extend(ignored_entries(self))
         return self._plans
@@ -696,9 +697,11 @@ class Reconstructor:
         from .topology_routing import resolve,spacing
         out,pieces,changed,blocked=resolve(self,raw['replacements'],raw['pieces'],states,lambda n,t:progress(35+round(n*.3),t))
         if blocked and not quick:
-            alternate=self._raw_frame(states,deformation,lambda n,t:progress(65+round(n*.1),t),True,diagnostics=False)
-            ao,ap,ac,ab=resolve(self,alternate['replacements'],alternate['pieces'],states,lambda n,t:progress(75+round(n*.15),t))
-            if len(ab)<len(blocked):raw,out,pieces,changed,blocked=alternate,ao,ap,ac,ab
+            blocked_refs={tuple(ref) for ref,_ in blocked}
+            if any((q['layer'],q['index']) in blocked_refs and not q.get('ignored') and q.get('route_plan') is not None for q in pieces):
+                alternate=self._raw_frame(states,deformation,lambda n,t:progress(65+round(n*.1),t),True,diagnostics=False)
+                ao,ap,ac,ab=resolve(self,alternate['replacements'],alternate['pieces'],states,lambda n,t:progress(75+round(n*.15),t))
+                if len(ab)<len(blocked):raw,out,pieces,changed,blocked=alternate,ao,ap,ac,ab
         from .ignored_motion import add_linked_geometry
         out=add_linked_geometry(self,out,states)
         result=dict(raw,replacements=out,pieces=pieces,repair_refs=changed,hard_failures=blocked,
@@ -816,7 +819,7 @@ class Reconstructor:
             feature=features.setdefault((layer,index),dict(source=source,pieces=[],net=entry['net']))
             piece=dict(ownership_seam=entry.get('ownership_seam',EMPTY),strict_box=part.get('strict_box'),box_invalid=part.get('box_invalid',False),graph_branch=entry.get('graph_branch',False) or part.get('box_complex',False),moving_nominal=entry.get('moving_nominal') if not part.get('box_complex') else plan.land,fixed_nominal=entry.get('fixed_nominal') if not part.get('box_complex') else shapely.union_all(plan.anchors),ignored=entry.get('ignored',False),ignored_following=entry.get('following',False),follow_owners=entry.get('follow_owners',(owner,)),die=owner,layer=layer,index=index,net=entry['net'],via_refs=entry['refs'],vias=[v[1] for v in entry['refs']],
                        fallback_regions=fallback if part.get('near') is not None else None,connection_failed=bool(error) or not valid,
-                       missing_region=part['A'] if part.get('strict_box') is not None or getattr(plan,'plane_domain',False) else missing_area(part,plan,self.model.bound.centers[owner],states[owner]) if plan is not None and part.get('near') is not None else source,
+                       missing_region=part['A'] if part.get('strict_box') is not None or getattr(plan,'plane_domain',False) else missing_area(part,plan,self.model.bound.centers[owner],states[owner]) if plan is not None and part.get('near') is not None else (regions['C'] if entry.get('ignored') and entry.get('following') and not regions['C'].is_empty else source),
                        moving_handle_endpoint=(transform(shapely.Point(plan.route.coords[0]),self.model.bound.centers[owner],states[owner]) if plan is not None else None),
                        moving_terminals=shapely.union_all([self.model.moved(v['poly'],owner,states) for v in entry['mine'] if 'poly' in v]),
                        source=source,source_scope_complete=bool(entry.get('routing_source',source) is source if plan is None else plan.source is source),endpoint_weights=(entry.get('serial_left',1.),entry.get('serial_right',0.)),branch=entry.get('branch',1),branch_count=entry.get('branch_count',1),route_plan=plan,interval=(a,b),boundary_angles=part.get('angles',(0.,0.)),route_identity=None if plan is None else plan.identity,
@@ -840,7 +843,7 @@ class Reconstructor:
         for (layer,index),feature in features.items():
             ps=feature['pieces'];source=feature['source']
             owners=sorted({q['die'] for q in ps}|{v['owner'] for v in self.vias_by_target.get((layer,index),()) if v['owner']>=0})
-            compose_key=('composed-continuity-v55',self.rules.identity,layer,index,quick,self.settings.reconstruction_style,self.settings.reconstruction_boundary_mode,
+            compose_key=('composed-continuity-v57',self.rules.identity,layer,index,quick,self.settings.reconstruction_style,self.settings.reconstruction_boundary_mode,
                          tuple((owner,states[owner].tobytes(),self.model.bound.centers[owner].tobytes()) for owner in owners),
                          tuple((q['route_identity'],q['interval'],q['boundary_angles'],q.get('ignored'),q.get('ignored_following'),q['endpoint_weights'],q['strict_box'].wkb if q.get('strict_box') is not None else None) for q in ps))
             saved=self.geometry_pool.get(compose_key)

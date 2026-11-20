@@ -32,6 +32,9 @@ def show_shape_menu(window,event,point):
     if len(refs)==1:
         key,i=refs[0];kind,xy,_=shape_nodes(window.data,key,i)
         summary=f'{key} #{i+1} · {kind} · {len(xy)} 个名义节点'
+        pending=((getattr(getattr(window,'reconstruction_overlay',None),'staged_overlay',None) or {}).get('actions',{})).get(refs[0])
+        if pending and getattr(window,'reconstruction_pending',False):
+            summary+=' · 待算：'+' + '.join(pending)
     else:
         summary=f'已选 {len(refs)} 个图形 · {len({k for k,_ in refs})} 层'
     menu.addAction(summary).setEnabled(False)

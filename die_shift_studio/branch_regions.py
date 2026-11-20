@@ -59,6 +59,29 @@ def transition_domains(source,rows,tol,sections=None):
         return active,parts(source.difference(active))
     components=parts(source);intervals=[];blades={}
     if sections is None:sections=path_sections(rows)
+    # If pose-tilted blades from different branch members cross inside source,
+    # revert the colliding members to perpendicular cuts so seams never crisscross.
+    row_faces=[]
+    for row,part in zip(rows,sections):
+        faces=[]
+        if part is not None:
+            for name in ('near','far'):
+                face=part[name]
+                if face.geom_type=='LineString':faces.append(face)
+        row_faces.append(faces)
+    crossing=set()
+    for i in range(len(rows)):
+        if not any(abs(v)>1e-6 for v in rows[i].get('boundary_angles',(0.,0.))):continue
+        for j in range(len(rows)):
+            if i==j:continue
+            if any(a.intersects(b) and not a.equals(b) for a in row_faces[i] for b in row_faces[j]):
+                crossing.add(i);crossing.add(j)
+    if crossing:
+        sections=list(sections)
+        for i in crossing:
+            if not any(rows[i].get('manual_angles',(False,False))):
+                fallback=rows[i]['route_plan'].partition(*rows[i]['interval'],(0.,0.))
+                if fallback is not None:sections[i]=fallback
     for row,part in zip(rows,sections):
         plan=row['route_plan'];a,b=row['interval'];eps=min(tol*8,(b-a)*.05)
         if b-a>tol:intervals.append(substring(plan.route,a+eps,b-eps))
@@ -119,7 +142,31 @@ def assemble(r,source,rows,states):
         if m and f and not any(q.get('strict_box') is not None for q in rows):active=shapely.union_all([active,g]);continue
         index=len(rigid);rigid.append(g)
         if m or f:known[index]=float(m)
-    domains=sorted(parts(clean_overlay(active,r.tol)),key=lambda g:g.bounds);physical_count=len(rigid)
+    domains=sorted(parts(clean_overlay(active,r.tol)),key=lambda g:g.bounds)
+    # Absorb narrow terminal-free floating rigid slivers sandwiched between two
+    # transition domains of the same owner (e.g. close parallel branch cuts on
+    # a shared copper neck) so they form one clean, wider transition zone.
+    if len(domains)>1 and not any(q.get('strict_box') is not None for q in rows):
+        gap_limit=max(r._rule_width*2.5,50.)
+        absorbed=set()
+        for i,g in enumerate(rigid):
+            if i in known:continue
+            touching=[d for d in domains if d.distance(g)<=r.tol*4]
+            if len(touching)<2:continue
+            equiv_width=2.*g.area/max(g.length,1e-6)
+            min_gap=min(a.distance(b) for ix,a in enumerate(touching) for b in touching[ix+1:])
+            if min_gap<=gap_limit or equiv_width<=gap_limit:
+                absorbed.add(i)
+        if absorbed:
+            active=shapely.union_all([active,*(rigid[i] for i in absorbed)])
+            new_rigid=[];new_known={}
+            for i,g in enumerate(rigid):
+                if i in absorbed:continue
+                if i in known:new_known[len(new_rigid)]=known[i]
+                new_rigid.append(g)
+            rigid,known=new_rigid,new_known
+            domains=sorted(parts(clean_overlay(active,r.tol)),key=lambda g:g.bounds)
+    physical_count=len(rigid)
     # Real terminal regions provide Dirichlet conditions even in whole-pad mode.
     for g,v in ((moving,1.),(fixed,0.)):
         known[len(rigid)]=v;rigid.append(g)
@@ -265,7 +312,7 @@ def consolidate(r,pieces,states):
         else:other.append(q)
     for rows in groups.values():
         source=rows[0]['route_plan'].source
-        cache_key=('branch-assembly-local-intervals-v55',r.rules.identity,r.settings.reconstruction_style,
+        cache_key=('branch-assembly-local-intervals-v57',r.rules.identity,r.settings.reconstruction_style,
                    tuple(r.model.bound.centers[rows[0]['die']]),states[rows[0]['die']].tobytes(),
                    tuple((q['route_identity'],q['interval'],q['boundary_angles'],tuple(q['nominal_regions'][k].wkb for k in 'ABC')) for q in rows))
         cached=r.geometry_pool.get(cache_key)

@@ -1,3 +1,11 @@
+# V57 随动诊断、复杂铜面动区、低概率低亮与层叠选中列
+
+`reconstruction.py` 与 `reconstruction_events.py` 修复整块随动图形失联时的 `missing_region`（改用移动后的 `regions['C']` 而非原位 `source`），并在离散扫描中接入 `ignored_motion.linked_owners`。`ignored_motion.entries` 与 `gui.py` 确保被忽略的图形自动清除全部动区并覆盖旧选框，同时在 `die_internal` 保留所属 DIE 与显式静止/随动优先级。
+
+`branch_regions.py` 吸收被同一 DIE 相邻动区夹住的狭窄无端孔刚体条，并在 `transition_domains` 检出跨成员相交斜切时自动回退垂直切口；`plane_route.live_part` 按跨度与切口高度比例限制最大倾角，避免宽面边界横竖交错及虚假内角 DRC；`reconstruction_route.choose` 在无安全余量段时优先长度达到 `max_travel` 的直段而非亚位移窄条。
+
+`reconstruction_probability.pose_probability` 计算离散极端姿态物理概率质量，`gui.is_low_probability_pose`、`reconstruction_overlay.py`（`LOW_PALETTE`、`low_problems`）与 `drc_overlay.py` 对低于 `2Φ(-k)` 的极端工况进行低亮弱化处理。`ReconstructionOverlay.stage` 记录逐图形累计待算操作（`actions`）并用分类虚线色与画布 `staged_tags` 标注；随动填充提升至 `#c9b3eb`（alpha `0.45`）。`gui.py` 层叠表扩展为 4 列（`显示 / 选中 / 层·类型 / 用途`），`selectable_boxes` 默认仅勾选固定 RDL，由 `selection.py` 过滤并随工程持久化 `selectability`。`reconstruction.frame` 跳过仅含忽略图形硬失败的冗余 `quick` 回退。回归见 `tests/test_v57.py`，操作说明见 [V57 使用说明](V57_使用说明.md)。
+
 # V56 GD55_1119 交互、反馈与性能
 
 `Jobs/GD55_1119`（`GD55_1119.gds`、`GD55_1119.dshift.json`）纳入 `.gitattributes`、`RealDataAnalyse/projects.py` 与 `tools/package_release.py` 随包白名单。

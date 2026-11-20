@@ -20,14 +20,14 @@ def fixed_enclosures_safe(r,ref,vias):
 def entries(r):
     out=[]
     for ref in sorted(set(r.settings.reconstruction_ignored)|set(r.auto_ignored)):
-        if ref in getattr(r,'box_refs',()):continue
+        if ref not in r.settings.reconstruction_ignored and ref in getattr(r,'box_refs',()):continue
         vias=r.vias_by_target.get(ref,())
         internal=r.die_internal.get(ref)
         if not vias and internal is None:continue
         source=r.model.cache.layers[ref[0]]['geometry'][ref[1]]
         owners=[internal] if internal is not None else sorted({v['owner'] for v in vias if v['owner']>=0})
         if not owners:continue
-        following=ref in r.settings.reconstruction_following or ref in getattr(r,'auto_following',())
+        following=(ref in r.settings.reconstruction_following) if ref in r.settings.reconstruction_ignored else (ref in r.settings.reconstruction_following or ref in getattr(r,'auto_following',()))
         node=r.model.nodes[r.model.ids[ref]]
         mine=list(vias) or [dict(center=np.asarray(source.centroid.coords[0]))]
         out.append(dict(layer=ref[0],index=ref[1],owner=owners[0],follow_owners=tuple(owners),following=following,

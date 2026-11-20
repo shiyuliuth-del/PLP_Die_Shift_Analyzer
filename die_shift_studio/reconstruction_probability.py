@@ -110,6 +110,28 @@ def central_certificate(r,entry,entries):
                 reason='平移矩形导体的中心安全盒：双Lipschitz边距、静态邻网及包围量充分界限')
 
 
+def pose_probability(grid,p,index):
+    """Physical truncated-normal cell probability mass of one discrete extreme pose."""
+    if grid is None or index is None or index<0 or not (0<p.target_nsigma<math.inf):
+        return None
+    key=(p.input_nsigma,p.target_nsigma,p.reference_nsigma,
+         p.single_bound_x_um,p.single_bound_y_um,p.multi_bound_x_um,p.multi_bound_y_um,
+         p.bound_angle_deg,p.mean_x_um,p.mean_y_um,p.mean_angle_deg,p.rho_xy,
+         p.per_die_enabled,tuple(tuple(r) for r in (p.die_bounds or ())))
+    cached=getattr(grid,'_extreme_weights_cache',None)
+    if cached is None or cached[0]!=key:
+        weights,_=extreme_weights(grid,p)
+        grid._extreme_weights_cache=(key,weights)
+    else:
+        weights=cached[1]
+    digits=grid.choices(int(index))
+    prob=1.0
+    for owner,d in enumerate(digits):
+        if grid.radices[owner]>1:
+            prob*=float(weights[owner][d])
+    return prob
+
+
 def attach(bank,r):
     if bank.get('selected_indices') is not None:
         from .evaluation_scope import SCOPE_NAMES,conditional_weights,conditional_event
