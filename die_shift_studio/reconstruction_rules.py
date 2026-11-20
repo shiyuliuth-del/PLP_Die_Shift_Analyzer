@@ -71,7 +71,8 @@ class FixedRules:
         for layer,rows in (replacements or {}).items():
             for row in rows:
                 for index in row['indices']:changed[layer,index]=row['geometry']
-        return {key:shapely.union_all([changed.get(ref,self.model.nodes[self.model.ids[ref]]['poly']) for ref in refs])
+        return {key:changed.get(refs[0],self.original[key]) if len(refs)==1 else
+                shapely.union_all([changed.get(ref,self.model.nodes[self.model.ids[ref]]['poly']) for ref in refs])
                 if any(ref in changed for ref in refs) else self.original[key] for key,refs in self.nets.items()}
 
     def local(self,key,g,states,vias=None):
@@ -170,6 +171,7 @@ class FixedRules:
         only on the owning DIE. Final posed neighbours are checked separately.
         """
         from .reconstruction_route import warp,part_key
+        from .drc_rules import pad_first
         from .turn_connection import VARIANTS
         token=('rule-choice-v41',self.identity,style,part_key(part),np.asarray(center).tobytes(),np.asarray(pose).tobytes())
         if token in plan.pose_memo:
@@ -195,7 +197,7 @@ class FixedRules:
                 cancel_check();alternate,reason=warp(part,plan,center,pose,style,v)
                 if reason:continue
                 candidate_score=quality(alternate)
-                if candidate_score<best_score:best,best_score=alternate,candidate_score
+                if pad_first(candidate_score)<pad_first(best_score):best,best_score=alternate,candidate_score
                 if not any(best_score[:-1]):break
         size=sum(int(shapely.get_num_coordinates(g))*24 for g in best.values())+512
         if size<=plan.memo_budget:

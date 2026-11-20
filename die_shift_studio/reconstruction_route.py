@@ -61,7 +61,7 @@ def medial_graph(wkb,width):
     return nodes,tuple(tuple(v) for v in graph)
 
 
-def trace(poly,start,end,width):
+def trace(poly,start,end,width,visibility_budget=None):
     """Shortest interior medial path, with exact source terminal endpoints."""
     # Prepared GEOS indexes are lazily mutated. Never attach one to a
     # source polygon shared by foreground and background reconstruction.
@@ -83,11 +83,11 @@ def trace(poly,start,end,width):
         direct=shapely.LineString([start,end])
         if poly.covers(direct):return direct
         from .reconstruction_visibility import trace as fallback
-        return fallback(poly,start,end,width)
+        return fallback(poly,start,end,width,max_edges=visibility_budget)
     active=np.array([i for i,row in enumerate(base) if row],int)
     if not len(active):
         from .reconstruction_visibility import trace as fallback
-        return fallback(poly,start,end,width)
+        return fallback(poly,start,end,width,max_edges=visibility_budget)
     tree=cKDTree(nodes[active]);graph=[list(row) for row in base];graph.extend([[],[]])
     allxy=np.vstack([nodes,start,end]);src,dst=len(nodes),len(nodes)+1
     for pos,point in ((src,start),(dst,end)):
@@ -105,7 +105,7 @@ def trace(poly,start,end,width):
             if value<dist.get(j,math.inf):dist[j]=value;previous[j]=i;heapq.heappush(queue,(value,j))
     if dst not in previous:
         from .reconstruction_visibility import trace as fallback
-        return fallback(poly,start,end,width)
+        return fallback(poly,start,end,width,max_edges=visibility_budget)
     order=[dst]
     while order[-1]!=src:order.append(previous[order[-1]])
     line=shapely.LineString(allxy[order[::-1]])

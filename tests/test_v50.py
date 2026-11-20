@@ -95,7 +95,7 @@ class V50Tests(unittest.TestCase):
     for key in ('moved_cut','extra_cut'):
      for line in shapely.get_parts(q[key]):
       if line.geom_type=='LineString':self.assertLess(line.hausdorff_distance(shapely.LineString([line.coords[0],line.coords[-1]])),1e-6)
-   e.configure_reconstruction(True,replace(cfg,reconstruction_ignored=(('5/0',0),)))
+   e.configure_reconstruction(True,replace(cfg,reconstruction_ignored=(('5/0',0),),reconstruction_box_excluded=(('5/0',0),)))
    ignored=e.reconstructor.frame(np.zeros((1,3)),diagnostics=False,_raw=True)
    rows=[q for q in ignored['pieces'] if q['layer']=='5/0' and q['index']==0]
    self.assertTrue(rows);self.assertTrue(all(q.get('ignored') for q in rows))

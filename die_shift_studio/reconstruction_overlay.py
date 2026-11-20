@@ -4,6 +4,7 @@ import time
 import math
 import numpy as np
 import shapely
+from .moving_pair import boundary_pose,relative_pose
 from matplotlib.collections import LineCollection,PatchCollection
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
@@ -150,7 +151,7 @@ class ReconstructionOverlay:
                             continue
                         from .reconstruction_edits import apply_angles
                         part=apply_angles(self.w.view_settings,route,part) or part
-                        staged.append(transform(part['far' if side else 'near'],frame['rotation_centers'][q['die']],frame['states'][q['die']]*q.get('endpoint_weights',(1.,0.))[side]));changed=True
+                        staged.append(transform(part['far' if side else 'near'],*boundary_pose(q,frame,side)));changed=True
                     if changed:g=shapely.union_all(staged)
                 if g is None:continue
                 if q.get('graph_members'):
@@ -159,7 +160,7 @@ class ReconstructionOverlay:
                     result[key]=g
                 elif plan is not None and g.geom_type=='Point':
                     local=plan.pad_handle(side)
-                    local=transform(local,frame['rotation_centers'][q['die']],frame['states'][q['die']]*q.get('endpoint_weights',(1.,0.))[side])
+                    local=transform(local,*boundary_pose(q,frame,side))
                     result[key]=local
                     anchor=tuple(np.round(np.asarray(plan.route.coords[0 if side==0 else -1]),7))
                     groups.setdefault((q['layer'],kind,q['die'] if side==0 else -1,anchor),[]).append((key,g,local))
@@ -528,7 +529,7 @@ class CutDrag:
         from .selection import inverse_geometry
         side=1 if kind=='extra' else 0;frame=w.current_frame;owner=piece['die']
         point=np.array([event.xdata,event.ydata])-self.state['handle_offset']
-        nominal=inverse_geometry(shapely.Point(point),frame['rotation_centers'][owner],frame['states'][owner]*piece.get('endpoint_weights',(1.,0.))[side])
+        nominal=inverse_geometry(shapely.Point(point),*boundary_pose(piece,frame,side))
         plan=piece['route_plan'];origin=np.asarray(plan.route.interpolate(piece['interval'][side]).coords[0])
         self.state['nominal_press']=np.asarray(nominal.coords[0])
         self.state['drag_offset']=origin-np.asarray(nominal.coords[0])
@@ -540,7 +541,7 @@ class CutDrag:
             ref=(piece['layer'],piece['index'])
             peers=[shapely.union_all([other['nominal_regions']['A'],other['nominal_regions']['C']])
                    for other in overlay.pieces()
-                   if (other['layer'],other['index'])==ref and other['die']!=owner and not other.get('ignored')]
+                   if (other['layer'],other['index'])==ref and (other['die']!=owner or (other.get('via_refs') and set(other['via_refs']).isdisjoint(piece['via_refs']))) and not other.get('ignored')]
             peers=[g for g in peers if not g.is_empty]
             if peers:
                 from .reconstruction_route import terminal_marks
@@ -572,8 +573,8 @@ class CutDrag:
         if self.latest is not None:
             cursor=self.latest-self.state['handle_offset'];self.latest=None;piece=state['piece'];owner=piece['die'];frame=state['frame']
             from .selection import inverse_geometry
-            weight=piece.get('endpoint_weights',(1.,0.))[1 if state['kind']=='extra' else 0]
-            cursor=np.asarray(inverse_geometry(shapely.Point(cursor),frame['rotation_centers'][owner],frame['states'][owner]*weight).coords[0])
+            side=int(state['kind']=='extra')
+            cursor=np.asarray(inverse_geometry(shapely.Point(cursor),*boundary_pose(piece,frame,side)).coords[0])
             plan=piece.get('route_plan')
             if plan is not None:
                 which=1 if state['kind']=='extra' else 0
@@ -586,7 +587,7 @@ class CutDrag:
                 else:
                     target_s=state['press_interval']+projection-state['press_projection']
                     if which==1 and state.get('peer_limit') is not None:target_s=min(target_s,state['peer_limit'])
-                    part,clamped=plan.edit_pose(*piece['interval'],which,target_s,frame['rotation_centers'][owner],frame['states'][owner],self.w.view_settings.reconstruction_style,cursor=route_cursor)
+                    part,clamped=plan.edit_pose(*piece['interval'],which,target_s,*relative_pose(piece,frame),self.w.view_settings.reconstruction_style,cursor=route_cursor)
                     if part is not None:
                         from .reconstruction_edits import apply_angles
                         part=apply_angles(state['updated'],plan,part)
@@ -610,14 +611,14 @@ class CutDrag:
         state=self.state;w=self.w;overlay=w.reconstruction_overlay
         piece=state['piece'];side=int(state['kind']=='extra');owner=piece['die'];frame=state['frame']
         face=part['far' if side else 'near']
-        weight=piece.get('endpoint_weights',(1.,0.))[side]
-        line=transform(face,frame['rotation_centers'][owner],frame['states'][owner]*weight)
+        placement=boundary_pose(piece,frame,side)
+        line=transform(face,*placement)
         if line.geom_type=='Point':
             offset=state['handle_offset']
             if not np.any(offset):
                 pad_handle=piece['route_plan'].pad_handle(side)
                 if not pad_handle.is_empty:
-                    line=transform(pad_handle,frame['rotation_centers'][owner],frame['states'][owner]*weight)
+                    line=transform(pad_handle,*placement)
             else:line=shapely.Point(np.asarray(line.coords[0])+offset)
         segments=_lines(line)
         if segments:

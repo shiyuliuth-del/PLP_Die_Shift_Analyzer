@@ -20,7 +20,7 @@ def fixed_enclosures_safe(r,ref,vias):
 def entries(r):
     out=[]
     for ref in sorted(set(r.settings.reconstruction_ignored)|set(r.auto_ignored)):
-        if ref not in r.settings.reconstruction_ignored and ref in getattr(r,'box_refs',()):continue
+        if ref in getattr(r,'box_refs',()):continue
         vias=r.vias_by_target.get(ref,())
         internal=r.die_internal.get(ref)
         if not vias and internal is None:continue

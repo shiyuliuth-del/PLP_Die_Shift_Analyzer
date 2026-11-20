@@ -63,6 +63,7 @@ def measure_reconstruction_yield(reconstructor,p,cfg,progress,local_cache=None,p
     owners={key:set() for key in book.nets}
     for entry in entries:
         affected=entry.get('follow_owners',(entry['owner'],)) if entry.get('following') else (entry['owner'],) if entry['plan'] is not None or entry['orphan'] else ()
+        if entry.get('paired_vias'):affected=tuple(owner for _,owner in entry['paired_vias'])
         owners[book.refnet[entry['layer'],entry['index']]].update(affected)
     owners={k:tuple(sorted(o for o in v if len(choices[o])>1 or np.any(grid.locals[o][choices[o][0]]))) for k,v in owners.items()}
     tables={};clauses=set();checks=0;reused=0
@@ -82,7 +83,7 @@ def measure_reconstruction_yield(reconstructor,p,cfg,progress,local_cache=None,p
             part,_=r.interval(entry)
             definitions.append((entry['owner'],entry['source'].wkb_hex,entry['orphan'],
                                 None if part is None else tuple(part[k].wkb_hex for k in 'ABC')))
-        factor_key=logical_fingerprint((r.rules.identity,'continuity1',tuple(targets),book.original[key].wkb_hex,definitions,cfg.reconstruction_style,cfg.reconstruction_boundary_mode,tuple(ref for ref in cfg.reconstruction_ignored if ref in targets),tuple(ref for ref in cfg.reconstruction_following if ref in targets),
+        factor_key=logical_fingerprint((r.rules.identity,'continuity-v58',tuple(targets),book.original[key].wkb_hex,definitions,cfg.reconstruction_style,cfg.reconstruction_boundary_mode,tuple(ref for ref in cfg.reconstruction_ignored if ref in targets),tuple(ref for ref in cfg.reconstruction_following if ref in targets),
                     tuple((o,grid.locals[o].tobytes().hex(),book.model.bound.centers[o].tobytes().hex()) for o in deps),book.width,book.space,book.border,book.dbu,
                     None if book.board is None else book.board.wkb_hex,book.keepout.wkb_hex))
         hit=local_cache.get(factor_key) if local_cache is not None else None

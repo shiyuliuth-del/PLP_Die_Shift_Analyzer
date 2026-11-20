@@ -8,7 +8,60 @@ from shapely.geometry.polygon import orient
 from .resources import cancel_check
 
 
-def trace(poly,start,end,width):
+def triangulated_path(poly,start,end,tolerance=0.):
+    """Connect points through the shared edges of an interior triangular mesh."""
+    from shapely.affinity import translate
+    from shapely.errors import GEOSException,UnsupportedGEOSVersionError
+    triangulate=getattr(shapely,'constrained_delaunay_triangles',None)
+    if triangulate is None:return None
+    start_point,end_point=shapely.Point(start),shapely.Point(end)
+    if poly.geom_type!='Polygon':
+        poly=next((g for g in shapely.get_parts(poly) if g.geom_type=='Polygon' and g.covers(start_point) and g.covers(end_point)),None)
+        if poly is None:return None
+    if not poly.covers(start_point) or not poly.covers(end_point):return None
+    if shapely.get_num_coordinates(poly)>2048:return None
+    origin=np.asarray(poly.bounds[:2]);local=translate(poly,*(-origin))
+    start=np.asarray(start)-origin;end=np.asarray(end)-origin
+    start_point,end_point=shapely.Point(start),shapely.Point(end)
+    try:
+        if tolerance:local=shapely.set_precision(local,tolerance*.25)
+        triangles=shapely.get_parts(triangulate(local))
+    except (GEOSException,UnsupportedGEOSVersionError):return None
+    if not len(triangles):return None
+    xy=shapely.get_coordinates(triangles).reshape(-1,4,2)[:,:3]
+    tree=shapely.STRtree(triangles)
+    sources=tree.query(start_point,predicate='intersects');targets=set(tree.query(end_point,predicate='intersects'))
+    if not len(sources) or not targets:return None
+    vertices,ids=np.unique(xy.reshape(-1,2),axis=0,return_inverse=True)
+    ids=ids.reshape(-1,3);owners={};graph=[[] for _ in triangles];centers=xy.mean(axis=1)
+    for index,triangle in enumerate(ids):
+        if index%256==0:cancel_check()
+        for i,j in zip(triangle,np.roll(triangle,1)):
+            edge=(min(i,j),max(i,j));other=owners.get(edge)
+            if other is None:owners[edge]=index;continue
+            middle=vertices[list(edge)].mean(axis=0)
+            cost=math.dist(centers[index],centers[other])
+            graph[index].append((other,cost,middle));graph[other].append((index,cost,middle))
+    queue=[(0.,int(i)) for i in sources];dist={i:0. for i in sources};previous={}
+    heapq.heapify(queue)
+    while queue:
+        cancel_check();value,index=heapq.heappop(queue)
+        if value!=dist[index]:continue
+        if index in targets:
+            points=[end]
+            while index in previous:
+                index,middle=previous[index];points.append(middle)
+            line=shapely.LineString(np.asarray([start,*points[::-1]])+origin)
+            return line if poly.covers(line) else None
+        for other,cost,middle in graph[index]:
+            value2=value+cost
+            if value2<dist.get(other,math.inf):
+                dist[other]=value2;previous[other]=(index,middle);heapq.heappush(queue,(value2,other))
+    return None
+
+
+def trace(poly,start,end,width,*,max_edges=None):
+    checked=0
     # Thousands of visibility edges query the SAME polygon. Preparing its
     # segment index once avoids repeatedly scanning every foreign-net ring.
     # Prepared GEOS indexes are lazily mutated. Never attach one to a
@@ -62,7 +115,10 @@ def trace(poly,start,end,width):
                 edges=np.minimum(i,neighbours_i)*n+np.maximum(i,neighbours_i)
                 missing=np.array([q for q,code in enumerate(edges) if int(code) not in tested],dtype=int)
                 for offset in range(0,len(missing),512):
-                    cancel_check();indices=missing[offset:offset+512];targets=neighbours_i[indices]
+                    cancel_check();indices=missing[offset:offset+512]
+                    checked+=len(indices)
+                    if max_edges is not None and checked>max_edges:return None
+                    targets=neighbours_i[indices]
                     lines=shapely.linestrings(np.stack((np.repeat(xy[i][None,:],len(targets),axis=0),xy[targets]),axis=1))
                     inside=shapely.covers(poly,lines)
                     tested.update((int(edges[j]),bool(ok)) for j,ok in zip(indices,inside))

@@ -60,6 +60,7 @@ def measure(part,plan,center,pose,regions):
 
 
 def solve(r,plan,base,center,pose,quick=False,native_check=True):
+    from .drc_rules import pad_first
     mode=r.settings.reconstruction_boundary_mode;style=r.settings.reconstruction_style
     if mode=='perpendicular' and quick:
         regions,error=warp(base,plan,center,pose,style)
@@ -116,14 +117,14 @@ def solve(r,plan,base,center,pose,quick=False,native_check=True):
                 _,part,regions=ordered[0];quality=None
             else:
                 # Finite cached native checks rank actual style-preserving
-                # copper. Spacing > enclosure > width > angle; no short trade.
+                # copper. Enclosure precedes spacing, width and angle.
                 # Only three distinct geometric finalists need edge checks.
                 best=None;seen=set()
                 for geometric,part0,copper in ordered:
                     identity=(copper['A'].wkb,copper['B'].wkb,copper['C'].wkb)
                     if identity in seen:continue
                     seen.add(identity);score=r.rules.quality(plan,copper,pose)
-                    candidate=(*score,*geometric)
+                    candidate=(*pad_first(score),*geometric)
                     if best is None or candidate<best[0]:best=(candidate,part0,copper,score)
                     if not any(score[:-1]) or len(seen)>=3:break
                 _,part,regions,quality=best
@@ -143,7 +144,7 @@ def solve(r,plan,base,center,pose,quick=False,native_check=True):
         if error:continue
         try:width,least,mean=measure(part,plan,center,pose,regions)
         except (ValueError,shapely.errors.GEOSException):width=least=mean=0.
-        score=(*quality,*((-width,-least,-mean) if mode=='wide' else (-least,-mean,-width)))
+        score=(*pad_first(quality),*((-width,-least,-mean) if mode=='wide' else (-least,-mean,-width)))
         if best is None or score<best[0]:best=(score,part,regions,quality)
     if best is None:
         regions,error,quality=r.rules.best_regions(plan,base,center,pose,style)

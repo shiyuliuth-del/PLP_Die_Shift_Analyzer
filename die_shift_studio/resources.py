@@ -3,7 +3,7 @@ import os
 import sys
 import threading
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor,ProcessPoolExecutor,as_completed
+from concurrent.futures import FIRST_COMPLETED,ThreadPoolExecutor,ProcessPoolExecutor,as_completed,wait
 import multiprocessing
 from contextlib import contextmanager
 
@@ -132,9 +132,8 @@ class _Cancellation:
     def is_set(self):return any(e is not None and e.is_set() for e in self.events)
 
 
-def parallel_iter(fn,items,profile=None):
-    """Bounded ordered output: at most twice the worker count is in flight."""
-    from collections import deque
+def parallel_iter(fn,items,profile=None,*,ordered=True,idle=None):
+    """Bounded output: at most twice the worker count is in flight."""
     profile=profile or resource_profile();items=iter(items)
     workers=1 if getattr(_local,'nested',False) else max(1,profile['workers'])
     if workers==1:
@@ -155,16 +154,20 @@ def parallel_iter(fn,items,profile=None):
         finally:
             _local.nested=False
             with _slots:_active_threads-=1;_slots.notify_all()
-    executor=ThreadPoolExecutor(max_workers=workers,thread_name_prefix='die-shift-stream');pending=deque()
+    executor=ThreadPoolExecutor(max_workers=workers,thread_name_prefix='die-shift-stream');pending={}
+    def submit():
+        try:pending[executor.submit(wrapped,next(items))]=None
+        except StopIteration:pass
     try:
-        for _ in range(workers*2):
-            try:pending.append(executor.submit(wrapped,next(items)))
-            except StopIteration:break
+        for _ in range(workers*2):submit()
         while pending:
-            cancel_check();future=pending.popleft();value=future.result()
-            try:pending.append(executor.submit(wrapped,next(items)))
-            except StopIteration:pass
-            yield value
+            cancel_check()
+            ready=(next(iter(pending)),) if ordered else wait(pending,timeout=.5,return_when=FIRST_COMPLETED).done
+            if not ready and idle is not None:idle()
+            for future in ready:
+                del pending[future]
+                value=future.result();submit()
+                yield value
     finally:
         abort.set()
         for f in pending:f.cancel()

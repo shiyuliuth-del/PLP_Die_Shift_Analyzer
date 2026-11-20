@@ -94,7 +94,8 @@ def main():
                               'reconstruction':{'scope':'test','pieces':[],
                                                 'summary':{'regions_ambiguous':2}}}
                 w.show_frame_status(status_frame)
-                assert '2 处手动动区归属不明确，未应用' in w.statusBar().currentMessage()
+                app.processEvents()
+                assert '2 处手动动区归属不明确，未应用' in w.runtime_view.toPlainText()
             w.load_project(project);settle()
             assert w.view_settings.reconstruction_boxes==saved_regions
             assert w.view_settings.reconstruction_second_cuts==(plane,),(w.view_settings.reconstruction_second_cuts,plane)

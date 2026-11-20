@@ -16,7 +16,8 @@ from .extreme_filter import PoseClause,ProblemIndex
 def entry_owners(entries,grid):
     owners=set()
     for q in entries:
-        if q.get('following'):owners.update(q.get('follow_owners',(q['owner'],)))
+        if q.get('paired_vias'):owners.update(owner for _,owner in q['paired_vias'])
+        elif q.get('following'):owners.update(q.get('follow_owners',(q['owner'],)))
         elif q['plan'] is not None or q['orphan']:owners.add(q['owner'])
     return tuple(sorted(o for o in owners if o>=0 and grid.radices[o]>1))
 
@@ -68,21 +69,39 @@ def needed(r,bundles,grid=None):
         from .ignored_motion import linked_fixed_vias
         ports=linked_fixed_vias(r,r._plans or ())
         if ports and (mode=='global' or ports.keys()&set(r.settings.reconstruction_fixed_via_follows)):return True
+    from .drc_policy import enabled
+    from .routing_quality import Landing,pad_loss
+    from .geometry_rules import has_angle_violation
+    from .native_backend import any_violation
+    from .drc import rule_region
+    width=r.rules.width if enabled(r.settings,'width') else 0.
+    angle=r.settings.drc_min_angle_deg if enabled(r.settings,'angle') else 0.
     tables=[]
     for ref,b in bundles.items():
         if any(q.get('connection_failed') for v in b['values'].values() for q in v['pieces']):return True
         if grid is not None:
             source=r.model.nodes[r.model.ids[ref]]['poly']
             from .topology_routing import covers_ports
-            for via,owner,_ in r.rules.vias[r.rules.refnet[ref]]:
+            for via,owner,enclosure in r.rules.vias[r.rules.refnet[ref]]:
                 physical=r.model.nodes[r.model.ids[via]]['poly']
                 if source.intersection(physical).area<=r.tol*r.tol:continue
+                pad=Landing.from_source(physical,enclosure,source,r.tol).protected
                 for ds,v in b['values'].items():
                     states=np.zeros((grid.count,3));digits=dict(zip(b['owners'],ds))
                     positions=(grid.locals[owner][digits[owner]],) if owner in digits else grid.locals[owner] if owner>=0 else (np.zeros(3),)
                     for pose in positions:
                         if owner>=0:states[owner]=pose
                         if not covers_ports(v['geometry'],[r.model.moved(physical,owner,states)],r.tol):return True
+                        if v['pieces'] and not all(q.get('ignored') for q in v['pieces']):
+                            if (np.any(pose) or any(digits.values())) and pad_loss(v['geometry'],[r.model.moved(pad,owner,states)],r.tol)>0.:return True
+            if width or angle:
+                for ds,v in b['values'].items():
+                    if not any(ds):continue
+                    active=shapely.union_all([q['regions']['A'] for q in v['pieces'] if not q.get('ignored')])
+                    if active.is_empty:continue
+                    g=v['geometry']
+                    if angle and has_angle_violation(g,angle,r.tol,active):return True
+                    if width and any_violation('width',g.wkb,r.tol,width) and rule_region(g,width,r.tol).intersects(active):return True
         items=[(digits,(v['geometry'],v['pieces'])) for digits,v in b['values'].items()]
         geos=np.asarray([v[0] for _,v in items],object)
         tables.append(dict(ref=ref,kind='copper',net=r.rules.refnet[ref],owners=b['owners'],items=items,
@@ -113,25 +132,16 @@ def needed(r,bundles,grid=None):
 
 
 def scene(r,grid,bundles,digits,diagnostics=True):
-    from .topology_routing import resolve
     from .reconstruction import decorate_problems
     states=np.array([poses[d] for poses,d in zip(grid.locals,digits)]);out={};pieces=[]
     for ref,b in bundles.items():
         row=b['values'][tuple(digits[o] for o in b['owners'])]
         out.setdefault(ref[0],[]).append(dict(indices=(ref[1],),geometry=row['geometry'],net=r.rules.refnet[ref][1]))
         pieces.extend(dict(q,regions=dict(q['regions'])) for q in row['pieces'])
-    out,pieces,repaired,blocked=resolve(r,out,pieces,states)
-    if blocked:
-        # The interactive path can also try its bounded quick angle candidate.
-        # Statistics must use exactly the same completed copper in that case.
-        alternate=r.frame(states,diagnostics=False)
-        if diagnostics:
-            alternate=dict(alternate,violations=r.rules.check(alternate['replacements'],states),original_violations=r.rules.nominal_check(),constraints_complete=True)
-            decorate_problems(alternate)
-        return states,alternate
+    _,out,pieces,repaired,blocked=r.complete_copper(dict(replacements=out,pieces=pieces),states)
     from .ignored_motion import add_linked_geometry
     out=add_linked_geometry(r,out,states)
-    frame=dict(replacements=out,pieces=pieces,violations=r.rules.check(out,states) if diagnostics else [],original_violations=r.rules.nominal_check() if diagnostics else (),dbu_um=r.tol,
+    frame=dict(replacements=out,pieces=pieces,violations=r.rules.check(out,states) if diagnostics else [],original_violations=r.rules.nominal_check() if diagnostics else (),dbu_um=r.tol,constraints_complete=bool(diagnostics),
                repair_refs=repaired,hard_failures=blocked,electrically_valid=not bool(blocked))
     decorate_problems(frame);return states,frame
 
@@ -161,8 +171,8 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
     from .evaluation_scope import digits_for
     visits=(digits_for(grid,i) for i in indices) if indices is not None else product(*(range(n) for n in grid.radices))
     total=len(indices) if indices is not None else grid.total+1
-    # Each lane owns its mutable plan, rule and frame caches. Reduction stays in
-    # catalogue order; no material edits or Qt objects are shared between poses.
+    # Each lane owns its mutable plan, rule and frame caches. Every result is
+    # reduced by its original digits, even when a later pose finishes first.
     import threading
     from contextlib import ExitStack
     from .resources import parallel_iter, resource_profile, geometry_budget
@@ -171,14 +181,18 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
     profile=resource_profile()
     workers=min(total,geometry_budget(profile,sum(n['poly'].__sizeof__()+shapely.get_num_coordinates(n['poly'])*32 for n in r.model.nodes)))
     local=threading.local();lock=threading.Lock();solvers=[]
-    if workers>1:r._plans_for_all_poses(progress)
+    if workers>1:
+        r._plans_for_all_poses(progress)
+        r.rules.nominal_check()
     def evaluate(digits):
         cancel_check();solver=r
         if workers>1:
             solver=getattr(local,'solver',None)
             if solver is None:
-                solver=Reconstructor(r.model,r.p,r.settings,plan_pool=clone_plan_pool(r.plan_pool),geometry_pool=r.geometry_pool,reference=r)
-                solver._plans=clone_plan_pool({'current':r._plans})['current']
+                plans=clone_plan_pool(dict(r.plan_pool,current=r._plans))
+                current=plans.pop('current')
+                solver=Reconstructor(r.model,r.p,r.settings,plan_pool=plans,geometry_pool=r.geometry_pool,reference=r)
+                solver._plans=current
                 solver.auto_following=set(r.auto_following);solver.auto_ignored=dict(r.auto_ignored);solver.safe_vias=dict(r.safe_vias)
                 solver._envelopes=getattr(r,'_envelopes',{})
                 if getattr(r,'measured_only',False):solver.measured_only=True
@@ -188,11 +202,30 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
         else:
             states=np.asarray([v[d] for v,d in zip(grid.locals,digits)])
             frame=solver.frame(states)
-        return digits,states,frame
+        edges=routing_violations(r.model,states,r.p,r.settings,frame['replacements'])
+        return digits,states,frame,edges
+    import time
+    completed=0;last_update=time.monotonic()
+    def idle():
+        nonlocal last_update
+        if time.monotonic()-last_update>=3.:
+            progress(round(100*completed/total),f'电连接补偿后联合核验 {completed:,}/{total:,} · 正在核验剩余姿态')
+            last_update=time.monotonic()
+    # Keep GEOS and the native DRC backend private for sustained joint scans.
+    from . import reconstruction_workers
+    isolated=0
+    if reconstruction_workers.spawn_enabled and bundles is not None and total>=64:
+        packed=sum(int(shapely.get_num_coordinates(v['geometry']))*32 for table in bundles.values() for v in table['values'].values())
+        estimate=max(192*1024**2,packed*4)
+        isolated=min(profile['process_workers'],profile['memory_budget_mb']*1024**2//estimate,total)
     with ExitStack() as cleanup:
       cleanup.callback(lambda:[s.close() for s in solvers])
-      values=parallel_iter(evaluate,visits,dict(profile,workers=workers));cleanup.callback(values.close)
-      for number,(digits,states,frame) in enumerate(values):
+      if isolated:
+        values=reconstruction_workers.isolated_scenes(r,grid,bundles,visits,isolated,idle)
+      else:
+        values=parallel_iter(evaluate,visits,dict(profile,workers=workers),ordered=False,idle=idle)
+      cleanup.callback(values.close)
+      for digits,states,frame,edges in values:
         cancel_check()
         repairs+=bool(frame['repair_refs'])
         remember(r,states,frame)
@@ -208,10 +241,10 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
             g=max((v['geometry'] for v in rows if v.get('phase')!='original'),key=lambda g:g.area,default=active_region(q))
             score=(RANK[rank],g.area,-index)
             if key not in witnesses or score>witnesses[key]['score']:witnesses[key]=dict(index=index,choices=tuple(digits),score=score,kinds=q.get('problem_reasons',()),geometry=g)
-        edges=routing_violations(r.model,states,r.p,r.settings,frame['replacements'])
         if edges:routing_factors.append(clause)
         for row in edges:strongest(routing_lines,[(row['layer'],i) for i in row['indices']],BLOCKED,None,binary,routing_witnesses,edge_witness(row,index,r.model,states))
-        progress(round(100*(number+1)/total),f'电连接补偿后联合核验 {number+1:,}/{total:,}')
+        completed+=1;last_update=time.monotonic()
+        progress(round(100*completed/total),f'电连接补偿后联合核验 {completed:,}/{total:,}')
     zones={}
     for key in zones_seen:
         clauses=tuple(sorted(records[key],key=lambda q:q.allowed));idx=ProblemIndex(grid,clauses)
@@ -219,10 +252,10 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
                         witness=witnesses.get(key),severity=severity.get(key,'green'),
                         probability=dict(lower=0.,upper=1.,certified=False,reason='有限离散极端不能证明连续概率上界'))
     return dict(complete=True,grid=grid,grid_key=tuple(v.tobytes() for v in grid.locals),zones=zones,
-                routing_summary=dict(lines=routing_lines,witnesses=routing_witnesses,red_factors=routing_factors),
+                routing_summary=dict(lines=routing_lines,witnesses=routing_witnesses,red_factors=sorted(routing_factors,key=lambda q:q.allowed)),
                 connection_factors=tuple(sorted(connection_records,key=lambda q:q.allowed)),red_factors=tuple(sorted(scene_records,key=lambda q:q.allowed)),package_states=total,selected_indices=tuple(indices) if indices is not None else None,
                 geometry_checks=sum(len(b['values']) for b in bundles.values()) if bundles is not None else total,local_checks=total,pair_checks=total,
-                joint_repaired_states=repairs,scope='全部离散极端；按电连接补偿后的实际铜联合核验。连续概率另给界限。')
+                joint_repaired_states=repairs,scope=('所选' if indices is not None else '全部')+'离散极端；按电连接补偿后的实际铜联合核验。连续概率另给界限。')
 
 
 def yield_value(r,p,cfg,grid,bundles,progress,partial=None):
