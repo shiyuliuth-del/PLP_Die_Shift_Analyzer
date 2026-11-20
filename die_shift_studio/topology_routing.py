@@ -195,38 +195,32 @@ def cached_connection(r,source,current,ports,obstacles,board,width,tol,space,req
 
 def _adopt(rows,geometry,tol,reason):
     """Keep material regions disjoint and attach compensation to its real A area."""
-    def material(g):
-        values=parts(g)
-        if len(values)==1:return values[0]
-        return shapely.union_all(values,grid_size=tol)
     def overlay(a,b,op):
-        return material(getattr(shapely,op)(a,b,grid_size=tol))
-    before=shapely.union_all([g for q in rows for g in q['regions'].values()],grid_size=tol)
-    delta=before.symmetric_difference(geometry,grid_size=tol)
+        operation=getattr(shapely,op)
+        try:values=parts(operation(a,b))
+        except shapely.errors.GEOSException:values=parts(operation(a,b,grid_size=tol))
+        return values[0] if len(values)==1 else shapely.union_all(values)
+    before=shapely.union_all([g for q in rows for g in q['regions'].values()])
+    delta=overlay(before,geometry,'symmetric_difference')
     if delta.area<=tol*tol:reason='原铜已包含当前全部连接端，保留原图；未伪装成型变'
-    fixed=overlay(shapely.union_all([q['regions']['B'] for q in rows],grid_size=tol),geometry,'intersection')
-    moving=overlay(overlay(shapely.union_all([q['regions']['C'] for q in rows],grid_size=tol),geometry,'intersection'),fixed,'difference')
-    remaining=overlay(geometry,shapely.union_all([fixed,moving],grid_size=tol),'difference')
-    if len(rows)==1:
-        regions=[remaining]
-    else:
-        assigned=shapely.Polygon();regions=[]
-        support=[q['regions']['A'] if not q['regions']['A'].is_empty else q.get('missing_region',shapely.Polygon()) for q in rows]
-        for g in support:
-            a=overlay(overlay(remaining,g.buffer(tol*4),'intersection'),assigned,'difference')
-            regions.append(a);assigned=overlay(assigned,a,'union')
-        extras=[[] for _ in rows];leftovers=parts(overlay(remaining,assigned,'difference'))
-        if leftovers:
-            for g in leftovers:
-                index=min(range(len(rows)),key=lambda i:support[i].distance(g) if not support[i].is_empty else float('inf'))
-                # Sub-grid residuals next to the actual rigid outline stay rigid.
-                if g.area<=tol*g.length*2 and not (fixed.is_empty and moving.is_empty):
-                    near=overlay(g,support[index].buffer(tol*8),'intersection') if not support[index].is_empty else shapely.Polygon()
-                    far=overlay(g,near,'difference');extras[index].append(near)
-                    if moving.is_empty or (not fixed.is_empty and fixed.distance(far)<=moving.distance(far)):fixed=overlay(fixed,far,'union')
-                    else:moving=overlay(moving,far,'union')
-                else:extras[index].append(g)
-            regions=[shapely.union_all([g,*items],grid_size=tol) if items else g for g,items in zip(regions,extras)]
+    fixed=overlay(shapely.union_all([q['regions']['B'] for q in rows]),geometry,'intersection')
+    moving=overlay(overlay(shapely.union_all([q['regions']['C'] for q in rows]),geometry,'intersection'),fixed,'difference')
+    remaining=overlay(geometry,shapely.union_all([fixed,moving]),'difference');assigned=shapely.Polygon();regions=[]
+    support=[q['regions']['A'] if not q['regions']['A'].is_empty else q.get('missing_region',shapely.Polygon()) for q in rows]
+    for g in support:
+        a=overlay(overlay(remaining,g.buffer(tol*4),'intersection'),assigned,'difference')
+        regions.append(a);assigned=overlay(assigned,a,'union')
+    extras=[[] for _ in rows]
+    for g in parts(overlay(remaining,assigned,'difference')):
+        index=min(range(len(rows)),key=lambda i:support[i].distance(g) if not support[i].is_empty else float('inf'))
+        # Sub-grid residuals adjacent to rigid copper stay assigned to it.
+        if g.area<=tol*g.length*2 and not (fixed.is_empty and moving.is_empty):
+            near=overlay(g,support[index].buffer(tol*8),'intersection') if not support[index].is_empty else shapely.Polygon()
+            far=overlay(g,near,'difference');extras[index].append(near)
+            if moving.is_empty or (not fixed.is_empty and fixed.distance(far)<=moving.distance(far)):fixed=overlay(fixed,far,'union')
+            else:moving=overlay(moving,far,'union')
+        else:extras[index].append(g)
+    regions=[shapely.union_all([g,*items]) if items else g for g,items in zip(regions,extras)]
     for q,a in zip(rows,regions):
         for name in ('moved_cut','extra_cut'):
             cut=q.get(name)
@@ -235,7 +229,7 @@ def _adopt(rows,geometry,tol,reason):
         q.update(regions=dict(A=a,B=fixed,C=moving),bridge=a,fixed=fixed,moved=moving,
                  bridge_area_um2=a.area,fixed_area_um2=fixed.area,moved_area_um2=moving.area,
                  connection_failed=False,valid=True,routing_recovered=True,routing_note=reason,
-                 warning=reason,compensation_region=delta.intersection(a.buffer(tol*4),grid_size=tol))
+                 warning=reason,compensation_region=overlay(delta,a.buffer(tol*4),'intersection'))
 
 
 def resolve(r,replacements,pieces,states,progress=lambda *_:None):
