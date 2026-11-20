@@ -111,10 +111,15 @@ def connected_candidate(source,current,ports,obstacles,board,width,tol,space=0.,
     full=shapely.union_all(parts(shapely.make_valid(full)),grid_size=tol)
     if not covers(full):return None
     if expected[0]==1 and len(parts(full))>1:
-        # Clipping with a nearby obstacle may leave grid-edge flakes. They
-        # are not intended terminals or separate components of the source.
-        cleaned=[g for g in parts(full) if g.area>g.length*tol or any(g.intersects(p) for p in ports)]
-        full=shapely.union_all(cleaned,grid_size=tol)
+        # A clipped sliver that carries no part of any requested terminal is
+        # not another endpoint. Start with the anchored material if coverage
+        # is unchanged; do not spend a route search reconnecting scraps.
+        components=parts(full)
+        fragment_limit=min(width*width,full.area*.005)
+        anchored=[g for g in components if g.area>fragment_limit or any(g.intersects(p) for p in ports)]
+        if anchored and len(anchored)<len(components):
+            cleaned=shapely.union_all(anchored,grid_size=tol)
+            if covers(cleaned):full=cleaned
     # A new hole inside originally solid copper may be a folded overlap. Fill
     # it only if the area contains no foreign net or other hard obstacle.
     if expected[1]==0:
@@ -133,7 +138,7 @@ def connected_candidate(source,current,ports,obstacles,board,width,tol,space=0.,
     for padding in (max(width*2,tol*16),max(width*8,tol*32)):
         region=shapely.box(bounds[0]-padding,bounds[1]-padding,bounds[2]+padding,bounds[3]+padding)
         if board is not None:region=region.intersection(board)
-        free=region.difference(forbidden);working=full
+        free=shapely.difference(region,forbidden,grid_size=tol);working=full
         cores={}
         for _ in range(max(1,len(parts(full))-1)):
             cancel_check();components=parts(working)
@@ -141,7 +146,11 @@ def connected_candidate(source,current,ports,obstacles,board,width,tol,space=0.,
             pairs=sorted((a.distance(b),i,j) for i,a in enumerate(components) for j,b in enumerate(components) if i<j)
             joined=None
             for _,i,j in pairs:
-                for diameter in dict.fromkeys((width,width*.75,width*.5,width*.25,width*.125,max(tol*8,width*.0625),tol*4)):
+                diameters=tuple(dict.fromkeys((width,width*.75,width*.5,width*.25,width*.125,max(tol*8,width*.0625),tol*4)))
+                # Test fast routes at every diameter before building the
+                # visibility graph, which is most useful for a narrow rescue.
+                attempts=[(d,False) for d in diameters]+[(d,True) for d in diameters[-2:]]
+                for diameter,visibility in attempts:
                     cancel_check();radius=max(tol*2,diameter/2)
                     if radius not in cores:cores[radius]=parts(free.buffer(-radius,quad_segs=4))
                     for domain in cores[radius]:
@@ -158,11 +167,13 @@ def connected_candidate(source,current,ports,obstacles,board,width,tol,space=0.,
                     margin=max(width*4,tol*32)
                     local=domain.intersection(shapely.box(x0-margin,y0-margin,x1+margin,y1+margin))
                     def routes():
-                        if domain.covers(ends):yield ends;return
-                        if not local.equals(domain):yield triangulated_path(local,start,end,tol)
-                        yield triangulated_path(domain,start,end,tol)
-                        if not local.equals(domain):yield trace(local,start,end,diameter,visibility_budget=4096)
-                        yield trace(domain,start,end,diameter,visibility_budget=8192)
+                        if visibility:
+                            if not local.equals(domain):yield trace(local,start,end,diameter,visibility_budget=4096)
+                            yield trace(domain,start,end,diameter,visibility_budget=8192)
+                        else:
+                            if domain.covers(ends):yield ends;return
+                            if not local.equals(domain):yield triangulated_path(local,start,end,tol)
+                            yield triangulated_path(domain,start,end,tol)
                     for line in routes():
                         if line is None:continue
                         wire=line.buffer(radius,quad_segs=8,join_style=1)
@@ -187,7 +198,7 @@ def cached_connection(r,source,current,ports,obstacles,board,width,tol,space,req
     """
     cancel_check()
     blobs=(source.wkb,current.wkb,tuple(p.wkb for p in ports),obstacles.wkb,None if board is None else board.wkb)
-    key=('electrical-local-repair-v58.1',*blobs,float(width),float(tol),float(space),require_full,reroute)
+    key=('electrical-local-repair-v58.2',*blobs,float(width),float(tol),float(space),require_full,reroute)
     value=r.geometry_pool.get(key)
     if value is not None:return None if value[0] is None else shapely.from_wkb(value[0])
     result=connected_candidate(source,current,ports,obstacles,board,width,tol,space,require_full=require_full,reroute=reroute)
