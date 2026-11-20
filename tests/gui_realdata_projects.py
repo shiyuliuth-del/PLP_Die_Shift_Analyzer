@@ -151,6 +151,13 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         while w.worker and time.monotonic()<until: app.processEvents(); time.sleep(.02)
         assert w.worker is None and w.connect_button.property('connected') is False
         w.endpoint.setText(old_endpoint)
+        production = root/'Jobs'/'SH22'
+        shutil.copytree(ROOT/'Jobs/SH22',production)
+        w.open_folder(production,link=False);wait(w)
+        assert w.dies.value()==2 and not w.dies.isEnabled()
+        assert w.file_view.rowCount()==4 and w.profile.rowCount()==10
+        w.accept_info(dict(project=w.project.text(), die_count=9))
+        assert w.dies.value()==2, 'Production DIE count must come from its directories'
         print('REALDATA_PROJECT_GUI_PASS: folder -> linked server -> exact 36 XLSX records and template, selections/settings, green/red status, continuous overlay, hidden log', flush=True)
     finally:
         if w.worker:
