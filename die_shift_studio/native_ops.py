@@ -86,6 +86,9 @@ def execute(kdb,request):
         r=kdb.Region()
         for part in a.each():r.insert(part.round_corners(request['radius'],request['radius'],128))
         a=r
+    elif op in ('subtract','subtract_area'):
+        a=a-region(kdb,request['b'],request.get('bkey'))
+        if op=='subtract_area':return dict(polygons=[],area=float(a.area()))
     elif op!='normalize':raise ValueError('Unknown native operation: '+op)
     area=float(a.area());a.merge()
     return dict(polygons=encode(a),area=area)

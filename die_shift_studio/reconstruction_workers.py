@@ -1,5 +1,7 @@
 """Run large joint verification jobs with private geometry and DRC runtimes."""
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+from concurrent.futures.process import BrokenProcessPool
+from collections import deque
 import multiprocessing
 
 from .resources import cancel_check, cancellation_scope, serial_scope
@@ -28,14 +30,19 @@ def _initialize(data, case, roles, order, cache, parameters, settings, plans, ac
     _worker = solver, grid, bundles, stop
 
 
-def _verify(digits):
+def _verify(digits, fresh=False):
     from .reconstruction_joint import scene
     from .width_keepout import routing_violations
 
     solver, grid, bundles, stop = _worker
     with cancellation_scope(stop), serial_scope():
         cancel_check()
-        states, frame = scene(solver, grid, bundles, digits)
+        if fresh:
+            import numpy as np
+            states = np.asarray([poses[d] for poses, d in zip(grid.locals, digits)])
+            frame = solver.frame(states)
+        else:
+            states, frame = scene(solver, grid, bundles, digits)
         edges = routing_violations(solver.model, states, solver.p, solver.settings, frame['replacements'])
         fields = ('layer', 'index', 'die', 'route_identity', 'connection_failed',
                   'missing_region', 'rule_witnesses', 'problem_reasons')
@@ -53,43 +60,56 @@ def _verify(digits):
 def isolated_scenes(r, grid, bundles, visits, workers, idle):
     """Submit bounded jobs and return each real completion independently."""
     ctx = multiprocessing.get_context('spawn')
-    stop = ctx.Event()
     model = r.model
     inputs = (model.data, model.case, model.roles, model.connections.order, model.cache, r.p, r.settings,
-              r.plan_pool, r._plans, grid, bundles, stop)
-    queue = iter(visits)
-    pending = set()
-    executor = ProcessPoolExecutor(workers, mp_context=ctx, initializer=_initialize, initargs=inputs)
+              r.plan_pool, r._plans, grid, bundles)
+    queue, retries = iter(visits), deque()
+    for restart in range(3):
+        stop = ctx.Event()
+        pending = {}
+        executor = ProcessPoolExecutor(workers, mp_context=ctx, initializer=_initialize, initargs=(*inputs, stop))
 
-    def submit():
+        def submit():
+            try:
+                digits, fresh = (retries.popleft(), True) if retries else (next(queue), False)
+            except StopIteration:
+                return
+            try:
+                pending[executor.submit(_verify, digits, fresh)] = digits
+            except BrokenProcessPool:
+                retries.appendleft(digits)
+                raise
+
         try:
-            pending.add(executor.submit(_verify, next(queue)))
-        except StopIteration:
-            pass
-
-    try:
-        for _ in range(workers * 2):
-            submit()
-        while pending:
-            cancel_check()
-            ready, _ = wait(pending, timeout=.5, return_when=FIRST_COMPLETED)
-            if not ready:
-                idle()
-            for future in ready:
-                pending.remove(future)
-                result = future.result()
+            for _ in range(workers * 2):
                 submit()
-                yield result
-    finally:
-        stop.set()
-        for future in pending:
-            future.cancel()
-        if pending and wait(pending, timeout=1).not_done:
-            terminate = getattr(executor, 'terminate_workers', None)
-            if terminate is not None:
-                terminate()
-            else:
-                for child in tuple((executor._processes or {}).values()):
-                    if child.is_alive():
-                        child.terminate()
-        executor.shutdown(wait=True, cancel_futures=True)
+            while pending:
+                cancel_check()
+                ready, _ = wait(pending, timeout=.5, return_when=FIRST_COMPLETED)
+                if not ready:
+                    idle()
+                for future in ready:
+                    result = future.result()
+                    del pending[future]
+                    yield result
+                    submit()
+            return
+        except BrokenProcessPool as exc:
+            if restart == 2:
+                raise RuntimeError(f'联合核验进程反复退出；未完成的离散姿态：{tuple(pending.values())}') from exc
+            # Retain reduced results. Reassemble only unreturned poses with
+            # private, fresh copper instead of relying on cached scene shapes.
+            retries.extend(pending.values())
+        finally:
+            stop.set()
+            for future in pending:
+                future.cancel()
+            if pending and wait(pending, timeout=1).not_done:
+                terminate = getattr(executor, 'terminate_workers', None)
+                if terminate is not None:
+                    terminate()
+                else:
+                    for child in tuple((executor._processes or {}).values()):
+                        if child.is_alive():
+                            child.terminate()
+            executor.shutdown(wait=True, cancel_futures=True)

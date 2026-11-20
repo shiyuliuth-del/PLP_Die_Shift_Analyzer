@@ -21,7 +21,8 @@ class Landing:
 
 def pad_loss(copper, pads, tol):
     """Ignore area changes below the possible one-grid rounding strip."""
-    return sum(max(0., shapely.difference(pad,copper,grid_size=tol).area - pad.length * tol)
+    from .native_backend import compute
+    return sum(max(0., compute('subtract_area',pad.wkb,tol,0.,copper.wkb)[1] - pad.length * tol)
                for pad in pads if not copper.covers(pad))
 
 

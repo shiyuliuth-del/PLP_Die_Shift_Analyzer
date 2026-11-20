@@ -92,6 +92,29 @@ class V59Tests(unittest.TestCase):
                 self.assertEqual(frame['repair_refs'],expected[digits]['repair_refs'])
         finally:e.close()
 
+    def test_crashed_lane_retries_only_unreturned_pose_results(self):
+        from concurrent.futures import Future
+        from concurrent.futures.process import BrokenProcessPool
+        from unittest.mock import patch
+        from die_shift_studio.reconstruction_workers import isolated_scenes
+
+        retried=[]
+        class Pool:
+            def __init__(self, broken):self.broken=broken
+            def submit(self, fn, digits, fresh):
+                result=Future()
+                if self.broken and digits==(2,):result.set_exception(BrokenProcessPool('test'))
+                else:result.set_result(digits)
+                if fresh:retried.append(digits)
+                return result
+            def shutdown(self, **kwargs):pass
+
+        model=SimpleNamespace(data=None,case=None,roles={},connections=SimpleNamespace(order=()),cache=None)
+        solver=SimpleNamespace(model=model,p=None,settings=None,plan_pool={},_plans=[])
+        with patch('die_shift_studio.reconstruction_workers.ProcessPoolExecutor',side_effect=[Pool(True),Pool(False)]):
+            self.assertEqual(sorted(isolated_scenes(solver,None,None,[(0,),(1,),(2,)],1,lambda:None)),[(0,),(1,),(2,)])
+        self.assertEqual(retried,[(2,)])
+
     def test_deletion_keeps_both_physical_ends_and_persists(self):
         e, cfg, _ = two_ended()
         try:

@@ -35,6 +35,7 @@ def covers_ports(g,ports,tol):
 
 def separate_pair(a,b,source_a,source_b,ports_a,ports_b,tol,space=0.,protected=((),())):
     """Share the overlap corridor; clipping only one pad can be impossible."""
+    from .native_backend import geometry
     overlap=a.intersection(b)
     if overlap.is_empty:return a,b
     location=max(shapely.get_parts(overlap),key=lambda g:g.area+tol*g.length).representative_point()
@@ -59,8 +60,8 @@ def separate_pair(a,b,source_a,source_b,ports_a,ports_b,tol,space=0.,protected=(
                 edge0=c-n*gap/2;edge1=c+n*gap/2
                 ha=shapely.Polygon([edge0-u*size,edge0+u*size,edge0+u*size-n*size,edge0-u*size-n*size])
                 hb=shapely.Polygon([edge1-u*size,edge1+u*size,edge1+u*size+n*size,edge1-u*size+n*size])
-                ga=shapely.union_all(parts(shapely.difference(a,shapely.difference(patch,ha,grid_size=tol),grid_size=tol)),grid_size=tol)
-                gb=shapely.union_all(parts(shapely.difference(b,shapely.difference(patch,hb,grid_size=tol),grid_size=tol)),grid_size=tol)
+                ga=geometry('subtract',a,tol,other=shapely.difference(patch,ha,grid_size=tol))
+                gb=geometry('subtract',b,tol,other=shapely.difference(patch,hb,grid_size=tol))
                 if (not ga.is_empty and not gb.is_empty and ga.is_valid and gb.is_valid
                     and signature(ga)==signature(source_a) and signature(gb)==signature(source_b)
                     and covers_ports(ga,ports_a,tol) and covers_ports(gb,ports_b,tol)
