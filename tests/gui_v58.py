@@ -47,6 +47,9 @@ with tempfile.TemporaryDirectory() as tmp:
         second.set()
         wait_until(lambda: not window._tasks)
         assert window.progress.isHidden() and not window.statusBar().currentMessage()
+        window.statusBar().showMessage('animation running')
+        window.show_frame_status(None)
+        assert not window.statusBar().currentMessage()
     finally:
         first.set(); second.set()
         wait_until(lambda: not window._tasks)

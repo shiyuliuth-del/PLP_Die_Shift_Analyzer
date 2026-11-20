@@ -1253,7 +1253,8 @@ class MainWindow(W.QMainWindow):
         duration,steps=motion_timing(self.view_settings,distance,float(max(start_size)),True)
         self.transition.start(duration,steps,update,complete)
     def show_frame_status(self,frame):
-        message=('预演已更新' if frame is not None else '名义位置')+f' · 当前 DRC {len(getattr(self,"display_issues",self.filtered_issues))} 处违规'
+        issues=getattr(self,'display_issues',getattr(self,'filtered_issues',()))
+        message=('预演已更新' if frame is not None else '名义位置')+f' · 当前 DRC {len(issues)} 处违规'
         if frame is not None:
             from .statistics import mean_and_bounds
             params=self.params();mu,_=mean_and_bounds(params,len(frame['states']));bounds=np.array([mean_and_bounds(params.for_die(i),len(frame['states']))[1] for i in range(len(frame['states']))])
@@ -1276,6 +1277,8 @@ class MainWindow(W.QMainWindow):
             if s:message+=f" · {SCOPE_NAMES[self.view_settings.evaluation_scope]} {s['package_states']:,} 种姿态，{len(s['lines'])} 条风险线路"
             else:message+=' · 正在核实型变后首行汇总'
         self.log_bus.emit(message)
+        if not self._tasks:
+            self.statusBar().clearMessage()
         self.refresh_extreme_colors(frame)
     def present_frame(self,frame):
         if self.cut_drag.state is not None:return
