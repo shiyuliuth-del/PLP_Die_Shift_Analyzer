@@ -1,3 +1,13 @@
+# V56 GD55_1119 交互、反馈与性能
+
+`Jobs/GD55_1119`（`GD55_1119.gds`、`GD55_1119.dshift.json`）纳入 `.gitattributes`、`RealDataAnalyse/projects.py` 与 `tools/package_release.py` 随包白名单。
+
+`reconstruction.py` 为双 DIE 无固定过孔线路保留整条源路径，以 `default_fixed_start` 约束自动初始分区、以 `ownership_domain` 归属手动框选，`CutDrag` 按对端 DIE 实际 `A∪C` 支承限位，支持跨 50% 名义缝拖动。`reaches_anchor` 同时覆盖实体固定过孔与归属缝/对端锚点，防止 `inward_routes` 短弦在拐角前截断路径。`reconstruction_zones.expand` 与 `change_zone('delete')` 同步处理 `box_refs` 的删除与重框选。
+
+`RegionSelect` 新增十字落点标记与起点标记，由 `render_cache.SceneRenderer.draw_feedback` 多图元局部增量重绘。`ReconstructionOverlay.stage` 覆盖全部重构字段（含 `fixed_via_follows` 与新增选框），关闭自动计算时通过 `staged_overlay` 与 `defer_reconstruction -> render_scene` 即时高亮标记受影响图形、过孔与选框，`shape_menu` 读取叠加草稿状态。
+
+`ReconstructionOverlay.draw_labels` 先剔除视野外动区并按严重度排序，多动区时不强行叠加；`width_labels.LabelLayout` 对轴对齐矩形采用 NumPy 向量化 AABB 碰撞与面积计算。`RoutePlan.section` 改用向量化射线-边求交（顶点/共线退回 exact shapely），`partition` 先做面积守恒快速验证，`choose` 跳过已等宽段的 25 点重采样，`FixedRules` 按物理层共享 `STRtree` 并按 `active` 邻域过滤异网查询，`native_backend.compute` LRU 增至 1024。回归见 `tests/test_v56.py`，操作说明见 [V56 使用说明](V56_使用说明.md)。
+
 # V55 导入、分叉与固定孔联动
 
 gds_merge.merge_import 分层处理、以有界查询块识别同层实体接触并维护稳定源索引。geometry_errors.sanitize_data 批量校验规则多边形，逐形状保留孔洞修复和错误见证。stack.Connections 复用已编译的图层几何。大批量实测进程上限来自 CPU、可用内存、工程上限与预计任务数量。

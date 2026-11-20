@@ -61,8 +61,8 @@ def tagged_sources(ref):
     kernels={'die_shift_studio/cuda_kernels.cu','die_shift_studio/cuda_kernels.ptx'}
     root_files={name for name in files if '/' not in name}
     client_files={'RealDataAnalyse/'+n for n in ('__init__.py','main.py','gui.py','excel.py','runner.py','storage.py','transport.py','projects.py','conversation.py','instances.py','plans.py','plan_ui.py','widgets.py','RUN.bat','BUILD.bat','RealDataAnalyse.spec','requirements.txt','README.md')}
-    from RealDataAnalyse.projects import GD55_INPUTS
-    case_files={'Jobs/GD55/'+name for name in GD55_INPUTS}
+    from RealDataAnalyse.projects import GD55_INPUTS, GD55_1119_INPUTS
+    case_files={'Jobs/GD55/'+name for name in GD55_INPUTS}|{'Jobs/GD55_1119/'+name for name in GD55_1119_INPUTS}
     if root_files!=SOURCE_FILES or any(
             name not in SOURCE_FILES|kernels|client_files|case_files and not (name.startswith('die_shift_studio/') and name.endswith('.py'))
             for name in files):

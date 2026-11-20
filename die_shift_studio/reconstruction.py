@@ -307,33 +307,40 @@ class Reconstructor:
         # Buffered foreign copper contains every possible position in the full
         # independent multi-DIE input box. It is a conservative feasibility check,
         # not a claim to have finitely enumerated a continuous distribution.
-        envelopes={}
-        for layer,role in self.model.roles.items():
-            if role!='固定RDL':continue
-            values=[];nets=[]
-            for index,source in enumerate(self.model.cache.layers[layer]['geometry']):
-                radius=0.
-                for owner in {v['owner'] for v in self.vias_by_target.get((layer,index),()) if v['owner']>=0}:
-                    mu,b=mean_and_bounds(self.p.for_die(owner),len(self.model.bound.centers))
-                    r=float(np.max(np.linalg.norm(shapely.get_coordinates(source)-self.model.bound.centers[owner],axis=1)))
-                    radius=max(radius,float(np.linalg.norm(abs(mu[:2])+b[:2])+2*r*np.sin(min(np.pi,abs(mu[2])+b[2])/2)))
-                values.append(source.buffer((radius+2*self.tol)/np.cos(np.pi/48),quad_segs=12) if radius else source)
-                nets.append(int(self.model.nodes[self.model.ids[layer,index]]['net']))
-            envelopes[layer]=(shapely.STRtree(values),nets)
-        self._envelopes=envelopes
+        envelopes=getattr(self,'_envelopes',None)
+        if envelopes is None:
+            envelopes={}
+            for layer,role in self.model.roles.items():
+                if role!='固定RDL':continue
+                values=[];nets=[]
+                for index,source in enumerate(self.model.cache.layers[layer]['geometry']):
+                    radius=0.
+                    for owner in {v['owner'] for v in self.vias_by_target.get((layer,index),()) if v['owner']>=0}:
+                        mu,b=mean_and_bounds(self.p.for_die(owner),len(self.model.bound.centers))
+                        r=float(np.max(np.linalg.norm(shapely.get_coordinates(source)-self.model.bound.centers[owner],axis=1)))
+                        radius=max(radius,float(np.linalg.norm(abs(mu[:2])+b[:2])+2*r*np.sin(min(np.pi,abs(mu[2])+b[2])/2)))
+                    values.append(source.buffer((radius+2*self.tol)/np.cos(np.pi/48),quad_segs=12) if radius else source)
+                    nets.append(int(self.model.nodes[self.model.ids[layer,index]]['net']))
+                envelopes[layer]=(shapely.STRtree(values),nets)
+            self._envelopes=envelopes
         from .resources import resource_profile
         memo_budget=max(128*1024,min(2*1024**2,int(resource_profile()['available_memory_mb']*1024**2*.08/max(1,len(groups)))))
         def build(task):
             cancel_check()
             layer,index,owner,mine,all_vias=task
             original_source=self.model.cache.layers[layer]['geometry'][index]
+            net=int(self.model.nodes[self.model.ids[layer,index]]['net'])
             from .reconstruction_ownership import divide
             allocation=divide(original_source.wkb,tuple((v['owner'],v['poly'].wkb) for v in all_vias),self._rule_width,self.tol)
             domains=allocation.get(owner,[(original_source,shapely.Polygon())])
+            flexible=(bool(allocation) and len(allocation)==2 and all(len(v)==1 for v in allocation.values())
+                      and not any(v['net']==net and original_source.intersects(v['poly']) for v in self.stays))
             return [entry for source,seam in domains
                     for local in ([v for v in mine if source.intersection(v['poly']).area>self.tol*self.tol],)
-                    if local for entry in build_domain(layer,index,owner,local,all_vias,original_source,source,seam,bool(allocation))]
-        def build_domain(layer,index,owner,mine,all_vias,original_source,source,seam,allocated):
+                    if local for entry in build_domain(layer,index,owner,local,all_vias,original_source,
+                                                       original_source if flexible else source,seam,bool(allocation),
+                                                       ownership_domain=source if flexible else None)]
+        def build_domain(layer,index,owner,mine,all_vias,original_source,source,seam,allocated,ownership_domain=None):
             refs=normalize_via_refs((v['key'],v['index']) for v in mine)
             net=int(self.model.nodes[self.model.ids[layer,index]]['net'])
             from .landing_geometry import embedded_pad
@@ -342,7 +349,7 @@ class Reconstructor:
             fixed=[landing(v) for v in self.stays
                    if v['net']==net and source.intersects(v['poly'])]
             fixed.extend(landing(v) for v in all_vias if v['owner']!=owner)
-            if not seam.is_empty:fixed.append(seam)
+            if not seam.is_empty and ownership_domain is None:fixed.append(seam)
             fixed=[g for g in fixed if not g.is_empty]
             disjoint=[g for g in fixed if g.intersection(land).area<=self.tol*self.tol]
             if disjoint:fixed=disjoint
@@ -357,6 +364,8 @@ class Reconstructor:
                 if land.is_empty:return dict(local_base,plan=None,orphan=False,warning='名义落盘无可用铜，保留原图')
                 stop=min(fixed,key=lambda g:g.distance(land));legacy_end=np.asarray(stop.representative_point().coords[0])
                 ports=[v['center'] for v in self.stays if v['net']==net and stop.intersection(v['poly']).area>self.tol*self.tol]
+                if not ports and ownership_domain is not None:
+                    ports=[v['center'] for v in all_vias if v['owner']!=owner and stop.intersection(v['poly']).area>self.tol*self.tol]
                 center=np.mean(ports,axis=0) if ports else np.asarray(stop.centroid.coords[0])
                 end=center if source.covers(shapely.Point(center)) and stop.buffer(self.tol).covers(shapely.Point(center)) else legacy_end
                 candidates=[]
@@ -370,9 +379,9 @@ class Reconstructor:
                 pairs.extend(inward_routes(source,moving))
                 seen=set();traced=[]
                 real_fixed=tuple(v['poly'] for v in self.stays if v['net']==net and v['poly'].intersects(source) and any(a.intersects(v['poly']) for a in fixed))
-                found_physical=False
+                found_anchored=False
                 for start,endpoint in pairs:
-                    if found_physical and not with_manual and all(not g.dwithin(shapely.Point(endpoint),self.tol) for g in real_fixed):continue
+                    if found_anchored and not with_manual and all(not g.dwithin(shapely.Point(endpoint),self.tol*8) for g in fixed):continue
                     line=trace(source,start,endpoint,self._rule_width)
                     if line is not None and line.wkb in seen:continue
                     if line is not None:seen.add(line.wkb)
@@ -383,8 +392,15 @@ class Reconstructor:
                     plan.terminal_vias=(tuple(v['poly'] for v in moving),terminal_fixed)
                     physical_start=any(g.dwithin(shapely.Point(line.coords[0]),self.tol) for g in plan.terminal_vias[0])
                     plan.physical_end=any(g.dwithin(shapely.Point(line.coords[-1]),self.tol) for g in terminal_fixed)
+                    plan.reaches_anchor=plan.physical_end or any(g.dwithin(shapely.Point(line.coords[-1]),self.tol*8) for g in fixed)
+                    plan.anchored_bent=plan.reaches_anchor and len(plan.xy)>2
                     plan.pad_modes=(physical_start,False)
                     plan.pad_trigger=self.settings.reconstruction_pad_trigger_um
+                    if ownership_domain is not None and not seam.is_empty:
+                        from .reconstruction_route import terminal_marks
+                        seam_marks=terminal_marks(line,seam)
+                        if len(seam_marks):plan.default_fixed_start=float(seam_marks.min())
+                        plan.ownership_domain=ownership_domain
                     # Opposite moving terminals share a nominal middle seam. Neither
                     # owner's transition may consume the other owner's half-route.
                     opposite_owner=any(v['owner']!=owner and stop.intersects(v['poly']) for v in all_vias)
@@ -397,7 +413,7 @@ class Reconstructor:
                     partition=plan.choose(travel)
                     if partition is not None:
                         candidates.append((not bool(plan.warning),partition['b']-partition['a'],plan))
-                        found_physical|=plan.physical_end and len(plan.xy)>2
+                        found_anchored|=plan.anchored_bent
                 if not candidates:
                     from .plane_route import candidate
                     alternative=candidate(local_base,traced,self)
@@ -414,13 +430,16 @@ class Reconstructor:
                 saved=[q for q in candidates if q[2].identity in roots]
                 if saved:candidates=saved
                 else:
-                    # Inward chords are useful for wide copper, but their end
-                    # can stop before a real bend and create an uneditable tail.
-                    physical=[row for row in candidates if row[2].physical_end]
-                    if physical:candidates=physical
+                    # Inward chords are useful for wide straight bars, but on bent
+                    # traces they stop before a corner and create an uneditable stub.
                     from .parallel_zones import alignment
-                    aligned=[row for row in candidates if alignment(row[2])>=np.cos(np.deg2rad(5))]
-                    if aligned:candidates=aligned
+                    anchored=[row for row in candidates if getattr(row[2],'anchored_bent',False)]
+                    if anchored:candidates=anchored
+                    else:
+                        aligned=[row for row in candidates if alignment(row[2])>=np.cos(np.deg2rad(5))]
+                        if aligned:candidates=aligned
+                        physical=[row for row in candidates if row[2].reaches_anchor]
+                        if physical:candidates=physical
                 if pair_route or getattr(self,'measured_only',False):
                     # Individual pair copper is discarded by branch assembly.
                     # Native DRC on every pair checked a fictitious full net and
@@ -524,7 +543,7 @@ class Reconstructor:
         # Route construction is pose-independent and reused after every handle edit.
         from .session_cache import logical_fingerprint
         base_key=logical_fingerprint((self.model.data.geometry_id,self.model.roles,self.model.connections.order,
-                                'source-routes-v55-branches',self.settings.evaluation_scope=='risk',self.rules.identity,bool(getattr(self,'measured_only',False)),self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
+                                'source-routes-v56-branches',self.settings.evaluation_scope=='risk',self.rules.identity,bool(getattr(self,'measured_only',False)),self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
         # Forcing/editing one source must not rebuild every source path. Mine
         # membership includes enclosure filtering; all-via ownership controls
         # allocation. Existing path identities survive later manual edits.
@@ -562,11 +581,22 @@ class Reconstructor:
                 [poses[rows] for poses,rows in zip(grid.locals,projected)])
         return self._risk_priority
 
+    def _box_applies(self,plan,box_poly):
+        domain=getattr(plan,'ownership_domain',None)
+        if domain is None or domain.intersects(box_poly):return True
+        ref=tuple(plan.key[:2])
+        from .reconstruction_edits import key as edit_key
+        deleted=set(self.settings.reconstruction_deleted)
+        peers=[e for e in (self._plans or getattr(self,'_base_plans',None) or ())
+               if (e['layer'],e['index'])==ref and e.get('plan') is not None
+               and e['plan'].owner!=plan.owner and edit_key(e['plan']) not in deleted]
+        return not any(getattr(e['plan'],'ownership_domain',e['plan'].source).intersects(box_poly) for e in peers)
+
     def interval(self,entry):
         plan=entry['plan']
         if plan is None:return None,False
         ref=tuple(plan.key[:2])
-        if ref in self.box_refs and ref in self.source_boxes:
+        if ref in self.box_refs and ref in self.source_boxes and self._box_applies(plan,self.source_boxes[ref]):
             from .manual_regions import usable_partition
             key=plan.key,plan.identity
             if key not in self.box_partitions:
@@ -585,7 +615,7 @@ class Reconstructor:
                     if adjusted is not None:
                         a,b=adjusted['a'],adjusted['b'];manual=True
                         if not self.settings.reconstruction_regions:return adjusted,True
-        if ref in self.box_refs and ref in self.angle_boxes:
+        if ref in self.box_refs and ref in self.angle_boxes and self._box_applies(plan,self.angle_boxes[ref]):
             from .manual_regions import aligned_partition
             key=plan.key,plan.identity,'aligned'
             if key not in self.box_partitions:

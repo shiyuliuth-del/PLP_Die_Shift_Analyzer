@@ -159,7 +159,7 @@ class GeometrySelection:
         self.artist.set_verts(polys)
         if self.deformed_artist is None:
             self.deformed_artist=PatchCollection([],facecolors=(.13,.60,.88,.18),edgecolors='#1769ac',linewidths=1.5,zorder=14);w.ax.add_collection(self.deformed_artist)
-        paths=[PathPatch(geometry_path(q['geometry'])) for k,items in replacements.items() if w.visible_boxes[k].isChecked()
+        paths=[w.geometry_patch(q['geometry']) for k,items in replacements.items() if w.visible_boxes[k].isChecked()
                and k not in getattr(w,'width_hidden_sources',()) for q in items if any((k,i) in refs for i in q['indices'])]
         hidden_sources=getattr(w,'width_hidden_sources',())
         if refs and hidden_sources and w.view_settings.width_display['描边']!='hide':
@@ -175,8 +175,8 @@ class GeometrySelection:
             if w.tabs.currentIndex()!=0:return
             artists=[self.artist,self.deformed_artist]
             if w.width_toggle.isChecked():
-                w.width_overlay.draw();artists.extend(w.width_overlay.labels)
+                w.width_overlay.draw();artists.extend(a for a in w.width_overlay.labels if a.get_visible())
             if w.reconstruction_toggle.isChecked():
-                w.reconstruction_overlay.draw_labels();artists.extend(w.reconstruction_overlay.labels)
+                w.reconstruction_overlay.draw_labels();artists.extend(a for a in w.reconstruction_overlay.labels if a.get_visible())
             signature=(tuple(self.selected),w.width_overlay.stamp if w.width_toggle.isChecked() else None,w.reconstruction_overlay.stamp if w.reconstruction_toggle.isChecked() else None)
             w.scene_renderer.draw_selection(artists,w.legend,signature)

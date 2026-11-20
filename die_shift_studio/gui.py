@@ -1066,6 +1066,7 @@ class MainWindow(W.QMainWindow):
         for message in data.import_warnings:self.log_bus.emit(message,'WARNING')
         for message in getattr(data,'merge_notes',()):self.log_bus.emit(message)
         cache_settings=ViewSettings.from_dict(project.get('settings')) if project else ViewSettings(reconstruction_auto=False)
+        self._applied_preview_settings=cache_settings
         cache_id=logical_fingerprint((str(Path(project_path or data.path).resolve()),data.sha256,data.top_name))
         self._project_cache_root=Path(project_path).resolve().parent/'Cache'/'runtime' if project_path else None
         self.switch_project_cache(cache_id,cache_settings.cache_max_entries)
@@ -1263,6 +1264,9 @@ class MainWindow(W.QMainWindow):
         if frame and frame.get('diagnostic_only'):
             from .topology_routing import failure_message
             self.log_bus.emit(failure_message(frame['reconstruction']['hard_failures']),'ERROR')
+        if not getattr(self,'reconstruction_pending',False):
+            self._applied_preview_settings=self.view_settings
+            if hasattr(self,'reconstruction_overlay'):self.reconstruction_overlay.staged_overlay=None
         self.stop_animation()
         self._motion_intent=('frame',frame)
         def complete():
@@ -1369,13 +1373,16 @@ class MainWindow(W.QMainWindow):
         if hasattr(self,'reconstruction_yield'):self.reconstruction_yield.reset()
         try:
             if stage:self.reconstruction_overlay.stage()
-            self.reconstruction_overlay.draw();self.canvas.draw_idle()
+            self.reconstruction_overlay.draw();self.render_scene()
         except Exception as exc:self.log_bus.emit(f'待计算动区预览未生成：{exc}')
-        self.statusBar().showMessage('重构修改待应用；点击“重构计算”统一计算。')
+        self.statusBar().showMessage('重构修改待应用；已标记调整图形，点击“重构计算”统一计算。')
 
     def compute_reconstruction(self):
         if self.remote_locked or self.data is None:return
         self.reconstruction_pending=False;self._reconstruction_apply_once=True
+        if hasattr(self,'reconstruction_overlay'):
+            self.reconstruction_overlay.staged_overlay=None
+            self.reconstruction_overlay.draft_frame=self.reconstruction_overlay.draft_data=self.reconstruction_overlay.draft_key=None
         if not self.reconstruction_toggle.isChecked():
             self.reconstruction_toggle.blockSignals(True);self.reconstruction_toggle.setChecked(True);self.reconstruction_toggle.blockSignals(False)
         self.invalidate_reconstruction_edit();self.request_preview()
@@ -2569,6 +2576,11 @@ class MainWindow(W.QMainWindow):
         old=set(self.view_settings.reconstruction_fixed_via_follows);refs=set(refs)
         self.view_settings=replace(self.view_settings,reconstruction_fixed_via_follows=tuple(sorted(old|refs if following else old-refs)))
         self.invalidate_reconstruction_edit();self.request_preview(quiet=True)
+        action='固定过孔随动' if following else '固定过孔恢复静止'
+        if getattr(self,'reconstruction_pending',False):
+            self.statusBar().showMessage(f'已暂存：{action}（{len(refs)} 个过孔已标记，点击“重构计算”统一计算）')
+        else:
+            self.statusBar().showMessage(f'已设置：{action}（{len(refs)} 个过孔）')
 
     def change_reconstruction_mode(self,refs,following):
         if getattr(self,'remote_locked',False):return
@@ -2576,6 +2588,11 @@ class MainWindow(W.QMainWindow):
         self.view_settings=replace(self.view_settings,reconstruction_following=tuple(sorted(old|refs if following else old-refs)),
                                    reconstruction_ignored=tuple(sorted(set(self.view_settings.reconstruction_ignored)|refs)))
         self.invalidate_reconstruction_edit();self.request_preview()
+        mode='整块随动' if following else '整块静止'
+        if getattr(self,'reconstruction_pending',False):
+            self.statusBar().showMessage(f'已暂存：忽略图形改为{mode}（{len(refs)} 个图形已标记，点击“重构计算”统一计算）')
+        else:
+            self.statusBar().showMessage(f'已设置：忽略图形为{mode}（{len(refs)} 个图形）')
     def change_reconstruction_ignores(self,refs,ignore):
         if getattr(self,'remote_locked',False):return
         old=set(self.view_settings.reconstruction_ignored)
@@ -2588,7 +2605,13 @@ class MainWindow(W.QMainWindow):
             extra['reconstruction_deleted']=tuple(r for r in self.view_settings.reconstruction_deleted if r[:2] not in refs)
         self.view_settings=replace(self.view_settings,reconstruction_ignored=tuple(sorted(updated)),**extra)
         self.invalidate_reconstruction_edit();self.request_preview()
-        self.statusBar().showMessage(f'已忽略重构 {len(updated)} 个图形；保持源图，运动过孔仍按所属DIE运动。')
+        if getattr(self,'reconstruction_pending',False):
+            action='忽略重构' if ignore else '取消忽略重构'
+            self.statusBar().showMessage(f'已暂存：{action}（{len(refs)} 个图形已标记，点击“重构计算”统一计算）')
+        elif ignore:
+            self.statusBar().showMessage(f'已忽略重构 {len(updated)} 个图形；保持源图，运动过孔仍按所属DIE运动。')
+        else:
+            self.statusBar().showMessage(f'已取消忽略重构 {len(refs)} 个图形；重新参与重构预演。')
 
     def change_width_ignores(self,refs,ignore):
         self.ignored_width_lines=(self.ignored_width_lines.union(refs) if ignore else self.ignored_width_lines.difference(refs))

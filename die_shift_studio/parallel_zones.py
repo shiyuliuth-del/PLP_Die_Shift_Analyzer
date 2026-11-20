@@ -20,7 +20,8 @@ def straight_runs(plan,minimum):
         if stop<len(plan.lengths) and plan.tangent(plan.marks[stop])@axis>=limit:continue
         eps=max(plan.tolerance*16,.01)
         lo=max(plan.land_end,plan.marks[start])+eps
-        hi=min(plan.fixed_start,plan.marks[stop])-eps
+        auto_end=min(plan.fixed_start,getattr(plan,'default_fixed_start',plan.fixed_start))
+        hi=min(auto_end,plan.marks[stop])-eps
         for pos,radius in plan.corners:
             if pos==plan.marks[start]:lo=max(lo,pos+radius+eps)
             if pos==plan.marks[stop]:hi=min(hi,pos-radius-eps)

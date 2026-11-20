@@ -16,6 +16,7 @@ GD55_INPUTS = ('GD55_1105.gds', 'GD55.dshift.json',
                    SETTINGS, 'Template/GD55_Template.gds',
                    *(f'Excel/GD55_SYNTHETIC_DIE{die}.xlsx' for die in range(1, 4)),
                )))
+GD55_1119_INPUTS = ('GD55_1119.gds', 'GD55_1119.dshift.json')
 
 
 def inside(folder, value):
@@ -180,22 +181,24 @@ def copy_inputs(folder, paths, stop, subfolder, suffixes):
 
 
 def install_case(destination):
-    """Place the shipped project next to built EXEs; never alter an existing project."""
-    source = Path(__file__).resolve().parents[1] / 'Jobs' / 'GD55'
+    """Place the shipped projects next to built EXEs; never alter an existing project."""
+    root_jobs = Path(__file__).resolve().parents[1] / 'Jobs'
     jobs = Path(destination).resolve() / 'Jobs'
     jobs.mkdir(parents=True, exist_ok=True)
-    target = jobs / 'GD55'
-    if target.exists():
-        return
-    with tempfile.TemporaryDirectory(prefix='.case-', dir=jobs) as temp:
-        stage = Path(temp) / 'GD55'
-        provision_project(stage)
-        # Only the reviewed case inputs, never copy a developer's task outputs.
-        for name in GD55_INPUTS:
-            (stage / name).parent.mkdir(parents=True,exist_ok=True)
-            shutil.copyfile(source / name, stage / name)
-        if not target.exists():
-            os.rename(stage, target)
+    for folder, inputs in (('GD55', GD55_INPUTS), ('GD55_1119', GD55_1119_INPUTS)):
+        source = root_jobs / folder
+        target = jobs / folder
+        if target.exists() or not source.is_dir():
+            continue
+        with tempfile.TemporaryDirectory(prefix='.case-', dir=jobs) as temp:
+            stage = Path(temp) / folder
+            provision_project(stage)
+            # Only the reviewed case inputs, never copy a developer's task outputs.
+            for name in inputs:
+                (stage / name).parent.mkdir(parents=True,exist_ok=True)
+                shutil.copyfile(source / name, stage / name)
+            if not target.exists():
+                os.rename(stage, target)
 
 
 if __name__ == '__main__':

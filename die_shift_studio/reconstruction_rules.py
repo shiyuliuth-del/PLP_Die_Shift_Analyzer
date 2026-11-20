@@ -36,6 +36,9 @@ class FixedRules:
             key=(layer.split('/')[0],node['net']);ref=(layer,node['index'])
             self.nets.setdefault(key,[]).append(ref);self.refnet[ref]=key
         self.original={key:shapely.union_all([model.nodes[model.ids[ref]]['poly'] for ref in refs]) for key,refs in self.nets.items()}
+        by_plane=defaultdict(list)
+        for key,geom in self.original.items():by_plane[key[0]].append((key,geom))
+        self._plane_trees={plane:(tuple(k for k,_ in rows),tuple(g for _,g in rows),shapely.STRtree([g for _,g in rows])) for plane,rows in by_plane.items()}
         links=defaultdict(set)
         for link in model.connections.links:
             a=(link['upper'],link['upper_index']);b=(link['lower'],link['lower_index'])
@@ -120,27 +123,37 @@ class FixedRules:
         rest=shapely.union_all([self.model.nodes[self.model.ids[r]]['poly'].intersection(neighbourhood) for r in refs
                                if r!=(plan.layer,plan.index) and self.model.nodes[self.model.ids[r]]['poly'].intersects(neighbourhood)])
         vias=[v for v in self.vias[key] if v[1] in (-1,plan.owner) and self.model.nodes[self.model.ids[v[0]]]['poly'].intersects(plan.source)]
-        others=[g for k,g in self.original.items() if k[0]==key[0] and k!=key]
-        value=(key,rest,vias,others,shapely.STRtree(others));self.contexts[tag]=value;return value
+        plane_keys,plane_geos,plane_tree=self._plane_trees[key[0]]
+        value=(key,rest,vias,plane_keys,plane_geos,plane_tree);self.contexts[tag]=value;return value
 
     def quality(self,plan,candidate,pose):
         """Actual rule score of one candidate, without recursively optimizing it."""
         from .native_backend import any_violation
-        key,rest,vias,others,tree=self.context(plan)
+        key,rest,vias,plane_keys,plane_geos,tree=self.context(plan)
         states=np.zeros((len(self.model.bound.centers),3));states[plan.owner]=pose
-        copper=shapely.union_all([rest,*candidate.values()]);kinds=set();amount=0.
+        parts_list=[g for g in (rest,*candidate.values()) if g is not None and not g.is_empty]
+        copper=parts_list[0] if len(parts_list)==1 else shapely.union_all(parts_list)
+        kinds=set();amount=0.
         active=candidate['A'].buffer(self.dbu*2)
+        ab=active.bounds
         for op,value in (('width',self.width),('space',self.space)):
             if enabled(self.cfg,op) and any_violation(op,copper.wkb,self.dbu,value) and rule_region(copper,value,self.dbu,op).intersects(active):kinds.add(op)
         for ref,owner,required in (vias if enabled(self.cfg,'enclosure') else ()):
-            missing=self.model.moved(required,owner,states).difference(copper).intersection(active).area
+            moved_req=self.model.moved(required,owner,states)
+            rb=moved_req.bounds
+            if rb[0]>ab[2] or rb[2]<ab[0] or rb[1]>ab[3] or rb[3]<ab[1]:continue
+            missing=moved_req.difference(copper).intersection(active).area
             if missing>self.dbu*self.dbu:kinds.add('enclosure');amount+=missing/max(self.width*self.space,1e-12)
-        if enabled(self.cfg,'board') and self.board is not None and not copper.difference(self.inside).intersection(active).is_empty:
-            kinds.add('board');amount+=copper.difference(self.inside).area/max(self.width*self.space,1e-12)
+        if enabled(self.cfg,'board') and self.board is not None and not self.inside.covers(active):
+            outside=copper.difference(self.inside).intersection(active)
+            if not outside.is_empty:
+                kinds.add('board');amount+=outside.area/max(self.width*self.space,1e-12)
         if enabled(self.cfg,'keepout') and not self.keepout.is_empty and shapely.relate_pattern(copper.intersection(active),self.keepout,'T********'):
             kinds.add('keepout');amount+=copper.intersection(self.keepout).area/max(self.width*self.space,1e-12)
-        for j in tree.query(copper,predicate='dwithin',distance=self.space):
-            other=others[int(j)]
+        for j in tree.query(active,predicate='dwithin',distance=self.space+self.dbu*4):
+            j=int(j)
+            if plane_keys[j]==key:continue
+            other=plane_geos[j]
             if self.pair_fails(copper,other) and self.pair(copper,other).intersects(active):
                 kinds.add('foreign');gap=copper.distance(other)
                 if copper.intersects(other):kinds.add('short')

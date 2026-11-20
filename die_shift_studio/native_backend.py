@@ -159,7 +159,7 @@ def packed(wkb,dbu):
     value=encoded(wkb,dbu) if len(wkb)<=256000 else _encode(shapely.from_wkb(wkb),dbu)
     return value,float(dbu).hex()+':'+hashlib.sha256(wkb).hexdigest()
 
-@lru_cache(maxsize=192)
+@lru_cache(maxsize=1024)
 def compute(op,wkb,dbu,distance=0.,other=None):
     a,akey=packed(wkb,dbu);request=dict(op=op,a=a,akey=akey)
     if op.removesuffix('_any') in ('width','space','notch','separation'):request['distance']=max(1,math.ceil(distance/dbu-1e-9))

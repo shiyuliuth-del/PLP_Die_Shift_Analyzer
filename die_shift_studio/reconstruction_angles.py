@@ -33,7 +33,10 @@ def side_direction(sides,point,fallback):
 
 def measure(part,plan,center,pose,regions):
     effective,landing,fixed,near,moved,far,t0,t1=connection_data(part,plan,center,pose)
-    body=regions['A'].difference(shapely.union_all([landing,fixed]))
+    if landing.is_empty and fixed.is_empty:
+        body=regions['A']
+    else:
+        body=regions['A'].difference(fixed if landing.is_empty else landing if fixed.is_empty else shapely.union_all([landing,fixed]))
     faces=shapely.union_all([shapely.LineString(moved),shapely.LineString(far)]).buffer(plan.tolerance*4)
     sides=[g for g in shapely.get_parts(body.boundary.difference(faces)) if g.geom_type=='LineString']
     sides=sorted(sides,key=lambda g:g.length,reverse=True)[:2]
@@ -77,6 +80,8 @@ def solve(r,plan,base,center,pose,quick=False,native_check=True):
         if mode=='balanced':goal*=.5
         angles=[goal,goal*.5,goal*1.5,np.array([goal[0],0.]),np.array([0.,goal[1]])]
         for delta in (() if quick else (-math.pi/12,math.pi/12)):angles.append(np.clip(goal+delta,-math.pi/3,math.pi/3))
+        seen_angles=[np.asarray(base.get('angles',(0.,0.)),float)]
+        seen_keys={part_key(base)}
         for values in (() if mode=='perpendicular' or base.get('strict_box') is not None else angles[:1] if quick else angles):
             cancel_check()
             values=np.clip(np.asarray(values,float),-math.pi/3,math.pi/3)
@@ -84,8 +89,12 @@ def solve(r,plan,base,center,pose,quick=False,native_check=True):
                 if locked:values[side]=base['angles'][side]
             if base['near'].geom_type=='Point':values=np.array([0.,values[1]])
             if base['far'].geom_type=='Point':values=np.array([values[0],0.])
+            if any(np.max(np.abs(values-prev))<math.radians(.5) for prev in seen_angles):continue
+            seen_angles.append(values)
             part=plan.partition(base['a'],base['b'],values)
-            if part is not None and part_key(part) not in {part_key(p) for p in trials}:trials.append(part)
+            if part is not None:
+                pk=part_key(part)
+                if pk not in seen_keys:seen_keys.add(pk);trials.append(part)
     except ValueError:pass
     ranked=[]
     for part in trials:
@@ -111,7 +120,7 @@ def solve(r,plan,base,center,pose,quick=False,native_check=True):
                 # Only three distinct geometric finalists need edge checks.
                 best=None;seen=set()
                 for geometric,part0,copper in ordered:
-                    identity=shapely.union_all(list(copper.values())).wkb
+                    identity=(copper['A'].wkb,copper['B'].wkb,copper['C'].wkb)
                     if identity in seen:continue
                     seen.add(identity);score=r.rules.quality(plan,copper,pose)
                     candidate=(*score,*geometric)

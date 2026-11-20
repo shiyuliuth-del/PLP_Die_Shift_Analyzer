@@ -23,6 +23,7 @@ EMPTY=shapely.Polygon()
 def clean_overlay(g,tolerance):
     """Remove only sub-DBU floating overlay spurs, never edit imported source."""
     if g.is_empty:return g
+    if g.geom_type=='Polygon' and not g.interiors and len(g.exterior.coords)<=5:return g
     epsilon=max(tolerance*1e-6,np.spacing(max(1.,max(abs(x) for x in g.bounds)))*32)
     simple=g.simplify(epsilon,preserve_topology=False)
     if not simple.is_empty and simple.is_valid and abs(simple.area-g.area)<=max(tolerance*tolerance*.01,epsilon*g.length):return simple
@@ -217,7 +218,48 @@ class RoutePlan:
                 self.corners.append((float(self.marks[i]),radius))
 
     def __getstate__(self):
-        state=dict(self.__dict__);state['cache']={};state['pose_memo']=OrderedDict();state['memo_bytes']=0;return state
+        state=dict(self.__dict__);state['cache']={};state['pose_memo']=OrderedDict();state['memo_bytes']=0
+        for name in ('_ring_cache','_land_cache','_anchor_cache','_source_meta'):state.pop(name,None)
+        return state
+
+    def _source_info(self):
+        meta=getattr(self,'_source_meta',None)
+        if meta is not None and meta[0] is self.source:return meta
+        rings=[np.asarray(r.coords,float) for p in parts(self.source) for r in (p.exterior,*p.interiors)]
+        if rings:
+            starts=np.concatenate([r[:-1] for r in rings])
+            ends=np.concatenate([r[1:] for r in rings])
+        else:
+            starts=ends=np.empty((0,2),float)
+        meta=(self.source,self.source.bounds,float(self.source.area),starts,ends)
+        self._source_meta=meta
+        return meta
+
+    def _land_info(self):
+        info=getattr(self,'_land_cache',None)
+        if info is not None and info[0] is self.land:return info[1],info[2]
+        area=float(self.land.area);bounds=self.land.bounds
+        self._land_cache=(self.land,area,bounds)
+        return area,bounds
+
+    def _anchor_info(self):
+        info=getattr(self,'_anchor_cache',None)
+        if info is not None and info[0] is self.anchors:return info[1]
+        bounds=tuple(a.bounds for a in self.anchors)
+        self._anchor_cache=(self.anchors,bounds)
+        return bounds
+
+    def _point_at(self,s):
+        if s<=0.:return self.xy[0]
+        if s>=self.length:return self.xy[-1]
+        i=min(len(self.lengths)-1,max(0,int(np.searchsorted(self.marks,s,side='right')-1)))
+        length=self.lengths[i]
+        if length<=1e-12:return self.xy[i]
+        return self.xy[i]+((s-self.marks[i])/length)*(self.xy[i+1]-self.xy[i])
+
+    @staticmethod
+    def _bounds_overlap(a,b):
+        return a[0]<=b[2] and a[2]>=b[0] and a[1]<=b[3] and a[3]>=b[1]
 
     @property
     def key(self):return self.layer,self.index,self.owner,self.refs
@@ -280,13 +322,40 @@ class RoutePlan:
         return s
 
     def section(self,s,angle=0.):
-        point=np.asarray(self.route.interpolate(s).coords[0]);normal=self.tangent(s);u=np.array([-normal[1],normal[0]])
-        co,si=np.cos(angle),np.sin(angle);u=np.array([co*u[0]-si*u[1],si*u[0]+co*u[1]])
-        size=np.hypot(self.source.bounds[2]-self.source.bounds[0],self.source.bounds[3]-self.source.bounds[1])+1
-        chord=shapely.intersection(self.source,shapely.LineString([point-u*size,point+u*size]))
-        lines=[q for q in shapely.get_parts(chord) if q.geom_type=='LineString' and q.length>self.tolerance]
-        if not lines:return None
-        return min(lines,key=lambda g:float(g.distance(shapely.Point(point))))
+        key=('section',round(float(s),8),round(float(angle),10))
+        if key in self.cache:return self.cache[key]
+        point=self._point_at(float(s));normal=self.tangent(s);u=np.array([-normal[1],normal[0]])
+        if angle:
+            co,si=np.cos(angle),np.sin(angle);u=np.array([co*u[0]-si*u[1],si*u[0]+co*u[1]])
+        _,bounds,_,starts,ends=self._source_info()
+        result=None;exact=True
+        if len(starts):
+            perp=np.array([-u[1],u[0]])
+            d0=(starts-point)@perp;d1=(ends-point)@perp
+            eps=max(self.tolerance*1e-4,1e-9)
+            if not np.any((np.abs(d0)<=eps)|(np.abs(d1)<=eps)):
+                cross=np.flatnonzero((d0<0)!=(d1<0))
+                if not len(cross):
+                    exact=False;result=None
+                elif (len(cross)&1)==0:
+                    alpha=d0[cross]/(d0[cross]-d1[cross])
+                    hits=starts[cross]+alpha[:,None]*(ends[cross]-starts[cross])
+                    ts=np.sort((hits-point)@u)
+                    best=None
+                    for lo,hi in zip(ts[0::2],ts[1::2]):
+                        if hi-lo<=self.tolerance:continue
+                        dist=0. if lo<=0.<=hi else (lo if lo>0. else -hi)
+                        if best is None or dist<best[0]:best=(dist,float(lo),float(hi))
+                    exact=False
+                    result=shapely.LineString([point+best[1]*u,point+best[2]*u]) if best is not None else None
+        if exact:
+            size=np.hypot(bounds[2]-bounds[0],bounds[3]-bounds[1])+1
+            chord=shapely.intersection(self.source,shapely.LineString([point-u*size,point+u*size]))
+            lines=[q for q in shapely.get_parts(chord) if q.geom_type=='LineString' and q.length>self.tolerance]
+            result=min(lines,key=lambda g:float(g.distance(shapely.Point(point)))) if lines else None
+        if len(self.cache)>1024:self.cache.clear()
+        self.cache[key]=result
+        return result
 
     def prefix(self,s,angle=0.):
         """Connected source portion on the moving-terminal side of a local cut."""
@@ -298,12 +367,13 @@ class RoutePlan:
         blade=shapely.LineString([xy[0]-v*self.tolerance*16,xy[-1]+v*self.tolerance*16])
         try:pieces=parts(split(self.source,blade))
         except (ValueError,shapely.errors.GEOSException):return None
-        eps=max(self.tolerance**2,self.land.area*1e-7)
-        candidates=[g for g in pieces if g.intersection(self.land).area>=self.land.area-eps]
-        candidates=[g for g in candidates if all(g.intersection(a).area<=eps for a in self.anchors)]
+        land_area,land_bounds=self._land_info();anchor_bounds=self._anchor_info()
+        eps=max(self.tolerance**2,land_area*1e-7)
+        candidates=[g for g in pieces if self._bounds_overlap(g.bounds,land_bounds) and g.intersection(self.land).area>=land_area-eps]
+        candidates=[g for g in candidates if all(not self._bounds_overlap(g.bounds,ab) or g.intersection(a).area<=eps for a,ab in zip(self.anchors,anchor_bounds))]
         if len(pieces)<2 or len(candidates)!=1:result=None
         else:result=candidates[0],face,shapely.union_all([g for g in pieces if g is not candidates[0]])
-        if len(self.cache)>512:self.cache.clear()
+        if len(self.cache)>1024:self.cache.clear()
         self.cache[key]=result
         return result
 
@@ -327,13 +397,19 @@ class RoutePlan:
             blade=shapely.LineString([xy[0]-v*self.tolerance*16,xy[-1]+v*self.tolerance*16])
             try:pieces=parts(split(moving_plus,blade))
             except (ValueError,shapely.errors.GEOSException):return None
-            epsilon=max(self.tolerance**2,self.land.area*1e-7)
-            movable=[g for g in pieces if g.intersection(self.land).area>=self.land.area-epsilon]
+            land_area,land_bounds=self._land_info()
+            epsilon=max(self.tolerance**2,land_area*1e-7)
+            movable=[g for g in pieces if self._bounds_overlap(g.bounds,land_bounds) and g.intersection(self.land).area>=land_area-epsilon]
             if len(movable)!=1 or len(pieces)<2:return None
             c=movable[0];a_shape=shapely.union_all([g for g in pieces if g is not c])
         if a_shape.is_empty:return None
-        union=shapely.union_all([a_shape,b_shape,c])
-        if union.symmetric_difference(self.source).area>max(self.tolerance**2,self.source.area*1e-8):return None
+        _,_,source_area,_,_=self._source_info()
+        area_eps=max(self.tolerance**2,source_area*1e-8)
+        diff=abs((a_shape.area+b_shape.area+c.area)-source_area)
+        if diff>area_eps:return None
+        if diff>area_eps*.1 or not (a_shape.is_valid and b_shape.is_valid and (c.is_empty or c.is_valid)):
+            union=shapely.union_all([a_shape,b_shape,c])
+            if union.symmetric_difference(self.source).area>area_eps:return None
         a_shape,b_shape,c=(clean_overlay(g,self.tolerance) for g in (a_shape,b_shape,c))
         return {'A':a_shape,'B':b_shape,'C':c,'near':near,'far':far,'a':a,'b':b,'angles':tuple(map(float,angles))}
 
@@ -374,10 +450,11 @@ class RoutePlan:
                 self.land=original_land;self.land_end=original_end;self.cache.clear();self.preferred_land=preferred
             if chosen is not None:return chosen
         eps=max(self.tolerance*16,.01)
-        breaks=[(self.land_end+eps,0.),*self.corners,(self.fixed_start-eps,0.)]
+        auto_end=min(self.fixed_start,getattr(self,'default_fixed_start',self.fixed_start))
+        breaks=[(self.land_end+eps,0.),*(c for c in self.corners if self.land_end+eps<c[0]<auto_end-eps),(auto_end-eps,0.)]
         candidates=[]
         for (left,g0),(right,g1) in zip(breaks,breaks[1:]):
-            lo=max(self.land_end+eps,left+g0);hi=min(self.fixed_start-eps,right-g1)
+            lo=max(self.land_end+eps,left+g0);hi=min(auto_end-eps,right-g1)
             if hi<=lo:continue
             # Width changes at pads may occupy the beginning/end of a segment.
             # Search inward only until a genuine separating section is found.
@@ -391,28 +468,34 @@ class RoutePlan:
             candidates.append((float(b-a),float(a),float(b),part))
         if not candidates:
             # Bent or branched path: a topology-checked full-length interval.
-            for b in np.linspace(self.fixed_start-eps,self.land_end+eps,24):
+            for b in np.linspace(auto_end-eps,self.land_end+eps,24):
                 part=self.partition(0.,float(b))
                 if part is not None:candidates.append((float(b),0.,float(b),part));break
         if not candidates:return None
         # A long straight centreline may begin inside a wide junction/pad.
         # Search its interior for a constant-width run instead of ranking the
         # whole segment (which can hide a perfectly usable uniform section).
-        uniform=[]
-        for length,a,b,_ in candidates:
+        uniform=[];best_uniform=0.
+        for length,a,b,_ in sorted(candidates,key=lambda q:-q[0]):
+            if length<=best_uniform:continue
+            if self.width_variation(a,b)<=.05:
+                best_uniform=max(best_uniform,length);continue
             stations=np.linspace(a,b,25)
             widths=[self.section(float(t)) for t in stations]
             widths=[g.length if g is not None else float('nan') for g in widths]
             best=None
             for left in range(len(stations)-1):
+                if stations[-1]-stations[left]<=best_uniform:break
                 for right in range(left+1,len(stations)):
                     w=widths[left:right+1]
                     if not np.isfinite(w).all() or min(w)<=self.tolerance or max(w)>min(w)*1.05:break
                     if best is None or stations[right]-stations[left]>stations[best[1]]-stations[best[0]]:best=(left,right)
-            if best:
+            if best and stations[best[1]]-stations[best[0]]>best_uniform:
                 lo,hi=map(float,stations[list(best)])
                 part=self.partition(lo,hi)
-                if part is not None:uniform.append((hi-lo,lo,hi,part))
+                if part is not None:
+                    uniform.append((hi-lo,lo,hi,part))
+                    best_uniform=max(best_uniform,hi-lo)
         candidates.extend(uniform)
         def rank(q):
             variation=self.width_variation(q[1],q[2])

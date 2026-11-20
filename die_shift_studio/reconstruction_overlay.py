@@ -47,7 +47,8 @@ def display_material(data,visible_layers):
 
 class ReconstructionOverlay:
     def __init__(self,window):
-        self.draft_frame=self.draft_data=self.draft_key=None;self.w=window;self.artists={};self.cuts=None;self.stamp=self.table_stamp=None
+        self.draft_frame=self.draft_data=self.draft_key=None;self.staged_overlay=None
+        self.w=window;self.artists={};self.cuts=None;self.stamp=self.table_stamp=None
         self.selected=self.selected_kind=None;self.hover=None;self.hover_key=None
         self.end_artists=[];self.region_artists=[];self.arrow_artists=[];self.path_cache={};self.handles={};self.union_cache={};self.labels=[];self.text_sizes={};self.zone_views={};self.zone_clips={}
         self.pulse_timer=QtCore.QTimer(window);self.pulse_timer.setInterval(33);self.pulse_timer.timeout.connect(self.pulse)
@@ -62,23 +63,39 @@ class ReconstructionOverlay:
         return (frame or {}).get('reconstruction')
     def stage(self):
         w=self.w;frame=w.current_frame
-        if not frame or not frame.get('reconstruction') or not getattr(w,'engine',None):return
         cfg=w.view_settings;previous=w.preview_settings()
         if cfg.reconstruction_key()==previous.reconstruction_key():
-            self.draft_frame=self.draft_data=self.draft_key=None;self.stamp=None;return
-        if self.draft_frame is frame and self.draft_key==cfg.reconstruction_key():return
-        refs=set();data=frame['reconstruction'];geo=w.engine.reconstructor.model.cache.layers
-        for name in ('ignored','following','forced','angles','intervals','added','deleted','regions','boxes','angle_boxes','box_excluded','cuts','extra_cuts','second_cuts','dropped_cuts'):
+            self.draft_frame=self.draft_data=self.draft_key=None;self.staged_overlay=None;self.stamp=None;return
+        if self.draft_frame is frame and self.draft_key==cfg.reconstruction_key() and self.staged_overlay and self.staged_overlay.get('key')==cfg.reconstruction_key():return
+        solver=getattr(getattr(w,'engine',None),'reconstructor',None)
+        geo=solver.model.cache.layers if solver is not None else (w.geometry_cache.layers if getattr(w,'geometry_cache',None) is not None else {})
+        rdl_refs=set();via_refs=set();staged_boxes=[]
+        for name in ('ignored','following','forced','angles','intervals','added','deleted','regions','boxes','angle_boxes','box_excluded','cuts','extra_cuts','second_cuts','dropped_cuts','fixed_via_follows'):
             field='reconstruction_'+name
-            for row in set(getattr(cfg,field))^set(getattr(previous,field)):
+            cur=set(getattr(cfg,field));prev=set(getattr(previous,field))
+            if name in ('boxes','angle_boxes'):
+                for row in cur-prev:
+                    staged_boxes.append((row[0],shapely.Polygon(row[1])))
+            for row in cur^prev:
                 if name in ('boxes','angle_boxes','regions'):
                     g=shapely.Polygon(row[1]) if name!='regions' else shapely.box(*row[1]);layer=row[0]
-                    refs.update((layer,i) for i in np.flatnonzero(shapely.intersects(geo[layer]['geometry'],g)))
-                else:refs.add(tuple(row[:2]))
-        from .reconstruction_zones import live_serial
-        local=frame
-        for ref in sorted(refs):local=live_serial(w.engine.reconstructor,cfg,local,ref,draft=True)
-        self.draft_frame=frame;self.draft_key=cfg.reconstruction_key();self.draft_data=dict(local['reconstruction'],draft_refs=refs or {(q['layer'],q['index']) for q in data['pieces']})
+                    if layer in geo:
+                        rdl_refs.update((layer,int(i)) for i in np.flatnonzero(shapely.intersects(geo[layer]['geometry'],g)))
+                elif name=='fixed_via_follows':
+                    via_refs.add((str(row[0]),int(row[1])))
+                else:rdl_refs.add((str(row[0]),int(row[1])))
+        all_refs=rdl_refs|via_refs
+        self.staged_overlay=dict(refs=all_refs,boxes=tuple(staged_boxes),key=cfg.reconstruction_key())
+        if frame and frame.get('reconstruction') and solver is not None:
+            data=frame['reconstruction']
+            from .reconstruction_zones import live_serial
+            local=frame
+            for ref in sorted(rdl_refs):
+                try:local=live_serial(solver,cfg,local,ref,draft=True)
+                except Exception:pass
+            self.draft_frame=frame;self.draft_key=cfg.reconstruction_key()
+            draft_refs=all_refs or {(q['layer'],q['index']) for q in data['pieces']}
+            self.draft_data=dict(local['reconstruction'],draft_refs=draft_refs)
         self.stamp=None
 
     def pieces(self):return [q for q in (self.data() or {}).get('pieces',()) if self.active() and self.w.visible_boxes[q['layer']].isChecked()]
@@ -179,7 +196,8 @@ class ReconstructionOverlay:
         # committed frame takes ownership.
         dragging=edit is not None and w.cut_drag.state is edit
         edit_stamp=(id(edit),dragging,0 if dragging else id(edit['marker'])) if edit else None
-        stamp=(id(data),id(bank),vis,w.view_bounds,order,nominal,edit_stamp,repr(w.layer_styles))
+        staged_info=self.staged_overlay if (self.active() and getattr(w,'reconstruction_pending',False)) else None
+        stamp=(id(data),id(bank),vis,w.view_bounds,order,nominal,edit_stamp,repr(w.layer_styles),id(staged_info))
         if stamp==self.stamp:self.draw_labels();return
         if self.stamp is not None and self.stamp[0]!=id(data) and edit is None:
             if self.hover is not None:self.hover.set_visible(False)
@@ -257,11 +275,20 @@ class ReconstructionOverlay:
             artist.set_alpha(None)
             artist.set_zorder(2+(order.index(layer) if layer in order else 0)/max(1,len(order))+.001*('BCA'.index(k)+1))
         staged=[]
-        for layer,index in (data or {}).get('draft_refs',()):
+        staged_refs=set((data or {}).get('draft_refs',()))
+        if staged_info:staged_refs.update(staged_info.get('refs',()))
+        solver=getattr(getattr(w,'engine',None),'reconstructor',None)
+        geo_layers=solver.model.cache.layers if solver is not None else (w.geometry_cache.layers if getattr(w,'geometry_cache',None) is not None else {})
+        for layer,index in staged_refs:
             if layer in vis:
                 gs=[g for (l,i,kind,status),parts in region_groups.items() if (l,i)==(layer,index) and kind=='A' for g in parts.values()]
-                if not gs:gs=[w.engine.reconstructor.model.cache.layers[layer]['geometry'][index]]
+                if not gs and layer in geo_layers and index<len(geo_layers[layer]['geometry']):
+                    gs=[geo_layers[layer]['geometry'][index]]
                 staged.extend(patch(g) for g in gs if not g.is_empty and _in_view(g.bounds,w.view_bounds))
+        if staged_info:
+            for layer,box_poly in staged_info.get('boxes',()):
+                if layer in vis and not box_poly.is_empty and _in_view(box_poly.bounds,w.view_bounds):
+                    staged.append(patch(box_poly))
         self.staged.set_paths(staged);self.staged.set_visible(bool(staged))
         self.problems.set_paths(red);self.problems.set_visible(bool(red));self.warning.set_paths(warnings);self.warning.set_visible(bool(warnings))
         self.cuts.set_segments(first);self.cuts.set_visible(bool(first));self.second_cuts.set_segments(second);self.second_cuts.set_visible(bool(second))
@@ -270,24 +297,37 @@ class ReconstructionOverlay:
         self.draw_labels()
 
     def draw_labels(self):
-        w=self.w;selected=set(getattr(getattr(w,'selection',None),'selected',()));items=[];boxes=[];outside=[];anchors=[]
+        w=self.w;selected=set(getattr(getattr(w,'selection',None),'selected',()));candidates=[];boxes=[]
         bank=self.risk_bank();nominal=bool((w.current_frame or {}).get('nominal_global'))
-        if self.active():
+        hidden_outside=0
+        if self.active() and selected:
             from .width_witness import pose_text
             labels={'red':'线路无法保持连通','yellow':'线路连通，有 DRC 违例','green':'通过检查','pending':'核验尚未完成'}
+            vx0,vy0,vx1,vy1=w.view_bounds
+            vcx,vcy=(vx0+vx1)*.5,(vy0+vy1)*.5
+            visible_zones=[]
             for key,(q,status,g) in self.zone_views.items():
                 if (q['layer'],q['index']) not in selected or (status=='green' and not q.get('routing_recovered')):continue
                 if g.is_empty:g=q['source']
+                if g.is_empty:continue
+                gb=g.bounds
+                if not _in_view(gb,w.view_bounds):
+                    hidden_outside+=1;continue
+                cx,cy=(gb[0]+gb[2])*.5,(gb[1]+gb[3])*.5
+                visible_zones.append(((-RANK.get(status,0),(cx-vcx)**2+(cy-vcy)**2),key,q,status,g,gb))
+            visible_zones.sort(key=lambda item:item[0])
+            rules=(self.data() or {}).get('rules',{})
+            places=w.view_settings.width_yield_decimals
+            for _,key,q,status,g,gb in visible_zones[:32]:
                 row=(bank or {}).get('zones',{}).get(key,{})
                 kinds=q.get('problem_reasons',()) if not nominal else row.get('kinds',q.get('problem_reasons',()))
                 if not kinds and status=='yellow':kinds=row.get('kinds',())
                 text=f"{q['layer']} #{q['index']+1} · DIE{q['die']+1} · {labels[status]}"
                 text+='\n'+('、'.join(kinds) if kinds else q.get('warning') or '核验尚未完成')
                 if q.get('routing_note') and kinds:text+='\n'+q['routing_note']
-                rules=(self.data() or {}).get('rules',{})
                 if rules:text+=f"\n要求线宽≥{rules['width_um']:g} μm，线距≥{rules['space_um']:g} μm"
                 angles=q.get('boundary_angles',(0.,0.));text+=f"\n边界角度 {math.degrees(angles[0]):.1f}° / {math.degrees(angles[1]):.1f}°"
-                probability=row.get('probability');places=w.view_settings.width_yield_decimals
+                probability=row.get('probability')
                 if probability:
                     if probability.get('certified'):text+=f"\n失效概率 ≤ {probability['upper']*100:.{places}g}%（保守界限）"
                     else:text+=f"\n极端代表网格估计≈{probability.get('estimate',0)*100:.{places}g}% · 连续概率待定"
@@ -295,21 +335,22 @@ class ReconstructionOverlay:
                 if witness and (nominal or not q.get('problem_reasons')):text+='\n代表工况：'+pose_text(bank['grid_key'],witness['index'])
                 else:
                     state=w.current_frame['states'][q['die']];text+=f"\nDX {state[0]:.2f} μm, DY {state[1]:.2f} μm, θ {math.degrees(state[2]):.2f}°"
-                rect,anchor,out=w.width_overlay.label_anchor(g)
-                if out:text+='\n动区在当前视野外'
-                items.append((status,text));boxes.append(rect if out else shapely.box(*g.bounds));anchors.append(anchor);outside.append(out)
+                candidates.append((status,text));boxes.append(shapely.box(*gb))
         from .width_labels import LabelLayout
         from .canvas_callouts import put
         from matplotlib.colors import to_rgb
         count=0
-        if items:
+        if candidates:
             size=w.view_settings.width_label_font_pt;layout=LabelLayout(w.ax,boxes,size,self.text_sizes)
             if w.legend is not None and w.legend.get_visible():
                 b=w.legend.get_window_extent(w.canvas.get_renderer());layout.labels.append((np.array([b.x0,b.y0])/layout.scale,np.array([b.x1,b.y1])/layout.scale))
-            for i,(status,text) in enumerate(items):
-                near=layout.place_selected(i,text);position=(*near,size) if near else layout.place_pinned(i,text)
+            allow_pinned=len(candidates)<=4
+            max_labels=16
+            for i,(status,text) in enumerate(candidates):
+                if count>=max_labels:break
+                near=layout.place_selected(i,text)
+                position=(*near,size) if near else (layout.place_pinned(i,text) if (allow_pinned or count==0) else None)
                 if position is None:continue
-                if outside[i]:position=w.width_overlay.retarget(position,anchors[i])
                 _,tip,offset,font=position;color=PALETTE[status]
                 put(w,self.labels,count,text,tip,offset,font,color,np.asarray(to_rgb(color))*.64,color);count+=1
         for a in self.labels[count:]:a.set_visible(False)
@@ -353,6 +394,7 @@ class ReconstructionOverlay:
     def clear_hover(self):self.highlight(None)
     def hide(self):
         self.w.cut_drag.retained=None
+        self.staged_overlay=None
         self.clear_hover();self.stamp=None;self.handles={};self.zone_views={};self.zone_clips={};self.hit_items=[];self.hit_geometry=None
         for artist in [*self.artists.values(),*self.labels,*self.end_artists,*self.region_artists,*self.arrow_artists,*[getattr(self,n,None) for n in ('staged','warning','problems','cuts','second_cuts','points','second_points')]]:
             if artist is not None:artist.set_visible(False)
@@ -420,6 +462,18 @@ class CutDrag:
         self.state['press_projection']=piece['interval'][side]
         self.state['projection_cursor']=origin.copy();self.state['projection']=piece['interval'][side]
         self.state['press_interval']=piece['interval'][side]
+        peer_limit=None
+        if getattr(plan,'ownership_domain',None) is not None:
+            ref=(piece['layer'],piece['index'])
+            peers=[shapely.union_all([other['nominal_regions']['A'],other['nominal_regions']['C']])
+                   for other in overlay.pieces()
+                   if (other['layer'],other['index'])==ref and other['die']!=owner and not other.get('ignored')]
+            peers=[g for g in peers if not g.is_empty]
+            if peers:
+                from .reconstruction_route import terminal_marks
+                marks=terminal_marks(plan.route,shapely.union_all(peers))
+                if len(marks):peer_limit=max(piece['interval'][0]+plan.tolerance*16,float(marks.min())-max(plan.tolerance*16,1e-3))
+        self.state['peer_limit']=peer_limit
         self.state['companions']=[]
         for member in piece.get('drag_members',()):
             other=member['route_plan']
@@ -457,7 +511,9 @@ class CutDrag:
                 edit=move_side(state['settings'],plan,state['nominal_press'],cursor,piece.get('strict_box')) if piece.get('strict_box') is not None else None
                 if edit:state['updated'],part=edit
                 else:
-                    part,clamped=plan.edit_pose(*piece['interval'],which,state['press_interval']+projection-state['press_projection'],frame['rotation_centers'][owner],frame['states'][owner],self.w.view_settings.reconstruction_style,cursor=route_cursor)
+                    target_s=state['press_interval']+projection-state['press_projection']
+                    if which==1 and state.get('peer_limit') is not None:target_s=min(target_s,state['peer_limit'])
+                    part,clamped=plan.edit_pose(*piece['interval'],which,target_s,frame['rotation_centers'][owner],frame['states'][owner],self.w.view_settings.reconstruction_style,cursor=route_cursor)
                     if part is not None:
                         from .reconstruction_edits import apply_angles
                         part=apply_angles(state['updated'],plan,part)
@@ -613,9 +669,11 @@ class CutDrag:
             w.invalidate_reconstruction_edit()
             w.request_preview(quiet=True)
         else:
-            # The latest local preview can finish after mouse-up. Applying it
-            # changes the drawing only, leaving the committed calculation intact.
-            w.defer_reconstruction(stage=not updated.reconstruction_live)
+            # The latest local preview can finish after mouse-up. If no live
+            # result matches the final position yet, stage immediately so the
+            # edited shape is visibly marked even with auto-calculation off.
+            need_stage=(not updated.reconstruction_live) or (state.get('live_result_key')!=state.get('live_key'))
+            w.defer_reconstruction(stage=need_stage)
         overlay.clear_hover();overlay.draw();w.render_scene()
 
     def cancel(self,redraw=True):
@@ -667,24 +725,37 @@ def nudge_cut(settings,piece,step,kind='cut'):
 class RegionSelect:
     """Draw an oriented selection and seed cuts on the intersected sources."""
     def __init__(self,window):
-        self.w=window;self.mode=None;self.state=None;self.rect=None
-        for name,fn in [('button_press_event',self.press),('motion_notify_event',self.move),('scroll_event',self.scroll)]:window.canvas.mpl_connect(name,fn)
+        self.w=window;self.mode=None;self.state=None;self.rect=None;self.cursor=None;self.marker=None;self.anchor_marker=None
+        for name,fn in [('button_press_event',self.press),('motion_notify_event',self.move),('scroll_event',self.scroll),('axes_leave_event',self.leave),('figure_leave_event',self.leave)]:window.canvas.mpl_connect(name,fn)
     def set_mode(self,mode):
         if mode is not None and self.mode is None:
             self.previous_cursor=self.w.canvas.cursor()
             self.w.canvas.setCursor(getattr(Qt,'CursorShape',Qt).CrossCursor)
         if mode is None:
             if self.mode is not None:self.w.canvas.setCursor(self.previous_cursor)
-            self._drop()
+            self._drop(clear_cursor=True)
         self.mode=mode
-    def _drop(self):
+    def _ensure_markers(self):
+        if self.marker is None or self.marker.axes is not self.w.ax:
+            self.marker=Line2D([],[],marker='+',ms=10,mew=1.1,color='#263d52',ls='none',zorder=32,visible=False)
+            self.w.ax.add_line(self.marker)
+        if self.anchor_marker is None or self.anchor_marker.axes is not self.w.ax:
+            self.anchor_marker=Line2D([],[],marker='+',ms=9,mew=1.1,color='#287bb2',ls='none',zorder=31,visible=False)
+            self.w.ax.add_line(self.anchor_marker)
+    def _drop(self,clear_cursor=False):
         self.w.canvas.region_rotating=False
-        if self.rect is not None:
-            try:self.rect.remove()
-            except ValueError:pass
+        removed=False
+        for attr in ('rect','anchor_marker') if not clear_cursor else ('rect','marker','anchor_marker'):
+            artist=getattr(self,attr,None)
+            if artist is not None:
+                try:artist.remove()
+                except ValueError:pass
+                setattr(self,attr,None);removed=True
+        if clear_cursor:self.cursor=None
+        self.state=None
+        if removed:
             self.w.scene_renderer.feedback_background=None
             self.w.canvas.draw_idle()
-        self.rect=None;self.state=None
     def _point(self,event):
         return np.array([event.xdata,event.ydata],float) if event.xdata is not None and event.ydata is not None else None
     def vertices(self):
@@ -692,7 +763,24 @@ class RegionSelect:
         x,y=(s['current']-s['anchor'])@rotation
         return s['anchor']+np.array([[0,0],[x,0],[x,y],[0,y]])@rotation.T
     def draw(self):
-        self.rect.set_xy(self.vertices());self.w.scene_renderer.draw_feedback(self.rect,('region',id(self.rect)),self.w.legend)
+        self._ensure_markers()
+        artists=[]
+        if self.rect is not None and self.state is not None:
+            self.rect.set_xy(self.vertices());self.rect.set_visible(True);artists.append(self.rect)
+        if self.state is not None:
+            self.anchor_marker.set_data([self.state['anchor'][0]],[self.state['anchor'][1]]);self.anchor_marker.set_visible(True);artists.append(self.anchor_marker)
+        else:
+            self.anchor_marker.set_visible(False)
+        if self.cursor is not None and self.mode is not None:
+            self.marker.set_data([self.cursor[0]],[self.cursor[1]]);self.marker.set_visible(True);artists.append(self.marker)
+        else:
+            self.marker.set_visible(False)
+        self.w.scene_renderer.draw_feedback(artists or [self.marker],('region',id(self.rect),id(self.marker)),self.w.legend)
+    def leave(self,event=None):
+        if self.mode is None:return
+        self.cursor=None
+        if self.marker is not None and self.marker.get_visible():
+            self.marker.set_visible(False);self.draw()
     def press(self,event):
         if self.mode is None or event.button!=1 or event.inaxes is not self.w.ax or getattr(event,'reconstruction_cut_handled',False):return
         if getattr(self.w,'remote_locked',False) or getattr(self.w.canvas,'ruler_active',False):return
@@ -700,6 +788,7 @@ class RegionSelect:
             self.w.statusBar().showMessage('请等待名义零位复原后框选动区');return
         point=self._point(event)
         if point is None or not self.w.reconstruction_toggle.isChecked():return
+        self.cursor=point
         selection=getattr(self.w,'selection',None)
         if selection is not None:
             selection.press=None
@@ -712,15 +801,21 @@ class RegionSelect:
         self.rect=Polygon(np.repeat(point[None,:],4,axis=0),facecolor='#6ca5ce',edgecolor='#287bb2',alpha=.25,lw=1,linestyle='--',zorder=20)
         self.w.ax.add_patch(self.rect);self.draw()
     def move(self,event):
-        if self.state is not None and self._point(event) is not None:self.state['current']=self._point(event);self.draw()
+        if self.mode is None or self.w.navigation.drag is not None:return
+        if event.inaxes is not self.w.ax:self.leave();return
+        point=self._point(event)
+        if point is None:return
+        self.cursor=point
+        if self.state is not None:self.state['current']=point
+        self.draw()
     def scroll(self,event):
         if self.state is None or self._point(event) is None:return
         point=self._point(event);delta=-math.radians(2)*event.step;c,t=math.cos(delta),math.sin(delta)
         self.state['anchor']=point+np.array([[c,-t],[t,c]])@(self.state['anchor']-point)
-        self.state['current']=point;self.state['angle']+=delta;self.draw()
+        self.state['current']=point;self.cursor=point;self.state['angle']+=delta;self.draw()
     def _finish(self,point):
         self.state['current']=point
-        vertices=self.vertices();layers=self._layers();self._drop()
+        vertices=self.vertices();layers=self._layers();self._drop(clear_cursor=False)
         if abs(shapely.Polygon(vertices).area)<1e-12 or not layers:return
         field='reconstruction_angle_boxes' if self.w.view_settings.reconstruction_box_mode=='aligned' else 'reconstruction_boxes'
         rows=(*getattr(self.w.view_settings,field),*((layer,tuple(tuple(map(float,v)) for v in vertices)) for layer in layers))
@@ -731,7 +826,9 @@ class RegionSelect:
             key,index=ref
             return key in layers and index<len(geometry[key]['geometry']) and geometry[key]['geometry'][index].intersects(polygon)
         removed=tuple(ref for ref in settings.reconstruction_box_excluded if not selected(ref))
-        changes={field:rows,'reconstruction_box_excluded':removed}
+        unignored=tuple(ref for ref in settings.reconstruction_ignored if not selected(ref))
+        undeleted=tuple(row for row in settings.reconstruction_deleted if not selected(row[:2]))
+        changes={field:rows,'reconstruction_box_excluded':removed,'reconstruction_ignored':unignored,'reconstruction_deleted':undeleted}
         if field=='reconstruction_angle_boxes':
             # The new box takes precedence over existing cuts on sources it
             # selects. Future drags then become the explicit per-route edits.
@@ -739,6 +836,9 @@ class RegionSelect:
                 changes[name]=tuple(row for row in getattr(settings,name) if not selected(row[:2]))
         self.w.view_settings=replace(settings,**changes)
         self.w.invalidate_reconstruction_edit();self.w.request_preview(quiet=True)
-        self.w.statusBar().showMessage('已提交框选动区；必要时在原选框周围延伸至可用边界')
+        if self.w.view_settings.reconstruction_auto:
+            self.w.statusBar().showMessage('已提交框选动区；必要时在原选框周围延伸至可用边界')
+        else:
+            self.w.statusBar().showMessage('已暂存框选动区并标记图形；点击“重构计算”统一计算')
     def _layers(self):
         return sorted(k for k,role in self.w.roles().items() if role=='固定RDL' and self.w.visible_boxes[k].isChecked())
