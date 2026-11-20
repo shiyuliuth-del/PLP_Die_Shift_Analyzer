@@ -5,6 +5,9 @@ on:
       - 'die_shift_studio/**'
       - 'RealDataAnalyse/**'
       - 'Jobs/GD55/**'
+      - 'Jobs/SH22/**'
+      - 'tests/gui_sh22_measurements.py'
+      - 'tests/test_production_measurements.py'
       - 'tests/test_realdata_projects.py'
       - 'tests/test_v46.py'
       - 'tests/test_evaluation_scope.py'
@@ -149,6 +152,8 @@ jobs:
       - name: Exercise an existing CuPy build environment
         if: matrix.environment == 'with-cupy'
         run: .\.venv\Scripts\python -m pip install cupy-cuda12x
+      - name: Verify production measurement import and diagnostic layers
+        run: .\.venv\Scripts\python -m unittest discover -s tests -p test_production_measurements.py -v
       - name: Generate and expand the actual source-only ZIP
         run: |
           $py = (Get-Item .\.venv\Scripts\python.exe).FullName

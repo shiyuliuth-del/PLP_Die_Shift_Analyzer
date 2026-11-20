@@ -49,5 +49,6 @@ Jobs/**/Tasks/
 Jobs/**/Output/
 Jobs/**/RealDataAnalyse.project.json
 !Jobs/GD55/RealDataAnalyse/RealDataAnalyse.project.json
+!Jobs/SH22/RealDataAnalyse/RealDataAnalyse.project.json
 
 Jobs/.RealDataAnalyse/

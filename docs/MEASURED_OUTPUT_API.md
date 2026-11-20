@@ -181,3 +181,9 @@ RealDataAnalyse生产批次将output.configure指向项目Cache/Batches；OAS完
 `package_count` 可传已经从 Excel 导入的封装总数作为调度提示，批次不会据此推导姿态或生成封装。回执 `execution` 表示 threads 或 processes，`threads` 保留为实际并行路数，`queue_limit` 是在途任务上限。独立进程仅计算姿态及DRC，主程序保留问题目录、OAS写入与原子提交。
 
 ERROR由多边形记录组成。实际倾斜在整数输出格点仍可表示时，直接写斜边四角。极细或微角的四角会在原格点上变成轴对齐时，写局部四角多边形及带角度的引用。回执仍给当前姿态坐标下的marker_corners_um和marker_angle_deg。
+
+## V58 诊断分层和生产坐标
+
+常规 DRC 的最小外包 Polygon 写入 ERROR，实际异网短接及连接失败的最小外包 Polygon 写入 ERROR2。量测目录报告 `severity`（`drc` 或 `serious`）、`short_circuit`、`connection_failure`。两层均使用实际姿态坐标及原有 DIE 归属。begin/end 回执含 `error2_layer`，pose/end 的 `error2_rectangles` 为严重层计数，`error_rectangles` 为两层总数。FAIL 轮廓和计数维持原口径。
+
+生产测量客户端使用 `info.board_bounds_um` 与 `info.dies[].center_um` 匹配理论封装锚点和实际芯片位移。转换后的 `position_um` 仍是名义封装左下角在全局 TopCell 的坐标；每颗 DIE 继续通过 `dx_um`、`dy_um`、`rotation_center_um`、`angle_deg` 放置。原有 16 条命令和旧式导入格式兼容。

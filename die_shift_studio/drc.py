@@ -67,6 +67,6 @@ class GlobalDRC:
             self.cache[key]=out
             while len(self.cache)>self.capacity:self.cache.popitem(last=False)
         return out
-    def frame(self,states,replacements=None,settings=None,progress=lambda *_:None,owners=None,scopes=None):
+    def frame(self,states,replacements=None,settings=None,progress=lambda *_:None,owners=None,scopes=None,*,electrical=False):
         from .current_drc import frame
-        return frame(self,states,replacements,settings,progress,owners,scopes)
+        return frame(self,states,replacements,settings,progress,owners,scopes,electrical=electrical)

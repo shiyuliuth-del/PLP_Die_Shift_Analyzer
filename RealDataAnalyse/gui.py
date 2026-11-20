@@ -10,6 +10,7 @@ from die_shift_studio.jobs import REALDATA_DIRECTORY
 from die_shift_studio.qt_compat import QtCore, QtGui, QtWidgets as W, Signal
 from . import __version__
 from .excel import DEFAULT_PROFILE, HEADERS, import_files
+from .measurements import HEADINGS, SUFFIXES, folders, nominal_geometry
 from .projects import load_folder, save_folder, inside, copy_excel, copy_inputs, template_file
 from .runner import Runner
 from .storage import Ledger, configure_logging
@@ -23,7 +24,7 @@ from .plan_ui import PlanPanel
 COMMANDS = {
     'ping': {}, 'info': {}, 'app.start': {}, 'project.open': {'path': ''},
     'project.close': {}, 'session.prepare': {},
-    'output.configure': {'output_directory': '', 'max_threads': 4, 'max_memory_mb': 2048},
+    'output.configure': {'output_directory': '', 'max_threads': 0, 'max_memory_mb': 0},
     'preview.submit': {'dies': [{'die': 1, 'dx_um': 0, 'dy_um': 0, 'angle_deg': 0}]},
     'export.gds': {'filename': 'measured.gds'},
     'batch.begin': {'filename': 'measured.oas', 'output_policy': 'omit_failed_regions'},
@@ -59,6 +60,8 @@ class ProgressBar(W.QProgressBar):
         self.setTextVisible(False)
         self.detail = '就绪 · 请选择项目文件夹'
         self.started = None
+        self.start_time = None
+        self.end_time = None
         self.elapsed = 0
         self.failed = False
 
@@ -74,18 +77,39 @@ class ProgressBar(W.QProgressBar):
         painter.setPen(QtGui.QColor('#8796a5'))
         painter.drawRect(rect)
         painter.setPen(QtGui.QColor('#142536'))
-        elapsed = int(time.monotonic() - self.started) if self.started else self.elapsed
-        label = self.detail + (f' · {round(fraction * 100)}%' if self.maximum() > 1 else '') + (f' · 已用 {elapsed // 60:02d}:{elapsed % 60:02d}' if elapsed else '')
+        label = self.label(fraction)
         alignment = getattr(QtCore.Qt, 'AlignmentFlag', QtCore.Qt).AlignCenter
         elide = getattr(QtCore.Qt, 'TextElideMode', QtCore.Qt).ElideRight
         painter.drawText(rect.adjusted(8, 0, -8, 0), alignment, self.fontMetrics().elidedText(label, elide, rect.width() - 16))
 
+    def label(self, fraction):
+        percent = f'{round(fraction * 100)}% · ' if self.maximum() > 1 else ''
+        if self.start_time is None:
+            return percent + self.detail
+        elapsed = int(time.monotonic() - self.started) if self.started is not None else self.elapsed
+        started = time.strftime('%H:%M:%S', time.localtime(self.start_time))
+        stopped = time.strftime('%H:%M:%S', time.localtime(self.end_time)) if self.end_time is not None else ''
+        duration = f'{elapsed // 3600:02d}:{elapsed // 60 % 60:02d}:{elapsed % 60:02d}'
+        times = f'开始 {started} · ' + (f'结束 {stopped} · ' if stopped else '')
+        return f'{percent}{times}耗时 {duration} · {self.detail}'
+
+    def begin(self):
+        self.started = time.monotonic()
+        self.start_time = time.time()
+        self.end_time = None
+
+    def finish(self):
+        self.end_time = time.time()
+        self.elapsed = int(time.monotonic() - self.started)
+        self.started = None
+        self.status(self.detail)
+
     def status(self, text, current=None, total=None):
         self.detail = str(text).replace('\n', ' ')
-        self.setToolTip(self.detail)
         if current is not None:
             self.setRange(0, max(1, int(total or 1)))
             self.setValue(int(current))
+        self.setToolTip(self.label(self.value() / max(1, self.maximum())))
         self.update()
 
 
@@ -99,6 +123,7 @@ class Window(W.QMainWindow):
         self.pending_close = False
         self.page = 0
         self.project_root = None
+        self.measurement = None
         self.operation = ''
         self.last_log_update = 0
         self.shared_profile = copy.deepcopy(DEFAULT_PROFILE)
@@ -145,8 +170,11 @@ class Window(W.QMainWindow):
         form.addRow(buttons)
         controls = W.QHBoxLayout()
         self.dies = self.spin(controls, 'DIE数量', 1, 10000, 3)
-        self.workers = self.spin(controls, '并发线程', 1, 64, 4)
-        self.memory = self.spin(controls, '内存MB', 128, 1048576, 2048)
+        self.workers = self.spin(controls, '并发线程', 0, 64, 0)
+        self.memory = self.spin(controls, '内存MB', 0, 1048576, 0)
+        self.workers.setSpecialValueText('0（自动）')
+        self.memory.setSpecialValueText('0（自动）')
+        self.memory.setSingleStep(128)
         self.retries = self.spin(controls, '自动重试', 0, 10, 3)
         self.timeout = self.spin(controls, '任务超时秒', 0, 86400, 0)
         self.timeout.setSpecialValueText('0（无超时）')
@@ -189,19 +217,13 @@ class Window(W.QMainWindow):
         sheet_row.addWidget(self.sheet, 1)
         self.header_row = self.spin(sheet_row, '表头行', 1, 1048576, 1)
         profile_layout.addLayout(sheet_row)
-        self.profile = W.QTableWidget(len(HEADERS), 3)
+        self.profile = W.QTableWidget(0, 3)
         self.profile.setHorizontalHeaderLabels(['数据字段', 'Excel列名', '要求 / 单位'])
         self.profile.verticalHeader().show()
         self.profile.horizontalHeader().setStretchLastSection(True)
         self.profile.setColumnWidth(0, 220)
         self.profile.setColumnWidth(1, 250)
-        descriptions = ['必填文本，保留前导零', '必填整数，从1起', '必填 / μm', '必填 / μm', '必填 / °', '必填 / μm', '必填 / μm', '可选，XY成对 / μm', '可选，XY成对 / μm']
-        for i, field in enumerate(HEADERS):
-            for j, text in enumerate((field, field, descriptions[i])):
-                item = W.QTableWidgetItem(text)
-                if j != 1:
-                    item.setFlags(item.flags() & ~getattr(QtCore.Qt, 'ItemFlag', QtCore.Qt).ItemIsEditable)
-                self.profile.setItem(i, j, item)
+        self.set_profile(DEFAULT_PROFILE)
         self.profile.setMinimumHeight(150)
         self.profile.setMaximumHeight(220)
         self.profile_frame = table_frame(self.profile, 230, self.settings, 'mapping')
@@ -358,10 +380,11 @@ class Window(W.QMainWindow):
     def busy(self, on):
         for widget in (self.connect_button, self.start_button, self.add_files, self.remove_files,
                        self.folder_button, self.import_button, self.create_plan_button, self.run_button, self.send_button,
-                       self.endpoint, self.project, self.database, self.output, self.template, self.dies, self.profile,
+                       self.endpoint, self.project, self.database, self.output, self.template, self.profile,
                        self.workers, self.memory, self.retries, self.timeout, self.file_view, self.sheet, self.header_row, self.mapping_shared,
                        *self.path_buttons):
             widget.setEnabled(not on)
+        self.dies.setEnabled(not on and not self.measurement)
         self.stop_button.setEnabled(on)
 
     def execute(self, fn, callback=None, failure=None, operation='操作'):
@@ -370,7 +393,7 @@ class Window(W.QMainWindow):
         self.operation = operation
         self.busy(True)
         self.progress.failed = False
-        self.progress.started = time.monotonic()
+        self.progress.begin()
         self.progress.status(operation + ' · 正在开始', 0, 100)
         worker = Worker(fn, self)
         self.worker = worker
@@ -401,8 +424,7 @@ class Window(W.QMainWindow):
                     failure(str(exc))
         worker.done.connect(result)
         def finished():
-            self.progress.elapsed = int(time.monotonic() - self.progress.started)
-            self.progress.started = None
+            self.progress.finish()
             self.worker = None
             self.busy(False)
             self.refresh()
@@ -487,6 +509,7 @@ class Window(W.QMainWindow):
             return config
         def done(config):
             self.project_root = Path(config['folder'])
+            self.measurement = config.get('measurement')
             self.folder.setText(config['folder'])
             self.project.setText(config['project'])
             self.template.setText(config['template'])
@@ -501,9 +524,8 @@ class Window(W.QMainWindow):
             self.mapping_shared.blockSignals(False)
             self.set_profile(self.shared_profile)
             self.set_files(config['files'])
-            for name, value in config['controls'].items():
-                if name in ('dies', 'workers', 'memory', 'retries', 'timeout'):
-                    getattr(self, name).setValue(int(value))
+            for name, default in (('dies', 3), ('workers', 0), ('memory', 0), ('retries', 3), ('timeout', 0)):
+                getattr(self, name).setValue(int(config['controls'].get(name, default)))
             self.logger = configure_logging(config['workspace'])
             self.page = 0
             self.table.setRowCount(0)
@@ -590,12 +612,23 @@ class Window(W.QMainWindow):
         self.mapping_guard = True
         self.sheet.setText(profile['sheet'])
         self.header_row.setValue(profile['header_row'])
-        for row, field in enumerate(HEADERS):
-            self.profile.item(row, 1).setText(profile.get('columns', {}).get(field, field))
+        fields = HEADINGS if self.measurement else HEADERS
+        descriptions = (('整数', '整数', '0 / 1', '全局理论中心X', '全局理论中心Y',
+                         '全局实际中心X', '全局实际中心Y', '原始偏移X', '原始偏移Y', '度')
+                        if self.measurement else
+                        ('文本', '从1起的整数', 'μm', 'μm', '度', 'μm', 'μm', '可选 / μm', '可选 / μm'))
+        self.mapping_shared.setText('Excel列映射（全局坐标）' if self.measurement else 'Excel列映射（长度μm，角度°；中心留空沿用工程）')
+        self.profile.setRowCount(len(fields))
+        for row, (field, description) in enumerate(zip(fields, descriptions)):
+            for column, text in enumerate((field, profile['columns'].get(field, field), description)):
+                item = W.QTableWidgetItem(text)
+                if column != 1:
+                    item.setFlags(item.flags() & ~getattr(QtCore.Qt, 'ItemFlag', QtCore.Qt).ItemIsEditable)
+                self.profile.setItem(row, column, item)
         self.mapping_guard = False
 
     def profile_value(self):
-        columns = {field: self.profile.item(row, 1).text().strip() for row, field in enumerate(HEADERS)}
+        columns = {self.profile.item(row, 0).text(): self.profile.item(row, 1).text().strip() for row in range(self.profile.rowCount())}
         return dict(sheet=self.sheet.text().strip(), header_row=self.header_row.value(), columns=columns)
 
     def persist(self):
@@ -604,7 +637,8 @@ class Window(W.QMainWindow):
         files = self.file_entries()
         profile = copy.deepcopy(self.shared_profile)
         save_folder(self.project_root, self.project.text(), files, self.database.text(), self.output.text(), profile,
-                    {key: getattr(self, key).value() for key in ('dies', 'workers', 'memory', 'retries', 'timeout')}, shared_mapping=self.mapping_mode,template=self.template.text().strip())
+                    {key: getattr(self, key).value() for key in ('dies', 'workers', 'memory', 'retries', 'timeout')},
+                    shared_mapping=self.mapping_mode, template=self.template.text().strip(), measurement=self.measurement)
         return files, profile
 
     def select_template(self,path):
@@ -621,7 +655,8 @@ class Window(W.QMainWindow):
         if self.project_root is None:
             self.log('请先选择项目文件夹')
             return
-        files, _ = W.QFileDialog.getOpenFileNames(self, '添加各DIE Excel（外部文件将复制到项目内）', str(self.project_root), 'Excel (*.xlsx)')
+        pattern = '测量表 (*.xlsx *.csv)' if self.measurement else 'Excel (*.xlsx)'
+        files, _ = W.QFileDialog.getOpenFileNames(self, '添加各DIE测量表', str(self.project_root), pattern)
         if not files:
             return
         entries = self.file_entries()
@@ -634,7 +669,15 @@ class Window(W.QMainWindow):
             self.set_files(entries)
             self.persist()
         root = self.project_root
-        self.execute(lambda stop, progress: copy_excel(root, files, stop), done, operation='添加Excel')
+        if self.measurement:
+            dies = [path.name for path in folders(self.measurement['root'])]
+            name, ok = W.QInputDialog.getItem(self, '选择芯片目录', '芯片名称', dies, 0, False)
+            if not ok:
+                return
+            add = lambda stop, progress: copy_inputs(root, files, stop, str(Path('Excel') / name), SUFFIXES)
+        else:
+            add = lambda stop, progress: copy_excel(root, files, stop)
+        self.execute(add, done, operation='添加Excel')
 
     def delete_files(self):
         for row in sorted({index.row() for index in self.file_view.selectedIndexes()}, reverse=True):
@@ -660,11 +703,25 @@ class Window(W.QMainWindow):
         files = [entry['path'] for entry in files if entry['enabled']]
         dies, workers = self.dies.value(), self.workers.value()
         def done(value):
+            if value.get('info'):
+                self.accept_info(value.pop('info'))
             self.database.setText(value['database'])
             self.output.setText(str(output))
             self.page = 0
             self.persist()
-        self.execute(lambda stop, progress: import_files(files, target, dies, workers, stop, progress, profile, profiles), done, operation='校验Excel并创建任务')
+        project, measurement = self.project.text(), self.measurement
+        endpoint, timeout = self.endpoint.text(), self.timeout.value()
+        def prepare(stop, progress):
+            geometry = None
+            if measurement:
+                info = self.linked_project(endpoint, project, stop, progress, timeout, str(output))
+                geometry = nominal_geometry(info)
+            result = import_files(files, target, dies, workers, stop, progress, profile, profiles,
+                                  measurement=measurement, geometry=geometry)
+            if measurement:
+                result['info'] = info
+            return result
+        self.execute(prepare, done, operation='校验Excel并创建任务')
 
     def do_run(self):
         try:
@@ -682,7 +739,9 @@ class Window(W.QMainWindow):
             import sqlite3
             with closing(sqlite3.connect(Path(kwargs['database']).resolve().as_uri() + '?mode=ro', uri=True)) as db:
                 meta = {k: json.loads(v) for k, v in db.execute('select key,value from meta')}
-            if selected != sorted(p['path'] for p in meta.get('sources', [])) or profile != meta.get('profile') or profiles != meta.get('profiles', {}) or self_die != meta.get('die_count'):
+            if (selected != sorted(p['path'] for p in meta.get('sources', [])) or profile != meta.get('profile')
+                    or profiles != meta.get('profiles', {}) or self_die != meta.get('die_count')
+                    or measurement != meta.get('measurement')):
                 raise ValueError('Excel勾选、列映射或DIE数量与任务记录不符，请先校验并创建新任务')
             from .storage import sha256
             for index, source in enumerate(meta.get('sources', []), 1):
@@ -691,6 +750,7 @@ class Window(W.QMainWindow):
                     raise ValueError('Excel内容已修改，请先校验并创建新任务')
             return Runner(**kwargs, stop=stop, progress=progress, trace=self.conversation).run()
         self_die = self.dies.value()
+        measurement = self.measurement
         def done(value):
             if value['state'] != 'completed' or self.pending_close:
                 return
@@ -825,7 +885,8 @@ class Window(W.QMainWindow):
             for i, row in enumerate(rows):
                 seq, package, cell, state, result, payload = row
                 poses = json.loads(payload).get('dies', [])
-                lines = [self.die_text(pose) for pose in poses]
+                names = meta.get('die_names', [])
+                lines = [self.die_text(pose, names) for pose in poses]
                 preview = '; '.join(lines[:20]) + (f' … 共{len(lines)}颗DIE，双击展开' if len(lines)>20 else '')
                 state={'computed_with_issues':'已计算（含问题）','committed_with_issues':'已输出（含问题）','committed':'已输出'}.get(state,state)
                 try:
@@ -836,16 +897,20 @@ class Window(W.QMainWindow):
                 for j, value in enumerate((package, cell, preview, state, result)):
                     item = W.QTableWidgetItem(str(value)[:4000])
                     item.setToolTip(('\n'.join(lines) if j==2 else str(value))[:16000])
-                    if j==2:item.setData(role, payload)
+                    if j==2:item.setData(role, '\n'.join(lines))
                     self.table.setItem(i,j,item)
             state = {'imported': '已导入', 'running': '运行中', 'paused': '已暂停', 'blocked': '需处理', 'completed': '已完成'}.get(meta.get('state'), meta.get('state', ''))
-            self.page_label.setText(f'{state} · 第{self.page + 1}/{max(1, (count + 199) // 200)}页 · 共{count}封装')
+            skipped = meta.get('skipped_packages', 0)
+            self.page_label.setText(f'{state} · 第{self.page + 1}/{max(1, (count + 199) // 200)}页 · 共{count}封装'
+                                    + (f' · 测量失败跳过{skipped}封装' if skipped else ''))
         except (OSError, ValueError, TypeError, sqlite3.Error):
             pass
 
     @staticmethod
-    def die_text(pose):
-        text = f'DIE{pose["die"]}: ΔX={pose["dx_um"]:g} μm, ΔY={pose["dy_um"]:g} μm, θ={pose["angle_deg"]:g}°'
+    def die_text(pose, names=()):
+        die = pose['die']
+        label = names[die-1] if 0 < die <= len(names) else f'DIE{die}'
+        text = f'{label}: ΔX={pose["dx_um"]:g} μm, ΔY={pose["dy_um"]:g} μm, θ={pose["angle_deg"]:g}°'
         if 'rotation_center_um' in pose:
             text += f', 中心={pose["rotation_center_um"]} μm'
         return text
@@ -853,10 +918,10 @@ class Window(W.QMainWindow):
     def show_dies(self, row, column):
         if column != 2 or not self.table.item(row,column):return
         role = getattr(QtCore.Qt,'ItemDataRole',QtCore.Qt).UserRole
-        payload = json.loads(self.table.item(row,column).data(role))
+        poses = self.table.item(row,column).data(role)
         dialog = W.QDialog(self); dialog.setWindowTitle('各DIE偏移设置'); dialog.resize(720,450)
         layout = W.QVBoxLayout(dialog); text = W.QPlainTextEdit(); text.setReadOnly(True)
-        text.setPlainText('\n'.join(self.die_text(pose) for pose in payload['dies']))
+        text.setPlainText(poses)
         layout.addWidget(text)
         dialog.exec() if hasattr(dialog,'exec') else dialog.exec_()
 
@@ -872,6 +937,7 @@ class Window(W.QMainWindow):
         entries = self.file_entries()
         config = dict(folder=str(self.project_root) if self.project_root else '', project=self.project.text(),
                       files=entries, template=self.template.text().strip(), profile=copy.deepcopy(self.shared_profile), shared_mapping=self.mapping_mode,
+                      measurement=self.measurement,
                       controls={key:getattr(self,key).value() for key in ('dies','workers','memory','retries','timeout')})
         def create(stop,progress):
             progress(dict(text='保存计划快照 · 校验输入摘要',current=0,total=1))

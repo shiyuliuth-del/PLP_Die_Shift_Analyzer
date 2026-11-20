@@ -18,8 +18,8 @@
   "shared_mapping": true,
   "controls": {
     "dies": 3,
-    "workers": 12,
-    "memory": 4096,
+    "workers": 0,
+    "memory": 0,
     "retries": 3,
     "timeout": 0
   },
