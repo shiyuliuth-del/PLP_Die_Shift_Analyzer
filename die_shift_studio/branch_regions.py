@@ -146,8 +146,7 @@ def assemble(r,source,rows,states):
     # Absorb narrow terminal-free floating rigid slivers sandwiched between two
     # transition domains of the same owner (e.g. close parallel branch cuts on
     # a shared copper neck) so they form one clean, wider transition zone.
-    distinct_paths={q['route_plan'].route.wkb for q in rows}
-    if len(domains)>1 and len(distinct_paths)>1 and not any(q.get('strict_box') is not None for q in rows):
+    if len(domains)>1 and not any(q.get('strict_box') is not None for q in rows):
         gap_limit=max(r._rule_width*2.5,50.)
         absorbed=set()
         for i,g in enumerate(rigid):

@@ -71,7 +71,8 @@ class FixedRules:
         for layer,rows in (replacements or {}).items():
             for row in rows:
                 for index in row['indices']:changed[layer,index]=row['geometry']
-        return {key:shapely.union_all([changed.get(ref,self.model.nodes[self.model.ids[ref]]['poly']) for ref in refs])
+        return {key:changed.get(refs[0],self.original[key]) if len(refs)==1 else
+                shapely.union_all([changed.get(ref,self.model.nodes[self.model.ids[ref]]['poly']) for ref in refs])
                 if any(ref in changed for ref in refs) else self.original[key] for key,refs in self.nets.items()}
 
     def local(self,key,g,states,vias=None):

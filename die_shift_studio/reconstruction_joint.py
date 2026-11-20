@@ -132,25 +132,16 @@ def needed(r,bundles,grid=None):
 
 
 def scene(r,grid,bundles,digits,diagnostics=True):
-    from .topology_routing import resolve
     from .reconstruction import decorate_problems
     states=np.array([poses[d] for poses,d in zip(grid.locals,digits)]);out={};pieces=[]
     for ref,b in bundles.items():
         row=b['values'][tuple(digits[o] for o in b['owners'])]
         out.setdefault(ref[0],[]).append(dict(indices=(ref[1],),geometry=row['geometry'],net=r.rules.refnet[ref][1]))
         pieces.extend(dict(q,regions=dict(q['regions'])) for q in row['pieces'])
-    out,pieces,repaired,blocked=resolve(r,out,pieces,states)
-    if blocked:
-        # The interactive path can also try its bounded quick angle candidate.
-        # Statistics must use exactly the same completed copper in that case.
-        alternate=r.frame(states,diagnostics=False)
-        if diagnostics:
-            alternate=dict(alternate,violations=r.rules.check(alternate['replacements'],states),original_violations=r.rules.nominal_check(),constraints_complete=True)
-            decorate_problems(alternate)
-        return states,alternate
+    _,out,pieces,repaired,blocked=r.complete_copper(dict(replacements=out,pieces=pieces),states)
     from .ignored_motion import add_linked_geometry
     out=add_linked_geometry(r,out,states)
-    frame=dict(replacements=out,pieces=pieces,violations=r.rules.check(out,states) if diagnostics else [],original_violations=r.rules.nominal_check() if diagnostics else (),dbu_um=r.tol,
+    frame=dict(replacements=out,pieces=pieces,violations=r.rules.check(out,states) if diagnostics else [],original_violations=r.rules.nominal_check() if diagnostics else (),dbu_um=r.tol,constraints_complete=bool(diagnostics),
                repair_refs=repaired,hard_failures=blocked,electrically_valid=not bool(blocked))
     decorate_problems(frame);return states,frame
 
@@ -180,8 +171,8 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
     from .evaluation_scope import digits_for
     visits=(digits_for(grid,i) for i in indices) if indices is not None else product(*(range(n) for n in grid.radices))
     total=len(indices) if indices is not None else grid.total+1
-    # Each lane owns its mutable plan, rule and frame caches. Reduction stays in
-    # catalogue order; no material edits or Qt objects are shared between poses.
+    # Each lane owns its mutable plan, rule and frame caches. Every result is
+    # reduced by its original digits, even when a later pose finishes first.
     import threading
     from contextlib import ExitStack
     from .resources import parallel_iter, resource_profile, geometry_budget
@@ -190,14 +181,18 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
     profile=resource_profile()
     workers=min(total,geometry_budget(profile,sum(n['poly'].__sizeof__()+shapely.get_num_coordinates(n['poly'])*32 for n in r.model.nodes)))
     local=threading.local();lock=threading.Lock();solvers=[]
-    if workers>1:r._plans_for_all_poses(progress)
+    if workers>1:
+        r._plans_for_all_poses(progress)
+        r.rules.nominal_check()
     def evaluate(digits):
         cancel_check();solver=r
         if workers>1:
             solver=getattr(local,'solver',None)
             if solver is None:
-                solver=Reconstructor(r.model,r.p,r.settings,plan_pool=clone_plan_pool(r.plan_pool),geometry_pool=r.geometry_pool,reference=r)
-                solver._plans=clone_plan_pool({'current':r._plans})['current']
+                plans=clone_plan_pool(dict(r.plan_pool,current=r._plans))
+                current=plans.pop('current')
+                solver=Reconstructor(r.model,r.p,r.settings,plan_pool=plans,geometry_pool=r.geometry_pool,reference=r)
+                solver._plans=current
                 solver.auto_following=set(r.auto_following);solver.auto_ignored=dict(r.auto_ignored);solver.safe_vias=dict(r.safe_vias)
                 solver._envelopes=getattr(r,'_envelopes',{})
                 if getattr(r,'measured_only',False):solver.measured_only=True
@@ -208,10 +203,17 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
             states=np.asarray([v[d] for v,d in zip(grid.locals,digits)])
             frame=solver.frame(states)
         return digits,states,frame
+    import time
+    completed=0;last_update=time.monotonic()
+    def idle():
+        nonlocal last_update
+        if time.monotonic()-last_update>=3.:
+            progress(round(100*completed/total),f'电连接补偿后联合核验 {completed:,}/{total:,} · 正在核验剩余姿态')
+            last_update=time.monotonic()
     with ExitStack() as cleanup:
       cleanup.callback(lambda:[s.close() for s in solvers])
-      values=parallel_iter(evaluate,visits,dict(profile,workers=workers));cleanup.callback(values.close)
-      for number,(digits,states,frame) in enumerate(values):
+      values=parallel_iter(evaluate,visits,dict(profile,workers=workers),ordered=False,idle=idle);cleanup.callback(values.close)
+      for digits,states,frame in values:
         cancel_check()
         repairs+=bool(frame['repair_refs'])
         remember(r,states,frame)
@@ -230,7 +232,8 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
         edges=routing_violations(r.model,states,r.p,r.settings,frame['replacements'])
         if edges:routing_factors.append(clause)
         for row in edges:strongest(routing_lines,[(row['layer'],i) for i in row['indices']],BLOCKED,None,binary,routing_witnesses,edge_witness(row,index,r.model,states))
-        progress(round(100*(number+1)/total),f'电连接补偿后联合核验 {number+1:,}/{total:,}')
+        completed+=1;last_update=time.monotonic()
+        progress(round(100*completed/total),f'电连接补偿后联合核验 {completed:,}/{total:,}')
     zones={}
     for key in zones_seen:
         clauses=tuple(sorted(records[key],key=lambda q:q.allowed));idx=ProblemIndex(grid,clauses)
@@ -238,10 +241,10 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
                         witness=witnesses.get(key),severity=severity.get(key,'green'),
                         probability=dict(lower=0.,upper=1.,certified=False,reason='有限离散极端不能证明连续概率上界'))
     return dict(complete=True,grid=grid,grid_key=tuple(v.tobytes() for v in grid.locals),zones=zones,
-                routing_summary=dict(lines=routing_lines,witnesses=routing_witnesses,red_factors=routing_factors),
+                routing_summary=dict(lines=routing_lines,witnesses=routing_witnesses,red_factors=sorted(routing_factors,key=lambda q:q.allowed)),
                 connection_factors=tuple(sorted(connection_records,key=lambda q:q.allowed)),red_factors=tuple(sorted(scene_records,key=lambda q:q.allowed)),package_states=total,selected_indices=tuple(indices) if indices is not None else None,
                 geometry_checks=sum(len(b['values']) for b in bundles.values()) if bundles is not None else total,local_checks=total,pair_checks=total,
-                joint_repaired_states=repairs,scope='全部离散极端；按电连接补偿后的实际铜联合核验。连续概率另给界限。')
+                joint_repaired_states=repairs,scope=('所选' if indices is not None else '全部')+'离散极端；按电连接补偿后的实际铜联合核验。连续概率另给界限。')
 
 
 def yield_value(r,p,cfg,grid,bundles,progress,partial=None):

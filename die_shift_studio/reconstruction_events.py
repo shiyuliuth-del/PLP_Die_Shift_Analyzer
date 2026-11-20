@@ -102,8 +102,8 @@ def color_for(q,bank,nominal,*,checked=True):
 
 
 def _compact(q):
-    names=('layer','index','die','net','via_refs','route_identity','regions','nominal_regions','missing_region','moving_terminals','moved_cut','extra_cut','connection_failed','valid','warning','interval','boundary_angles','ignored','ignored_following','orphan')
-    return {k:q[k] for k in names if k in q}
+    names=('layer','index','die','net','via_refs','route_identity','regions','nominal_regions','missing_region','moving_terminals','moved_cut','extra_cut','connection_failed','valid','warning','interval','boundary_angles','ignored','ignored_following','orphan','strict_box','box_invalid','relative_pose')
+    return {**{k:q[k] for k in names if k in q},'route_available':q.get('route_plan') is not None}
 
 
 def _component_groups(r,bundles):
@@ -188,7 +188,7 @@ def scan(r,grid,progress=lambda *_:None,source_cache=None):
         from .reconstruction_incremental import source_settings
         # Independent copper is reused across handle edits. Actual net and pair
         # checks below still see every updated neighbour and shared DIE digit.
-        token=('reconstruction-source-continuity-v58',logical_fingerprint((r.rules.identity,ref,asdict(r.p),
+        token=('reconstruction-source-continuity-v58.1',logical_fingerprint((r.rules.identity,ref,asdict(r.p),
             source_settings(r.settings,ref),tuple(v.tolist() for v in grid.locals))))
         return source_cache.get_or_compute(token,lambda:build_uncached(ref))
     bundles=dict(parallel_map(build,refs,progress=lambda n,total:progress(12+round(28*n/max(1,total)),f'重构逐图形几何 {n}/{total}')))

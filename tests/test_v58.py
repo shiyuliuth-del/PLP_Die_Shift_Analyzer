@@ -1,4 +1,5 @@
 """Physical end motions, pad priority and persistent single-zone repair."""
+from contextlib import closing
 from dataclasses import asdict
 from types import SimpleNamespace
 import unittest
@@ -35,6 +36,43 @@ def two_ended(different=True):
 
 
 class V58Tests(unittest.TestCase):
+    def test_later_pose_can_publish_while_first_pose_is_running(self):
+        from threading import Event
+        from die_shift_studio.resources import parallel_iter
+        first=Event()
+        def calculate(index):
+            if index==0 and not first.wait(5):raise TimeoutError('first pose blocked')
+            return index
+        profile={'workers':2,'worker_capacity':2}
+        with closing(parallel_iter(calculate,range(4),profile,ordered=False)) as results:
+            try:self.assertNotEqual(next(results),0)
+            finally:first.set()
+            self.assertIn(0,list(results))
+
+    def test_joint_fallback_does_not_reverify_current_copper(self):
+        from unittest.mock import Mock, patch
+        from die_shift_studio.reconstruction import Reconstructor
+        name=('2/0',0)
+        current=dict(replacements={},pieces=[dict(layer=name[0],index=name[1],route_available=True)])
+        alternate=dict(replacements={},pieces=[])
+        solver=SimpleNamespace(_raw_frame=Mock(return_value=alternate))
+        blocked=[(name,'open')]
+        with patch('die_shift_studio.topology_routing.resolve',side_effect=[({},current['pieces'],(),blocked),({},[],(),())]) as resolve:
+            raw,_,_,_,problems=Reconstructor.complete_copper(solver,current,np.zeros((1,3)))
+        self.assertIs(raw,alternate)
+        self.assertFalse(problems)
+        self.assertEqual(resolve.call_count,2)
+
+    def test_triangulated_path_runs_around_an_interior_blockage(self):
+        if not hasattr(shapely,'constrained_delaunay_triangles'):
+            self.skipTest('triangulation unavailable on this Shapely version')
+        from die_shift_studio.reconstruction_visibility import triangulated_path
+        region=box(0,0,100,100).difference(box(42,20,58,80))
+        path=triangulated_path(region,(15,50),(85,50))
+        self.assertIsNotNone(path)
+        self.assertTrue(region.covers(path))
+        self.assertGreater(path.length,70.)
+
     def test_deletion_keeps_both_physical_ends_and_persists(self):
         e, cfg, _ = two_ended()
         try:

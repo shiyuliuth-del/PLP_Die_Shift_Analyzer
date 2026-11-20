@@ -707,20 +707,26 @@ class Reconstructor:
         updated=replace(self.settings,reconstruction_intervals=tuple(rows))
         return updated,dict(part,clamped=clamped)
 
+    def complete_copper(self,raw,states,progress=lambda *_:None,*,quick=False,deformation=None):
+        """Validate the supplied raw copper once and reuse it for the fallback decision."""
+        from .topology_routing import resolve
+        out,pieces,changed,blocked=resolve(self,raw['replacements'],raw['pieces'],states,lambda n,t:progress(35+round(n*.3),t))
+        if blocked and not quick:
+            blocked_refs={tuple(ref) for ref,_ in blocked}
+            if any((q['layer'],q['index']) in blocked_refs and not q.get('ignored') and (q.get('route_available') or q.get('route_plan') is not None) for q in pieces):
+                alternate=self._raw_frame(states,deformation,lambda n,t:progress(65+round(n*.1),t),True,diagnostics=False)
+                ao,ap,ac,ab=resolve(self,alternate['replacements'],alternate['pieces'],states,lambda n,t:progress(75+round(n*.15),t))
+                if len(ab)<len(blocked):raw,out,pieces,changed,blocked=alternate,ao,ap,ac,ab
+        return raw,out,pieces,changed,blocked
+
     def frame(self,states,deformation=None,progress=lambda *_:None,quick=False,*,targets=None,diagnostics=True,render_cache=None,_raw=False):
         if _raw:return self._raw_frame(states,deformation,progress,quick,targets=targets,diagnostics=diagnostics,render_cache=render_cache)
         states=np.asarray(states,float);key=(states.tobytes(),'electrical-continuity',bool(quick),bool(diagnostics),None if targets is None else tuple(sorted(targets)))
         hit=self.cache.get(key) if diagnostics else None
         if hit is not None:return hit
         raw=self._raw_frame(states,deformation,lambda n,t:progress(round(n*.35),t),quick,diagnostics=False,render_cache=render_cache)
-        from .topology_routing import resolve,spacing
-        out,pieces,changed,blocked=resolve(self,raw['replacements'],raw['pieces'],states,lambda n,t:progress(35+round(n*.3),t))
-        if blocked and not quick:
-            blocked_refs={tuple(ref) for ref,_ in blocked}
-            if any((q['layer'],q['index']) in blocked_refs and not q.get('ignored') and q.get('route_plan') is not None for q in pieces):
-                alternate=self._raw_frame(states,deformation,lambda n,t:progress(65+round(n*.1),t),True,diagnostics=False)
-                ao,ap,ac,ab=resolve(self,alternate['replacements'],alternate['pieces'],states,lambda n,t:progress(75+round(n*.15),t))
-                if len(ab)<len(blocked):raw,out,pieces,changed,blocked=alternate,ao,ap,ac,ab
+        raw,out,pieces,changed,blocked=self.complete_copper(raw,states,progress,quick=quick,deformation=deformation)
+        from .topology_routing import spacing
         from .ignored_motion import add_linked_geometry
         out=add_linked_geometry(self,out,states)
         result=dict(raw,replacements=out,pieces=pieces,repair_refs=changed,hard_failures=blocked,

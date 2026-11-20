@@ -8,6 +8,51 @@ from shapely.geometry.polygon import orient
 from .resources import cancel_check
 
 
+def triangulated_path(poly,start,end):
+    """Connect points through the shared edges of an interior triangular mesh."""
+    from shapely.errors import GEOSException,UnsupportedGEOSVersionError
+    triangulate=getattr(shapely,'constrained_delaunay_triangles',None)
+    if triangulate is None:return None
+    start_point,end_point=shapely.Point(start),shapely.Point(end)
+    if poly.geom_type!='Polygon':
+        poly=next((g for g in shapely.get_parts(poly) if g.geom_type=='Polygon' and g.covers(start_point) and g.covers(end_point)),None)
+        if poly is None:return None
+    if not poly.covers(start_point) or not poly.covers(end_point):return None
+    try:triangles=shapely.get_parts(triangulate(poly))
+    except (GEOSException,UnsupportedGEOSVersionError):return None
+    if not len(triangles):return None
+    xy=shapely.get_coordinates(triangles).reshape(-1,4,2)[:,:3]
+    tree=shapely.STRtree(triangles)
+    sources=tree.query(start_point,predicate='intersects');targets=set(tree.query(end_point,predicate='intersects'))
+    if not len(sources) or not targets:return None
+    vertices,ids=np.unique(xy.reshape(-1,2),axis=0,return_inverse=True)
+    ids=ids.reshape(-1,3);owners={};graph=[[] for _ in triangles];centers=xy.mean(axis=1)
+    for index,triangle in enumerate(ids):
+        if index%256==0:cancel_check()
+        for i,j in zip(triangle,np.roll(triangle,1)):
+            edge=(min(i,j),max(i,j));other=owners.get(edge)
+            if other is None:owners[edge]=index;continue
+            middle=vertices[list(edge)].mean(axis=0)
+            cost=math.dist(centers[index],centers[other])
+            graph[index].append((other,cost,middle));graph[other].append((index,cost,middle))
+    queue=[(0.,int(i)) for i in sources];dist={i:0. for i in sources};previous={}
+    heapq.heapify(queue)
+    while queue:
+        cancel_check();value,index=heapq.heappop(queue)
+        if value!=dist[index]:continue
+        if index in targets:
+            points=[end]
+            while index in previous:
+                index,middle=previous[index];points.append(middle)
+            line=shapely.LineString([start,*points[::-1]])
+            return line if poly.covers(line) else None
+        for other,cost,middle in graph[index]:
+            value2=value+cost
+            if value2<dist.get(other,math.inf):
+                dist[other]=value2;previous[other]=(index,middle);heapq.heappush(queue,(value2,other))
+    return None
+
+
 def trace(poly,start,end,width,*,max_edges=None):
     checked=0
     # Thousands of visibility edges query the SAME polygon. Preparing its

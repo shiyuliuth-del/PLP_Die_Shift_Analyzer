@@ -25,26 +25,25 @@ def pad_loss(copper, pads, tol):
                for pad in pads)
 
 
-def refine(copper, zones, protected, free, width, width_rule, min_angle, tol, valid):
-    """Widen and round only near actual transition defects after connection."""
+def transition_defects(geometry,zones,width_rule,min_angle,tol):
     from .drc import rule_region
     from .geometry_rules import angle_regions
     from .native_backend import any_violation
+    narrow = shapely.Polygon()
+    if width_rule and any_violation('width', geometry.wkb, tol, width_rule):
+        narrow = rule_region(geometry, width_rule, tol).intersection(zones)
+    acute = angle_regions(geometry, min_angle, tol).intersection(zones) if min_angle else shapely.Polygon()
+    return narrow,acute
+
+
+def refine(copper, zones, protected, free, width, width_rule, min_angle, tol, valid, defects):
+    """Widen and round only near actual transition defects after connection."""
     from .reconstruction_route import parts
 
     def copper_union(*geometries):
         return shapely.union_all([p for g in geometries for p in parts(g)], grid_size=tol)
 
-    def defects(geometry):
-        narrow = shapely.Polygon()
-        if width_rule and any_violation('width', geometry.wkb, tol, width_rule):
-            narrow = rule_region(geometry, width_rule, tol).intersection(zones)
-        acute = angle_regions(geometry, min_angle, tol).intersection(zones) if min_angle else shapely.Polygon()
-        return narrow, acute
-
-    narrow, acute = defects(copper)
-    if narrow.is_empty and acute.is_empty:
-        return copper
+    narrow, acute = defects
     best = copper
     def score(a, b):
         return (not a.is_empty, a.area, not b.is_empty, b.area)
@@ -56,7 +55,7 @@ def refine(copper, zones, protected, free, width, width_rule, min_angle, tol, va
             grown = narrow.buffer(radius, quad_segs=4).intersection(free)
             candidate = copper_union(copper, grown)
             if valid(candidate):
-                candidate_score = score(*defects(candidate))
+                candidate_score = score(*transition_defects(candidate,zones,width_rule,min_angle,tol))
                 if candidate_score < best_score:
                     best, best_score = candidate, candidate_score
         if not acute.is_empty:
@@ -69,7 +68,7 @@ def refine(copper, zones, protected, free, width, width_rule, min_angle, tol, va
             smoothed = smoothed.buffer(-radius, quad_segs=6).buffer(radius, quad_segs=6)
             candidate = copper_union(best.difference(window), smoothed.intersection(window).intersection(free))
             if valid(candidate):
-                candidate_score = score(*defects(candidate))
+                candidate_score = score(*transition_defects(candidate,zones,width_rule,min_angle,tol))
                 if candidate_score < best_score:
                     best, best_score = candidate, candidate_score
     return best

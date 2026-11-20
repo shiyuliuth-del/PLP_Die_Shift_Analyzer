@@ -150,24 +150,28 @@ def connected_candidate(source,current,ports,obstacles,board,width,tol,space=0.,
                     else:continue
                     ends=shapely.shortest_line(a,b)
                     from .reconstruction_route import trace
-                    line=None
+                    from .reconstruction_visibility import triangulated_path
                     start,end=ends.coords[0],ends.coords[-1]
                     # Most repairs are near one cut. Restrict the first
                     # search to that throat before tracing across the full net.
                     x0,y0,x1,y1=ends.bounds
                     margin=max(width*4,tol*32)
                     local=domain.intersection(shapely.box(x0-margin,y0-margin,x1+margin,y1+margin))
-                    if domain.covers(ends):line=ends
-                    elif not local.equals(domain):
-                        line=trace(local,start,end,diameter,visibility_budget=4096)
-                    if line is None:line=trace(domain,start,end,diameter,visibility_budget=8192)
-                    if line is None:continue
-                    wire=line.buffer(radius,quad_segs=8,join_style=1)
-                    candidate=shapely.union_all([working,wire],grid_size=tol)
-                    if (candidate.is_valid and len(parts(candidate))<len(components)
-                        and signature(candidate)[1]==expected[1] and not candidate.intersects(obstacles)
-                        and covers(candidate)):
-                        joined=candidate;break
+                    def routes():
+                        if domain.covers(ends):yield ends;return
+                        if not local.equals(domain):yield triangulated_path(local,start,end)
+                        yield triangulated_path(domain,start,end)
+                        if not local.equals(domain):yield trace(local,start,end,diameter,visibility_budget=4096)
+                        yield trace(domain,start,end,diameter,visibility_budget=8192)
+                    for line in routes():
+                        if line is None:continue
+                        wire=line.buffer(radius,quad_segs=8,join_style=1)
+                        candidate=shapely.union_all([working,wire],grid_size=tol)
+                        if (candidate.is_valid and len(parts(candidate))<len(components)
+                            and signature(candidate)[1]==expected[1] and not candidate.intersects(obstacles)
+                            and covers(candidate)):
+                            joined=candidate;break
+                    if joined is not None:break
                 if joined is not None:break
             if joined is None:break
             working=joined
@@ -183,7 +187,7 @@ def cached_connection(r,source,current,ports,obstacles,board,width,tol,space,req
     """
     cancel_check()
     blobs=(source.wkb,current.wkb,tuple(p.wkb for p in ports),obstacles.wkb,None if board is None else board.wkb)
-    key=('electrical-local-repair-v58',*blobs,float(width),float(tol),float(space),require_full,reroute)
+    key=('electrical-local-repair-v58.1',*blobs,float(width),float(tol),float(space),require_full,reroute)
     value=r.geometry_pool.get(key)
     if value is not None:return None if value[0] is None else shapely.from_wkb(value[0])
     result=connected_candidate(source,current,ports,obstacles,board,width,tol,space,require_full=require_full,reroute=reroute)
@@ -370,7 +374,7 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
         if not progressed:break
     if np.any(states):
         from .drc_policy import enabled
-        from .routing_quality import refine
+        from .routing_quality import refine,transition_defects
         width=r.rules.width if enabled(r.settings,'width') else 0.
         angle=r.settings.drc_min_angle_deg if enabled(r.settings,'angle') else 0.
         for ref in sorted(mutable if width or angle else ()):
@@ -379,6 +383,8 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
             if not current.is_valid or not acceptable(ref,current) or enters_keepout(current):continue
             active=shapely.union_all([q['regions']['A'] for q in by_ref[ref]])
             if active.is_empty or not any(np.any(q.get('relative_pose',states[q['die']])) for q in by_ref[ref]):continue
+            defects=transition_defects(current,active,width,angle,r.tol)
+            if all(g.is_empty for g in defects):continue
             foreign=obstacles(ref)
             gap=min(r.rule_space,current.distance(foreign)) if not foreign.is_empty else r.rule_space
             keep=shapely.union_all(protected[ref])
@@ -391,7 +397,7 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
                         (r.rules.board is None or r.rules.board.buffer(r.tol).covers(candidate)) and
                         candidate.distance(foreign)>=gap-r.tol*2 and
                         pad_loss(candidate,protected[ref],r.tol)<=loss+r.tol*r.tol)
-            candidate=refine(current,active,keep,free,r._rule_width,width,angle,r.tol,valid)
+            candidate=refine(current,active,keep,free,r._rule_width,width,angle,r.tol,valid,defects)
             if candidate is not current:
                 objects[ref]=candidate;changed.add(ref)
                 repairs[ref]='保留孔盘及连接，局部扩宽并修整转角'
