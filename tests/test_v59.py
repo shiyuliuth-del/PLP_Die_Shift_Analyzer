@@ -35,7 +35,7 @@ def two_ended(different=True):
     return engine, settings, copper
 
 
-class V58Tests(unittest.TestCase):
+class V59Tests(unittest.TestCase):
     def test_later_pose_can_publish_while_first_pose_is_running(self):
         from threading import Event
         from die_shift_studio.resources import parallel_iter

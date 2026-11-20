@@ -55,4 +55,4 @@ with tempfile.TemporaryDirectory() as tmp:
         wait_until(lambda: not window._tasks)
         window.close()
         app.processEvents()
-print('GUI_V58_PASS: progress and status clear together after overlapping background jobs')
+print('GUI_V59_PASS: progress and status clear together after overlapping background jobs')
