@@ -1,11 +1,7 @@
 {
   "schema": 1,
   "measurement": {
-    "scale_um": 1000,
-    "die_order": [
-      "101",
-      "102"
-    ]
+    "scale_um": 1000
   },
   "controls": {
     "workers": 0,

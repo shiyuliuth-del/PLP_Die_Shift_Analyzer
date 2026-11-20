@@ -708,6 +708,8 @@ class Window(W.QMainWindow):
             self.database.setText(value['database'])
             self.output.setText(str(output))
             self.page = 0
+            for warning in value.get('warnings', ()):
+                self.log_view.appendPlainText('导入警告 · ' + warning)
             self.persist()
         project, measurement = self.project.text(), self.measurement
         endpoint, timeout = self.endpoint.text(), self.timeout.value()
@@ -905,8 +907,10 @@ class Window(W.QMainWindow):
                     self.table.setItem(i,j,item)
             state = {'imported': '已导入', 'running': '运行中', 'paused': '已暂停', 'blocked': '需处理', 'completed': '已完成'}.get(meta.get('state'), meta.get('state', ''))
             skipped = meta.get('skipped_packages', 0)
+            warnings = meta.get('import_warning_count', 0)
             self.page_label.setText(f'{state} · 第{self.page + 1}/{max(1, (count + 199) // 200)}页 · 共{count}封装'
-                                    + (f' · 测量失败跳过{skipped}封装' if skipped else ''))
+                                    + (f' · 跳过{skipped}封装' if skipped else '')
+                                    + (f' · {warnings}条导入警告' if warnings else ''))
         except (OSError, ValueError, TypeError, sqlite3.Error):
             pass
 

@@ -2,10 +2,12 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import closing
 import json
+import logging
 import math
 from pathlib import Path
 import sqlite3
 import tempfile
+import time
 
 from .storage import Ledger, dumps, sha256
 
@@ -125,13 +127,10 @@ def import_files(paths, database, die_count, workers, stop, progress=lambda _: N
         from .measurements import folders, import_part, infer_die_indices, nominal_geometry, package_rows, table_file
         directory = Path(measurement['root']).resolve()
         die_folders = folders(directory)
-        explicit_order = measurement.get('die_order')
-        order = explicit_order or [folder.name for folder in die_folders]
-        if not isinstance(order, list) or any(not isinstance(name, str) for name in order):
-            raise ValueError('die_order须按工程DIE顺序列出芯片目录名')
-        if len(set(order)) != die_count or set(order) != {folder.name for folder in die_folders}:
-            raise ValueError('芯片目录数量或配置顺序与工程DIE数量不一致')
-        path_dies = {directory / name: index + 1 for index, name in enumerate(order)}
+        order = [folder.name for folder in die_folders]
+        if len(order) != die_count:
+            raise ValueError('芯片目录数量与工程DIE数量不一致')
+        path_dies = {folder: index + 1 for index, folder in enumerate(die_folders)}
         if {p.parent for p in paths} != set(path_dies) or not all(map(table_file, paths)):
             raise ValueError('请为每颗芯片选择其目录下的CSV或XLSX文件')
         scale = numeric(measurement.get('scale_um', 1000), '坐标到μm的比例')
@@ -160,6 +159,19 @@ def import_files(paths, database, die_count, workers, stop, progress=lambda _: N
         stage = Path(temp) / 'run.sqlite'
         ledger = Ledger(stage)
         try:
+            warning_preview = []
+            warning_count = 0
+            logger = logging.getLogger('RealDataAnalyse')
+
+            def warn(message):
+                nonlocal warning_count
+                warning_count += 1
+                if len(warning_preview) < 8:
+                    warning_preview.append(message)
+                    logger.warning('%s', message)
+                ledger.db.execute('insert into events(created,level,message) values(?,?,?)',
+                                  (time.time(), 'WARNING', message))
+
             if geometry:
                 ledger.db.execute('create table production(r integer,c integer,die integer,tx real,ty real,ax real,ay real,angle real,dx real,dy real,source text,line integer)')
             with ThreadPoolExecutor(max_workers=max(1, min(workers, len(paths), 16)), thread_name_prefix='excel') as pool:
@@ -176,6 +188,12 @@ def import_files(paths, database, die_count, workers, stop, progress=lambda _: N
                             with ledger.db:
                                 if geometry:
                                     ledger.db.executemany('insert into production values(?,?,?,?,?,?,?,?,?,?,?,?)', part.execute('select * from poses'))
+                                    path = Path(info['path'])
+                                    for line, message in part.execute('select line,message from warnings order by rowid'):
+                                        origin = f'{path.parent.name}/{path.name}'
+                                        if line is not None:
+                                            origin += f' 第{line}行'
+                                        warn(f'{origin}：{message}')
                                 else:
                                     ledger.db.executemany('insert into measurements values(?,?,?,?,?,?,?)', part.execute('select * from rows'))
                         except sqlite3.IntegrityError:
@@ -184,25 +202,30 @@ def import_files(paths, database, die_count, workers, stop, progress=lambda _: N
                     progress(dict(text=f'Excel汇入 · {len(sources)}/{len(paths)}文件 · {info["path"]} · {info["rows"]}行', current=len(sources), total=len(paths)))
             if geometry:
                 progress(dict(text='匹配封装 · 读取理论中心及全局坐标', current=0, total=1))
-                if not explicit_order:
-                    indices = infer_die_indices(ledger.db, geometry['centers_um'], scale, tolerance, stop)
-                    if any(i != j for i, j in indices.items()):
-                        cases = ' '.join(f'when {i} then {j}' for i, j in indices.items())
-                        ledger.db.execute(f'update production set die=case die {cases} end')
-                        for item in sources:
-                            item['die'] = indices[item['die']]
-                        order = [name for _, name in sorted((indices[i], name) for i, name in enumerate(order, 1))]
-                seq, skipped = package_rows(ledger.db, geometry, scale, tolerance, stop, progress)
+                indices = infer_die_indices(ledger.db, geometry['centers_um'], scale, tolerance, stop)
+                if any(i != j for i, j in indices.items()):
+                    cases = ' '.join(f'when {i} then {j}' for i, j in indices.items())
+                    ledger.db.execute(f'update production set die=case die {cases} end')
+                    for item in sources:
+                        item['die'] = indices[item['die']]
+                    order = [name for _, name in sorted((indices[i], name) for i, name in enumerate(order, 1))]
+                old_order = measurement.get('die_order')
+                if old_order and old_order != order:
+                    warn(f'机台理论中心与旧工程芯片顺序不同。按图纸DIE位置匹配为 {"、".join(order)}')
+                seq, skipped = package_rows(ledger.db, geometry, scale, tolerance, stop, progress, order, warn)
                 if not seq:
-                    raise ValueError(f'没有可运行的完整实测封装（测量失败跳过 {skipped} 封装）')
+                    raise ValueError(f'没有可运行的完整实测封装（跳过 {skipped} 封装）')
                 ledger.db.execute('drop table production')
                 ledger.db.commit()
                 ledger.set('measurement', measurement)
                 ledger.set('nominal_geometry', geometry)
                 ledger.set('die_names', order)
                 ledger.set('skipped_packages', skipped)
+                ledger.set('import_warning_count', warning_count)
                 if skipped:
-                    ledger.event(f'已跳过 {skipped} 个含测量失败记录的封装', 'WARNING')
+                    ledger.event(f'已跳过 {skipped} 个无法形成完整实测记录的封装', 'WARNING')
+                if warning_count:
+                    ledger.event(f'导入记录有 {warning_count} 条警告，完整明细见任务数据库 events 表', 'WARNING')
             else:
                 seq = join_legacy(ledger.db, sources, die_count, stop, progress)
             ledger.set('sources', sorted(sources, key=lambda x: (x['die'], x['path'])))
@@ -219,10 +242,13 @@ def import_files(paths, database, die_count, workers, stop, progress=lambda _: N
         if stop.is_set():
             raise InterruptedError('已停止导入；未发布任务数据库')
         __import__('os').link(stage, database)
-    progress(dict(text=f'导入完成 · {len(paths)}文件 · {seq}封装 · {die_count} DIE', current=seq, total=seq))
+    details = f' · 跳过 {skipped} 封装 · {warning_count} 条警告' if geometry and (skipped or warning_count) else ''
+    progress(dict(text=f'导入完成 · {len(paths)}文件 · {seq}封装 · {die_count} DIE{details}', current=seq, total=seq))
     result = dict(packages=seq, dies=die_count, database=str(database))
     if geometry:
-        result.update(die_names=order, skipped_packages=skipped)
+        result.update(die_names=order, skipped_packages=skipped, warning_count=warning_count,
+                      warnings=warning_preview, repaired_rows=sum(source['repaired_rows'] for source in sources),
+                      rejected_rows=sum(source['rejected_rows'] for source in sources))
     return result
 
 

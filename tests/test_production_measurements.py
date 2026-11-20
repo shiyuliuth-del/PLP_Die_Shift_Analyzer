@@ -64,10 +64,86 @@ class ProductionMeasurements(unittest.TestCase):
             self.assertEqual([sha256(p) for p in paths], digest)
             duplicate = excel/'101'/'duplicate.csv'
             duplicate.write_bytes(paths[0].read_bytes())
-            bad = root/'reject.sqlite'
-            with self.assertRaisesRegex(ValueError, '无法唯一匹配'):
-                import_files(paths+[duplicate], bad, 2, 0, stop, measurement=dict(root=str(excel)), geometry=geometry)
-            self.assertFalse(bad.exists())
+            recovered = root/'deduplicated.sqlite'
+            result = import_files(paths+[duplicate], recovered, 2, 0, stop, measurement=dict(root=str(excel)), geometry=geometry)
+            self.assertEqual(result['packages'], 2)
+            self.assertTrue(any('重复' in message for message in result['warnings']))
+
+    def test_folder_names_and_saved_order_do_not_change_physical_placement(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            geometry = dict(board_origin_um=[-20, 30], centers_um=[[-10,40],[30,50]])
+            file_names = (('102', '101'), ('晶片 右侧', 'a 左侧'))
+            payloads = []
+            for run, (left, right) in enumerate(file_names):
+                excel = root / str(run)
+                paths = []
+                for name, cx, cy, angle in ((left,10,10,1.2),(right,50,20,-2.3)):
+                    path = excel/name/'measure.csv'
+                    path.parent.mkdir(parents=True)
+                    with path.open('w', encoding='utf-8-sig', newline='') as stream:
+                        csv.writer(stream).writerows([HEADINGS, [3,4,1,(1000+cx)/1000,(500+cy)/1000,
+                                                                 (1002+cx)/1000,(503+cy)/1000,.002,.003,angle]])
+                    paths.append(path)
+                task = root/f'run{run}.sqlite'
+                result = import_files(paths[::-1], task, 2, 0, threading.Event(), geometry=geometry,
+                                      measurement=dict(root=str(excel), die_order=[right,left]))
+                self.assertEqual(result['die_names'], [left,right])
+                self.assertTrue(any('旧工程芯片顺序' in message for message in result['warnings']))
+                with closing(sqlite3.connect(task)) as db:
+                    payloads.append(db.execute('select payload from packages').fetchall())
+            self.assertEqual(payloads[0], payloads[1])
+
+    def test_isolated_bad_rows_and_extra_bad_file_keep_healthy_packages(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            excel = root/'Excel'
+            geometry = dict(board_origin_um=[0,0], centers_um=[[10,10],[50,20]])
+            paths = []
+            for i, (name, cx, cy) in enumerate((('逻辑',10,10),('B Die',50,20))):
+                path = excel/name/'measurement.csv'
+                path.parent.mkdir(parents=True)
+                rows = []
+                for n in range(6):
+                    tx, ty = (1000*n+cx)/1000, cy/1000
+                    row = [n,0,1,tx,ty,tx+.003,ty+.002,.003,.002,1]
+                    if n == 0 and i == 0:
+                        row[3] = 'broken theoretical X'
+                    if n == 1 and i == 1:
+                        row[9] = 'bad angle'
+                    if n == 2 and i == 1:
+                        row[7] = ''  # recover independently from two confirmed coordinates
+                    rows.append(row)
+                    if n == 3 and i == 0:
+                        conflicting = row.copy(); conflicting[9] = -1
+                        rows.append(conflicting)
+                with path.open('w', encoding='utf-8-sig', newline='') as stream:
+                    writer = csv.writer(stream)
+                    writer.writerow(HEADINGS)
+                    writer.writerow(rows[0])
+                    if not i:
+                        stream.write('"unterminated column\n')
+                    writer.writerows(rows[1:])
+                paths.append(path)
+            bad_file = paths[0].with_name('bad.csv')
+            bad_file.write_text('broken heading\n', encoding='utf8')
+            result = import_files([bad_file,*paths], root/'run.sqlite', 2, 0, threading.Event(),
+                                  geometry=geometry, measurement=dict(root=str(excel)))
+            self.assertEqual(result['packages'], 3)
+            self.assertEqual(result['skipped_packages'], 3)
+            self.assertEqual(result['repaired_rows'], 1)
+            self.assertEqual(result['rejected_rows'], 3)
+            with closing(sqlite3.connect(result['database'])) as db:
+                packages = [pkg for pkg, in db.execute('select package from packages order by seq')]
+                self.assertEqual(packages, ['2:0:1','4:0:1','5:0:1'])
+                warnings = '\n'.join(msg for msg, in db.execute("select message from events where level='WARNING'"))
+                for term in ('已跳过文件','已跳过行','实测姿态','偏移X','冲突','缺少芯片','CSV引号'):
+                    self.assertIn(term, warnings)
+            with self.assertRaisesRegex(ValueError, '芯片位置|图纸位置'):
+                import_files(paths, root/'bad_geometry.sqlite', 2, 0, threading.Event(),
+                             geometry=dict(board_origin_um=[0,0], centers_um=[[10,10],[550,20]]),
+                             measurement=dict(root=str(excel), die_order=['逻辑','B Die']))
+            self.assertFalse((root/'bad_geometry.sqlite').exists())
 
     def test_shipped_production_fixture_discovers_two_dies_and_four_files(self):
         config = load_folder(ROOT/'Jobs/SH22')
