@@ -60,7 +60,7 @@ class V54Tests(unittest.TestCase):
             for region in (box(-52,17,-45,25),box(239,10,242,12),box(30,10,150,30)):
                 self.assertEqual(has_angle_violation(copper,angle,.001,region),witnesses.intersects(region))
 
-    def test_virtual_ownership_seam_anchors_two_independent_zones(self):
+    def test_virtual_ownership_seam_anchors_merged_zone(self):
         source = box(-20, -12, 220, 12)
         moving = Point(0, 0).buffer(6)
         seam = box(219.98, -12, 220, 12)
@@ -81,18 +81,19 @@ class V54Tests(unittest.TestCase):
                                  settings=SimpleNamespace(reconstruction_style='linear'),
                                  model=SimpleNamespace(bound=SimpleNamespace(centers=np.array([[0., 0.]]))))
         result = assemble(solver, source, rows, np.array([[4., 9., .01]]))
-        self.assertEqual(len(result), 2)
-        self.assertEqual(result[0]['endpoint_weights'][0], 1.)
-        self.assertLess(result[0]['endpoint_weights'][1], 1.)
-        self.assertGreater(result[1]['endpoint_weights'][0], 0.)
-        self.assertEqual(result[1]['endpoint_weights'][1], 0.)
-        for q in result:
-            self.assertTrue(q['valid'])
-            near, far = q['moved_cut'], q['extra_cut']
-            self.assertEqual((near.geom_type,far.geom_type), ('LineString','LineString'))
-            self.assertGreater(near.distance(far), 10.)
-            self.assertEqual(editable_piece(q,far.centroid.coords[0],'extra')['interval'], q['interval'])
-        self.assertLess(result[0]['regions']['A'].intersection(result[1]['regions']['A']).area, 1e-6)
+        q, = result
+        self.assertTrue(q['valid'])
+        self.assertEqual(q['endpoint_weights'], (1., 0.))
+        self.assertEqual({row['route_identity'] for row in q['graph_members']}, {'first', 'second'})
+        nominal = q['nominal_regions']
+        self.assertLess(nominal['A'].symmetric_difference(source.intersection(box(35,-12,176,12))).area, 1e-6)
+        self.assertTrue(nominal['B'].covers(seam))
+        self.assertLess(shapely.union_all(list(nominal.values())).symmetric_difference(source).area, 1e-6)
+        near, far = q['moved_cut'], q['extra_cut']
+        self.assertEqual((near.geom_type, far.geom_type), ('LineString', 'LineString'))
+        self.assertGreater(near.distance(far), 10.)
+        self.assertAlmostEqual(far.centroid.x, 176., places=6)
+        self.assertEqual(editable_piece(q,far.centroid.coords[0],'extra')['route_identity'], 'second')
 
     def test_cut_slivers_inherit_adjacent_rigid_motion(self):
         from die_shift_studio.branch_regions import merge_rigid_cells
