@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import gdstk
+import psutil
 from die_shift_studio.local_ipc import call
 from die_shift_studio.oas_validation import verify_crc
 from RealDataAnalyse.projects import load_folder
@@ -106,16 +107,21 @@ def run_case(root):
                 for center in expected:
                     assert any(max(abs(a-b) for a,b in zip(center, point)) < 0.002 for point in actual), (expected, actual)
         assert all(sha256(path) == digest for path,digest in input_hash.items())
-        print('SH22_POSITIONED_OAS_PASS: real measured DIE centers, varied poses, CRC and isolated Output', flush=True)
     finally:
         if endpoint.exists():
             transport = Transport(endpoint)
             if transport.alive():
+                descriptor = json.loads(endpoint.read_text(encoding='utf8'))
+                child = psutil.Process(descriptor['pid'])
+                processes = [child]
+                parent = child.parent()
+                frozen_server = os.environ.get('DIE_SHIFT_TEST_EXE')
+                if frozen_server and parent and Path(parent.exe()).resolve() == Path(frozen_server).resolve():
+                    processes.append(parent)
                 transport.request('app.shutdown', retries=0)
-            end = time.monotonic()+60
-            while transport.alive() and time.monotonic() < end:
-                time.sleep(.1)
-            assert not transport.alive()
+                _, alive = psutil.wait_procs(processes, timeout=60)
+                assert not alive, '配套预演服务及冻结启动进程须完整退出'
+    print('SH22_POSITIONED_OAS_PASS: real measured DIE centers, varied poses, CRC, isolated Output and safe exit', flush=True)
 
 
 if __name__ == '__main__':
