@@ -63,7 +63,7 @@ def generate(attachment, target):
                                 dx = dy = angle = 0
                             row_values = [tx/1000, ty/1000, (tx+dx)/1000, (ty+dy)/1000, dx/1000, dy/1000, angle]
                             writer.writerow([row, col, 1, *(f'{value:.8f}' for value in row_values)])
-    manifest = dict(schema=1, measurement=dict(scale_um=1000, die_order=[str(index) for index in range(101,101+len(local))]),
+    manifest = dict(schema=1, measurement=dict(scale_um=1000),
                     controls=dict(workers=0, memory=0, retries=3, timeout=0))
     (area / SETTINGS).write_text(json.dumps(manifest, ensure_ascii=False, indent=2)+'\n', encoding='utf8')
     assert all((target / name).is_file() for name in SH22_INPUTS)
