@@ -9,6 +9,7 @@ import numpy as np
 import shapely
 from .resources import cancel_check
 from .reconstruction_route import parts
+from .routing_quality import Landing,pad_loss
 
 
 def signature(g):
@@ -32,7 +33,7 @@ def covers_ports(g,ports,tol):
     return bool(np.all(shapely.area(shapely.intersection(g,ports[~inside]))>tol*tol))
 
 
-def separate_pair(a,b,source_a,source_b,ports_a,ports_b,tol,space=0.):
+def separate_pair(a,b,source_a,source_b,ports_a,ports_b,tol,space=0.,protected=((),())):
     """Share the overlap corridor; clipping only one pad can be impossible."""
     overlap=a.intersection(b)
     if overlap.is_empty:return a,b
@@ -66,7 +67,8 @@ def separate_pair(a,b,source_a,source_b,ports_a,ports_b,tol,space=0.):
                     and not any(ga.intersects(p) for p in ports_b)
                     and not any(gb.intersects(p) for p in ports_a)
                     and not ga.intersects(gb)):
-                    score=max((a.area-ga.area)/max(a.area,tol*tol),(b.area-gb.area)/max(b.area,tol*tol))
+                    loss_a,loss_b=pad_loss(ga,protected[0],tol),pad_loss(gb,protected[1],tol)
+                    score=(loss_a+loss_b,max(loss_a,loss_b),max((a.area-ga.area)/max(a.area,tol*tol),(b.area-gb.area)/max(b.area,tol*tol)))
                     if best is None or score<best[0]:best=(score,ga,gb)
     return None if best is None else best[1:]
 
@@ -91,37 +93,48 @@ def weld_interfaces(geometry,expected,tol):
     return None
 
 
-def connected_candidate(source,current,ports,obstacles,board,width,tol,space=0.):
+def connected_candidate(source,current,ports,obstacles,board,width,tol,space=0.,*,require_full=False,reroute=True):
     """Clip foreign copper, then join separated material through real free space."""
     expected=signature(source);gap=max(tol*4,space)
     forbidden=obstacles.buffer(gap,quad_segs=4) if not obstacles.is_empty else obstacles
-    if any(p.difference(forbidden).area<=tol*tol for p in ports):return None
-    if (current.is_valid and signature(current)==expected and covers_ports(current,ports,tol)
+    if require_full:
+        if any(p.intersection(forbidden).area>p.length*tol for p in ports):return None
+        if board is not None and pad_loss(board,ports,tol)>0.:return None
+    elif any(p.difference(forbidden).area<=tol*tol for p in ports):return None
+    def covers(geometry):
+        return pad_loss(geometry,ports,tol)==0. if require_full else covers_ports(geometry,ports,tol)
+    if (current.is_valid and signature(current)==expected and covers(current)
         and not current.intersects(obstacles) and (board is None or board.buffer(tol).covers(current))):return current
     full=shapely.union_all([current,*ports],grid_size=tol)
-    if not forbidden.is_empty:full=full.difference(forbidden)
-    if board is not None:full=full.intersection(board)
+    if not forbidden.is_empty:full=full.difference(forbidden,grid_size=tol)
+    if board is not None:full=full.intersection(board,grid_size=tol)
     full=shapely.union_all(parts(shapely.make_valid(full)),grid_size=tol)
-    if not covers_ports(full,ports,tol):return None
+    if not covers(full):return None
+    if expected[0]==1 and len(parts(full))>1:
+        # Clipping with a nearby obstacle may leave grid-edge flakes. They
+        # are not intended terminals or separate components of the source.
+        cleaned=[g for g in parts(full) if g.area>g.length*tol or any(g.intersects(p) for p in ports)]
+        full=shapely.union_all(cleaned,grid_size=tol)
     # A new hole inside originally solid copper may be a folded overlap. Fill
     # it only if the area contains no foreign net or other hard obstacle.
     if expected[1]==0:
         fills=[shapely.Polygon(h) for p in parts(full) for h in p.interiors]
         if fills and all(not h.intersects(forbidden) for h in fills):full=shapely.union_all([full,*fills],grid_size=tol)
     def acceptable(g):
-        return (not g.is_empty and g.is_valid and signature(g)==expected and covers_ports(g,ports,tol)
+        return (not g.is_empty and g.is_valid and signature(g)==expected and covers(g)
                 and not g.intersects(obstacles) and (board is None or board.buffer(tol).covers(g)))
     if acceptable(full):return full
     welded=weld_interfaces(full,expected,tol)
     if welded is not None and acceptable(welded):return welded
     # Keep every material component and its terminal identity. A connector is
     # accepted only when it decreases the component count without adding holes.
-    if len(parts(full))<=expected[0] or expected[0]!=1:return None
+    if not reroute or len(parts(full))<=expected[0] or expected[0]!=1:return None
     bounds=shapely.union_all([source,full]).bounds
     for padding in (max(width*2,tol*16),max(width*8,tol*32)):
         region=shapely.box(bounds[0]-padding,bounds[1]-padding,bounds[2]+padding,bounds[3]+padding)
         if board is not None:region=region.intersection(board)
         free=region.difference(forbidden);working=full
+        cores={}
         for _ in range(max(1,len(parts(full))-1)):
             cancel_check();components=parts(working)
             if len(components)==1:break
@@ -129,20 +142,31 @@ def connected_candidate(source,current,ports,obstacles,board,width,tol,space=0.)
             joined=None
             for _,i,j in pairs:
                 for diameter in dict.fromkeys((width,width*.75,width*.5,width*.25,width*.125,max(tol*8,width*.0625),tol*4)):
-                    cancel_check();radius=max(tol*2,diameter/2);core=free.buffer(-radius,quad_segs=4)
-                    a=components[i].intersection(core);b=components[j].intersection(core)
-                    if a.is_empty or b.is_empty:continue
-                    domain=next((p for p in parts(core) if p.intersects(a) and p.intersects(b)),None)
-                    if domain is None:continue
-                    ends=shapely.shortest_line(a.intersection(domain),b.intersection(domain))
+                    cancel_check();radius=max(tol*2,diameter/2)
+                    if radius not in cores:cores[radius]=parts(free.buffer(-radius,quad_segs=4))
+                    for domain in cores[radius]:
+                        a=components[i].intersection(domain);b=components[j].intersection(domain)
+                        if not a.is_empty and not b.is_empty:break
+                    else:continue
+                    ends=shapely.shortest_line(a,b)
                     from .reconstruction_route import trace
-                    line=trace(domain,ends.coords[0],ends.coords[-1],diameter)
+                    line=None
+                    start,end=ends.coords[0],ends.coords[-1]
+                    # Most repairs are near one cut. Restrict the first
+                    # search to that throat before tracing across the full net.
+                    x0,y0,x1,y1=ends.bounds
+                    margin=max(width*4,tol*32)
+                    local=domain.intersection(shapely.box(x0-margin,y0-margin,x1+margin,y1+margin))
+                    if domain.covers(ends):line=ends
+                    elif not local.equals(domain):
+                        line=trace(local,start,end,diameter,visibility_budget=4096)
+                    if line is None:line=trace(domain,start,end,diameter,visibility_budget=8192)
                     if line is None:continue
                     wire=line.buffer(radius,quad_segs=8,join_style=1)
                     candidate=shapely.union_all([working,wire],grid_size=tol)
                     if (candidate.is_valid and len(parts(candidate))<len(components)
                         and signature(candidate)[1]==expected[1] and not candidate.intersects(obstacles)
-                        and covers_ports(candidate,ports,tol)):
+                        and covers(candidate)):
                         joined=candidate;break
                 if joined is not None:break
             if joined is None:break
@@ -151,7 +175,7 @@ def connected_candidate(source,current,ports,obstacles,board,width,tol,space=0.)
     return None
 
 
-def cached_connection(r,source,current,ports,obstacles,board,width,tol,space):
+def cached_connection(r,source,current,ports,obstacles,board,width,tol,space,require_full=False,reroute=True):
     """Repeat local scenes across package combinations without re-routing.
 
     Actual posed obstacles and every physical terminal are part of the key;
@@ -159,10 +183,10 @@ def cached_connection(r,source,current,ports,obstacles,board,width,tol,space):
     """
     cancel_check()
     blobs=(source.wkb,current.wkb,tuple(p.wkb for p in ports),obstacles.wkb,None if board is None else board.wkb)
-    key=('electrical-local-repair-v54',*blobs,float(width),float(tol),float(space))
+    key=('electrical-local-repair-v58',*blobs,float(width),float(tol),float(space),require_full,reroute)
     value=r.geometry_pool.get(key)
     if value is not None:return None if value[0] is None else shapely.from_wkb(value[0])
-    result=connected_candidate(source,current,ports,obstacles,board,width,tol,space)
+    result=connected_candidate(source,current,ports,obstacles,board,width,tol,space,require_full=require_full,reroute=reroute)
     blob=None if result is None else result.wkb
     size=512+sum(len(b) for b in (blobs[0],blobs[1],*blobs[2],blobs[3],blobs[4] or b'',blob or b''))*2
     r.geometry_pool.put(key,(blob,),size=size)
@@ -171,35 +195,38 @@ def cached_connection(r,source,current,ports,obstacles,board,width,tol,space):
 
 def _adopt(rows,geometry,tol,reason):
     """Keep material regions disjoint and attach compensation to its real A area."""
-    def material(g):return shapely.union_all(parts(g))
+    def material(g):
+        values=parts(g)
+        if len(values)==1:return values[0]
+        return shapely.union_all(values,grid_size=tol)
     def overlay(a,b,op):
-        try:return material(getattr(shapely,op)(a,b))
-        except shapely.errors.GEOSException:
-            # Display partition only: shared DBU overlay, never a repaired
-            # substitute for the already electrically-validated copper.
-            return material(getattr(shapely,op)(a,b,grid_size=tol))
-    before=shapely.union_all([g for q in rows for g in q['regions'].values()])
-    if before.symmetric_difference(geometry).area<=tol*tol:reason='原铜已包含当前全部连接端，保留原图；未伪装成型变'
-    fixed=overlay(shapely.union_all([q['regions']['B'] for q in rows]),geometry,'intersection')
-    moving=overlay(overlay(shapely.union_all([q['regions']['C'] for q in rows]),geometry,'intersection'),fixed,'difference')
-    remaining=overlay(geometry,shapely.union_all([fixed,moving]),'difference');assigned=shapely.Polygon()
-    regions=[]
-    for q in rows:
-        a=overlay(overlay(remaining,q['regions']['A'].buffer(tol*4),'intersection'),assigned,'difference')
-        regions.append(a);assigned=overlay(assigned,a,'union')
-    for g in parts(overlay(remaining,assigned,'difference')):
+        return material(getattr(shapely,op)(a,b,grid_size=tol))
+    before=shapely.union_all([g for q in rows for g in q['regions'].values()],grid_size=tol)
+    delta=before.symmetric_difference(geometry,grid_size=tol)
+    if delta.area<=tol*tol:reason='原铜已包含当前全部连接端，保留原图；未伪装成型变'
+    fixed=overlay(shapely.union_all([q['regions']['B'] for q in rows],grid_size=tol),geometry,'intersection')
+    moving=overlay(overlay(shapely.union_all([q['regions']['C'] for q in rows],grid_size=tol),geometry,'intersection'),fixed,'difference')
+    remaining=overlay(geometry,shapely.union_all([fixed,moving],grid_size=tol),'difference')
+    if len(rows)==1:
+        regions=[remaining]
+    else:
+        assigned=shapely.Polygon();regions=[]
         support=[q['regions']['A'] if not q['regions']['A'].is_empty else q.get('missing_region',shapely.Polygon()) for q in rows]
-        index=min(range(len(rows)),key=lambda i:support[i].distance(g) if not support[i].is_empty else float('inf'))
-        # Boolean quantization leaves thin residues along distant rigid edges.
-        # They belong to that rigid region, not to a remote transition. Giving
-        # them to A produced the apparent nonlinear spur at nul7123 5613/2266.
-        thin=g.area<=tol*g.length*2
-        if thin and (not fixed.is_empty or not moving.is_empty):
-            near=overlay(g,support[index].buffer(tol*8),'intersection') if not support[index].is_empty else shapely.Polygon()
-            far=overlay(g,near,'difference');regions[index]=overlay(regions[index],near,'union')
-            if moving.is_empty or (not fixed.is_empty and fixed.distance(far)<=moving.distance(far)):fixed=overlay(fixed,far,'union')
-            else:moving=overlay(moving,far,'union')
-        else:regions[index]=overlay(regions[index],g,'union')
+        for g in support:
+            a=overlay(overlay(remaining,g.buffer(tol*4),'intersection'),assigned,'difference')
+            regions.append(a);assigned=overlay(assigned,a,'union')
+        extras=[[] for _ in rows];leftovers=parts(overlay(remaining,assigned,'difference'))
+        if leftovers:
+            for g in leftovers:
+                index=min(range(len(rows)),key=lambda i:support[i].distance(g) if not support[i].is_empty else float('inf'))
+                # Sub-grid residuals next to the actual rigid outline stay rigid.
+                if g.area<=tol*g.length*2 and not (fixed.is_empty and moving.is_empty):
+                    near=overlay(g,support[index].buffer(tol*8),'intersection') if not support[index].is_empty else shapely.Polygon()
+                    far=overlay(g,near,'difference');extras[index].append(near)
+                    if moving.is_empty or (not fixed.is_empty and fixed.distance(far)<=moving.distance(far)):fixed=overlay(fixed,far,'union')
+                    else:moving=overlay(moving,far,'union')
+                else:extras[index].append(g)
+            regions=[shapely.union_all([g,*items],grid_size=tol) if items else g for g,items in zip(regions,extras)]
     for q,a in zip(rows,regions):
         for name in ('moved_cut','extra_cut'):
             cut=q.get(name)
@@ -208,7 +235,7 @@ def _adopt(rows,geometry,tol,reason):
         q.update(regions=dict(A=a,B=fixed,C=moving),bridge=a,fixed=fixed,moved=moving,
                  bridge_area_um2=a.area,fixed_area_um2=fixed.area,moved_area_um2=moving.area,
                  connection_failed=False,valid=True,routing_recovered=True,routing_note=reason,
-                 warning=reason,compensation_region=before.symmetric_difference(geometry).intersection(a.buffer(tol*4)))
+                 warning=reason,compensation_region=delta.intersection(a.buffer(tol*4),grid_size=tol))
 
 
 def resolve(r,replacements,pieces,states,progress=lambda *_:None):
@@ -218,15 +245,17 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
     for q in pieces:by_ref.setdefault((q['layer'],q['index']),[]).append(q)
     inputs=getattr(r,'_topology_inputs',None)
     if inputs is None:
-        original={};nets={};terminals={}
+        original={};nets={};terminals={};lands={}
         for key,refs in r.rules.nets.items():
             for ref in refs:
-                original[ref]=r.model.nodes[r.model.ids[ref]]['poly'];nets[ref]=key;terminals[ref]=[]
+                original[ref]=r.model.nodes[r.model.ids[ref]]['poly'];nets[ref]=key;terminals[ref]=[];lands[ref]=[]
                 for via,owner,required in r.rules.vias[key]:
                     physical=r.model.nodes[r.model.ids[via]]['poly']
-                    if original[ref].intersection(physical).area>r.tol*r.tol:terminals[ref].append((via,owner,physical))
-        r._topology_inputs=inputs=(original,nets,terminals)
-    original,nets,terminals=inputs
+                    if original[ref].intersection(physical).area<=r.tol*r.tol:continue
+                    terminals[ref].append((via,owner,physical))
+                    lands[ref].append(Landing.from_source(physical,required,original[ref],r.tol))
+        r._topology_inputs=inputs=(original,nets,terminals,lands)
+    original,nets,terminals,lands=inputs
     from .ignored_motion import linked_owners
     linked,link_failures=linked_owners(r,states)
     def actual_owner(node):
@@ -240,12 +269,19 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
         for row in rows:
             for i in row['indices']:objects[layer,i]=private(row['geometry'])
     mutable={ref for ref,rows in by_ref.items() if any(not q.get('ignored') for q in rows)}
-    for ref in objects:ports[ref]=[private(r.model.moved(physical,linked.get(via,owner),states)) for via,owner,physical in terminals[ref]]
+    enclosures={};protected={}
+    for ref in objects:
+        ports[ref]=[];enclosures[ref]=[];protected[ref]=[]
+        for (via,owner,_),landing in zip(terminals[ref],lands[ref]):
+            owner=linked.get(via,owner)
+            ports[ref].append(private(r.model.moved(landing.via,owner,states)))
+            enclosures[ref].append(private(r.model.moved(landing.enclosure,owner,states)))
+            protected[ref].append(private(r.model.moved(landing.protected,owner,states)))
     manual_masks={ref:shapely.union_all([q['regions']['A'] for q in rows]) for ref,rows in by_ref.items() if any(q.get('strict_box') is not None for q in rows)}
     manual_before={ref:objects[ref] for ref in manual_masks}
     def preserves_box(ref,g):
         return ref not in manual_masks or g.symmetric_difference(manual_before[ref]).difference(manual_masks[ref].buffer(r.tol*2)).area<=r.tol*r.tol
-    changed=set();blocked=list(link_failures);external={};immutable={}
+    changed=set();repairs={};blocked=list(link_failures);external={};immutable={}
     for ref,values in ports.items():
         external.setdefault(nets[ref][0],[]).extend((nets[ref],g) for g in values)
     for node in r.model.nodes:
@@ -266,23 +302,28 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
         # then cannot invalidate an otherwise identical local repair cache.
         return shapely.union_all([g.intersection(box) for other,g in objects.items() if nets[other][0]==nets[ref][0] and nets[other]!=nets[ref] and g.intersects(box)]+[r.rules.keepout.intersection(box),*[g.intersection(box) for g in foreign_hits(ref,box)]])
     def enters_keepout(g):return not r.rules.keepout.is_empty and shapely.relate_pattern(g,r.rules.keepout,'T********')
-    def attempt(ref,reason):
+    def acceptable(ref,candidate):
+        return (preserves_box(ref,candidate) and not foreign_hits(ref,candidate) and
+                same_connections(original[ref],candidate,[g for _,_,g in terminals[ref]],ports[ref],r.tol))
+    def attempt(ref,reason,*,pad_only=False):
         if ref not in mutable or any(q.get('box_invalid') for q in by_ref.get(ref,())):return None
         foreign=obstacles(ref)
-        # Keep the spacing corridor first. Within that corridor try to retain
-        # enclosure before relaxing to electrical contact; width may narrow
-        # inside connected_candidate, while foreign copper remains forbidden.
-        enclosed=[p.buffer(r.rules.p.annulus_um/math.cos(math.pi/128),quad_segs=32) for p in ports[ref]]
+        # Distinct nets, connectivity and topology are hard. Within feasible
+        # copper, exhaust clearance choices for a full pad before trimming it.
+        goal_sets=(protected[ref],enclosures[ref],ports[ref])
+        seen=set()
+        for targets in goal_sets:
+            key=tuple(g.wkb for g in targets)
+            if key in seen:continue
+            seen.add(key)
+            for space in dict.fromkeys((r.rule_space,r.rule_space*.5,0.)):
+                candidate=cached_connection(r,original[ref],objects[ref],targets,foreign,r.rules.board,r._rule_width,r.tol,space,True,not pad_only)
+                if candidate is not None and acceptable(ref,candidate):
+                    return candidate,reason
+        if pad_only:return None
         for space in dict.fromkeys((r.rule_space,r.rule_space*.5,0.)):
-            for targets in (enclosed,ports[ref]):
-                candidate=cached_connection(r,original[ref],objects[ref],targets,foreign,r.rules.board,r._rule_width,r.tol,space)
-                if candidate is None:continue
-                if original[ref].geom_type!='Polygon' and not same_connections(
-                        original[ref],candidate,[g for _,_,g in terminals[ref]],ports[ref],r.tol):continue
-                if targets is enclosed and not all(candidate.buffer(r.tol*.1).covers(g) for g in enclosed):continue
-                if any(q.get('strict_box') is not None for q in by_ref.get(ref,())):
-                    allowed=shapely.union_all([q['regions']['A'] for q in by_ref[ref]])
-                    if candidate.symmetric_difference(objects[ref]).difference(allowed.buffer(r.tol*2)).area>r.tol*r.tol:continue
+            candidate=cached_connection(r,original[ref],objects[ref],ports[ref],foreign,r.rules.board,r._rule_width,r.tol,space)
+            if candidate is not None and acceptable(ref,candidate):
                 return candidate,reason
         return None
     from .topology_checks import inspect_many,foreign_pairs,same_connections
@@ -291,10 +332,16 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
     # is an obstacle even when full native DRC artwork was not requested.
     for number,ref in enumerate(sorted(mutable)):
         cancel_check();progress(round(40*number/max(1,len(mutable))),f'核验实际连接 {number+1}/{len(mutable)} · {ref[0]} #{ref[1]+1}')
-        if checked[ref][0] and not checked[ref][1] and not foreign_hits(ref,objects[ref]) and not any(q.get('connection_failed') for q in by_ref[ref]):continue
-        candidate=attempt(ref,'保连通补偿：已调整连接轮廓，工艺规则另检')
-        if candidate is not None:
-            objects[ref]=candidate[0];changed.add(ref);_adopt(by_ref[ref],candidate[0],r.tol,candidate[1])
+        current=objects[ref]
+        collided=foreign_hits(ref,current)
+        missing=bool(np.any(states) and not all(p.difference(current).area<=p.length*r.tol for p in protected[ref]))
+        already_connected=checked[ref][0] and not checked[ref][1] and not collided and not any(q.get('connection_failed') for q in by_ref[ref])
+        if already_connected and not missing:continue
+        candidate=attempt(ref,'保连通补偿：已调整连接轮廓，工艺规则另检',pad_only=already_connected)
+        if candidate is not None and (not checked[ref][0] or collided or checked[ref][1] or
+                pad_loss(candidate[0],protected[ref],r.tol)<pad_loss(current,protected[ref],r.tol) or
+                any(q.get('connection_failed') for q in by_ref[ref])):
+            objects[ref]=candidate[0];changed.add(ref);repairs[ref]=candidate[1]
     # Removing one side of an overlap cannot create a new foreign contact.
     # A rerouted candidate is checked against every current neighbour before use.
     refs=list(objects)
@@ -304,29 +351,58 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
         progressed=False
         for left,right in pairs:
             if not objects[left].intersects(objects[right]):continue
-            # Most collisions are overlapping pad shoulders. Try one shared
-            # corridor before expensive whole-net visibility routing.
-            if left in mutable and right in mutable:
-                divided=None
-                for space in dict.fromkeys((r.rule_space,r.rule_space*.5,0.)):
-                    candidate=separate_pair(objects[left],objects[right],original[left],original[right],ports[left],ports[right],r.tol,space)
-                    if candidate is not None and all(
-                            not foreign_hits(ref,g) and preserves_box(ref,g) and
-                            (original[ref].geom_type=='Polygon' or same_connections(
-                                original[ref],g,[p for _,p in terminals[ref]],ports[ref],r.tol))
-                            for ref,g in zip((left,right),candidate)):
-                        divided=candidate;break
-                if divided is not None:
-                    for ref,g in zip((left,right),divided):
-                        objects[ref]=g;changed.add(ref);_adopt(by_ref[ref],g,r.tol,'共同通道补偿：两侧轮廓同时收窄，工艺规则另检')
-                    progressed=True;continue
             candidates=[]
-            for ref in (left,right):
-                candidate=attempt(ref,'异网避让补偿：局部收窄或绕接，工艺规则另检')
-                if candidate is not None:candidates.append((objects[ref].symmetric_difference(candidate[0]).area,ref,*candidate))
+            def offer(changes,reason):
+                losses=[pad_loss(changes.get(ref,objects[ref]),protected[ref],r.tol) for ref in (left,right)]
+                clearance=changes.get(left,objects[left]).distance(changes.get(right,objects[right]))
+                edit=sum(objects[ref].symmetric_difference(g).area for ref,g in changes.items())
+                candidates.append(((sum(losses),max(losses),max(0.,r.rule_space-clearance),edit),changes,reason))
+            if left in mutable and right in mutable:
+                for space in dict.fromkeys((r.rule_space,r.rule_space*.5,0.)):
+                    candidate=separate_pair(objects[left],objects[right],original[left],original[right],ports[left],ports[right],
+                                            r.tol,space,(protected[left],protected[right]))
+                    if candidate is not None and all(acceptable(ref,g) for ref,g in zip((left,right),candidate)):
+                        offer(dict(zip((left,right),candidate)),'共同通道补偿：保留可行孔盘并调整线路')
+                        if candidates[-1][0][0]==0.:break
+            if not candidates or candidates[0][0][0]>0.:
+                for ref in (left,right):
+                    candidate=attempt(ref,'异网避让补偿：局部收窄或绕接，工艺规则另检')
+                    if candidate is not None:offer({ref:candidate[0]},candidate[1])
             if not candidates:continue
-            _,ref,g,reason=min(candidates,key=lambda item:(item[0],item[1]));objects[ref]=g;changed.add(ref);_adopt(by_ref[ref],g,r.tol,reason);progressed=True
+            _,changes,reason=min(candidates,key=lambda item:item[0])
+            for ref,g in changes.items():
+                objects[ref]=g;changed.add(ref);repairs[ref]=reason
+            progressed=True
         if not progressed:break
+    if np.any(states):
+        from .drc_policy import enabled
+        from .routing_quality import refine
+        width=r.rules.width if enabled(r.settings,'width') else 0.
+        angle=r.settings.drc_min_angle_deg if enabled(r.settings,'angle') else 0.
+        for ref in sorted(mutable if width or angle else ()):
+            cancel_check()
+            current=objects[ref]
+            if not current.is_valid or not acceptable(ref,current) or enters_keepout(current):continue
+            active=shapely.union_all([q['regions']['A'] for q in by_ref[ref]])
+            if active.is_empty or not any(np.any(q.get('relative_pose',states[q['die']])) for q in by_ref[ref]):continue
+            foreign=obstacles(ref)
+            gap=min(r.rule_space,current.distance(foreign)) if not foreign.is_empty else r.rule_space
+            keep=shapely.union_all(protected[ref])
+            free=active.buffer(r._rule_width,quad_segs=4).difference(foreign.buffer(max(r.tol*4,gap-r.tol)))
+            if r.rules.board is not None:free=free.intersection(r.rules.board)
+            loss=pad_loss(current,protected[ref],r.tol)
+            def valid(candidate):
+                return (candidate.is_valid and acceptable(ref,candidate) and
+                        not candidate.intersects(foreign) and not enters_keepout(candidate) and
+                        (r.rules.board is None or r.rules.board.buffer(r.tol).covers(candidate)) and
+                        candidate.distance(foreign)>=gap-r.tol*2 and
+                        pad_loss(candidate,protected[ref],r.tol)<=loss+r.tol*r.tol)
+            candidate=refine(current,active,keep,free,r._rule_width,width,angle,r.tol,valid)
+            if candidate is not current:
+                objects[ref]=candidate;changed.add(ref)
+                repairs[ref]='保留孔盘及连接，局部扩宽并修整转角'
+    for ref,reason in repairs.items():
+        _adopt(by_ref[ref],objects[ref],r.tol,reason)
     if changed:checked.update(inspect_many(r,{ref:objects[ref] for ref in changed},original,ports,manual_masks,manual_before,terminals))
     previous_percent=-1
     for number,ref in enumerate(sorted(objects)):

@@ -31,3 +31,8 @@ def violation_priority(kinds):
     # Lexicographic severity: never trade a short for any dimensional benefit.
     return tuple(int(bool(set(kinds)&set(group))) for group in
       (('short','keepout'),('foreign','space','board'),('enclosure',),('width',),('angle',)))
+
+
+def pad_first(score):
+    """Preserve the rule score layout while prioritizing enclosure in choices."""
+    return (score[0],score[2],score[1],*score[3:])

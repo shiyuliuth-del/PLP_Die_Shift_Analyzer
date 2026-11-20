@@ -16,7 +16,8 @@ from .extreme_filter import PoseClause,ProblemIndex
 def entry_owners(entries,grid):
     owners=set()
     for q in entries:
-        if q.get('following'):owners.update(q.get('follow_owners',(q['owner'],)))
+        if q.get('paired_vias'):owners.update(owner for _,owner in q['paired_vias'])
+        elif q.get('following'):owners.update(q.get('follow_owners',(q['owner'],)))
         elif q['plan'] is not None or q['orphan']:owners.add(q['owner'])
     return tuple(sorted(o for o in owners if o>=0 and grid.radices[o]>1))
 
@@ -68,21 +69,39 @@ def needed(r,bundles,grid=None):
         from .ignored_motion import linked_fixed_vias
         ports=linked_fixed_vias(r,r._plans or ())
         if ports and (mode=='global' or ports.keys()&set(r.settings.reconstruction_fixed_via_follows)):return True
+    from .drc_policy import enabled
+    from .routing_quality import Landing,pad_loss
+    from .geometry_rules import has_angle_violation
+    from .native_backend import any_violation
+    from .drc import rule_region
+    width=r.rules.width if enabled(r.settings,'width') else 0.
+    angle=r.settings.drc_min_angle_deg if enabled(r.settings,'angle') else 0.
     tables=[]
     for ref,b in bundles.items():
         if any(q.get('connection_failed') for v in b['values'].values() for q in v['pieces']):return True
         if grid is not None:
             source=r.model.nodes[r.model.ids[ref]]['poly']
             from .topology_routing import covers_ports
-            for via,owner,_ in r.rules.vias[r.rules.refnet[ref]]:
+            for via,owner,enclosure in r.rules.vias[r.rules.refnet[ref]]:
                 physical=r.model.nodes[r.model.ids[via]]['poly']
                 if source.intersection(physical).area<=r.tol*r.tol:continue
+                pad=Landing.from_source(physical,enclosure,source,r.tol).protected
                 for ds,v in b['values'].items():
                     states=np.zeros((grid.count,3));digits=dict(zip(b['owners'],ds))
                     positions=(grid.locals[owner][digits[owner]],) if owner in digits else grid.locals[owner] if owner>=0 else (np.zeros(3),)
                     for pose in positions:
                         if owner>=0:states[owner]=pose
                         if not covers_ports(v['geometry'],[r.model.moved(physical,owner,states)],r.tol):return True
+                        if v['pieces'] and not all(q.get('ignored') for q in v['pieces']):
+                            if (np.any(pose) or any(digits.values())) and pad_loss(v['geometry'],[r.model.moved(pad,owner,states)],r.tol)>0.:return True
+            if width or angle:
+                for ds,v in b['values'].items():
+                    if not any(ds):continue
+                    active=shapely.union_all([q['regions']['A'] for q in v['pieces'] if not q.get('ignored')])
+                    if active.is_empty:continue
+                    g=v['geometry']
+                    if angle and has_angle_violation(g,angle,r.tol,active):return True
+                    if width and any_violation('width',g.wkb,r.tol,width) and rule_region(g,width,r.tol).intersects(active):return True
         items=[(digits,(v['geometry'],v['pieces'])) for digits,v in b['values'].items()]
         geos=np.asarray([v[0] for _,v in items],object)
         tables.append(dict(ref=ref,kind='copper',net=r.rules.refnet[ref],owners=b['owners'],items=items,

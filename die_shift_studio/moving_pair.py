@@ -1,0 +1,90 @@
+"""Reference frames for conductors terminated by two physical moving vias."""
+from collections import defaultdict
+from dataclasses import dataclass
+
+import numpy as np
+
+from .preview import rigid_transform
+
+
+def rotate(vector, angle):
+    c, s = np.cos(angle), np.sin(angle)
+    return np.array([[c, -s], [s, c]]) @ vector
+
+
+@dataclass(frozen=True)
+class PairFrame:
+    center: np.ndarray
+    base: np.ndarray
+    relative: np.ndarray
+
+    @classmethod
+    def from_endpoints(cls, center, state, other_center, other_state):
+        # Express both transforms about the same origin, then evaluate the
+        # moving terminal in the coordinate system rigidly attached to the other.
+        delta = rigid_transform(np.asarray([center]), other_center, other_state)[0] - center
+        base = np.r_[delta, other_state[2]]
+        xy = rotate(state[:2] - delta, -base[2])
+        return cls(center, base, np.r_[xy, state[2] - base[2]])
+
+    def boundary_state(self, fraction):
+        return np.r_[self.base[:2] + rotate(self.relative[:2] * fraction, self.base[2]),
+                     self.base[2] + self.relative[2] * fraction]
+
+
+def frames(entries, centers, states):
+    grouped = defaultdict(list)
+    for entry in entries:
+        if entry.get('paired_vias') and entry['plan'] is not None:
+            grouped[entry['layer'], entry['index']].append(entry)
+    result = {}
+    for ref, rows in grouped.items():
+        endpoints = rows[0]['paired_vias']
+        owners = {owner for _, owner in endpoints}
+        active = {via for entry in rows for via in entry['refs']}
+        if len(owners) > 1 and all(via in active for via, _ in endpoints):
+            # Two distinct editable zones retain their shared nominal core.
+            continue
+        owner = rows[0]['owner']
+        other = next((o for via, o in endpoints if via not in active), owner)
+        result[ref] = (PairFrame(centers[owner], states[owner], np.zeros(3)) if other == owner else
+                       PairFrame.from_endpoints(centers[owner], states[owner], centers[other], states[other]))
+    return result
+
+
+def boundary_pose(piece, frame, side):
+    center = frame['rotation_centers'][piece['die']]
+    if 'boundary_states' in piece:
+        return center, piece['boundary_states'][side]
+    return center, frame['states'][piece['die']] * piece.get('endpoint_weights', (1., 0.))[side]
+
+
+def relative_pose(piece, frame):
+    owner = piece['die']
+    return frame['rotation_centers'][owner], piece.get('relative_pose', frame['states'][owner])
+
+
+def repose(pieces, geometry, pose):
+    """Map the assembled local copper and visible before/after witnesses to world XY."""
+    from .reconstruction import transform
+    if np.any(pose.base):
+        geometry = transform(geometry, pose.center, pose.base)
+    for q in pieces:
+        weights = q.get('endpoint_weights', (1., 0.))
+        q['boundary_states'] = tuple(pose.boundary_state(weight) for weight in weights)
+        q['relative_pose'] = pose.relative
+        q['base_pose'] = pose.base
+        if not np.any(pose.base):
+            continue
+        q['regions'] = {key: transform(g, pose.center, pose.base) for key, g in q['regions'].items()}
+        q['bridge'], q['fixed'], q['moved'] = (q['regions'][key] for key in 'ABC')
+        q['immovable'] = q['fixed']
+        for name in ('moved_cut', 'extra_cut', 'missing_region', 'moving_handle_endpoint'):
+            if q.get(name) is not None:
+                q[name] = transform(q[name], pose.center, pose.base)
+        if q.get('seam') and q['moved_cut'] is not None:
+            q['seam'] = [q['seam'][0], list(q['moved_cut'].centroid.coords[0])]
+        if q.get('fallback_regions'):
+            q['fallback_regions'] = {key: transform(g, pose.center, pose.base)
+                                     for key, g in q['fallback_regions'].items()}
+    return geometry

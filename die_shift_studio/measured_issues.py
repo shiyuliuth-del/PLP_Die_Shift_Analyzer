@@ -42,7 +42,6 @@ def catalogue(frame,case,model=None):
         for node in model.nodes:
             if node['owner']>=0:owners_by_net.setdefault(node['net'],set()).add(int(node['owner'])+1)
     import shapely,math
-    from shapely.affinity import rotate
     rows=[];origin=np.asarray(case['board'].bounds[:2])
     for i,q in enumerate(frame['drc_locations'] if 'drc_locations' in frame else locations(frame.get('drc',()),measure=frame.get('measure_drc',True))):
         from .resources import cancel_check
@@ -58,15 +57,19 @@ def catalogue(frame,case,model=None):
         poses=frame.get('states')
         angle=float(poses[next(iter(dies))-1,2]) if len(dies)==1 and poses is not None and next(iter(dies))<=len(poses) else 0.
         witness=q['geometry'];margin=max(float(getattr(model.data,'dbu_um',.001)) if model is not None else .001,1e-6)
-        if len(dies)==1:
-            local=rotate(witness,-angle,origin=(0,0),use_radians=True)
-            lo=np.asarray(local.bounds[:2])-margin;hi=np.asarray(local.bounds[2:])+margin
-            rectangle=rotate(shapely.box(*lo,*hi),angle,origin=(0,0),use_radians=True)
-        else:
-            rectangle=witness.minimum_rotated_rectangle
-            if rectangle.geom_type!='Polygon':rectangle=witness.buffer(margin).minimum_rotated_rectangle
-            edge=np.diff(np.asarray(rectangle.exterior.coords),axis=0)[0];angle=math.atan2(edge[1],edge[0])
-        corners=np.asarray(rectangle.exterior.coords)[:4].tolist()
+        center=np.asarray(point)
+        if len(dies)!=1:
+            # The minimum rectangle selects a direction. A sub-grid witness
+            # can collapse to an edge and may have large absolute coordinates.
+            edges=np.diff(shapely.get_coordinates(witness.minimum_rotated_rectangle),axis=0)
+            if len(edges):
+                edge=edges[np.argmax(np.linalg.norm(edges,axis=1))]
+                angle=math.atan2(edge[1],edge[0])
+        c,s=math.cos(angle),math.sin(angle)
+        axes=np.array([[c,-s],[s,c]])
+        local=(shapely.get_coordinates(witness)-center)@axes
+        lo=local.min(axis=0)-margin;hi=local.max(axis=0)+margin
+        corners=(center+np.array([[lo[0],lo[1]],[hi[0],lo[1]],[hi[0],hi[1]],[lo[0],hi[1]]])@axes.T).tolist()
         rows.append(dict(die_ids=sorted(dies) or [0],number=i+1,kind=q['kind'],layers=list(q.get('layers',(q.get('layer',''),))),
                          bounds_um=bounds,point_um=point,marker_corners_um=corners,marker_angle_deg=math.degrees(angle),package_relative_bounds_um=(np.asarray(bounds)-np.tile(origin,2)).tolist(),
                          required_um=q.get('required_um'),required_deg=q.get('required_deg'),actual_um=q.get('actual_um'),actual_deg=q.get('actual_deg'),

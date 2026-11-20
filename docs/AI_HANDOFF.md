@@ -1,3 +1,9 @@
+# V58 双运动端孔、孔盘保留与联合输出
+
+`moving_pair.py` 将单动区的近端位姿转换至对端真实刚体坐标系，求解后的铜、控制柄与失败见证再统一转回全局。`reconstruction.py` 保留真实端孔对应的两个源路由身份。`routing_quality.py` 从源铜提取可识别孔盘，并在已通过连通核验的活跃区域内尝试扩宽和修整内角。`topology_routing.py` 以完整孔盘、完整包围、局部覆盖为候选顺序，并用实际异网铜和端孔复核。概率目录同时记录两端的 DIE 依赖，必要时联合计算最终铜。`gui.py` 只在后台任务仍在运行时显示任务状态。
+
+验证与配合 RealDataAnalyse 输出见 [V58 使用说明](V58_使用说明.md)。
+
 # V57 随动诊断、复杂铜面动区、低概率低亮与层叠选中列
 
 `reconstruction.py` 与 `reconstruction_events.py` 修复整块随动图形失联时的 `missing_region`（改用移动后的 `regions['C']` 而非原位 `source`），并在离散扫描中接入 `ignored_motion.linked_owners`。`ignored_motion.entries` 与 `gui.py` 确保被忽略的图形自动清除全部动区并覆盖旧选框，同时在 `die_internal` 保留所属 DIE 与显式静止/随动优先级。

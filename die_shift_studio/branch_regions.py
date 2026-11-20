@@ -146,7 +146,8 @@ def assemble(r,source,rows,states):
     # Absorb narrow terminal-free floating rigid slivers sandwiched between two
     # transition domains of the same owner (e.g. close parallel branch cuts on
     # a shared copper neck) so they form one clean, wider transition zone.
-    if len(domains)>1 and not any(q.get('strict_box') is not None for q in rows):
+    distinct_paths={q['route_plan'].route.wkb for q in rows}
+    if len(domains)>1 and len(distinct_paths)>1 and not any(q.get('strict_box') is not None for q in rows):
         gap_limit=max(r._rule_width*2.5,50.)
         absorbed=set()
         for i,g in enumerate(rigid):
@@ -305,21 +306,22 @@ def assemble(r,source,rows,states):
     return result
 
 
-def consolidate(r,pieces,states):
+def consolidate(r,pieces,states,local_states=None):
     groups={};other=[]
     for q in pieces:
         if q.get('graph_branch') and q.get('route_plan') is not None:groups.setdefault((q['layer'],q['index'],q['die'],q['route_plan'].source.wkb),[]).append(q)
         else:other.append(q)
     for rows in groups.values():
         source=rows[0]['route_plan'].source
+        posed=(local_states or {}).get((rows[0]['layer'],rows[0]['index']),states)
         cache_key=('branch-assembly-local-intervals-v57',r.rules.identity,r.settings.reconstruction_style,
-                   tuple(r.model.bound.centers[rows[0]['die']]),states[rows[0]['die']].tobytes(),
+                   tuple(r.model.bound.centers[rows[0]['die']]),posed[rows[0]['die']].tobytes(),
                    tuple((q['route_identity'],q['interval'],q['boundary_angles'],tuple(q['nominal_regions'][k].wkb for k in 'ABC')) for q in rows))
         cached=r.geometry_pool.get(cache_key)
         if cached is not None:
             other.extend(dict(q,regions=dict(q['regions'])) for q in cached);continue
         try:
-            assembled=assemble(r,source,rows,states)
+            assembled=assemble(r,source,rows,posed)
             r.geometry_pool.put(cache_key,tuple(dict(q,regions=dict(q['regions'])) for q in assembled))
             other.extend(assembled)
         except shapely.errors.GEOSException as exc:

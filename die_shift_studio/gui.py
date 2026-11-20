@@ -819,9 +819,12 @@ class MainWindow(W.QMainWindow):
         def finish():
             worker._task_tracked=False;self._tasks.pop(id(worker),None);self.task_control.finished();self.log_bus.emit(f'{name}：'+('已取消' if worker.cancelled.is_set() else '线程退出')+f'，耗时 {time.perf_counter()-start:.3f} s')
             if self._closing and not self._tasks:QtCore.QTimer.singleShot(0,self.close)
-            if not self._tasks:self.progress.hide();self.cleanup_retired_sessions()
+            if not self._tasks:
+                self.progress.hide()
+                self.statusBar().clearMessage()
+                self.cleanup_retired_sessions()
             else:
-                n,t=next(reversed(self._tasks.values()));self.progress.setValue(n);self.progress.setFormat(f'{n}% · '+t[:36])
+                n,t=next(reversed(self._tasks.values()));self.progress.setValue(n);self.progress.setFormat(f'{n}% · '+t[:36]);self.statusBar().showMessage(t)
         worker.finished.connect(finish)
     def refresh_cache_status(self):
         size,total,count,pinned=self.cache_registry.statistics(self.cache_project_key)
@@ -1272,7 +1275,7 @@ class MainWindow(W.QMainWindow):
             s=self._coupled_data if self.coupled_view() else frame['width_summary']
             if s:message+=f" · {SCOPE_NAMES[self.view_settings.evaluation_scope]} {s['package_states']:,} 种姿态，{len(s['lines'])} 条风险线路"
             else:message+=' · 正在核实型变后首行汇总'
-        self.statusBar().showMessage(message)
+        self.log_bus.emit(message)
         self.refresh_extreme_colors(frame)
     def present_frame(self,frame):
         if self.cut_drag.state is not None:return
@@ -2112,7 +2115,6 @@ class MainWindow(W.QMainWindow):
         def rejected(message):
             if worker.view_ticket!=self.preview_ticket:return
             self.statusBar().showMessage('预演未应用：'+message.split('Traceback')[0]);self.error(message)
-        worker.progress.connect(lambda n,t:self.statusBar().showMessage(t) if worker.view_ticket==self.preview_ticket else None)
         worker.done.connect(accepted);worker.failed.connect(rejected)
         def finished():
             if actual is not None:actual.busy=False

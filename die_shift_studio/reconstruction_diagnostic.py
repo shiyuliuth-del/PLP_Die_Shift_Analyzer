@@ -29,7 +29,12 @@ def display(result,centers,states):
             if part is None:continue
             try:
                 from .connection_curves import connection_data
-                _,_,_,_,near,far,*_=connection_data(part,plan,centers[q['die']],states[q['die']])
+                center=centers[q['die']]
+                _,_,_,_,near,far,*_=connection_data(part,plan,center,q.get('relative_pose',states[q['die']]))
+                if 'base_pose' in q:
+                    from .preview import rigid_transform
+                    near=rigid_transform(near,center,q['base_pose'])
+                    far=rigid_transform(far,center,q['base_pose'])
                 for a,b in zip(near,far):segments.append(dict(layer=q['layer'],points=np.asarray([a,b],float)))
             except (ValueError,shapely.errors.GEOSException):continue
         pieces.append(q)

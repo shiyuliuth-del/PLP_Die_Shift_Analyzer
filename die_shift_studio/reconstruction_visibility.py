@@ -8,7 +8,8 @@ from shapely.geometry.polygon import orient
 from .resources import cancel_check
 
 
-def trace(poly,start,end,width):
+def trace(poly,start,end,width,*,max_edges=None):
+    checked=0
     # Thousands of visibility edges query the SAME polygon. Preparing its
     # segment index once avoids repeatedly scanning every foreign-net ring.
     # Prepared GEOS indexes are lazily mutated. Never attach one to a
@@ -62,7 +63,10 @@ def trace(poly,start,end,width):
                 edges=np.minimum(i,neighbours_i)*n+np.maximum(i,neighbours_i)
                 missing=np.array([q for q,code in enumerate(edges) if int(code) not in tested],dtype=int)
                 for offset in range(0,len(missing),512):
-                    cancel_check();indices=missing[offset:offset+512];targets=neighbours_i[indices]
+                    cancel_check();indices=missing[offset:offset+512]
+                    checked+=len(indices)
+                    if max_edges is not None and checked>max_edges:return None
+                    targets=neighbours_i[indices]
                     lines=shapely.linestrings(np.stack((np.repeat(xy[i][None,:],len(targets),axis=0),xy[targets]),axis=1))
                     inside=shapely.covers(poly,lines)
                     tested.update((int(edges[j]),bool(ok)) for j,ok in zip(indices,inside))
