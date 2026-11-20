@@ -449,7 +449,7 @@ class Window(W.QMainWindow):
         self.bindings[str(Path(endpoint).resolve())] = info.get('instance_id')
         self.button_status(self.connect_button, True)
         self.connect_button.setToolTip(f'连接正常 · ready={info.get("ready")} · 工程={info.get("project")}')
-        if info.get('die_count'):
+        if info.get('die_count') and not self.measurement:
             self.dies.setValue(info['die_count'])
 
     def connect_server(self):
