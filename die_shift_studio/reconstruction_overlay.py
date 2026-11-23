@@ -11,6 +11,7 @@ from matplotlib.patches import Rectangle
 from .reconstruction import normalize_via_refs,transform
 from .qt_compat import Qt,QtCore,QtWidgets as W
 from .reconstruction_events import zone_key,active_region,color_for,PALETTE,RANK
+from .edit_history import record
 
 CUT_COLOR='#237ab9'
 SECOND_CUT_COLOR=CUT_COLOR
@@ -232,7 +233,9 @@ class ReconstructionOverlay:
         dragging=edit is not None and w.cut_drag.state is edit
         edit_stamp=(id(edit),dragging,0 if dragging else id(edit['marker'])) if edit else None
         staged_info=self.staged_overlay if (self.active() and getattr(w,'reconstruction_pending',False)) else None
-        stamp=(id(data),id(bank),vis,w.view_bounds,order,nominal,pose_low,threshold,edit_stamp,repr(w.layer_styles),id(staged_info))
+        allow_pad=w.view_settings.reconstruction_allow_moving_pad
+        deleted=getattr(w,'pending_deleted_shapes',None) if self.active() and getattr(w,'reconstruction_pending',False) else None
+        stamp=(id(data),id(bank),vis,w.view_bounds,order,nominal,pose_low,threshold,edit_stamp,repr(w.layer_styles),id(staged_info),allow_pad,id(deleted))
         if stamp==self.stamp:self.draw_labels();return
         if self.stamp is not None and self.stamp[0]!=id(data) and edit is None:
             if self.hover is not None:self.hover.set_visible(False)
@@ -284,6 +287,10 @@ class ReconstructionOverlay:
             if q.get('box_invalid'):continue
             for kind,target,dot_list,line_list in (('moved','moved_cut',dots,first),('extra','extra_cut',far_dots,second)):
                 face=self.handles.get((self._key(q),kind),q.get(target))
+                if face is not None and not allow_pad:
+                    if face.geom_type in ('Point','MultiPoint'):continue
+                    if face.geom_type=='GeometryCollection':
+                        face=shapely.GeometryCollection([part for part in face.geoms if part.geom_type not in ('Point','MultiPoint')])
                 if self.owns_handle(q,kind,edit):
                     if face is None:continue
                     components=list(shapely.get_parts(face))
@@ -346,6 +353,12 @@ class ReconstructionOverlay:
             for layer,box_poly in staged_info.get('boxes',()):
                 if layer in vis and not box_poly.is_empty and _in_view(box_poly.bounds,w.view_bounds):
                     staged.append(patch(box_poly));staged_faces.append(to_rgba('#5992b628'));staged_edges.append(to_rgba('#2b6ea3'))
+        for (layer,_),g in (deleted or {}).items():
+            if layer not in vis or g.is_empty or not _in_view(g.bounds,w.view_bounds):continue
+            face,edge='#d3848138','#a14747'
+            staged.append(patch(g));staged_faces.append(to_rgba(face));staged_edges.append(to_rgba(edge))
+            if len(tag_items)<12:
+                point=g.representative_point();tag_items.append((point.x,point.y,'待算：删除图形',edge))
         self.staged.set_paths(staged);self.staged.set_visible(bool(staged))
         if staged:
             self.staged.set_facecolors(staged_faces);self.staged.set_edgecolors(staged_edges);self.staged.set_alpha(None)
@@ -496,6 +509,7 @@ class CutDrag:
         piece=editable_piece(piece,(event.xdata,event.ydata),kind)
         if piece.get('route_plan') is not None:
             plan=piece['route_plan']
+            if not w.view_settings.reconstruction_allow_moving_pad and plan.allows_pad_point:return
             saved=next((row for row in w.view_settings.reconstruction_intervals if (row[0],row[1],row[2],normalize_via_refs(row[3]),row[4])==(*plan.key,plan.identity)),None)
             if saved is not None:
                 part=plan.partition(saved[-2],saved[-1])
@@ -737,6 +751,7 @@ class CutDrag:
             if state['resume_preview']:w.request_preview(quiet=True,pose_change=True)
             return
         self.retained=state
+        record(w)
         w.view_settings=updated
         if updated.reconstruction_auto:
             self._cancel_live()
@@ -772,6 +787,8 @@ class CutDrag:
         if plan is None:return
         a,b=piece['interval'];target=plan.nominal_second if which else plan.nominal_first
         settings=_store_cut(self.w.view_settings,piece,None,plan.route.interpolate(target).coords[0],'extra' if which else 'cut')
+        if settings==self.w.view_settings:return
+        record(self.w)
         self.w.view_settings=settings;self.w.invalidate_reconstruction_edit();self.w.request_preview(quiet=True)
 
 
@@ -908,7 +925,9 @@ class RegionSelect:
             # selects. Future drags then become the explicit per-route edits.
             for name in ('reconstruction_intervals','reconstruction_angles'):
                 changes[name]=tuple(row for row in getattr(settings,name) if not selected(row[:2]))
-        self.w.view_settings=replace(settings,**changes)
+        updated=replace(settings,**changes)
+        if updated==settings:return
+        record(self.w);self.w.view_settings=updated
         self.w.invalidate_reconstruction_edit();self.w.request_preview(quiet=True)
         if self.w.view_settings.reconstruction_auto:
             self.w.statusBar().showMessage('已提交框选动区；必要时在原选框周围延伸至可用边界')

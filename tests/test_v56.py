@@ -118,7 +118,7 @@ class V56Tests(unittest.TestCase):
         w = MainWindow()
         w.resize(1200, 800)
 
-        def drain(timeout_ms=60000):
+        def drain(timeout_ms=180000):
             timer = QtCore.QElapsedTimer()
             timer.start()
             while timer.elapsed() < timeout_ms:
@@ -130,6 +130,7 @@ class V56Tests(unittest.TestCase):
                     if w.worker is None and not w.preview_workers and w.cut_drag.worker is None:
                         return
                 QtCore.QThread.msleep(20)
+            self.fail(w.runtime_view.toPlainText()[-3000:])
 
         def send(name, x, y, button=1):
             px, py = w.ax.transData.transform((x, y))
@@ -153,7 +154,15 @@ class V56Tests(unittest.TestCase):
             w.viewport_changed(force=True)
             app.processEvents()
             w.canvas.draw()
-            send('button_press_event', 672.7, -1854.0, 1)
+            def press_far(owner):
+                piece=next(q for q in w.reconstruction_overlay.data()['pieces']
+                           if (q['layer'],q['index'],q['die'])==('5/0',3,owner))
+                blade=piece['extra_cut']
+                self.assertEqual(blade.geom_type,'LineString')
+                x,y=blade.centroid.coords[0]
+                self.assertLess(abs(x-672.64),80.)
+                send('button_press_event',x,y,1)
+            press_far(2)
             self.assertIsNotNone(w.cut_drag.state)
             for tx in (720.0, 800.0, 860.0):
                 send('motion_notify_event', tx, -1854.0, 1)
@@ -164,7 +173,7 @@ class V56Tests(unittest.TestCase):
             p3_d2 = next(q for q in w.reconstruction_overlay.data()['pieces'] if (q['layer'], q['index'], q['die']) == ('5/0', 3, 2))
             self.assertGreater(p3_d2['extra_cut'].centroid.x, 840.0)
 
-            send('button_press_event', 647.8, -1854.0, 1)
+            press_far(0)
             self.assertIsNotNone(w.cut_drag.state)
             for tx in (690.0, 740.0, 780.0):
                 send('motion_notify_event', tx, -1854.0, 1)

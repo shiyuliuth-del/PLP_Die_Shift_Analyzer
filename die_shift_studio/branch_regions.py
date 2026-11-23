@@ -240,7 +240,7 @@ def assemble(r,source,rows,states):
                 endpoint=plan.route.coords[0 if side==0 else -1]
                 landing=plan.land if side==0 else shapely.union_all(plan.anchors)
                 whole=(s==0 if side==0 else abs(s-plan.length)<=r.tol)
-                if side==0 and getattr(plan,'pad_modes',(True,False))[0] and (whole or landing.difference(group).area<=r.tol*r.tol):
+                if side==0 and plan.allows_pad_point and (whole or landing.difference(group).area<=r.tol*r.tol):
                     actual=getattr(plan,'terminal_vias',((),()))[side]
                     terminal=min(actual,key=lambda g:g.distance(shapely.Point(endpoint))).centroid if actual else shapely.Point(endpoint)
                     terminals.append(terminal)

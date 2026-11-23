@@ -88,7 +88,8 @@ class V52Tests(unittest.TestCase):
     def test_internal_manual_box_grows_transversally_without_touching_pads(self):
         plan=SimpleNamespace(source=box(-3,-5,103,5),tolerance=.001,width=10.,
                              route=LineString([(0,0),(100,0)]),length=100.,
-                             land=box(-2,-2,2,2),anchors=[box(98,-2,102,2)],tangent=lambda _: (1.,0.))
+                             land=box(-2,-2,2,2),anchors=[box(98,-2,102,2)],tangent=lambda _: (1.,0.),
+                             allows_pad_point=False)
         box_inside=box(45,-1,52,1)
         result=usable_partition(plan,box_inside)
         self.assertTrue(result['A'].covers(box_inside))

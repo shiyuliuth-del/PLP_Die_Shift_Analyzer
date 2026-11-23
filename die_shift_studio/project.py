@@ -53,6 +53,13 @@ def normalize_project(project):
     edits=p.setdefault('node_edits',[])
     if not isinstance(edits,list) or any(not isinstance(q,dict) or not {'layer','index','original','nodes'}<=q.keys() for q in edits):
         raise ValueError('工程节点编辑必须为含图层、图形编号、源指纹与坐标的列表')
+    from .area_filter import normalize_deletions
+    p['deleted_shapes']=list(normalize_deletions(p.get('deleted_shapes',())))
+    apd=p.get('apd_export',{})
+    if (not isinstance(apd,dict) or not isinstance(apd.get('template',''),str)
+        or not isinstance(apd.get('layers',{}),dict)
+        or any(not isinstance(k,str) or not isinstance(v,str) for k,v in apd.get('layers',{}).items())):
+        raise ValueError('APD 导出设置格式无效')
     for ignore_name in ('ignored_width_lines','ignored_reconstruction'):
         saved=p.get(ignore_name)
         if saved is not None:

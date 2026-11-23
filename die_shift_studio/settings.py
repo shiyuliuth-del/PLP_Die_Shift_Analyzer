@@ -19,6 +19,8 @@ def normalize_display(values):
 
 @dataclass(frozen=True)
 class ViewSettings:
+    max_undo_steps:int=10
+    space_export_interval_um:float=5.
     from .drc_policy import ALL
     drc_checks:tuple=ALL
     drc_visible:tuple=ALL
@@ -102,6 +104,7 @@ class ViewSettings:
     reconstruction_enabled:bool=False
     reconstruction_auto:bool=True
     reconstruction_live:bool=True
+    reconstruction_allow_moving_pad:bool=False
     reconstruction_style:str="linear"
     reconstruction_boundary_mode:str="wide"
     reconstruction_ignored:tuple=()
@@ -229,6 +232,8 @@ class ViewSettings:
         integers={'width_yield_decimals','width_label_decimals','animation_fps','animation_speed','camera_speed','contact_box_budget','sample_exponent','random_seed','quadrature_order','angle_bins','footprint_samples','space_resolution','animation_duration_ms','animation_steps'}
         integers.update(('max_threads','max_memory_mb','table_page_limit'))
         limits.update(table_page_limit=(2,2000),max_threads=(0,1024),max_memory_mb=(0,16777216))
+        limits['max_undo_steps']=(0,1000);integers.add('max_undo_steps')
+        limits['space_export_interval_um']=(.001,10000.)
         limits.update(width_yield_exponent=(8,20),width_yield_seed=(0,2147483647),width_grid_nodes=(3,21))
         limits.update(reconstruction_pad_trigger_um=(0,1000),reconstruction_grid_nodes=(3,9),reconstruction_corner_guard_um=(0,1000),cache_max_entries=(10,100000),yield_sample_exponent=(8,20),yield_box_budget=(64,65536),yield_tolerance=(.000001,.1),
 
@@ -239,7 +244,7 @@ class ViewSettings:
             v=getattr(q,key)
             if not isinstance(v,(int,float)) or not math.isfinite(v) or not lo<=v<=hi or (key in integers and int(v)!=v):
                 raise ValueError(f'设置 {key} 超出范围 {lo}—{hi}')
-        for key in ('reconstruction_auto','save_project_results','show_contact_markers','reconstruction_live','width_show_probability','show_annulus_range','show_spacing_range','show_low_contact','show_low_width','animation_enabled','animation_return_zero','probability_show_ranges','contact_marker_absolute','unadapted_marker_absolute'):
+        for key in ('reconstruction_auto','save_project_results','show_contact_markers','reconstruction_live','reconstruction_allow_moving_pad','width_show_probability','show_annulus_range','show_spacing_range','show_low_contact','show_low_width','animation_enabled','animation_return_zero','probability_show_ranges','contact_marker_absolute','unadapted_marker_absolute'):
             if not isinstance(getattr(q,key),bool):raise ValueError(key+'必须为布尔值')
         import re
         color=lambda v:isinstance(v,str) and re.fullmatch(r'#[0-9a-fA-F]{6}',v)
@@ -260,7 +265,7 @@ class ViewSettings:
 
     def reconstruction_key(self):
         """Everything the reconstruction result depends on besides the pose."""
-        return (True,'nominal-route-continuity-v59',self.reconstruction_die_mode,self.reconstruction_fixed_via_mode,self.reconstruction_fixed_via_follows,self.reconstruction_box_excluded,self.drc_checks,self.evaluation_scope,self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_pad_trigger_um,self.reconstruction_ignored,self.reconstruction_following,self.drc_tolerance_um,self.drc_min_angle_deg,
+        return (True,'nominal-route-continuity-v59',self.reconstruction_die_mode,self.reconstruction_fixed_via_mode,self.reconstruction_fixed_via_follows,self.reconstruction_box_excluded,self.drc_checks,self.evaluation_scope,self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_allow_moving_pad,self.reconstruction_pad_trigger_um,self.reconstruction_ignored,self.reconstruction_following,self.drc_tolerance_um,self.drc_min_angle_deg,
                 self.reconstruction_corner_guard_um,tuple(self.reconstruction_intervals),
                 self.reconstruction_forced,self.reconstruction_angles,self.reconstruction_deleted,self.reconstruction_added,
                 tuple(self.reconstruction_regions),tuple(self.reconstruction_boxes),tuple(self.reconstruction_angle_boxes),tuple(self.reconstruction_cuts),

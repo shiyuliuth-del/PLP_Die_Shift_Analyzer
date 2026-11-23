@@ -11,6 +11,22 @@ import shapely
 from .gds_merge import filled_polygon,winding_outline
 
 
+def normalize_deletions(rows):
+    """Deletion records name unfiltered objects and their original contours."""
+    import re
+    if not isinstance(rows,(list,tuple)):raise ValueError('删除图形记录必须为列表')
+    result={}
+    for row in rows:
+        if (not isinstance(row,(list,tuple)) or len(row)!=3 or not isinstance(row[0],str)
+                or type(row[1]) is not int or row[1]<0 or not isinstance(row[2],str)
+                or not re.fullmatch('[0-9a-f]{64}',row[2])):
+            raise ValueError('删除记录须包含图层、源图形编号和轮廓指纹')
+        ref=tuple(row[:2])
+        if ref in result and result[ref]!=row[2]:raise ValueError('同一图形的删除记录不一致')
+        result[ref]=row[2]
+    return tuple((*ref,result[ref]) for ref in sorted(result))
+
+
 def remap_project(project,mapping):
     p=copy.deepcopy(project);cfg=p.setdefault('settings',{})
     def ref(k,i):return mapping.get((k,int(i)))
@@ -34,19 +50,36 @@ def remap_project(project,mapping):
     return p
 
 
-def apply(data,project):
+def apply(data,project,*,reference=None):
     threshold=float(project.get('parameters',{}).get('minimum_area_um2',0.))
     edge=float(project.get('parameters',{}).get('minimum_edge_um',0.01))
     if not np.isfinite(edge) or edge<0:raise ValueError('最短边长须为有限非负数字')
-    if (threshold<=0 and edge<=0) or getattr(data,'fabrication_filter',None)==(threshold,edge):return data,project
+    deletions=normalize_deletions(project.get('deleted_shapes',()))
+    if (threshold<=0 and edge<=0 and not deletions) or getattr(data,'fabrication_filter',None)==(threshold,edge,deletions):return data,project
     from .short_edges import contract
+    from .gds_shapes import shape_nodes,node_fingerprint
+    base=getattr(data,'_source_snapshot',data)
+    removed_refs=set()
+    for layer,index,fingerprint in deletions:
+        if index>=len(base.layers.get(layer,())):raise ValueError(f'已删除图形 {layer} #{index+1} 的源索引无效')
+        kind,xy,_=shape_nodes(base,layer,index)
+        if node_fingerprint(kind,xy)!=fingerprint:raise ValueError(f'已删除图形 {layer} #{index+1} 的源轮廓已改变')
+        removed_refs.add((layer,index))
     out=copy.copy(data);out.layers={};out.shape_info={};out._area_base=data
-    out.fabrication_filter=(threshold,edge);out.minimum_edge_um=edge
+    out.fabrication_filter=(threshold,edge,deletions);out.minimum_edge_um=edge;out.deleted_shapes=deletions
     out.area_threshold=threshold;out.area_indices={};mapping={};removed=holes=shortened=0
     invalid=[]
+    previous=getattr(reference,'fabrication_filter',None)
+    reuse=getattr(reference,'_area_base',None) is data and previous is not None and previous[:2]==(threshold,edge)
     for key,arrays in data.layers.items():
         values=[];metadata=[];indices=[];descriptions=data.shape_info.get(key,[None]*len(arrays))
+        retained=dict(zip(reference.area_indices[key],zip(reference.layers[key],reference.shape_info[key]))) if reuse else {}
         for i,xy in enumerate(arrays):
+            if (key,i) in removed_refs:continue
+            if i in retained:
+                xy,meta=retained[i]
+                mapping[key,i]=len(values);indices.append(i);values.append(xy);metadata.append(meta)
+                continue
             g=filled_polygon(xy,True)
             try:clean=contract(g,edge)
             except ValueError:
@@ -61,10 +94,10 @@ def apply(data,project):
             else:meta=descriptions[i]
             mapping[key,i]=len(values);indices.append(i);values.append(xy);metadata.append(meta)
         out.layers[key]=values;out.shape_info[key]=metadata;out.area_indices[key]=indices
-    from .gds_shapes import shape_nodes,node_fingerprint
     out.node_edits=[]
-    out.edit_digest=hashlib.sha256((data.edit_digest+'|source-filters-v52|'+threshold.hex()+'|'+edge.hex()).encode()).hexdigest()
-    for attr in ('geometry_cache','prepared_case','prepared_auto','prepared_roles','_source_snapshot'):
+    deletion_key=json.dumps(deletions,separators=(',',':')) if deletions else ''
+    out.edit_digest=hashlib.sha256((data.edit_digest+'|source-filters-v52|'+threshold.hex()+'|'+edge.hex()+deletion_key).encode()).hexdigest()
+    for attr in ('geometry_cache','prepared_case','prepared_auto','prepared_roles','_source_snapshot','_edit_index_maps'):
         out.__dict__.pop(attr,None)
     # Q works in the filtered index space. Give visible edits a filtered
     # baseline for restore, while the unfiltered source remains authoritative
@@ -97,6 +130,7 @@ def apply(data,project):
     out._sanitized_token=tuple((k,id(v),len(v)) for k,v in out.layers.items())
     out.import_warnings=list(data.import_warnings)+[f'最小面积 {threshold:g} μm²：移除 {removed} 个图形，填去 {holes} 个小孔洞。源文件未改动。']
     out.import_warnings.append(f'最短边长 {edge:g} μm：处理 {shortened} 个图形。')
+    if deletions:out.import_warnings.append(f'工程中已删除 {len(deletions)} 个源图形，源文件未改动。')
     if invalid:
         out.import_warnings.append(f'{len(invalid)} 个轮廓删除短边后无有效几何，已忽略：'+', '.join(invalid[:20]))
     p=remap_project(project,mapping);p['node_edits']=out.node_edits

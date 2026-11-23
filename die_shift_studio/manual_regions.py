@@ -58,15 +58,27 @@ def partition(plan,polygon):
         return min(edges,key=lambda g:(g.distance(plan.route.interpolate(s)),-g.length)) if edges else shapely.LineString()
     near=seam(c,a) if not c.is_empty else shapely.LineString()
     far=seam(d,b) if not d.is_empty else shapely.LineString()
-    if near.is_empty:near=shapely.Point(plan.route.coords[0]);a=0.
+    def blade_angle(edge,s):
+        if edge.is_empty or edge.geom_type!='LineString':return 0.
+        u=np.asarray(edge.coords[-1])-edge.coords[0];v=plan.tangent(s);normal=np.array([-v[1],v[0]])
+        angle=math.atan2(u[1],u[0])-math.atan2(normal[1],normal[0])
+        return (angle+math.pi/2)%math.pi-math.pi/2
+    allow_pad_point=getattr(plan,'allows_pad_point',True)
+    whole_moving_pad=not allow_pad_point and not plan.land.is_empty and plan.land.difference(active).area<=plan.tolerance**2
+    if near.is_empty or whole_moving_pad:
+        if not allow_pad_point:
+            # The selection covered the moving endpoint. Re-establish the nearest
+            # legal straight cut and preserve the far blade angle where possible.
+            if far.is_empty:return None
+            restored=plan.moving_line_partition(b,(0.,blade_angle(far,b)))
+            if restored is None:return None
+            return dict(restored,manual_angles=(False,True),strict_box=polygon,
+                        box_invalid=ambiguous,box_complex=restored['A'].geom_type!='Polygon')
+        near=shapely.Point(plan.route.coords[0]);a=0.
     # Trapped boxes remain visible diagnostics with no fixed-side dot.
     if far.is_empty:ambiguous=True
-    angles=[]
-    for edge,s in ((near,a),(far,b)):
-        if edge.is_empty or edge.geom_type!='LineString':angles.append(0.);continue
-        u=np.asarray(edge.coords[-1])-edge.coords[0];v=plan.tangent(s);normal=np.array([-v[1],v[0]])
-        angle=math.atan2(u[1],u[0])-math.atan2(normal[1],normal[0]);angles.append((angle+math.pi/2)%math.pi-math.pi/2)
-    return dict(A=active,B=d,C=c,near=near,far=far,a=a,b=b,angles=tuple(angles),manual_angles=(True,True),strict_box=polygon,
+    angles=(blade_angle(near,a),blade_angle(far,b))
+    return dict(A=active,B=d,C=c,near=near,far=far,a=a,b=b,angles=angles,manual_angles=(True,True),strict_box=polygon,
                 box_invalid=ambiguous,box_complex=active.geom_type!='Polygon' or near.geom_type not in ('LineString','Point') or far.geom_type not in ('LineString','Point'))
 
 

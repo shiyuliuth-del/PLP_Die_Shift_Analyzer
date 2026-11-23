@@ -6,6 +6,28 @@ from dataclasses import replace
 def key(plan):return (*plan.key,plan.identity)
 
 
+def retire_pad_intervals(settings,solver,pieces=()):
+    """Keep the far end of each existing point-mode zone when closing the mode."""
+    if settings.reconstruction_allow_moving_pad or solver is None:
+        return settings
+    rows={row[:5]:row for row in settings.reconstruction_intervals}
+    for piece in pieces:
+        for member in piece.get('graph_members',(piece,)):
+            plan=member.get('route_plan');a,b=member['interval']
+            if plan is not None and a==0 and member.get('strict_box') is None:
+                identity=key(plan)
+                rows.setdefault(identity,(*identity,a,b))
+    if not any(row[5]==0 for row in rows.values()):return settings
+    plans={key(plan):plan for entry in getattr(solver,'_plans',()) or ()
+           if (plan:=entry['plan']) is not None}
+    migrated=[]
+    for row in rows.values():
+        plan=plans.get(row[:5]) if row[5]==0 else None
+        part=plan.moving_line_partition(row[6]) if plan is not None else None
+        migrated.append((*row[:5],part['a'],part['b']) if part is not None else row)
+    return replace(settings,reconstruction_intervals=tuple(migrated))
+
+
 def blade_angles(settings,plan,a,b,defaults=(0.,0.)):
     angles=list(defaults);manual=[False,False]
     for row in settings.reconstruction_angles:
@@ -113,7 +135,7 @@ def change_zone(window,action,piece=None,ref=None,point=None,side=None,refs=()):
             for scale in (1,2,4,8,16,32):
                 left=max(0.,position-half*scale);right=min(plan.length,position+half*scale)
                 part=plan.partition(left,right)
-                if part is not None and part['A'].covers(nominal):chosen=(left,right);break
+                if part is not None and part['A'].covers(nominal):chosen=(part['a'],part['b']);break
             if chosen is None:
                 window.statusBar().showMessage('该点击位置不能形成保持连接的动区，未在其他位置替代添加');return
             left,right=chosen;identity=uuid.uuid4().hex[:12];new_id=base_id+'~'+identity
@@ -141,6 +163,9 @@ def change_zone(window,action,piece=None,ref=None,point=None,side=None,refs=()):
         updated=replace(cfg,reconstruction_added=added,reconstruction_deleted=deleted,reconstruction_intervals=tuple(intervals),
                         reconstruction_ignored=tuple(sorted(ignored)),reconstruction_forced=tuple(sorted(forced)))
     else:return
+    if updated==cfg:return
+    from .edit_history import record
+    record(window)
     window.view_settings=updated;window.invalidate_reconstruction_edit();window.request_preview(quiet=True)
 
 

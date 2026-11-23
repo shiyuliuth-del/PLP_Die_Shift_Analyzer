@@ -414,7 +414,7 @@ class Reconstructor:
                     plan.physical_end=any(g.dwithin(shapely.Point(line.coords[-1]),self.tol) for g in terminal_fixed)
                     plan.reaches_anchor=plan.physical_end or any(g.dwithin(shapely.Point(line.coords[-1]),self.tol*8) for g in fixed)
                     plan.anchored_bent=plan.reaches_anchor and len(plan.xy)>2
-                    plan.pad_modes=(physical_start,False)
+                    plan.pad_modes=(self.settings.reconstruction_allow_moving_pad and physical_start,False)
                     plan.pad_trigger=self.settings.reconstruction_pad_trigger_um
                     if ownership_domain is not None and not seam.is_empty:
                         from .reconstruction_route import terminal_marks
@@ -563,7 +563,7 @@ class Reconstructor:
         # Route construction is pose-independent and reused after every handle edit.
         from .session_cache import logical_fingerprint
         base_key=logical_fingerprint((self.model.data.geometry_id,self.model.roles,self.model.connections.order,
-                                'source-routes-v58',self.settings.evaluation_scope=='risk',self.rules.identity,bool(getattr(self,'measured_only',False)),self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
+                                'source-routes-v58',self.settings.evaluation_scope=='risk',self.rules.identity,bool(getattr(self,'measured_only',False)),self.settings.reconstruction_allow_moving_pad,self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
         # Forcing/editing one source must not rebuild every source path. Mine
         # membership includes enclosure filtering; all-via ownership controls
         # allocation. Existing path identities survive later manual edits.
@@ -884,7 +884,7 @@ class Reconstructor:
         for (layer,index),feature in features.items():
             ps=feature['pieces'];source=feature['source']
             owners=sorted({q['die'] for q in ps}|{v['owner'] for v in self.vias_by_target.get((layer,index),()) if v['owner']>=0})
-            compose_key=('composed-continuity-v58',self.rules.identity,layer,index,quick,self.settings.reconstruction_style,self.settings.reconstruction_boundary_mode,
+            compose_key=('composed-continuity-v58',self.rules.identity,layer,index,quick,self.settings.reconstruction_style,self.settings.reconstruction_boundary_mode,self.settings.reconstruction_allow_moving_pad,
                          tuple((owner,states[owner].tobytes(),self.model.bound.centers[owner].tobytes()) for owner in owners),
                          tuple((q['route_identity'],q['interval'],q['boundary_angles'],q.get('ignored'),q.get('ignored_following'),q['endpoint_weights'],q['strict_box'].wkb if q.get('strict_box') is not None else None) for q in ps))
             saved=self.geometry_pool.get(compose_key)
