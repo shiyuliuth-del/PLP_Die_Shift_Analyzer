@@ -61,6 +61,8 @@ def validate(snapshot, output, check_hash=False, stop=None):
         raise ValueError('输出位置不是普通文件')
     controls = snapshot['controls']
     nominal_limits(controls.get('bypass_limits',(0,0,0)))
+    if type(controls.get('ignore_measurement_failure',False)) is not bool:
+        raise ValueError('忽略测量失败须为布尔值')
     if (not 1 <= controls['dies'] <= 10000 or not 0 <= controls['workers'] <= 64
             or (controls['memory'] != 0 and not 128 <= controls['memory'] <= 1048576)
             or not 0 <= controls['retries'] <= 10 or not 0 <= controls['timeout'] <= 86400):
@@ -328,7 +330,8 @@ class PlanRunner:
                     geometry = nominal_geometry(connect_plan())
                 import_files([item['path'] for item in selected], database, controls['dies'], controls['workers'], self.stop,
                              lambda message: report(message,0,15), snapshot['profile'], profiles,
-                             measurement=measurement, geometry=geometry)
+                             measurement=measurement, geometry=geometry,
+                             ignore_measurement_failure=bool(measurement) and controls.get('ignore_measurement_failure',False))
             with closing(sqlite3.connect(database.as_uri()+'?mode=ro', uri=True)) as db:
                 batch_owner = json.loads(db.execute("select value from meta where key='run_id'").fetchone()[0])
                 sources = json.loads(db.execute("select value from meta where key='sources'").fetchone()[0])

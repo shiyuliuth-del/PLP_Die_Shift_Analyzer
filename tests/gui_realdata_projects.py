@@ -166,6 +166,11 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         w.open_folder(production,link=False);wait(w)
         assert w.dies.value()==2 and not w.dies.isEnabled()
         assert w.file_view.rowCount()==4 and w.profile.rowCount()==10
+        assert w.ignore_measurement_failure.text() == '忽略测量失败'
+        assert w.ignore_measurement_failure.isEnabled() and not w.ignore_measurement_failure.isChecked()
+        w.ignore_measurement_failure.click()
+        w.open_folder(production,link=False);wait(w)
+        assert w.ignore_measurement_failure.isChecked()
         w.accept_info(dict(project=w.project.text(), die_count=9))
         assert w.dies.value()==2, 'Production DIE count must come from its directories'
         print('REALDATA_PROJECT_GUI_PASS: folder -> linked server -> exact 36 XLSX records and template, selections/settings, green/red status, continuous overlay, hidden log', flush=True)

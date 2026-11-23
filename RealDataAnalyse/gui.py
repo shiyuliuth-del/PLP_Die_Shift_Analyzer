@@ -192,6 +192,10 @@ class Window(W.QMainWindow):
             bypass.addWidget(field)
             self.bypass_limits.append(field)
         form.addRow('原图直出阈值', bypass)
+        self.ignore_measurement_failure = W.QCheckBox('忽略测量失败')
+        self.ignore_measurement_failure.setEnabled(False)
+        self.ignore_measurement_failure.setToolTip('对机台标记失败的芯片，采用该行的 X/Y 偏移与旋转角。适用于机台生产格式。')
+        form.addRow(self.ignore_measurement_failure)
         layout.addWidget(connection)
         tabs = W.QTabWidget()
         self.tabs = tabs
@@ -398,6 +402,7 @@ class Window(W.QMainWindow):
                        *self.path_buttons, *self.bypass_limits):
             widget.setEnabled(not on)
         self.dies.setEnabled(not on and not self.measurement)
+        self.ignore_measurement_failure.setEnabled(not on and bool(self.measurement))
         self.stop_button.setEnabled(on)
 
     def execute(self, fn, callback=None, failure=None, operation='操作'):
@@ -542,6 +547,7 @@ class Window(W.QMainWindow):
                 getattr(self, name).setValue(int(config['controls'].get(name, default)))
             for field, value in zip(self.bypass_limits, nominal_limits(config['controls'].get('bypass_limits',(0,0,0)))):
                 field.setValue(value)
+            self.ignore_measurement_failure.setChecked(config['controls'].get('ignore_measurement_failure') is True)
             self.logger = configure_logging(config['workspace'])
             self.page = 0
             self.table.setRowCount(0)
@@ -649,7 +655,8 @@ class Window(W.QMainWindow):
 
     def controls(self):
         return {**{key:getattr(self,key).value() for key in ('dies','workers','memory','retries','timeout')},
-                'bypass_limits':[field.value() for field in self.bypass_limits]}
+                'bypass_limits':[field.value() for field in self.bypass_limits],
+                'ignore_measurement_failure':self.ignore_measurement_failure.isChecked()}
 
     def persist(self):
         if self.project_root is None:
@@ -736,6 +743,7 @@ class Window(W.QMainWindow):
                 self.log_view.appendPlainText('导入警告 · ' + warning)
             self.persist()
         project, measurement = self.project.text(), self.measurement
+        ignore_failure = bool(measurement) and self.ignore_measurement_failure.isChecked()
         endpoint, timeout = self.endpoint.text(), self.timeout.value()
         def prepare(stop, progress):
             geometry = None
@@ -743,7 +751,7 @@ class Window(W.QMainWindow):
                 info = self.linked_project(endpoint, project, stop, progress, timeout, str(output))
                 geometry = nominal_geometry(info)
             result = import_files(files, target, dies, workers, stop, progress, profile, profiles,
-                                  measurement=measurement, geometry=geometry)
+                                  measurement=measurement, geometry=geometry, ignore_measurement_failure=ignore_failure)
             if measurement:
                 result['info'] = info
             return result
@@ -768,8 +776,9 @@ class Window(W.QMainWindow):
                 meta = {k: json.loads(v) for k, v in db.execute('select key,value from meta')}
             if (selected != sorted(p['path'] for p in meta.get('sources', [])) or profile != meta.get('profile')
                     or profiles != meta.get('profiles', {}) or self_die != meta.get('die_count')
-                    or measurement != meta.get('measurement')):
-                raise ValueError('Excel勾选、列映射或DIE数量与任务记录不符，请先校验并创建新任务')
+                    or measurement != meta.get('measurement')
+                    or ignore_failure != meta.get('ignore_measurement_failure',False)):
+                raise ValueError('Excel勾选、列映射、DIE数量或测量失败选项与任务记录不符，请先创建新任务')
             from .storage import sha256
             for index, source in enumerate(meta.get('sources', []), 1):
                 progress(dict(text=f'核对Excel输入 · {index}/{len(selected)} · {Path(source["path"]).name}', current=index - 1, total=len(selected)))
@@ -778,6 +787,7 @@ class Window(W.QMainWindow):
             return Runner(**kwargs, stop=stop, progress=progress, trace=self.conversation).run()
         self_die = self.dies.value()
         measurement = self.measurement
+        ignore_failure = bool(measurement) and self.ignore_measurement_failure.isChecked()
         def done(value):
             if value['state'] != 'completed' or self.pending_close:
                 return
