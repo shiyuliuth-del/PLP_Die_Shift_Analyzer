@@ -18,7 +18,10 @@ class V30Tests(unittest.TestCase):
     def test_directory_initialization_and_user_data_survive_relaunch(self):
         with TemporaryDirectory() as d:
             root=Path(d)/'带 空格';root.mkdir();exe=root/'Die_Shift_Analyze.exe';exe.touch()
-            with patch('sys.frozen',True,create=True),patch('sys.executable',str(exe)),patch('sys._MEIPASS',d,create=True):
+            # Check directory provisioning without registering a process-wide
+            # fault stream in the temporary folder. Frozen launches test that separately.
+            with (patch('sys.frozen',True,create=True),patch('sys.executable',str(exe)),
+                  patch('sys._MEIPASS',d,create=True),patch('die_shift_studio.frozen_support._fault_stream',object())):
                 prepare_runtime();marker=root/'Jobs'/'old.json';marker.write_text('keep')
                 (root/'logs').rmdir();prepare_runtime();self.assertEqual(marker.read_text(),'keep')
                 self.assertEqual({p.name for p in root.iterdir()},{exe.name,'Jobs','logs'})
