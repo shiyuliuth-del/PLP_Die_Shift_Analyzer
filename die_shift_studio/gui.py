@@ -64,7 +64,7 @@ SPECS={
 class Worker(QtCore.QThread):
     done=Signal(object); failed=Signal(str); progress=Signal(int,str); partial=Signal(object)
     def __init__(self,fn,parent=None):
-        super().__init__(parent);self.fn=fn;self.cancelled=threading.Event();self._last_progress=0.;self._partial_lock=threading.Lock();self._partial_value=None;self._partial_queued=False
+        super().__init__(parent);self.fn=fn;self.cancelled=threading.Event();self.report_progress=True;self._last_progress=0.;self._partial_lock=threading.Lock();self._partial_value=None;self._partial_queued=False
     def update(self,n,text):
         if self.cancelled.is_set():raise InterruptedError('用户取消')
         import time
@@ -82,7 +82,7 @@ class Worker(QtCore.QThread):
     def run(self):
         try:
             from .resources import cancellation_scope
-            with cancellation_scope(self.cancelled):result=self.fn(self.update)
+            with cancellation_scope(self.cancelled):result=self.fn(self.update if self.report_progress else None)
             if not self.cancelled.is_set():self.done.emit(result)
         except InterruptedError:pass
         except ValueError as exc:
@@ -543,11 +543,14 @@ class MainWindow(W.QMainWindow):
         for form,key,title in ((channel,'show_low_width','显示低概率宽度风险'),):
             box=W.QCheckBox(title);self.setting_fields[key]=box;form.addRow(box);box.toggled.connect(self.settings_changed)
             box.setToolTip('有限正良率级别下，仅淡显或隐藏已证明事件概率上界不超过门限的位置。未定位置保留，全量计算结果可查。')
-        drc_group=group('DRC')
+        # Insert the dimensions before the spacer at the end of the process page.
+        self.process_layout.takeAt(self.process_layout.count()-1)
+        drc_group=self._group(self.process_layout,'其他',[],collapsed=True)
         self.parameter_field(drc_group,'minimum_edge_um')
         spin(drc_group,'drc_min_angle_deg','最小铜图形内角 / °',1,179,1)
         spin(drc_group,'drc_tolerance_um','尺寸容差 ± / μm',-10000,10000,3)
         self.setting_fields['drc_tolerance_um'].setToolTip('有效最小值 = 工艺值 − 容差。正值放宽，负值收紧；默认0.1 μm。线宽、线距、包围量、机械净距和图形距边框共用；实体偏移分布不变。')
+        self.process_layout.addStretch()
         recon=group('重构预演')
         choices['reconstruction_die_mode']=[('自动','auto'),('DIE内随动','follow'),('DIE内静止','stationary')]
         choice(recon,'reconstruction_die_mode','DIE内动区判断')
@@ -595,8 +598,11 @@ class MainWindow(W.QMainWindow):
         if self._closing:return
         from .acceleration import capabilities,graphics_inventory
         def work(progress):
-            progress(5,'检测显卡与计算运行时');cap=capabilities();inventory=graphics_inventory();progress(100,'硬件检测完成');return cap,inventory
-        worker=Worker(work,self);self.hardware_worker=worker;self.watch_worker(worker,'硬件检测')
+            if progress:progress(5,'检测显卡与计算运行时')
+            cap=capabilities();inventory=graphics_inventory()
+            if progress:progress(100,'硬件检测完成')
+            return cap,inventory
+        worker=Worker(work,self);worker.report_progress=self.progress_enabled();self.hardware_worker=worker;self.watch_worker(worker,'硬件检测')
         def accepted(value):
             if self._closing:return
             cap,adapters=value;profile=resource_profile()
@@ -794,6 +800,7 @@ class MainWindow(W.QMainWindow):
         if not self.loading:self.invalidate()
     def task_progress(self,worker,n,text):
         import time
+        if not self.progress_enabled():return
         if time.monotonic()<getattr(worker,'_quiet_until',0.):return
         if getattr(worker,'_task_tracked',True) is False or worker.cancelled.is_set():return
         self._tasks[id(worker)]=(n,text);self.progress.show();self.progress.setRange(0,100);self.progress.setValue(n);self.progress.setFormat(f'{n}% · '+text[:36]);self.statusBar().showMessage(text)
@@ -804,10 +811,11 @@ class MainWindow(W.QMainWindow):
         start=time.perf_counter();worker._task_tracked=True
         worker._quiet_until=time.monotonic()+.25 if quiet else 0.
         self._tasks[id(worker)]=(0,name+'：开始')
-        self.task_progress(worker,0,name+'：开始')
-        if quiet:
-            QtCore.QTimer.singleShot(260,lambda:self.task_progress(worker,0,name+'：计算中') if getattr(worker,'_task_tracked',False) and not worker.cancelled.is_set() else None)
-        worker.progress.connect(lambda n,t:self.task_progress(worker,n,t))
+        if worker.report_progress:
+            self.task_progress(worker,0,name+'：开始')
+            if quiet:
+                QtCore.QTimer.singleShot(260,lambda:self.task_progress(worker,0,name+'：计算中') if getattr(worker,'_task_tracked',False) and not worker.cancelled.is_set() else None)
+            worker.progress.connect(lambda n,t:self.task_progress(worker,n,t))
         worker.failed.connect(lambda text:self.log_bus.emit(name+'：'+text,'ERROR'))
         def finish():
             worker._task_tracked=False;self._tasks.pop(id(worker),None);self.task_control.finished();self.log_bus.emit(f'{name}：'+('已取消' if worker.cancelled.is_set() else '线程退出')+f'，耗时 {time.perf_counter()-start:.3f} s')
@@ -816,9 +824,12 @@ class MainWindow(W.QMainWindow):
                 self.progress.hide()
                 self.statusBar().clearMessage()
                 self.cleanup_retired_sessions()
-            else:
+            elif self.progress_enabled():
                 n,t=next(reversed(self._tasks.values()));self.progress.setValue(n);self.progress.setFormat(f'{n}% · '+t[:36]);self.statusBar().showMessage(t)
         worker.finished.connect(finish)
+
+    def progress_enabled(self):
+        return not (self.remote_locked or getattr(self,'requested_measured',False))
     def refresh_cache_status(self):
         size,total,count,pinned=self.cache_registry.statistics(self.cache_project_key)
         def fmt_size(n):
@@ -980,8 +991,10 @@ class MainWindow(W.QMainWindow):
         self.log_bus.emit(text,'ERROR');W.QMessageBox.warning(self,'操作未完成',str(text))
     def start_worker(self,fn,success,interactive=False):
         if self.worker is not None:self.error('上一项操作尚未完成');return
-        self.progress.show();self.progress.setValue(0);self.run_button.setEnabled(False);self.controls.setEnabled(interactive);self.job_combo.setEnabled(False);self.save_button.setEnabled(False)
+        if self.progress_enabled():self.progress.show();self.progress.setValue(0)
+        self.run_button.setEnabled(False);self.controls.setEnabled(interactive);self.job_combo.setEnabled(False);self.save_button.setEnabled(False)
         worker=Worker(fn,self);self.worker=worker
+        worker.report_progress=self.progress_enabled()
         self.watch_worker(worker,'主计算')
         worker.done.connect(lambda result:success(result) if not worker.cancelled.is_set() else None);worker.failed.connect(lambda text:(self.refresh_jobs(),self.error(text)));worker.finished.connect(lambda:self.finish_worker(worker));worker.start()
     def finish_worker(self,worker):
@@ -1013,17 +1026,20 @@ class MainWindow(W.QMainWindow):
         path,_=W.QFileDialog.getOpenFileName(self,'输入GDS/OAS','','GDS/OASIS (*.gds *.gdsii *.GDS *.oas *.oasis *.OAS)')
         if path:self.load_gds(path)
     def load_gds(self,path,top=None,project=None,project_path=None):
+        from .resources import progress_slice,cancel_check
         self.exit_region_mode();current_area=self.fields['minimum_area_um2'].value();current_edge=self.fields['minimum_edge_um'].value()
         def read_and_prepare(progress):
-            data=read_gds(path,top,lambda n,t:progress(round(n*.7),t))
+            data=read_gds(path,top,progress_slice(progress,0,.7))
             if isinstance(data,dict):return data
             settings=project if project and (not project.get('sha256') or project['sha256']==data.sha256) else {'schema_version':5,'parameters':{'minimum_area_um2':current_area,'minimum_edge_um':current_edge},'settings':{'reconstruction_auto':False}}
             from .gds_merge import restore_project_geometry
             data,settings=restore_project_geometry(data,settings);data.restored_project=settings
             roles=settings.get('roles',data.auto_roles)
-            progress(73,'构建几何索引与图层缓存');data.geometry_cache=GeometryCache(data)
+            cancel_check()
+            if progress:progress(73,'构建几何索引与图层缓存')
+            data.geometry_cache=GeometryCache(data)
             data.prepared_roles=roles;data.prepared_auto=automatic_parameters(data,roles)
-            progress(91,'构建名义金属连通与芯片归属')
+            if progress:progress(91,'构建名义金属连通与芯片归属')
             try:
                 from .stack import Connections
                 if '封装边框' in roles.values() and '芯片边框' in roles.values():
@@ -1031,7 +1047,7 @@ class MainWindow(W.QMainWindow):
                     data.prepared_case=build_case(data,roles,connections=connections)
                 else:data.prepared_case=None
             except ValueError:data.prepared_case=None
-            progress(100,'导入完成')
+            if progress:progress(100,'导入完成')
             return data
         def accepted(data):
             settings=project

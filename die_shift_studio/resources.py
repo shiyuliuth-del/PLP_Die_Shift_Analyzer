@@ -16,9 +16,22 @@ def cancellation_scope(event):
     try:yield
     finally:_local.cancel=previous
 
+@contextmanager
+def budget_scope(check):
+    previous=getattr(_local,'budget_check',None);_local.budget_check=check
+    try:yield
+    finally:_local.budget_check=previous
+
 def cancel_check():
     event=getattr(_local,'cancel',None)
     if event is not None and event.is_set():raise InterruptedError('用户取消')
+    budget_check=getattr(_local,'budget_check',None)
+    if budget_check is not None:budget_check()
+
+
+def progress_slice(progress,start,span):
+    if progress is None:return None
+    return lambda n,text:progress(start+round(n*span),text)
 
 @contextmanager
 def serial_scope():

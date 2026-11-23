@@ -21,7 +21,9 @@ def _matrix(model,owner,states):
 
 def frame(checker,states,replacements,settings,progress,owners=None,scopes=None,*,electrical=False):
     from .drc_policy import enabled,ALL
-    if not electrical and not getattr(settings,'drc_checks',ALL):progress(100,'所有尺寸DRC类别均未启用');return []
+    if not electrical and not getattr(settings,'drc_checks',ALL):
+        if progress:progress(100,'所有尺寸DRC类别均未启用')
+        return []
     from .drc import separation_region
     from .drc_rules import effective_clearances
     m=checker.model;p=checker.p;clearances=effective_clearances(p,settings);dbu=m.data.dbu_um;states=np.asarray(states,float)
@@ -60,7 +62,8 @@ def frame(checker,states,replacements,settings,progress,owners=None,scopes=None,
                          motion_owner=proved.get((r['node']['key'],r['node']['index']),r['node']['owner'])) for r in template]
     nets=[]
     for count,(key,rows) in enumerate(groups.items()):
-        cancel_check();progress(round(65*count/max(1,len(groups))),f'当前图形 DRC · 金属平面 {key[0]}')
+        cancel_check()
+        if progress:progress(round(65*count/max(1,len(groups))),f'当前图形 DRC · 金属平面 {key[0]}')
         layers=tuple(sorted({r['node']['key'] for r in rows}));who={r['motion_owner'] for r in rows}
         rigid=not any(r['changed'] for r in rows) and len(who)==1;owner=next(iter(who)) if rigid else -1
         original=checker.templates[key][1]
@@ -184,7 +187,7 @@ def frame(checker,states,replacements,settings,progress,owners=None,scopes=None,
                     from shapely.ops import nearest_points
                     bad=shapely.LineString(nearest_points(die,moved[j])).buffer(dbu)
                 items.append(dict(layer='',layers=(),geometry=bad,kind='芯片间机械净距不足',owner=-1,dependencies=deps,refs=(),required_um=required,actual_um=die.distance(moved[j])))
-    progress(100,f'当前图形 DRC 完成 · {len(items)} 组违规')
+    if progress:progress(100,f'当前图形 DRC 完成 · {len(items)} 组违规')
     return items
 
 

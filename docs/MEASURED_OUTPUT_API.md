@@ -50,6 +50,8 @@ python -m die_shift_studio.ipc_client --endpoint C:\work\endpoint.json output.co
 
 短命令直接返回 `status=completed,result={...}`。错误返回 `status=error,error={"type":"...","message":"..."}`。`task.get` 的外层 completed 表示查询完成；**真正任务状态在 result.status**，可能为 queued/running/completed/error/cancelled。只有任务 completed 才使用 result。超时仅停止客户端等待，不自动取消软件任务。最近 10000 个已结束任务可查询；控制端应及时保存结果。批次内部独立维护计数，历史淘汰不影响结束判断。
 
+实测模式关闭界面进度条和任务的中间百分比计算。旧客户端仍可读取 `progress` 兼容字段，运行中为 0，成功完成时为 100。用 `status` 判断单项结果，用批次完成计数跟踪整体任务；错误和取消仍通过状态返回。
+
 ## 命令表
 
 | 命令 | args | 完成含义 |

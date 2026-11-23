@@ -219,7 +219,7 @@ class RoutePlan:
 
     def __getstate__(self):
         state=dict(self.__dict__);state['cache']={};state['pose_memo']=OrderedDict();state['memo_bytes']=0
-        for name in ('_ring_cache','_land_cache','_anchor_cache','_source_meta'):state.pop(name,None)
+        for name in ('_ring_cache','_land_cache','_anchor_cache','_source_meta','_side_meta'):state.pop(name,None)
         return state
 
     def _source_info(self):
@@ -385,6 +385,10 @@ class RoutePlan:
         """Return disjoint A/B/C and their real shared boundaries, or no partition."""
         b=self.fixed_side(b)
         if a>=b:return None
+        angles=tuple(map(float,angles))
+        key=('partition',float(a),b,angles)
+        cached=self.cache.get(key)
+        if cached is not None:return dict(cached)
         outer=self.prefix(b,angles[1])
         if outer is None:return None
         moving_plus,far,b_shape=outer
@@ -411,7 +415,10 @@ class RoutePlan:
             union=shapely.union_all([a_shape,b_shape,c])
             if union.symmetric_difference(self.source).area>area_eps:return None
         a_shape,b_shape,c=(clean_overlay(g,self.tolerance) for g in (a_shape,b_shape,c))
-        return {'A':a_shape,'B':b_shape,'C':c,'near':near,'far':far,'a':a,'b':b,'angles':tuple(map(float,angles))}
+        result={'A':a_shape,'B':b_shape,'C':c,'near':near,'far':far,'a':a,'b':b,'angles':angles}
+        if len(self.cache)>1024:self.cache.clear()
+        self.cache[key]=dict(result)
+        return result
 
     def pad_handle(self,side):
         """UI-only branchward point; electrical endpoint and export stay exact."""
