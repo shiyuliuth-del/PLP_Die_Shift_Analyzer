@@ -163,6 +163,9 @@ def change_zone(window,action,piece=None,ref=None,point=None,side=None,refs=()):
         updated=replace(cfg,reconstruction_added=added,reconstruction_deleted=deleted,reconstruction_intervals=tuple(intervals),
                         reconstruction_ignored=tuple(sorted(ignored)),reconstruction_forced=tuple(sorted(forced)))
     else:return
+    if updated==cfg:return
+    from .edit_history import record
+    record(window)
     window.view_settings=updated;window.invalidate_reconstruction_edit();window.request_preview(quiet=True)
 
 

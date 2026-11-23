@@ -6,6 +6,7 @@ from .qt_compat import QtCore,Qt,QtWidgets as W
 class MouseDieMode:
     def __init__(self,window):
         self.w=window;self.owner=None;self.drag=None;self.pending=False;self.full_pending=False
+        self.drag_history=None
         self.idle=QtCore.QTimer(window);self.idle.setSingleShot(True);self.idle.setInterval(180);self.idle.timeout.connect(self.refine)
         self.timer=QtCore.QTimer(window);self.timer.setInterval(16);self.timer.timeout.connect(self.flush)
         for name,fn in [('key_press_event',self.key),('button_press_event',self.press),
@@ -39,12 +40,14 @@ class MouseDieMode:
         self.update_text();self.w.render_scene()
         return active
     def cancel_pending(self):
-        self.pending=False;self.full_pending=False;self.timer.stop();self.idle.stop();self.drag=None
+        self.pending=False;self.full_pending=False;self.timer.stop();self.idle.stop();self.drag=None;self.drag_history=None
     def press(self,event):
         w=self.w
         if event.inaxes is w.ax:w.canvas.setFocus()
         if self.owner is not None and event.button==3 and event.inaxes is w.ax:
             self.drag=(np.array([event.x,event.y]),w.manual_states.copy(),w.ax.transData.inverted().frozen())
+            history=getattr(w,'edit_history',None)
+            self.drag_history=history.capture() if history is not None else None
     def move(self,event):
         if self.drag is None or self.owner is None or event.x is None or event.y is None:return
         pixel,states,inv=self.drag;pose=states.copy()
@@ -54,11 +57,17 @@ class MouseDieMode:
         self.submit(pose)
     def release(self,event):
         if event.button==3 and self.owner is not None and self.drag is not None:
+            if self.drag_history is not None and not np.array_equal(self.drag[1],self.w.manual_states):
+                self.w.edit_history.record(self.drag_history)
+            self.drag_history=None
             self.drag=None;self.idle.start();self.flush()
     def scroll(self,event):
         from .navigation import control_held
         if control_held(event):return
         if self.owner is None or event.inaxes is not self.w.ax:return
+        if self.drag is None and event.step:
+            from .edit_history import record
+            record(self.w)
         pose=self.w.manual_states.copy();pose[self.owner,2]+=math.radians(.1)*float(event.step)
         self.submit(pose)
     def submit(self,states):

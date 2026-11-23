@@ -1,6 +1,9 @@
 """Verify the default straight moving-side boundary and opt-in pad controls."""
 from dataclasses import asdict, replace
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
+from xml.etree import ElementTree as ET
 
 import numpy as np
 import shapely
@@ -64,3 +67,37 @@ class MovingPadTests(unittest.TestCase):
                 self.assertEqual(part['far'].geom_type, 'LineString')
                 self.assertAlmostEqual(part['b'], 100.)
                 self.assertTrue(shapely.union_all([part[k] for k in 'ABC']).equals(source))
+
+
+class APDRulesTests(unittest.TestCase):
+    def test_rules_cover_requested_domain_and_use_matching_apd_region_names(self):
+        from die_shift_studio.apd_export import CFT, HEADER, OBJECTS, ROOT, rule_regions, template, write
+
+        root=ET.Element(ROOT)
+        ET.SubElement(root,f'{{{CFT}}}txt-FileType',Name='FileType').text='Design'
+        ET.SubElement(root,f'{{{CFT}}}txt-FormatVersion',Name='FormatVersion').text='23.100'
+        h=ET.SubElement(ET.SubElement(root,f'{{{CFT}}}xml-Header'),f'{{{HEADER}}}root',Name='DEMO')
+        ET.SubElement(h,f'{{{HEADER}}}precision',units='um',numberOfDecimalPlaces='3')
+        objects=ET.SubElement(root,f'{{{CFT}}}dir-objects')
+        layers=ET.SubElement(ET.SubElement(objects,f'{{{CFT}}}xml-objects',Name='SubClass'),f'{{{OBJECTS}}}root')
+        for name in ('Etch/RDL2','ConsRegion/RDL2'):
+            ET.SubElement(layers,f'{{{OBJECTS}}}object',Name=name)
+        domain=box(0,0,20,20).difference(box(3,3,6,6));board=box(-5,-5,25,25)
+        x=np.array([0.,10.,20.])
+        field=dict(base_spacing_um=15.,maps=[dict(owner=0,domain=domain,fixed_layers=['5/0'],
+                   spacing=np.array([[16.,19.],[21.,24.]]),cell_allowance=.1,x_edges=x,y_edges=x)])
+        with TemporaryDirectory() as tmp:
+            path=Path(tmp)/'example.dcfx'
+            ET.ElementTree(root).write(path,encoding='utf-8',xml_declaration=True)
+            source=template(path)
+            for mode,coverage,values in (('moving',domain,{20,25}),('package',board,{15,20,25})):
+                regions=rule_regions(field,board,[[0,0]],None,5.,mode)
+                self.assertTrue(shapely.union_all([r[1] for r in regions['5/0']]).equals(coverage))
+                self.assertAlmostEqual(sum(r[1].area for r in regions['5/0']),coverage.area)
+                dcfx,il,count=write(Path(tmp)/f'{mode}.dcfx',regions,{'5/0':'RDL2'},source)
+                rows=ET.parse(dcfx).findall('.//{*}object')
+                self.assertEqual(len(rows),count)
+                self.assertEqual({float(q.find('{*}attribute/{*}value').get('Value')) for q in rows},values)
+                code=il.read_text()
+                self.assertTrue(all(q.get('Name') in code for q in rows))
+                self.assertIn('CONSTRAINT REGION/RDL2',code)

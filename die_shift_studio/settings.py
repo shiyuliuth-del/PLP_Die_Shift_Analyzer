@@ -19,6 +19,8 @@ def normalize_display(values):
 
 @dataclass(frozen=True)
 class ViewSettings:
+    max_undo_steps:int=10
+    space_export_interval_um:float=5.
     from .drc_policy import ALL
     drc_checks:tuple=ALL
     drc_visible:tuple=ALL
@@ -230,6 +232,8 @@ class ViewSettings:
         integers={'width_yield_decimals','width_label_decimals','animation_fps','animation_speed','camera_speed','contact_box_budget','sample_exponent','random_seed','quadrature_order','angle_bins','footprint_samples','space_resolution','animation_duration_ms','animation_steps'}
         integers.update(('max_threads','max_memory_mb','table_page_limit'))
         limits.update(table_page_limit=(2,2000),max_threads=(0,1024),max_memory_mb=(0,16777216))
+        limits['max_undo_steps']=(0,1000);integers.add('max_undo_steps')
+        limits['space_export_interval_um']=(.001,10000.)
         limits.update(width_yield_exponent=(8,20),width_yield_seed=(0,2147483647),width_grid_nodes=(3,21))
         limits.update(reconstruction_pad_trigger_um=(0,1000),reconstruction_grid_nodes=(3,9),reconstruction_corner_guard_um=(0,1000),cache_max_entries=(10,100000),yield_sample_exponent=(8,20),yield_box_budget=(64,65536),yield_tolerance=(.000001,.1),
 

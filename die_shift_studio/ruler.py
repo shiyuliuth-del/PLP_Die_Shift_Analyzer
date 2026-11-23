@@ -5,6 +5,7 @@ from .qt_compat import QtGui,QtWidgets as W,Qt
 
 
 from .measurement_data import normalize
+from .edit_history import record
 
 
 class Rulers:
@@ -27,7 +28,9 @@ class Rulers:
         was=self.active
         if was:self.w.canvas.setCursor(self._previous_cursor)
         self.active=False;self.w.canvas.ruler_active=False;self.start=self.current=None;self.draw();return was
-    def clear(self):self.rows=[];self.start=self.current=None;self.draw()
+    def clear(self):
+        if self.rows:record(self.w)
+        self.rows=[];self.start=self.current=None;self.draw()
     def restore(self,rows):self.exit();self.rows=normalize(rows);self.draw()
     def point(self,e):
         if e.inaxes is not self.w.ax or e.xdata is None or e.ydata is None:return None
@@ -47,7 +50,9 @@ class Rulers:
         self.current=point;self.draw()
     def release(self,e):pass  # only the second click commits a measurement
     def finish(self,point):
-        if np.linalg.norm(point-self.start)>1e-12:self.rows.append([self.start.tolist(),point.tolist()])
+        if np.linalg.norm(point-self.start)>1e-12:
+            record(self.w)
+            self.rows.append([self.start.tolist(),point.tolist()])
         self.start=self.current=None;self.draw()
     def draw(self,redraw=True):
         for artist in self.artists:

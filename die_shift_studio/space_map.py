@@ -6,8 +6,10 @@ from .statistics import statistical_state
 
 def space_maps(model,p,resolution=81):
     model.configure_parameters(p)
-    case=model.case;owners={}
-    for record in model.records:owners.setdefault(record['owner'],set()).add(record['key'])
+    case=model.case;owners={};targets={}
+    for record in model.records:
+        owners.setdefault(record['owner'],set()).add(record['key'])
+        targets.setdefault(record['owner'],set()).update(record['target_layers'])
     maps=[]
     for owner,layers in owners.items():
         die=case['dies'][owner];c=model.bound.centers[owner];local=p.for_die(owner);state=statistical_state(local,len(case['dies']))
@@ -18,8 +20,22 @@ def space_maps(model,p,resolution=81):
         xx,yy=np.meshgrid((xe[1:]+xe[:-1])/2,(ye[1:]+ye[:-1])/2)
         points=np.column_stack((xx.ravel(),yy.ravel()))
         extra=uncertainty_bound(points,c,local,len(case['dies']),state=state).reshape(ny,nx)
+        # The two analytic upper bounds are Lipschitz in the observation point.
+        # This margin bounds any point in the cell using its centre sample.
+        from .statistics import mean_and_bounds
+        mu,covariance,k=state
+        _,hard=mean_and_bounds(local,len(case['dies']))
+        if np.isinf(p.target_nsigma):slope=0.
+        else:
+            mean_slope=2*abs(np.sin(mu[2]/2))
+            hard_slope=2*np.sin(min(np.pi,hard[2])/2)
+            if p.target_nsigma==0:slope=mean_slope+hard_slope
+            else:
+                linear=k*np.sqrt(covariance[2,2])
+                slope=mean_slope+max(hard_slope,linear+linear**2/2)
         maps.append(dict(owner=owner,layers=sorted(layers),x_edges=xe,y_edges=ye,
-                         spacing=extra+p.line_space_um,extra=extra,die=np.asarray(die.exterior.coords),domain=domain))
+                         spacing=extra+p.line_space_um,extra=extra,die=np.asarray(die.exterior.coords),domain=domain,
+                         fixed_layers=sorted(targets[owner]),cell_allowance=float(slope*np.hypot(dx/nx,dy/ny)/2)))
     return dict(maps=maps,base_spacing_um=p.line_space_um,target_sigma=p.target_nsigma,
                 definition='S(P)=固定线距+Q(P)；Q为整包目标σ下相对固定层的保守位移；不含孔径或最小包围量',
                 interface_count=len(model.records))

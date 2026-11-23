@@ -58,6 +58,8 @@ class ManualPreview(W.QDialog):
         try:
             self.rebuild();p=w.params();count=len(self.rows)
             if not count:raise ValueError('未识别芯片，请设置芯片边框')
+            from .edit_history import record
+            record(w)
             centers=[row[3].value() for row in self.rows]
             old=[[p.for_die(i).rotation_center,p.for_die(i).rotation_x_um,p.for_die(i).rotation_y_um] for i in range(count)]
             if centers!=old:

@@ -50,6 +50,8 @@ class V47Tests(unittest.TestCase):
  def test_overlapping_fixed_port_does_not_create_spurious_short_route(self):
   e,_,_=self.engine(shapely.box(-30,-30,330,30),[shapely.Point(0,0).buffer(5)],[shapely.Point(0,.3).buffer(5),shapely.Point(300,0).buffer(5)])
   try:
+   from dataclasses import replace
+   e.configure_reconstruction(True,replace(e.reconstructor.settings,reconstruction_allow_moving_pad=True))
    r=e.reconstructor;rows=r._plans_for_all_poses(lambda *_:None);plans=[q['plan'] for q in rows if q.get('plan')]
    self.assertEqual(len(plans),1);self.assertGreater(plans[0].length,290)
    # Both real fixed ports remain in the electrical and enclosure checks.

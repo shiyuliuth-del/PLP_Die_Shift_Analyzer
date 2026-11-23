@@ -10,6 +10,7 @@ from die_shift_studio.gds_merge import restore_project_geometry,winding_outline,
 from die_shift_studio.region_export import line_parts,contours,write_regions
 from die_shift_studio.dxf_export import Snapshot
 from die_shift_studio.dxf_settings import DxfSettings
+from die_shift_studio.settings import ViewSettings
 from test_v38 import expanded_outlines,fixture
 from die_shift_studio.reconstruction_route import warp
 
@@ -79,6 +80,7 @@ class V39ExtraTests(unittest.TestCase):
     def test_legacy_fixed_endpoint_becomes_line_and_keeps_both_landings(self):
         e,_,_=fixture()
         try:
+            e.configure_reconstruction(True,ViewSettings(reconstruction_allow_moving_pad=True))
             q=e.reconstructor.frame(np.zeros((1,3)))['pieces'][0];plan=q['route_plan']
             part=plan.partition(0,plan.length)
             self.assertEqual(part['near'].geom_type,'Point');self.assertEqual(part['far'].geom_type,'LineString')
@@ -151,7 +153,7 @@ class V39ConnectionTests(unittest.TestCase):
             members=list({q['route_identity']:q for zone in qs for q in zone.get('graph_members',(zone,))}.values())
             self.assertEqual(len(members),2);self.assertTrue(all(q['route_plan'] for q in members))
             rows=[(*q['route_plan'].key,q['route_plan'].identity,0.,q['route_plan'].length) for q in members]
-            cfg=replace(e.reconstructor.settings,reconstruction_intervals=tuple(rows));e.configure_reconstruction(True,cfg)
+            cfg=replace(e.reconstructor.settings,reconstruction_intervals=tuple(rows),reconstruction_allow_moving_pad=True);e.configure_reconstruction(True,cfg)
             pose=np.array([[15.,10.,.01]]);frame=e.reconstructor.frame(pose);qs=frame['pieces']
             self.assertEqual(len(qs),1)  # overlapping branches are now one transition domain
             self.assertTrue(all(q['valid'] for q in qs),[q['warning'] for q in qs])

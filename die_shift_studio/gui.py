@@ -202,7 +202,7 @@ class MainWindow(W.QMainWindow):
         self.space_data=None;self.space_artists=[];self.space_stamp=None;self.space_colorbar=None;self._resizing=False
         self._issue_table_stamp=None;self.dirty=False;self.manual_states=None;self.evaluation_motions={};self.probability_data=None;self.probability_artists=[];self.probability_stamp=None;self.legend=None;self.zone_artists=[];self.invalid_artists=[]
         from .dxf_settings import DxfSettings
-        self.dxf_settings=DxfSettings();self.ignored_width_lines=frozenset();self.dxf_directory='';self.view_settings=ViewSettings(reconstruction_auto=False);self.setting_fields={};self.layer_styles={};self.histogram_dirty=False
+        self.dxf_settings=DxfSettings();self.ignored_width_lines=frozenset();self.dxf_directory='';self.apd_options={};self.view_settings=ViewSettings(reconstruction_auto=False);self.setting_fields={};self.layer_styles={};self.histogram_dirty=False
         self.coverage_timer=QtCore.QTimer(self);self.coverage_timer.setSingleShot(True);self.coverage_timer.setInterval(180);self.coverage_timer.timeout.connect(self.refresh_coverage)
         self._coverage_pending=False;self._evaluation_requested=False;self._motion_intent=None;self.motion_worker=None;self.motion_pending=None;self.motion_generation=0;self.replacement_artists={};self._plotting=False;self.viewport_index=None;self._viewport_stamp=None
         self.issue_navigation=QtCore.QTimer(self);self.issue_navigation.setSingleShot(True);self.issue_navigation.setInterval(0);self.issue_navigation.timeout.connect(lambda:self.locate_issue(self.issue_table.currentRow(),0))
@@ -216,6 +216,13 @@ class MainWindow(W.QMainWindow):
         self.properties_shortcut.setContext(getattr(Qt,'ShortcutContext',Qt).WidgetWithChildrenShortcut)
         self.properties_shortcut.activated.connect(self.show_properties)
         self.selection=GeometrySelection(self);self.escape_shortcut=(QtGui.QShortcut if hasattr(QtGui,'QShortcut') else W.QShortcut)(QtGui.QKeySequence('Escape'),self);self.escape_shortcut.activated.connect(self.escape_action);self.scene_renderer=SceneRenderer(self.canvas,self.ax);self.refresh_jobs()
+        from .edit_history import EditHistory
+        self.edit_history=EditHistory(self);self.pending_deleted_shapes={}
+        self.edit_shortcuts=[]
+        for key,fn,parent in (('Delete',self.delete_selected_shapes,self.canvas),('U',self.undo_edit,self),('Shift+U',self.redo_edit,self)):
+            action=shortcut(QtGui.QKeySequence(key),parent)
+            action.setContext(getattr(Qt,'ShortcutContext',Qt).WidgetWithChildrenShortcut)
+            action.activated.connect(fn);self.edit_shortcuts.append(action)
         for name in ('button_press_event','scroll_event'):self.canvas.mpl_connect(name,lambda e:self.stop_animation())
         from .mouse_die import MouseDieMode
         self.mouse_die=MouseDieMode(self)
@@ -467,6 +474,17 @@ class MainWindow(W.QMainWindow):
             if form is not None:form.addRow(title,widget)
             widget.valueChanged.connect(self.settings_changed);return widget
         spin(general,'table_page_limit','表格每页最大行数',2,2000)
+        undo_steps=spin(None,'max_undo_steps','',0,1000)
+        undo_steps.setToolTip('仅记录图形、测量与分析编辑。0 表示关闭记录。')
+        history_row=W.QWidget();history_box=W.QHBoxLayout(history_row);history_box.setContentsMargins(0,0,0,0)
+        history_box.addWidget(undo_steps,1)
+        self.undo_button=W.QToolButton();self.redo_button=W.QToolButton()
+        for button,arrow,tip,slot in ((self.undo_button,'LeftArrow','撤销（U）',self.undo_edit),
+                                      (self.redo_button,'RightArrow','取消撤销（Shift+U）',self.redo_edit)):
+            button.setArrowType(getattr(getattr(Qt,'ArrowType',Qt),arrow))
+            button.setToolTip(tip);button.setAccessibleName(tip);button.setEnabled(False)
+            button.clicked.connect(slot);history_box.addWidget(button)
+        general.addRow('最大撤销步数',history_row)
         spin(hardware,'max_threads','最大并行数',0,1024).setSpecialValueText('0（自动）')
         spin(hardware,'max_memory_mb','最大内存占用 / MB',0,16777216).setSpecialValueText('0（自动）')
         caches=hardware
@@ -490,8 +508,14 @@ class MainWindow(W.QMainWindow):
         spin(probability,'probability_gamma','低概率增强 γ（越小越明显）',.1,1.,2)
         self.setting_fields['probability_gamma'].setToolTip('只调整颜色和透明度，不改变概率数值、边界或良率判定。0概率保持透明。')
         spin(probability,'contact_box_budget','接触概率自适应积分预算',128,32768)
-        probability.addRow(label('实体概率按所选方法计算；虚线包络表示输入幅度全部组合，并非等概率边界。默认接触判定用概率上下界；积分不足时明确标为待细化。∞仅作当前位置二值判断。'))
         space=group('避让空间')
+        apd_interval=spin(None,'space_export_interval_um','',.001,10000,3)
+        apd_row=W.QWidget();apd_layout=W.QHBoxLayout(apd_row);apd_layout.setContentsMargins(0,0,0,0)
+        apd_layout.addWidget(apd_interval,1)
+        self.apd_export_button=W.QPushButton('APD规则输出')
+        from .apd_export_ui import export as apd_export
+        self.apd_export_button.clicked.connect(lambda:apd_export(self));apd_layout.addWidget(self.apd_export_button)
+        space.addRow('避让空间输出间隔 / μm',apd_row)
         choice(space,'space_scope','显示范围')
         choice(space,'space_cmap','配色方案');choice(space,'space_interpolation','显示平滑')
         spin(space,'space_resolution','长边网格数',31,401)
@@ -595,7 +619,6 @@ class MainWindow(W.QMainWindow):
         color=ColorButton();self.setting_fields['contact_marker_color']=color;drawing.addRow('接触空心圆颜色',color);color.valueChanged.connect(self.settings_changed)
         spin(drawing,'contact_marker_size','接触空心圆直径 / pt 或 μm',.1,10000,2)
         check=W.QCheckBox('接触空心圆使用图纸绝对大小 / μm');self.setting_fields['contact_marker_absolute']=check;drawing.addRow(check);check.toggled.connect(self.settings_changed)
-        space.addRow(label('平滑只改变热图显示，不改变线距需求、连接归属和接触判定。资源由CPU/内存自动限额，多线程计算几何和概率，切换预演复用数值结果。'))
         page.addStretch();self.load_view_settings()
     def discover_hardware(self):
         if self._closing:return
@@ -656,6 +679,12 @@ class MainWindow(W.QMainWindow):
         if self.loading:return
         values={k:(w.currentData() if isinstance(w,W.QComboBox) else w.isChecked() if isinstance(w,W.QCheckBox) else w.text() if isinstance(w,W.QLineEdit) else w.value()) for k,w in self.setting_fields.items()}
         updated=ViewSettings.from_dict(dict(asdict(self.view_settings),**values))
+        if updated.space_export_interval_um!=self.view_settings.space_export_interval_um:
+            self.view_settings=updated
+            return
+        if updated.max_undo_steps!=self.view_settings.max_undo_steps:
+            self.view_settings=updated;self.edit_history.trim()
+            return
         if updated.reconstruction_allow_moving_pad!=self.view_settings.reconstruction_allow_moving_pad:
             self.change_moving_pad_mode(updated)
             return
@@ -882,6 +911,7 @@ class MainWindow(W.QMainWindow):
         self.session_values=self.cache_group.values;self.session_engines=self.cache_group.engines;self.engine=None
         from .session_cache import EphemeralCache
         self.space_motion_fields=EphemeralCache()
+        if hasattr(self,'edit_history'):self.edit_history.refresh()
     def switch_project_cache(self,key,count):
         self.stop_animation();self._prepared_motion=None;self._prepared_package=None
         self.cancel_previews()
@@ -900,6 +930,7 @@ class MainWindow(W.QMainWindow):
         self.cleanup_retired_sessions();self.refresh_cache_status();self.width_yield.refresh()
     def clear_cached_results(self,all_projects=False):
         if self.cache_clear_worker is not None:return
+        self.edit_history.clear(all_projects)
         self.stop_animation();self.width_yield.reset();self.reconstruction_yield.reset();self.constraint_feedback.cancel();self._prepared_motion=None;self._prepared_package=None
         self.preview_ticket+=1;self.preview_pending=None;self.motion_pending=None;self.motion_generation+=1
         self._width_grid_summary=None;self._problem_tag=None;self._coupled_key=None;self._coupled_data=None
@@ -1015,6 +1046,7 @@ class MainWindow(W.QMainWindow):
                 QtCore.QTimer.singleShot(0,lambda:self.apply_node_edits(pending[1]) if self.data is pending[0] else None)
             else:self.log_bus.emit('图纸已切换，旧图纸的排队节点编辑已取消。')
         if self._coverage_pending:self.coverage_timer.start()
+        if self.edit_history.queued:QtCore.QTimer.singleShot(0,self.edit_history.drain)
         if getattr(self,'remote_locked',False):self.measured_output.apply_lock()
     def area_changed(self,*_):
         if self.loading or self.data is None:return
@@ -1071,8 +1103,9 @@ class MainWindow(W.QMainWindow):
             self.project_path=Path(project_path).resolve() if settings and project_path and True else None
             self.refresh_jobs()
         self.start_worker(read_and_prepare,accepted)
-    def set_data(self,data,project=None,project_path=None):
+    def set_data(self,data,project=None,project_path=None,*,request_analysis=True):
         self.cut_drag.cancel();self.reconstruction_overlay.hide();self.constraint_feedback.cancel()
+        self.pending_deleted_shapes={}
         self.reconstruction_pending=False;self._reconstruction_apply_once=False;self._applied_preview_settings=None
         self.exit_region_mode()
         from .session_cache import logical_fingerprint
@@ -1096,6 +1129,7 @@ class MainWindow(W.QMainWindow):
             from .project import restored_width_ignores
             self.measured_output.restore(project.get('measured_output'))
             self.ignored_width_lines=restored_width_ignores(project,data);self.dxf_directory=project.get('dxf_directory','')
+            self.apd_options=project.get('apd_export',{})
             from .dxf_settings import DxfSettings
             from .dxf_controls import restore as restore_dxf_controls
             self.dxf_settings=DxfSettings.from_dict(project.get('dxf_options'));restore_dxf_controls(self)
@@ -1161,7 +1195,7 @@ class MainWindow(W.QMainWindow):
         if remembered is not None:
             key=self.assessment_identity(data,self.roles(),self.ordered_layers(),self.params(),self.view_settings)
             if remembered[0]==key:self.display_result(remembered[1]);self.log_bus.emit('已恢复本次运行中此工程的评估缓存')
-        if self.result is None and (self.width_toggle.isChecked() or self.reconstruction_toggle.isChecked()):self.request_preview()
+        if request_analysis and self.result is None and (self.width_toggle.isChecked() or self.reconstruction_toggle.isChecked()):self.request_preview()
     def selectability_changed(self,key):
         if self.loading or self.data is None:return
         if not self.selectable_boxes[key].isChecked() and getattr(self,'selection',None):
@@ -1416,6 +1450,7 @@ class MainWindow(W.QMainWindow):
 
     def compute_reconstruction(self):
         if self.remote_locked or self.data is None:return
+        self.pending_deleted_shapes={}
         self.reconstruction_pending=False;self._reconstruction_apply_once=True
         if hasattr(self,'reconstruction_overlay'):
             self.reconstruction_overlay.staged_overlay=None
@@ -1460,6 +1495,7 @@ class MainWindow(W.QMainWindow):
     def clear_manual_regions(self,*_):
         self.exit_region_mode()
         if not self.view_settings.reconstruction_regions:return
+        self.edit_history.record()
         self.view_settings=replace(self.view_settings,reconstruction_regions=())
         self.invalidate_reconstruction_edit();self.request_preview()
 
@@ -1472,6 +1508,7 @@ class MainWindow(W.QMainWindow):
         updated=nudge_cut(self.view_settings,piece,step,kind)
         if updated.reconstruction_key()==self.view_settings.reconstruction_key():
             self.statusBar().showMessage('当前切口不能继续移动');return
+        self.edit_history.record()
         self.view_settings=updated;self.invalidate_reconstruction_edit();self.request_preview(quiet=True)
 
     def clear_manual_cuts(self,*_):
@@ -1481,6 +1518,7 @@ class MainWindow(W.QMainWindow):
         from dataclasses import replace
         # Also restores the automatic cuts that were deleted, so one button undoes
         # every hand edit of the cut lines.
+        self.edit_history.record()
         self.view_settings=replace(self.view_settings,reconstruction_cuts=(),
                                    reconstruction_extra_cuts=(),reconstruction_second_cuts=(),reconstruction_dropped_cuts=(),reconstruction_intervals=(),reconstruction_angles=(),reconstruction_deleted=(),reconstruction_added=(),reconstruction_forced=(),reconstruction_boxes=(),reconstruction_angle_boxes=(),reconstruction_box_excluded=())
         self.invalidate_reconstruction_edit()
@@ -1513,6 +1551,7 @@ class MainWindow(W.QMainWindow):
         dropped=tuple(row for row in self.view_settings.reconstruction_dropped_cuts if not matches(row))
         changes['reconstruction_intervals']=tuple(r for r in self.view_settings.reconstruction_intervals if (r[0],r[1],r[2],r[4])!=(piece['layer'],piece['index'],piece['die'],piece.get('route_identity')))
         manual=manual or changes['reconstruction_intervals']!=self.view_settings.reconstruction_intervals
+        self.edit_history.record()
         self.view_settings=replace(self.view_settings,**changes,reconstruction_dropped_cuts=dropped)
         self.invalidate_reconstruction_edit()
         self.statusBar().showMessage('已恢复自动切口' if manual else '已删除自动切口；清除全部手动切口可恢复')
@@ -2276,7 +2315,7 @@ class MainWindow(W.QMainWindow):
             self.extreme_table.blockSignals(True);self.extreme_table.setCurrentCell(-1 if manual is not None else row,0);self.extreme_table.blockSignals(False)
         else:self.tabs.setCurrentIndex(0);self.preview_tabs.setCurrentIndex(0)
         self.plot_layout(preserve=preserve)
-        self.request_preview();self.width_yield.refresh();self.analysis.activate()
+        self.request_preview(pose_change=bool(self.pending_deleted_shapes));self.width_yield.refresh();self.analysis.activate()
         self.statusBar().showMessage('评估完成：选择极端情况预演；进入结果分析后计算安全范围与良率')
     def render_analysis_result(self,r,preserve=False):
         rec=r['recommendation']
@@ -2547,12 +2586,14 @@ class MainWindow(W.QMainWindow):
 
     def select_preview(self,row,column,*_):
         if self.loading:return
+        next_index=self.page_items[row-1][0] if 1<=row<=len(self.page_items) else None
+        if next_index!=self.active_preview or self.manual_states is not None:self.edit_history.record()
         if self.cut_drag.state is not None:self.cut_drag.cancel(redraw=False)
         if hasattr(self,'mouse_die'):
             self.mouse_die.cancel_pending();self.mouse_die.exit()
         self.reconstruction_overlay.clear_hover()
         self.manual_states=None
-        self.active_preview=self.page_items[row-1][0] if 1<=row<=len(self.page_items) else None
+        self.active_preview=next_index
         self._selected_grid_pose=self.extremes[self.active_preview]['states'] if self.active_preview is not None else None
         self.state_table.setRowCount(0)
         if self.active_preview is not None:
@@ -2636,9 +2677,11 @@ class MainWindow(W.QMainWindow):
         settings=retire_pad_intervals(self.view_settings,solver)
         return dict(schema_version=5,app_version=__version__,rulers=self.rulers.rows,sha256=self.data.sha256,top_cell=self.data.top_name,
                     roles=self.roles(),parameters=asdict(self.params()),settings=asdict(settings),node_edits=list(self.data.node_edits),
+                    deleted_shapes=list(getattr(self.data,'deleted_shapes',())),
                     geometry_indexing=getattr(self.data,'geometry_indexing','legacy'),legacy_node_edits=list(getattr(self.data,'legacy_node_edits',[])),
                     layout_output=__import__('die_shift_studio.layout_export',fromlist=['configuration']).configuration(self),
                     dxf_directory=self.dxf_directory,dxf_options=asdict(self.dxf_settings),measured_output=self.measured_output.configuration(),
+                    apd_export=self.apd_options,
                     ignored_reconstruction=dict(sha256=self.data.sha256,top_cell=self.data.top_name,refs=[list(r) for r in self.view_settings.reconstruction_ignored]),
                     ignored_width_lines=dict(sha256=self.data.sha256,top_cell=self.data.top_name,refs=[list(r) for r in sorted(self.ignored_width_lines)]),
                     extreme_view=dict(filter_mode=('all','drc','failed')[self.problem_filter.currentIndex()],filter_problems=bool(self.problem_filter.currentIndex()),mode=self.grid_mode.currentData(),page_size=self.view_settings.table_page_limit-1,page=(self.preview_page if self.extremes is not None else self._initial_extreme_page)+1),
@@ -2656,7 +2699,10 @@ class MainWindow(W.QMainWindow):
     def change_fixed_via_following(self,refs,following):
         if self.remote_locked or self.view_settings.reconstruction_fixed_via_mode!='individual':return
         old=set(self.view_settings.reconstruction_fixed_via_follows);refs=set(refs)
-        self.view_settings=replace(self.view_settings,reconstruction_fixed_via_follows=tuple(sorted(old|refs if following else old-refs)))
+        updated=old|refs if following else old-refs
+        if old==updated:return
+        self.edit_history.record()
+        self.view_settings=replace(self.view_settings,reconstruction_fixed_via_follows=tuple(sorted(updated)))
         self.invalidate_reconstruction_edit();self.request_preview(quiet=True)
         action='固定过孔随动' if following else '固定过孔恢复静止'
         if getattr(self,'reconstruction_pending',False):
@@ -2685,6 +2731,7 @@ class MainWindow(W.QMainWindow):
         if getattr(self,'remote_locked',False):return
         refs={(k,int(i)) for k,i in refs};old=set(self.view_settings.reconstruction_following)
         edits=self._strip_ignored_zones(self.view_settings,refs)
+        self.edit_history.record()
         self.view_settings=replace(self.view_settings,**edits,reconstruction_following=tuple(sorted(old|refs if following else old-refs)),
                                    reconstruction_ignored=tuple(sorted(set(self.view_settings.reconstruction_ignored)|refs)))
         self.invalidate_reconstruction_edit();self.request_preview()
@@ -2707,6 +2754,7 @@ class MainWindow(W.QMainWindow):
             extra['reconstruction_forced']=tuple(sorted(set(self.view_settings.reconstruction_forced)|refs))
             extra['reconstruction_deleted']=tuple(r for r in self.view_settings.reconstruction_deleted if r[:2] not in refs)
             extra['reconstruction_following']=tuple(sorted(set(self.view_settings.reconstruction_following)-refs))
+        self.edit_history.record()
         self.view_settings=replace(self.view_settings,reconstruction_ignored=tuple(sorted(updated)),**extra)
         self.invalidate_reconstruction_edit();self.request_preview()
         if getattr(self,'reconstruction_pending',False):
@@ -2719,7 +2767,9 @@ class MainWindow(W.QMainWindow):
             self.statusBar().showMessage(f'已取消忽略重构 {len(refs)} 个图形；重新参与重构预演。')
 
     def change_width_ignores(self,refs,ignore):
-        self.ignored_width_lines=(self.ignored_width_lines.union(refs) if ignore else self.ignored_width_lines.difference(refs))
+        updated=self.ignored_width_lines.union(refs) if ignore else self.ignored_width_lines.difference(refs)
+        if updated==self.ignored_width_lines:return
+        self.edit_history.record();self.ignored_width_lines=updated
         self._legend_stamp=None
         self.plot_layout(preserve=True)
         self.width_yield.refresh()
@@ -2737,30 +2787,91 @@ class MainWindow(W.QMainWindow):
             self.apply_node_edits(dialog.changes)
 
     def apply_node_edits(self,edits):
+        if self.remote_locked or self.data is None:return
         if self.worker is not None:
             self._queued_node_edit=(self.data,edits);self.log_bus.emit('节点编辑已排队，当前任务完成后重建几何。');return
-        original=self.data;project=self.project_settings();project['node_edits']=edits
-        pose=self.shown_states.copy() if self.shown_states is not None and np.any(self.shown_states) else None
-        was_assessed=self.result is not None;valid_case=self.case is not None;view=(self.ax.get_xlim(),self.ax.get_ylim())
+        from .area_filter import canonical_project
+        project=canonical_project(self.data,dict(self.project_settings(),node_edits=edits))
+        before=self.edit_history.capture()
+        self.apply_layout_edit(project,commit=lambda:self.edit_history.record(before),
+                               pose=before['pose'],extreme=before['extreme'])
+
+    def undo_edit(self):
+        self.edit_history.step()
+
+    def redo_edit(self):
+        self.edit_history.step(forward=True)
+
+    def delete_selected_shapes(self):
+        if self.remote_locked or self.data is None or self.cut_drag.state is not None:return
+        if self.worker is not None:
+            self.statusBar().showMessage('当前图纸正在更新，完成后可删除图形。');return
+        from .area_filter import canonical_project
+        from .gds_shapes import shape_nodes,node_fingerprint
+        original=self.data;roles=self.roles()
+        source=getattr(original,'_area_base',original)
+        base=getattr(source,'_source_snapshot',source)
+        project=canonical_project(original,self.project_settings())
+        rows={tuple(q[:2]):q[2] for q in project['deleted_shapes']}
+        for key,index in self.selection.selected:
+            if roles.get(key) in ('芯片边框','封装边框') or not 0<=index<len(original.layers.get(key,())):continue
+            raw=getattr(original,'area_indices',{}).get(key,range(len(original.layers[key])))[index]
+            kind,coords,_=shape_nodes(base,key,raw)
+            rows[key,raw]=node_fingerprint(kind,coords)
+        if len(rows)==len(project['deleted_shapes']):return
+        project['deleted_shapes']=[(*ref,rows[ref]) for ref in sorted(rows)]
+        before=self.edit_history.capture()
+        self.apply_layout_edit(project,commit=lambda:self.edit_history.record(before),
+                               pose=before['pose'],extreme=before['extreme'])
+
+    def apply_layout_edit(self,project,*,commit,pose=None,extreme=None):
+        """Publish a source-bound geometry edit only after reindexing succeeds."""
+        original=self.data;view=(self.ax.get_xlim(),self.ax.get_ylim())
+        was_assessed=self.result is not None
         selected=list(self.selection.selected)
+        stage=self.reconstruction_toggle.isChecked() and not self.view_settings.reconstruction_auto
+        from .edit_history import mapped_edits
+        previously_applied,_=mapped_edits(original,self.preview_settings(),(),to_source=True)
+        pending_before=dict(self.pending_deleted_shapes)
+        old_deleted={tuple(q[:2]) for q in getattr(original,'deleted_shapes',())}
+        next_deleted={tuple(q[:2]) for q in project['deleted_shapes']}
+        ghosts={ref:g for ref,g in pending_before.items() if ref in next_deleted}
+        if stage and next_deleted-old_deleted:
+            cache=self.geometry_cache or GeometryCache(original)
+            for (layer,raw) in next_deleted-old_deleted:
+                indices=getattr(original,'area_indices',{}).get(layer,range(len(original.layers.get(layer,()))))
+                if raw in indices:
+                    index=indices.index(raw)
+                    moved=next((row['geometry'] for row in self.selection.replacements().get(layer,()) if index in row['indices']),None)
+                    if moved is None:
+                        moved=cache.layers[layer]['geometry'][index]
+                        model=getattr(self.engine,'contact',None)
+                        if model is not None and (node:=model.ids.get((layer,index))) is not None and self.shown_states is not None:
+                            moved=model.moved(moved,model.nodes[node]['owner'],self.shown_states)
+                    ghosts[layer,raw]=moved
         def prepare(progress):
-            progress(5,'校验工程节点')
-            from .area_filter import canonical_project,apply
-            unfiltered=canonical_project(original,project)
-            updated,edited_project=apply(edited_snapshot(getattr(original,'_area_base',original),unfiltered.get('node_edits',[])),unfiltered)
+            progress(5,'校验图纸编辑')
+            from .area_filter import apply
+            base=getattr(original,'_area_base',original)
+            unfiltered=base if base.node_edits==project['node_edits'] else edited_snapshot(base,project['node_edits'])
+            updated,edited_project=apply(unfiltered,project,reference=original)
             progress(35,'重建几何和金属连接');cache=GeometryCache(updated)
             try:case=build_case(updated,edited_project['roles'],layer_order=edited_project['layer_order'])
-            except ValueError:
-                if valid_case:raise
-                case=None
+            except ValueError:case=None
             return updated,cache,case,edited_project
         def accepted(product):
             if self.data is not original:return
             updated,cache,case,edited_project=product
             updated.geometry_cache=cache;updated.prepared_case=case;updated.prepared_roles=project['roles'];updated.prepared_auto=automatic_parameters(updated,project['roles'])
-            self.set_data(updated,edited_project,project_path=self.project_path)
+            self.set_data(updated,edited_project,project_path=self.project_path,request_analysis=False)
             self.ax.set_xlim(view[0]);self.ax.set_ylim(view[1])
-            self.manual_states=pose
+            self.manual_states=None if pose is None else np.array(pose,float)
+            self.active_preview=extreme
+            self.pending_deleted_shapes=ghosts
+            if ghosts:
+                self.reconstruction_pending=True
+                applied,_=mapped_edits(updated,previously_applied,(),to_source=False)
+                self._applied_preview_settings=replace(self.view_settings,**applied)
             previous_map=getattr(original,'area_indices',{})
             current_map=getattr(updated,'area_indices',{})
             mapped=[]
@@ -2770,10 +2881,11 @@ class MainWindow(W.QMainWindow):
                 if source_index in present:mapped.append((key,present.index(source_index)))
             self.selection.selected=mapped
             self.plot_layout(preserve=True)
-            if pose is not None:self.request_preview()
-            if was_assessed:
+            if case is not None and (was_assessed or self.width_toggle.isChecked() or self.reconstruction_toggle.isChecked()):
                 self._evaluation_requested=True;self._coverage_pending=True;self.coverage_timer.start()
-            self.log_bus.emit('工程节点已更新。几何、连接和缓存按新版本计算；保存工程可保留本次编辑。')
+            elif case is not None:self.request_preview(pose_change=True)
+            commit()
+            self.log_bus.emit('工程图形、连通和分析缓存已更新。')
         self.start_worker(prepare,accepted)
 
     def write_project(self,path):
@@ -2811,7 +2923,9 @@ class MainWindow(W.QMainWindow):
             # First save names the same engineering session; keep solved poses.
             previous=self.cache_registry.retire(cache_id)
             if previous is not None:self.retired_sessions.append(previous)
-            self.cache_registry.rekey(self.cache_project_key,cache_id);self.cache_project_key=cache_id
+            old_cache_key=self.cache_project_key
+            self.cache_registry.rekey(old_cache_key,cache_id);self.cache_project_key=cache_id
+            self.edit_history.rekey(old_cache_key,cache_id)
             self.cleanup_retired_sessions();self.refresh_cache_status()
     def load_project(self,path):
         try:
