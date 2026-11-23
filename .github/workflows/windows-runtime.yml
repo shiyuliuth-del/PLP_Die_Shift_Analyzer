@@ -380,7 +380,7 @@ jobs:
         shell: cmd
         run: |
           set PYTHONPATH=.;tests
-          "%DIE_SHIFT_PYTHON%" -m unittest test_v39.V39Tests.test_shared_source_paints_union_of_all_fixed_regions test_v50.V50Tests.test_enclosure_actual_value_is_local_to_each_reported_witness -v
+          "%DIE_SHIFT_PYTHON%" -m unittest test_v39.V39Tests.test_shared_source_paints_union_of_all_fixed_regions test_v39.V39Tests.test_whole_pad_never_collapses_to_the_blue_point test_v50.V50Tests.test_enclosure_actual_value_is_local_to_each_reported_witness -v
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" -m unittest discover -s tests -p test_v40.py -v
           if errorlevel 1 exit /b 1

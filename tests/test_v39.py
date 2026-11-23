@@ -41,6 +41,7 @@ class V39Tests(unittest.TestCase):
     def test_whole_pad_never_collapses_to_the_blue_point(self):
         e,_,_=fixture()
         try:
+            e.configure_reconstruction(True,ViewSettings(reconstruction_allow_moving_pad=True))
             q=e.reconstructor.frame(np.zeros((1,3)))['pieces'][0];plan=q['route_plan'];part=plan.partition(0,q['interval'][1])
             pose=np.array([15.,12.,.01])
             from die_shift_studio.reconstruction import transform
@@ -186,6 +187,7 @@ class V39Tests(unittest.TestCase):
         from die_shift_studio.reconstruction_overlay import ReconstructionOverlay
         class Window(QtCore.QObject):pass
         w=Window();fig=Figure();w.ax=fig.add_subplot();w._closing=False
+        w.view_settings=ViewSettings()
         on=SimpleNamespace(isChecked=lambda:True)
         w.show_issues=on;w.layer_styles={};w.style_for=lambda layer:dict(color='#aabbcc',alpha=.5)
         w.reconstruction_toggle=on;w.visible_boxes={'5/0':on};w.view_bounds=(-10,-10,210,110)
