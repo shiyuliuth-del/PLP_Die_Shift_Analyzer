@@ -1585,6 +1585,7 @@ class MainWindow(W.QMainWindow):
                 project=canonical_project(self.data,self.project_settings())
                 project=self._merge_staged_restored_edits(project)
                 project['deleted_shapes']=target_deletions
+                project['node_edits']=list(self._effective_node_edits())
                 project.setdefault('overlays',{})['reconstruction']=True
                 pose=None if self.manual_states is None else tuple(map(tuple,self.manual_states))
                 extreme=self.active_preview
@@ -2886,7 +2887,7 @@ class MainWindow(W.QMainWindow):
         solver=None if getattr(self.engine,'busy',False) else getattr(self.engine,'reconstructor',None)
         settings=retire_pad_intervals(self.view_settings,solver)
         return dict(schema_version=5,app_version=__version__,rulers=self.rulers.rows,sha256=self.data.sha256,top_cell=self.data.top_name,
-                    roles=self.roles(),parameters=asdict(self.params()),settings=asdict(settings),node_edits=list(self._effective_node_edits()),
+                    roles=self.roles(),parameters=asdict(self.params()),settings=asdict(settings),node_edits=list(self.data.node_edits),
                     deleted_shapes=list(self._effective_deleted_shapes()),
                     geometry_indexing=getattr(self.data,'geometry_indexing','legacy'),legacy_node_edits=list(getattr(self.data,'legacy_node_edits',[])),
                     layout_output=__import__('die_shift_studio.layout_export',fromlist=['configuration']).configuration(self),
@@ -3117,6 +3118,7 @@ class MainWindow(W.QMainWindow):
         from .area_filter import canonical_project
         project=dict(canonical_project(self.data,self.project_settings()),gds_path=source)
         project=self._merge_staged_restored_edits(project)
+        if self._staged_node_edits is not None:project['node_edits']=list(self._staged_node_edits)
         if self.remote_locked or getattr(self,'requested_measured',False):
             for name,value in self.measured_output.saved_overlays.items():
                 project['overlays']['footprint' if name=='probability' else name]=value

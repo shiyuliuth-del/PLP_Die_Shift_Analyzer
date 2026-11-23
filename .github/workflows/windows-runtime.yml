@@ -115,7 +115,7 @@ on:
         type: boolean
         default: false
       resume_v50_tail:
-        description: 'Continue after V50 legacy overlay fixture compatibility; run only affected and unfinished checks'
+        description: 'Check source editing, local IPC and unfinished packaging without repeating the early suites'
         type: boolean
         default: false
 
@@ -376,7 +376,7 @@ jobs:
           "%DIE_SHIFT_PYTHON%" tests/gui_v40.py
           if errorlevel 1 exit /b %errorlevel%
           "%DIE_SHIFT_PYTHON%" tests/gui_v39.py
-      - name: Continue V50 tail without replaying passed suites
+      - name: Check source editing and local IPC without replaying the early suites
         if: ${{ inputs.resume_v52_client != true && inputs.resume_v51 != true && inputs.resume_v50_tail == true }}
         shell: cmd
         run: |
@@ -388,6 +388,14 @@ jobs:
           "%DIE_SHIFT_PYTHON%" tests/gui_v40.py
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" tests/gui_v39.py
+          if errorlevel 1 exit /b 1
+          "%DIE_SHIFT_PYTHON%" -m unittest test_v67 -v
+          if errorlevel 1 exit /b 1
+          "%DIE_SHIFT_PYTHON%" tests/gui_v64_editing.py
+          if errorlevel 1 exit /b 1
+          "%DIE_SHIFT_PYTHON%" tests/gui_v43.py
+          if errorlevel 1 exit /b 1
+          "%DIE_SHIFT_PYTHON%" tests/gui_v43_process.py
           if errorlevel 1 exit /b 1
       - name: Verify V44 Excel client and durable recovery
         if: ${{ inputs.resume_v52_client != true && inputs.resume_v51 != true }}
