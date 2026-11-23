@@ -65,6 +65,10 @@ class ProgressBar(W.QProgressBar):
         self.elapsed = 0
         self.failed = False
         self.count_only = False
+        self.clock_timer = QtCore.QTimer(self)
+        self.clock_timer.setTimerType(getattr(QtCore.Qt, 'TimerType', QtCore.Qt).PreciseTimer)
+        self.clock_timer.setInterval(1000)
+        self.clock_timer.timeout.connect(self.refresh_label)
 
     def paintEvent(self, event):
         painter = QtGui.QPainter(self)
@@ -78,40 +82,44 @@ class ProgressBar(W.QProgressBar):
         painter.setPen(QtGui.QColor('#8796a5'))
         painter.drawRect(rect)
         painter.setPen(QtGui.QColor('#142536'))
-        label = self.label(fraction, show_times=not self.count_only)
+        label = self.label(fraction)
         alignment = getattr(QtCore.Qt, 'AlignmentFlag', QtCore.Qt).AlignCenter
         elide = getattr(QtCore.Qt, 'TextElideMode', QtCore.Qt).ElideRight
         painter.drawText(rect.adjusted(8, 0, -8, 0), alignment, self.fontMetrics().elidedText(label, elide, rect.width() - 16))
 
-    def label(self, fraction, *, show_times=True):
+    def label(self, fraction, *, include_end=False):
         percent = f'{round(fraction * 100)}% · ' if not self.count_only and self.maximum() > 1 else ''
-        if self.start_time is None or not show_times:
-            return percent + self.detail
         elapsed = int(time.monotonic() - self.started) if self.started is not None else self.elapsed
-        started = time.strftime('%H:%M:%S', time.localtime(self.start_time))
-        stopped = time.strftime('%H:%M:%S', time.localtime(self.end_time)) if self.end_time is not None else ''
+        started = time.strftime('%H:%M:%S', time.localtime(self.start_time)) if self.start_time is not None else '--:--:--'
         duration = f'{elapsed // 3600:02d}:{elapsed // 60 % 60:02d}:{elapsed % 60:02d}'
-        times = f'开始 {started} · ' + (f'结束 {stopped} · ' if stopped else '')
-        return f'{percent}{times}耗时 {duration} · {self.detail}'
+        times = f'开始 {started} · 总耗时 {duration} · '
+        if include_end and self.end_time is not None:
+            times += f'结束 {time.strftime("%H:%M:%S", time.localtime(self.end_time))} · '
+        return percent + times + self.detail
 
     def begin(self):
         self.started = time.monotonic()
         self.start_time = time.time()
         self.end_time = None
         self.count_only = False
+        self.clock_timer.start()
 
     def finish(self):
         self.end_time = time.time()
         self.elapsed = int(time.monotonic() - self.started)
         self.started = None
-        self.status(self.detail)
+        self.clock_timer.stop()
+        self.refresh_label()
 
     def status(self, text, current=None, total=None):
         self.detail = str(text).replace('\n', ' ')
         if current is not None:
             self.setRange(0, max(1, int(total or 1)))
             self.setValue(int(current))
-        self.setToolTip(self.label(self.value() / max(1, self.maximum())))
+        self.refresh_label()
+
+    def refresh_label(self):
+        self.setToolTip(self.label(self.value() / max(1, self.maximum()), include_end=True))
         self.update()
 
     def package_status(self, completed, total, published):

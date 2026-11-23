@@ -1,3 +1,7 @@
+# V67 进度条常驻计时
+
+RealDataAnalyse 的进度条同时显示开始时间、总耗时与完成数量。独立的 Qt 定时器在任务开始后每秒刷新文字，计时以单调时钟为准。任务结束时停止定时器并保留最终耗时，结束时刻可悬停查看。
+
 # V66 动静区图层/JOIN、延迟删除、实测高并发与多动区性能
 
 `dxf_document._write_blocks` 将动静区 CAD 块内部实体写入块对应的 `_A` / `_B` / `_C` 图层，`region_contract.verify_written_contours` 核对块内所有实体图层与块 INSERT 图层一致。`DxfSettings.region_auto_join`（默认 `False`）在 `dxf_controls.py` 暴露为「动静区自动JOIN」，勾选时 `region_export._join_block_paths` 合并块内首尾相接的多段线并允许闭合环通过回读校验。

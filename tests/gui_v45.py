@@ -30,7 +30,7 @@ try:
  assert not any(q.text()=='DRC问题' for q in w.findChildren(W.QCheckBox))
  assert w.space_toggle.text()=='避让空间' and w.manual_button.text()=='手动偏移'
  assert all(not q.isChecked() for q in w.setting_sections.values())
- assert all(not q.isChecked() for q in w.process_sections.values())
+ assert all(q.isChecked() for q in w.process_sections.values())
  assert all(q.styleSheet()==w.setting_sections['通用'].styleSheet() for q in w.process_sections.values())
  assert w.setting_fields['drc_tolerance_um'].value()==.1
  assert w.measured_output.memory.value()==0 and w.measured_output.threads.value()==0

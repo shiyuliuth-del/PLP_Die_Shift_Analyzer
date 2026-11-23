@@ -172,6 +172,22 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         assert w.template.text()==str(folder/'RealDataAnalyse/Template/GD55_Template.gds')
         assert sha256(folder/'GD55_1105.gds') == before
         assert (folder/'RealDataAnalyse/logs/RealDataAnalyse.log').is_file()
+        clock = ProgressBar()
+        assert '开始 --:--:-- · 总耗时 00:00:00' in clock.label(0)
+        clock.begin()
+        clock.package_status(6,12,False)
+        initial = clock.toolTip()
+        until = time.monotonic() + 4
+        while clock.toolTip() == initial and time.monotonic() < until:
+            QTest.qWait(50)
+        assert clock.toolTip() != initial
+        assert clock.value() == 5000
+        assert all(label in clock.label(.5) for label in ('开始 ', '总耗时 ', '已完成 6 / 12'))
+        clock.finish()
+        final = clock.label(.5)
+        assert not clock.clock_timer.isActive() and '结束 ' in clock.toolTip()
+        QTest.qWait(1100)
+        assert clock.label(.5) == final
         # Continuous fill has no alternating Windows segments; text fits by elision.
         w.progress.failed = False
         w.progress.package_status(6,12,False)
