@@ -7,7 +7,7 @@ def build(window,layout):
     header,body,form=window.collapsible(layout,'DXF输出参数',window.setting_sections)
     info=W.QLabel('Flatten Top Cell：已启用，包含全部实例、阵列与层级变换。')
     info.setWordWrap(True);form.addRow(info)
-    hint=W.QLabel('动静区输出：A动区、B平移区、C静区，仅输出相接的开放轮廓，不使用HATCH。图层范围、Merge、孔洞拆层和比例仍有效。');hint.setWordWrap(True);form.addRow(hint)
+    hint=W.QLabel('动静区输出：_A 运动侧、_B 固定侧、_C 动区，同一图形按层成块。RKG_REF 为封装边框，DIE_REF 为芯片边框。应用图层范围和比例。');hint.setWordWrap(True);form.addRow(hint)
     fields={};window.dxf_fields=fields
     for key,title,items in (
         ('layer_scope','导出图层',[('全部已导入图层','all'),('当前显示图层','visible'),('参与分析图层','participating')]),

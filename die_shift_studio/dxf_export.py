@@ -85,7 +85,7 @@ def _vertices(ring):
     return xy
 
 
-def _handles(layers,count):
+def _handles(layers,count,blocks=()):
     alloc=doc.HandleAllocator();h={}
     for name in doc.STANDARD_TABLES:h['table_'+name]=alloc.take()
     for key in ('vport_active','ltype_byblock','ltype_bylayer','ltype_continuous','style_standard','appid_acad',
@@ -94,6 +94,9 @@ def _handles(layers,count):
         h[key]=alloc.take()
     for layer in layers:layer['handle']=alloc.take()
     entities=[alloc.take() for _ in range(count)]
+    for block in blocks:
+        for key in ('record','begin','end','insert'):block[key]=alloc.take()
+        block['children']=[alloc.take() for _ in block['outlines']]
     h['handseed']=alloc.handseed()
     return h,entities
 

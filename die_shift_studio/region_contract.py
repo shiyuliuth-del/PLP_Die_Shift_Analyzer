@@ -1,65 +1,132 @@
-"""Public V41 ABC names; internal C remains the historical moving support."""
-EXPORT_ROLES=frozenset(('封装边框','芯片边框','固定RDL'))
-PUBLIC_KIND={'A':'A','B':'C','C':'B','':''}
+"""Physical outline contract for the nominal dynamic/static region DXF."""
+from collections import Counter, defaultdict
+
+import numpy as np
+import shapely
+
+from .resources import cancel_check
 
 
-def verify_written_contours(path):
-    """Read the actual DXF bytes before publication, independently of the writer.
+REFERENCE_LAYERS = {'封装边框': 'RKG_REF', '芯片边框': 'DIE_REF'}
+EXPORT_ROLES = frozenset((*REFERENCE_LAYERS, '固定RDL'))
+# The solver still uses A for deformation, B for fixed and C for moving copper.
+PUBLIC_KIND = {'A': '_C', 'B': '_B', 'C': '_A'}
 
-    Every physical layer must be a closed, even-degree edge graph. Individual
-    ABC entities are open. Positive-length coincident/duplicate edges fail.
-    """
-    from collections import Counter,defaultdict
-    import math
-    import re
-    import shapely
-    import numpy as np
-    from .resources import cancel_check
-    layers=defaultdict(list);record=None;section=None;pending=False
-    def finish(row):
-        if not row:return
-        if row['closed'] or len(row['xy'])<2:raise ValueError('ABC输出含闭合实体或无效折线')
-        points=row['xy']
-        if points[0]==points[-1]:raise ValueError('ABC单条轮廓未在交界处断开')
-        base=re.sub(r'[ABC]$','',row['name'])
-        layers[base].extend(zip(points[:-1],points[1:]))
-    with open(path,encoding='ascii') as stream:
-        while True:
-            a=stream.readline()
-            if not a:break
-            b=stream.readline()
-            if not b:raise ValueError('DXF记录不完整')
-            code,value=int(a),b.strip()
-            if code==0:
-                finish(record);record=None
-                if value=='SECTION':pending=True
-                elif value=='ENDSEC':section=None
-                elif section=='ENTITIES':
-                    if value!='LWPOLYLINE':raise ValueError('动静区仅允许开放轮廓实体')
-                    record=dict(name='',xy=[],closed=False)
-            elif code==2 and pending:section=value;pending=False
-            elif record is not None:
-                if code==8:record['name']=value
-                elif code==70:record['closed']=bool(int(value)&1)
-                elif code==10:record['xy'].append([float(value),None])
-                elif code==20:record['xy'][-1][1]=float(value)
-    summary={}
-    for name,edges in layers.items():
-        cancel_check();degree=Counter();unique=set();segments=[];length=0.
-        for a,b in edges:
-            a,b=tuple(a),tuple(b)
-            if not all(math.isfinite(x) for x in (*a,*b)) or a==b:raise ValueError(f'{name} 含无效线段')
-            edge=tuple(sorted((a,b)))
-            if edge in unique:raise ValueError(f'{name} 存在重复轮廓线段')
-            unique.add(edge);degree[a]+=1;degree[b]+=1
-            line=shapely.LineString((a,b));segments.append(line);length+=line.length
-        if any(n%2 for n in degree.values()):raise ValueError(f'{name} ABC交界点未严格闭合，未覆盖已有文件')
-        geometries=np.asarray(segments,object);tree=shapely.STRtree(geometries)
-        for start in range(0,len(geometries),512):
-            cancel_check();i,j=tree.query(geometries[start:start+512],predicate='intersects');i=i+start
-            keep=j>i;i,j=i[keep],j[keep]
-            if len(i) and np.any(shapely.length(shapely.intersection(geometries[i],geometries[j]))>0):
-                raise ValueError(f'{name} 存在正长度重叠轮廓线段')
-        summary[name]=dict(segments=len(edges),nodes=len(degree),closed=True,overlap=False)
-    if not summary:raise ValueError('未读回有效动静区轮廓')
+
+def overlapping_edges(segments):
+    """Return positive-length coincidences once, including partial overlaps."""
+    if not len(segments):
+        return
+    tree = shapely.STRtree(segments)
+    for start in range(0, len(segments), 512):
+        cancel_check()
+        i, j = tree.query(segments[start:start+512], predicate='intersects')
+        i += start
+        keep = j > i
+        i, j = i[keep], j[keep]
+        shared = shapely.intersection(segments[i], segments[j])
+        for k in np.flatnonzero(shapely.length(shared) > 0):
+            yield int(i[k]), int(j[k]), shared[k]
+
+
+def _records(path):
+    with open(path, encoding='ascii') as stream:
+        record, fields = '', []
+        while line := stream.readline():
+            value = stream.readline()
+            if not value:
+                raise ValueError('DXF记录不完整')
+            code, value = int(line), value.strip()
+            if code == 0:
+                yield record, fields
+                record, fields = value, []
+            else:
+                fields.append((code, value))
+        yield record, fields
+
+
+def verify_written_contours(path, *, expected_blocks=None, expected_references=None, shared_layers=()):
+    """Read actual BLOCK/INSERT coordinates and audit the expanded linework."""
+    section = block = None
+    contents, inserts, references = {}, {}, []
+    for kind, fields in _records(path):
+        attrs = dict(fields)
+        if kind == 'SECTION':
+            section = attrs[2]
+        elif kind == 'ENDSEC':
+            section = None
+        elif section == 'BLOCKS':
+            if kind == 'BLOCK':
+                block = attrs[2]
+                if block in contents or any(float(attrs.get(k, 0)) for k in (10, 20, 30)):
+                    raise ValueError('动静区块名称重复或基点偏移')
+                contents[block] = []
+            elif kind == 'ENDBLK':
+                block = None
+            elif kind == 'LWPOLYLINE' and block and attrs[8] == '0':
+                contents[block].append(_outline(fields, attrs, False))
+            else:
+                raise ValueError('动静区块含不支持的实体')
+        elif section == 'ENTITIES':
+            if kind == 'INSERT':
+                name, layer = attrs[2], attrs[8]
+                if name in inserts or any(float(attrs.get(k, 0)) for k in (10, 20, 30, 50)) or any(
+                        float(attrs.get(k, 1)) != 1 for k in (41, 42, 43, 70, 71)):
+                    raise ValueError('动静区块重复插入或位置发生变化')
+                if not layer.endswith(tuple(PUBLIC_KIND.values())):
+                    raise ValueError('动静区块未插入ABC图层')
+                inserts[name] = layer
+            elif kind == 'LWPOLYLINE' and attrs[8] in REFERENCE_LAYERS.values():
+                references.append((attrs[8], _outline(fields, attrs, True)))
+            else:
+                raise ValueError('动静区输出包含非轮廓实体')
+    if contents.pop('*Model_Space', []) or contents.pop('*Paper_Space', []):
+        raise ValueError('动静区输出含未引用轮廓')
+    if set(contents) != set(inserts) or any(not paths for paths in contents.values()):
+        raise ValueError('动静区块定义、插入或线段不完整')
+    if expected_blocks is not None:
+        if len(expected_blocks) != len(inserts) or any(
+                inserts.get(b['name']) != b['layer'] or
+                len(contents[b['name']]) != len(b['outlines']) or
+                any(not np.array_equal(a, q) for a, q in zip(contents[b['name']], b['outlines']))
+                for b in expected_blocks):
+            raise ValueError('动静区块回读轮廓与写出坐标不一致')
+        if len(references) != len(expected_references) or any(
+                layer != wanted or not np.array_equal(xy[:-1], points)
+                for (layer, xy), (wanted, points) in zip(references, expected_references)):
+            raise ValueError('边框回读轮廓与写出坐标不一致')
+
+    layers = defaultdict(list)
+    for name, layer in inserts.items():
+        layers[layer[:-2]].extend(contents[name])
+    for name, xy in references:
+        layers[name].append(xy)
+    summary, segments = {}, []
+    for name, outlines in layers.items():
+        cancel_check()
+        degree = Counter()
+        edges = np.concatenate([np.stack((xy[:-1], xy[1:]), axis=1) for xy in outlines])
+        for a, b in edges:
+            degree[tuple(a)] += 1
+            degree[tuple(b)] += 1
+        # Shared contours are emitted just once, on the first owning layer.
+        # Their original rings are checked before deduplication.
+        if name not in shared_layers and any(n % 2 for n in degree.values()):
+            raise ValueError(f'{name} ABC交界未严格闭合，未覆盖已有文件')
+        segments.append(edges)
+        summary[name] = dict(segments=len(edges), nodes=len(degree), closed=True, overlap=False)
+    if not summary:
+        raise ValueError('未读回有效动静区轮廓')
+    if next(overlapping_edges(shapely.linestrings(np.concatenate(segments))), None) is not None:
+        raise ValueError('动静区DXF存在完全或部分重叠的轮廓线段')
     return summary
+
+
+def _outline(fields, attrs, closed):
+    xy = np.column_stack(([float(v) for c, v in fields if c == 10],
+                          [float(v) for c, v in fields if c == 20]))
+    if (bool(int(attrs[70]) & 1) != closed or len(xy) != int(attrs[90]) or
+            len(xy) < (3 if closed else 2) or not np.isfinite(xy).all() or
+            np.array_equal(xy[0], xy[-1]) or np.any(np.all(xy[:-1] == xy[1:], axis=1))):
+        raise ValueError('动静区输出的轮廓节点或开闭状态无效')
+    return np.vstack((xy, xy[:1])) if closed else xy

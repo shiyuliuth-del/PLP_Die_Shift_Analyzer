@@ -33,6 +33,7 @@ on:
       - 'tests/test_v54.py'
       - 'tests/test_v55.py'
       - 'tests/test_v59.py'
+      - 'tests/test_v61.py'
       - 'tests/gui_v59.py'
       - 'tests/test_v51.py'
       - 'tests/test_v50.py'
@@ -328,12 +329,12 @@ jobs:
           "%DIE_SHIFT_PYTHON%" tests/gui_v42_branches.py
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" tests/gui_v42_saved_process.py
-      - name: Verify both moving terminals, pad protection and progress cleanup
+      - name: Verify moving terminals, SH22 ownership, CAD blocks and progress cleanup
         if: ${{ inputs.resume_v52_client != true && inputs.resume_v51 != true && inputs.resume_v50_tail != true }}
         shell: cmd
         run: |
           set PYTHONPATH=.;tests
-          "%DIE_SHIFT_PYTHON%" -m unittest test_v59 -v
+          "%DIE_SHIFT_PYTHON%" -m unittest test_v59 test_v61 -v
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" tests/gui_v59.py
       - name: Verify V43 local named-pipe IPC and OAS output

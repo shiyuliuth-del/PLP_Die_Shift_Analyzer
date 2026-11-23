@@ -8,13 +8,15 @@ import math
 import os
 from pathlib import Path
 import tempfile
-import pickle
+from collections import defaultdict
+from typing import NamedTuple
 from .resources import cancel_check,parallel_iter,resource_profile,geometry_budget
 import numpy as np
 import shapely
 from .dxf_export import PairWriter,_handles,_verify
 from . import dxf_document as doc
-from .region_contract import EXPORT_ROLES,PUBLIC_KIND,verify_written_contours
+from .region_contract import (EXPORT_ROLES, PUBLIC_KIND, REFERENCE_LAYERS,
+                              overlapping_edges, verify_written_contours)
 
 
 def line_parts(g):
@@ -108,74 +110,161 @@ def partition_ring(ring,masks):
     return output
 
 
+class ContourGroup(NamedTuple):
+    layer: str
+    paths: list[np.ndarray]
+    closed: bool = False
+
+
 def layer_contours(task):
     key,raw,rows,role,options=task;cancel_check()
     polygons=[p for blob in raw for p in shapely.get_parts(shapely.from_wkb(blob)) if not p.is_empty]
     if any(p.geom_type!='Polygon' or not p.is_valid for p in polygons):raise ValueError(f'图层 {key} 的输出几何无效')
     inputs=len(polygons)
+    if role in REFERENCE_LAYERS:
+        return [ContourGroup(REFERENCE_LAYERS[role],
+                             [np.asarray(ring.coords) * options.scale for ring in (p.exterior, *p.interiors)],
+                             True) for p in polygons], inputs, inputs
+
     polygons=list(shapely.get_parts(shapely.union_all(polygons)))
-    merged=len(polygons);base='L'+key.replace('/','_D');shapes=[]
+    base='L'+key.replace('/','_D');groups=[]
     masks={k:shapely.union_all([q['regions'][k] for q in rows]) for k in 'AC'}
-    trees={kind:shapely.STRtree(shapely.get_parts(g)) for kind,g in masks.items()} if role=='固定RDL' else {}
+    trees={kind:shapely.STRtree(shapely.get_parts(g)) for kind,g in masks.items()}
     for polygon in polygons:
         cancel_check()
         local={kind:shapely.union_all(tree.geometries[tree.query(polygon,predicate='intersects')]) for kind,tree in trees.items()}
-        for hole,ring in enumerate([polygon.exterior,*polygon.interiors]):
-            assigned=partition_ring(ring,local) if role=='固定RDL' else [('',np.asarray(ring.coords))]
-            for kind,xy in assigned:
-                name=base+PUBLIC_KIND[kind];xy=xy*options.scale
-                if len(xy)>=2 and np.isfinite(xy).all():shapes.append((name,xy))
-    return key,joined_coordinates(shapes),inputs,merged
+        assigned=[]
+        for ring in (polygon.exterior,*polygon.interiors):
+            assigned.extend((kind,xy * options.scale) for kind,xy in partition_ring(ring,local))
+        by_layer=defaultdict(list)
+        degrees=defaultdict(int)
+        for kind,xy in joined_coordinates(assigned):
+            by_layer[base+PUBLIC_KIND[kind]].append(xy)
+            degrees[tuple(xy[0])]+=1
+            degrees[tuple(xy[-1])]+=1
+        if any(degree % 2 for degree in degrees.values()):
+            raise ValueError(f'图层 {key} 的ABC源轮廓未闭合')
+        groups.extend(ContourGroup(name,paths) for name,paths in sorted(by_layer.items()))
+    return groups,inputs,len(polygons)
 
 
-def contour_batches(snapshot,reconstruction,roles,options,progress=lambda *_:None):
+def _exclusive_outlines(groups):
+    """Preserve the union of outlines, emitting each coincident interval once."""
+    groups=sorted(groups,key=lambda q:not q.closed)
+    # Deduplicate identical full reference loops without merging or splitting them.
+    records=[];seen=defaultdict(list)
+    for group_index,group in enumerate(groups):
+        for path in group.paths:
+            if group.closed:
+                ring=shapely.LinearRing(path)
+                key=group.layer,ring.bounds
+                if any(ring.equals(previous) for previous in seen[key]):continue
+                seen[key].append(ring)
+            records.append((group_index,path))
+    if not records:return [],set()
+    sizes=np.array([len(path)-1 for _,path in records])
+    offsets=np.r_[0,np.cumsum(sizes)]
+    edges=shapely.linestrings(np.concatenate([np.stack((p[:-1],p[1:]),axis=1) for _,p in records]))
+    owners=np.repeat(np.array([i for i,_ in records]),sizes)
+    removed=defaultdict(list)
+    for _,edge,overlap in overlapping_edges(edges):
+        if groups[owners[edge]].closed:
+            raise ValueError('参考边框之间有重叠，无法同时保持完整独立闭合和无重叠')
+        removed[edge].append(overlap)
+    paths=defaultdict(list);shared=set()
+    for n,(owner,path) in enumerate(records):
+        cut_edges=[j for j in range(offsets[n],offsets[n+1]) if j in removed]
+        if not cut_edges:
+            paths[owner].append(path)
+            continue
+        shared.add(groups[owner].layer[:-2])
+        start=offsets[n]
+        pieces=[]
+        for j in cut_edges:
+            if j>start:
+                pieces.append(path[start-offsets[n]:j-offsets[n]+1])
+            edge=edges[j]
+            remainder=edge.difference(shapely.union_all(removed[j]))
+            intervals=line_parts(remainder)
+            for line in sorted(intervals,key=lambda g:min(edge.project(shapely.Point(g.coords[i])) for i in (0,-1))):
+                xy=np.asarray(line.coords)
+                if edge.project(shapely.Point(xy[0]))>edge.project(shapely.Point(xy[-1])):xy=xy[::-1]
+                pieces.append(xy)
+            start=j+1
+        if start<offsets[n+1]:
+            pieces.append(path[start-offsets[n]:])
+        joined=[]
+        for xy in pieces:
+            if joined and np.array_equal(joined[-1][-1],xy[0]):
+                joined[-1]=np.concatenate((joined[-1],xy[1:]))
+            else:joined.append(xy)
+        paths[owner].extend(joined)
+    return [group._replace(paths=paths[i]) for i,group in enumerate(groups) if paths[i]],shared
+
+
+def _prepare(snapshot,reconstruction,roles,options,progress):
     tasks=[]
     for key,raw in sorted(snapshot.layers.items()):
-        if roles.get(key) not in EXPORT_ROLES:continue
-        tasks.append((key,raw,[p for p in reconstruction.get('pieces',()) if p['layer']==key],roles.get(key),options))
-    profile=resource_profile();largest=max((sum(len(v) for v in raw) for key,raw in snapshot.layers.items()),default=1)
+        if roles.get(key) in EXPORT_ROLES:
+            tasks.append((key,raw,[p for p in reconstruction.get('pieces',()) if p['layer']==key],roles[key],options))
+    profile=resource_profile()
+    largest=max((sum(map(len,raw)) for _,raw,*_ in tasks),default=1)
     profile=dict(profile,workers=min(len(tasks) or 1,geometry_budget(profile,largest)))
-    for n,value in enumerate(parallel_iter(layer_contours,tasks,profile)):
-        progress(round(65*(n+1)/max(1,len(tasks))),f'拆分真实轮廓：{value[0]}');yield value
+    groups=[];inputs=merged=0
+    for n,(rows,i,m) in enumerate(parallel_iter(layer_contours,tasks,profile)):
+        groups.extend(rows);inputs+=i;merged+=m
+        progress(round(55*(n+1)/max(1,len(tasks))),f'拆分真实轮廓：{tasks[n][0]}')
+    progress(56,'去除完全及局部重叠的轮廓线段')
+    groups,shared=_exclusive_outlines(groups)
+    return groups,shared,inputs,merged
 
 
 def contours(snapshot,reconstruction,roles,options,progress=lambda *_:None):
-    shapes=[];inputs=merged=0
-    for key,rows,n,m in contour_batches(snapshot,reconstruction,roles,options,progress):shapes.extend(rows);inputs+=n;merged+=m
-    return shapes,inputs,merged
+    groups,_,inputs,merged=_prepare(snapshot,reconstruction,roles,options,progress)
+    return [(q.layer,xy) for q in groups for xy in q.paths],inputs,merged
 
 
 def write_regions(snapshot,reconstruction,roles,path,progress=lambda *_:None,*,settings=None):
     from .dxf_settings import DxfSettings
     options=settings or DxfSettings();path=Path(path)
-    # A spool bounds peak RAM and permits one sequential DXF write after its
-    # required header counts/extents are known. No giant concatenate is needed.
-    inputs=merged=count=0;names=set();lo=np.array([np.inf,np.inf]);hi=-lo
-    temp=None
-    with tempfile.TemporaryFile(dir=path.parent) as spool:
-        for key,shapes,n,m in contour_batches(snapshot,reconstruction,roles,options,progress):
-            inputs+=n;merged+=m;count+=len(shapes)
-            for name,xy in shapes:names.add(name);lo=np.minimum(lo,xy.min(axis=0));hi=np.maximum(hi,xy.max(axis=0))
-            pickle.dump(shapes,spool,protocol=5)
-        if not count:raise ValueError('当前没有可导出的有效轮廓')
-        extent=np.r_[lo,hi];layers=[dict(encoded_name=n,color=7) for n in sorted(names|{'0'})]
-        handles,entities=_handles(layers,count);spool.seek(0)
-        fd,temp=tempfile.mkstemp(prefix='.die-shift-regions-',suffix='.dxf',dir=path.parent)
-        try:
-            with os.fdopen(fd,'w',encoding='ascii',newline='') as stream:
-                w=PairWriter(stream);doc._write_header(w,handles,extent,0);doc._write_classes(w)
-                doc._write_tables(w,handles,layers,extent);doc._write_blocks(w,handles)
-                w.extend(((0,'SECTION'),(2,'ENTITIES')));i=0
-                while i<count:
-                    cancel_check();rows=pickle.load(spool)
-                    for name,xy in rows:
-                        doc._write_outline(w,dict(vertices=xy,closed=False),name,entities[i],handles['block_record_model']);i+=1
-                        if i%128==0:progress(65+round(25*i/count),'流式写出开放 A/B/C 轮廓')
-                w.add(0,'ENDSEC');doc._write_objects(w,handles);stream.flush();os.fsync(stream.fileno())
-            _verify(temp,count,extent);progress(92,'回读核对ABC端点、闭合与重复轮廓');topology=verify_written_contours(temp);digest=hashlib.sha256(Path(temp).read_bytes()).hexdigest();os.replace(temp,path)
-        finally:
-            if temp and os.path.exists(temp):os.unlink(temp)
+    groups,shared,inputs,merged=_prepare(snapshot,reconstruction,roles,options,progress)
+    if not groups:raise ValueError('当前没有可导出的有效轮廓')
+    blocks=[];references=[];names=set();lo=np.array([np.inf,np.inf]);hi=-lo
+    count=0
+    for i,(layer,paths,closed) in enumerate(groups):
+        names.add(layer)
+        for xy in paths:
+            lo=np.minimum(lo,xy.min(axis=0));hi=np.maximum(hi,xy.max(axis=0))
+            count+=1
+        if closed:references.extend((layer,xy[:-1]) for xy in paths)
+        else:blocks.append(dict(name=f'RDL_{i+1}',layer=layer,outlines=paths))
+    extent=np.r_[lo,hi];layers=[dict(encoded_name=n,color=7) for n in sorted(names|{'0'})]
+    handles,entities=_handles(layers,len(references),blocks)
+    fd,temp=tempfile.mkstemp(prefix='.die-shift-regions-',suffix='.dxf',dir=path.parent)
+    try:
+        with os.fdopen(fd,'w',encoding='ascii',newline='') as stream:
+            w=PairWriter(stream);doc._write_header(w,handles,extent,0);doc._write_classes(w)
+            doc._write_tables(w,handles,layers,extent,blocks);doc._write_blocks(w,handles,blocks)
+            w.extend(((0,'SECTION'),(2,'ENTITIES')))
+            for (layer,xy),handle in zip(references,entities):
+                cancel_check()
+                doc._write_outline(w,dict(vertices=xy),layer,handle,handles['block_record_model'])
+            for i,block in enumerate(blocks):
+                cancel_check()
+                doc._write_insert(w,block,handles['block_record_model'])
+                if i%128==0:progress(65+round(25*i/len(blocks)),'写出按源图形和图层分组的CAD块')
+            w.add(0,'ENDSEC');doc._write_objects(w,handles);stream.flush();os.fsync(stream.fileno())
+        _verify(temp,count,extent)
+        progress(92,'回读核对CAD块、闭合与重复轮廓')
+        topology=verify_written_contours(temp,expected_blocks=blocks,expected_references=references,shared_layers=shared)
+        digest=hashlib.sha256()
+        with open(temp,'rb') as stream:
+            for chunk in iter(lambda:stream.read(1024*1024),b''):digest.update(chunk)
+        cancel_check()
+        os.replace(temp,path)
+    finally:
+        if os.path.exists(temp):os.unlink(temp)
     progress(100,'动静区DXF输出完成')
-    return dict(path=str(path),polygons=count,layers=len(names),sha256=digest,ignored=snapshot.ignored_count,
+    return dict(path=str(path),polygons=count,layers=len(names),sha256=digest.hexdigest(),ignored=snapshot.ignored_count,
                 input_polygons=inputs,merged_polygons=merged,flattened=True,merge_layers=True,scale=options.scale,regions=True,topology=topology,
                 unresolved_regions=sum(not q.get('valid',True) for q in reconstruction.get('pieces',())))

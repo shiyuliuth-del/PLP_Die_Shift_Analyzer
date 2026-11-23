@@ -1,6 +1,6 @@
 # Agent 自动入口
 
-源码、GitHub与发布只在本规范检出工作。先读 [Agent.md](Agent.md)、[AI交接](docs/AI_HANDOFF.md)、[现行合同](docs/DESIGN_REQUIREMENTS.md)、[已知问题](docs/KNOWN_ISSUES.md) 和 [轮次记录](docs/Agents.md)。当前说明：[V59 使用说明](docs/V59_使用说明.md)。
+源码、GitHub与发布只在本规范检出工作。先读 [Agent.md](Agent.md)、[AI交接](docs/AI_HANDOFF.md)、[现行合同](docs/DESIGN_REQUIREMENTS.md)、[已知问题](docs/KNOWN_ISSUES.md) 和 [轮次记录](docs/Agents.md)。当前说明：[V61 使用说明](docs/V61_使用说明.md)。
 
 唯一长期主线是main；最新用户要求优先。保留其他Agent的在途分支，不重写历史tag，不把研究目录整体提交。每轮同步主线、补有意义的回归、记录工程兼容与实际验收，通过PR提交GitHub。正式Release仅源码与校验值，保留RUN.bat及BUILD.bat两个入口。
 
@@ -41,3 +41,5 @@ V59：[当前使用说明](docs/V59_使用说明.md)。双动孔线路默认保�
 实测支持Excel下每颗芯片一目录、CSV/XLSX多文件合并及从理论芯片中心匹配封装；实际全局中心驱动偏移，失败测量封装跳过。线程和内存默认0，保留完成时刻，普通DRC与严重连接问题分为ERROR、ERROR2，FAIL仍仅标封装边框。SH22随包400封装。
 
 V60：[当前使用说明](docs/V60_使用说明.md)。生产芯片目录名仅为追溯标签，实测按理论中心重新匹配图纸DIE。坏行隔离，同姿态重复合并，偏移从有效中心派生。坏封装跳过并记录完整警告，系统性匹配歧义和磁盘错误仍阻止发布任务。
+
+V61：动静区 DXF 用 _A 运动侧、_B 固定侧、_C 动区，封装及 DIE 参考层为 RKG_REF 和 DIE_REF。同源固定 RDL 外轮廓及孔洞按输出层独立成块。跨层重合统一去重。运动侧寻根优先，固定走线另一端的坐标不覆盖运动过孔的芯片归属。

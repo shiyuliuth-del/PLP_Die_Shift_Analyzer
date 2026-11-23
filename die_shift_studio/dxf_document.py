@@ -177,20 +177,21 @@ def _write_dimstyle_table(writer, handles):
     ))
     _table_end(writer)
 
-def _write_block_record_table(writer, handles):
-    _table_start(writer, "BLOCK_RECORD", handles["table_BLOCK_RECORD"], 2)
-    for key, name in (
-            ("block_record_model", "*Model_Space"),
-            ("block_record_paper", "*Paper_Space")):
+def _write_block_record_table(writer, handles, blocks):
+    _table_start(writer, "BLOCK_RECORD", handles["table_BLOCK_RECORD"], 2 + len(blocks))
+    records = [(handles["block_record_model"], "*Model_Space"),
+               (handles["block_record_paper"], "*Paper_Space")]
+    records.extend((block["record"], block["name"]) for block in blocks)
+    for handle, name in records:
         writer.extend((
-            (0, "BLOCK_RECORD"), (5, handles[key]),
+            (0, "BLOCK_RECORD"), (5, handle),
             (330, handles["table_BLOCK_RECORD"]),
             (100, "AcDbSymbolTableRecord"),
             (100, "AcDbBlockTableRecord"), (2, name),
         ))
     _table_end(writer)
 
-def _write_tables(writer, handles, layers, extents):
+def _write_tables(writer, handles, layers, extents, blocks=()):
     writer.extend(((0, "SECTION"), (2, "TABLES")))
     _write_vport_table(writer, handles, extents)
     _write_ltype_table(writer, handles)
@@ -200,24 +201,37 @@ def _write_tables(writer, handles, layers, extents):
     _write_empty_table(writer, handles, "UCS")
     _write_appid_table(writer, handles)
     _write_dimstyle_table(writer, handles)
-    _write_block_record_table(writer, handles)
+    _write_block_record_table(writer, handles, blocks)
     writer.add(0, "ENDSEC")
 
-def _write_blocks(writer, handles):
+def _write_blocks(writer, handles, blocks=()):
     writer.extend(((0, "SECTION"), (2, "BLOCKS")))
-    for prefix, name, owner in (
-            ("model", "*Model_Space", handles["block_record_model"]),
-            ("paper", "*Paper_Space", handles["block_record_paper"])):
+    layouts = [dict(name=name, record=handles["block_record_" + prefix],
+                    begin=handles["block_" + prefix], end=handles["endblk_" + prefix], outlines=())
+               for prefix, name in (("model", "*Model_Space"), ("paper", "*Paper_Space"))]
+    for block in (*layouts, *blocks):
+        name, owner = block["name"], block["record"]
         writer.extend((
-            (0, "BLOCK"), (5, handles["block_" + prefix]),
+            (0, "BLOCK"), (5, block["begin"]),
             (330, owner), (100, "AcDbEntity"), (8, "0"),
             (100, "AcDbBlockBegin"), (2, name), (70, 0),
             (10, 0.0), (20, 0.0), (30, 0.0), (3, name), (1, ""),
-            (0, "ENDBLK"), (5, handles["endblk_" + prefix]),
+        ))
+        # Layer 0 inside a block inherits the layer of its INSERT.
+        for xy, handle in zip(block["outlines"], block.get("children", ())):
+            _write_outline(writer, dict(vertices=xy, closed=False), "0", handle, owner, model=False)
+        writer.extend((
+            (0, "ENDBLK"), (5, block["end"]),
             (330, owner), (100, "AcDbEntity"), (8, "0"),
             (100, "AcDbBlockEnd"),
         ))
     writer.add(0, "ENDSEC")
+
+def _write_insert(writer, block, owner):
+    writer.extend(((0, "INSERT"), (5, block["insert"]), (330, owner),
+                   (100, "AcDbEntity"), (8, block["layer"]), (410, "Model"),
+                   (100, "AcDbBlockReference"), (2, block["name"]),
+                   (10, 0.0), (20, 0.0), (30, 0.0)))
 
 def _write_hatch(writer, hatch, owner):
     writer.extend((
@@ -244,11 +258,14 @@ def _write_hatch(writer, hatch, owner):
         (10, hatch["seed"][0]), (20, hatch["seed"][1]),
     ))
 
-def _write_outline(writer, loop, layer, handle, owner):
+def _write_outline(writer, loop, layer, handle, owner, *, model=True):
     vertices = loop["vertices"]
     writer.extend((
         (0, "LWPOLYLINE"), (5, handle), (330, owner),
-        (100, "AcDbEntity"), (8, layer), (410, "Model"),
+        (100, "AcDbEntity"), (8, layer),
+    ))
+    if model:writer.add(410, "Model")
+    writer.extend((
         (6, "CONTINUOUS"), (370, -1), (100, "AcDbPolyline"),
         (90, len(vertices)), (70, 1 if loop.get("closed", True) else 0), (43, 0.0), (38, 0.0), (39, 0.0),
     ))
