@@ -20,7 +20,7 @@ def normalize_display(values):
 @dataclass(frozen=True)
 class ViewSettings:
     max_undo_steps:int=10
-    space_export_interval_um:float=5.
+    space_export_interval_um:float=100.
     from .drc_policy import ALL
     drc_checks:tuple=ALL
     drc_visible:tuple=ALL

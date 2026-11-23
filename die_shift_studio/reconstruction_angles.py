@@ -39,19 +39,28 @@ def side_direction(segments,point,fallback):
 
 
 def measure(part,plan,center,pose,regions):
+    from .reconstruction_route import parts
     effective,landing,fixed,near,moved,far,t0,t1=connection_data(part,plan,center,pose)
     if landing.is_empty and fixed.is_empty:
         body=regions['A']
     else:
         body=regions['A'].difference(fixed if landing.is_empty else landing if fixed.is_empty else shapely.union_all([landing,fixed]))
+    body_parts=parts(body)
+    if not body_parts:raise ValueError('连接区无有效多边形')
+    body=body_parts[0] if len(body_parts)==1 else shapely.union_all(body_parts)
+    boundary=body.boundary
+    if boundary is None or boundary.is_empty:raise ValueError('连接区无有效边界')
     faces=shapely.union_all([shapely.LineString(moved),shapely.LineString(far)]).buffer(plan.tolerance*4)
-    sides=[g for g in shapely.get_parts(body.boundary.difference(faces)) if g.geom_type=='LineString']
+    sides=[g for g in shapely.get_parts(boundary.difference(faces)) if g.geom_type=='LineString']
     sides=sorted(sides,key=lambda g:g.length,reverse=True)[:2]
     width=float(sides[0].distance(sides[1])) if len(sides)==2 else 0.
     segments=_side_segments(sides)
     # Transverse cut angles measured against BOTH neighbouring boundary sides.
     co,si=np.cos(pose[2]),np.sin(pose[2]);rotation=np.array([[co,-si],[si,co]])
-    face0=moved[1]-moved[0];face0/=np.linalg.norm(face0);face1=far[1]-far[0];face1/=np.linalg.norm(face1)
+    face0=moved[1]-moved[0];n0=float(np.linalg.norm(face0))
+    face1=far[1]-far[0];n1=float(np.linalg.norm(face1))
+    if n0<=1e-12 or n1<=1e-12:raise ValueError('连接截面退化')
+    face0=face0/n0;face1=face1/n1
     t_near=plan.tangent(effective['a']);t_far=plan.tangent(effective['b'])
     angles=[]
     for j in range(2):
@@ -106,7 +115,7 @@ def solve(r,plan,base,center,pose,quick=False,native_check=True):
                 pk=part_key(part)
                 if pk not in seen_keys:seen_keys.add(pk);trials.append(part)
     except ValueError:pass
-    ranked=[]
+    ranked=[];valid_fallback=None
     for part in trials:
         cancel_check();regions,error=warp(part,plan,center,pose,style)
         if error:continue
@@ -115,6 +124,7 @@ def solve(r,plan,base,center,pose,quick=False,native_check=True):
             alternate,reason=warp(part,plan,center,pose,style,-1)
             if reason is None:candidates.append(alternate)
         for geometry in candidates:
+            if valid_fallback is None:valid_fallback=(part,geometry)
             try:width,least,mean=measure(part,plan,center,pose,geometry)
             except (ValueError,shapely.errors.GEOSException):continue
             rank=(-width,-least,-mean) if mode in ('wide','perpendicular') else (-least,-mean,-width)
@@ -138,6 +148,10 @@ def solve(r,plan,base,center,pose,quick=False,native_check=True):
                     if not any(score[:-1]) or len(seen)>=3:break
                 _,part,regions,quality=best
             answer=(part,regions,None,quality)
+        elif valid_fallback is not None:
+            part0,copper0=valid_fallback
+            quality=None if quick else r.rules.quality(plan,copper0,pose)
+            answer=(part0,copper0,None,quality)
         else:
             regions,error=warp(base,plan,center,pose,style);answer=(base,regions,error,None)
         if len(plan.cache)>512:plan.cache.clear()

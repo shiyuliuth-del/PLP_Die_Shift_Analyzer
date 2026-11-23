@@ -17,6 +17,9 @@ def overlapping_edges(segments):
     """Return positive-length coincidences once, including partial overlaps."""
     if not len(segments):
         return
+    coords = shapely.get_coordinates(segments).reshape(-1, 2, 2)
+    vecs = coords[:, 1] - coords[:, 0]
+    len2 = vecs[:, 0] * vecs[:, 0] + vecs[:, 1] * vecs[:, 1]
     tree = shapely.STRtree(segments)
     for start in range(0, len(segments), 512):
         cancel_check()
@@ -24,6 +27,14 @@ def overlapping_edges(segments):
         i += start
         keep = j > i
         i, j = i[keep], j[keep]
+        if not len(i):
+            continue
+        # Only nearly collinear segment pairs can share positive-length overlap.
+        cross = vecs[i, 0] * vecs[j, 1] - vecs[i, 1] * vecs[j, 0]
+        collinear = (cross * cross) <= (1e-10 * len2[i] * len2[j] + 1e-24)
+        i, j = i[collinear], j[collinear]
+        if not len(i):
+            continue
         shared = shapely.intersection(segments[i], segments[j])
         for k in np.flatnonzero(shapely.length(shared) > 0):
             yield int(i[k]), int(j[k]), shared[k]
@@ -45,10 +56,10 @@ def _records(path):
         yield record, fields
 
 
-def verify_written_contours(path, *, expected_blocks=None, expected_references=None, shared_layers=()):
+def verify_written_contours(path, *, expected_blocks=None, expected_references=None, shared_layers=(), allow_closed_blocks=False):
     """Read actual BLOCK/INSERT coordinates and audit the expanded linework."""
     section = block = None
-    contents, inserts, references = {}, {}, []
+    contents, block_layers, inserts, references = {}, {}, {}, []
     for kind, fields in _records(path):
         attrs = dict(fields)
         if kind == 'SECTION':
@@ -61,12 +72,14 @@ def verify_written_contours(path, *, expected_blocks=None, expected_references=N
                 if block in contents or any(float(attrs.get(k, 0)) for k in (10, 20, 30)):
                     raise ValueError('动静区块名称重复或基点偏移')
                 contents[block] = []
+                block_layers[block] = set()
             elif kind == 'ENDBLK':
                 block = None
-            elif kind == 'LWPOLYLINE' and block and attrs[8] == '0':
-                contents[block].append(_outline(fields, attrs, False))
+            elif kind == 'LWPOLYLINE' and block and attrs[8].endswith(tuple(PUBLIC_KIND.values())):
+                block_layers[block].add(attrs[8])
+                contents[block].append(_outline(fields, attrs, None if allow_closed_blocks else False))
             else:
-                raise ValueError('动静区块含不支持的实体')
+                raise ValueError('动静区块含不支持的实体或未赋予对应ABC图层')
         elif section == 'ENTITIES':
             if kind == 'INSERT':
                 name, layer = attrs[2], attrs[8]
@@ -82,8 +95,11 @@ def verify_written_contours(path, *, expected_blocks=None, expected_references=N
                 raise ValueError('动静区输出包含非轮廓实体')
     if contents.pop('*Model_Space', []) or contents.pop('*Paper_Space', []):
         raise ValueError('动静区输出含未引用轮廓')
+    block_layers.pop('*Model_Space', None); block_layers.pop('*Paper_Space', None)
     if set(contents) != set(inserts) or any(not paths for paths in contents.values()):
         raise ValueError('动静区块定义、插入或线段不完整')
+    if any(block_layers.get(name) != {layer} for name, layer in inserts.items()):
+        raise ValueError('动静区块内部实体图层与块插入图层不一致')
     if expected_blocks is not None:
         if len(expected_blocks) != len(inserts) or any(
                 inserts.get(b['name']) != b['layer'] or
@@ -126,7 +142,7 @@ def _outline(fields, attrs, expected_closed):
     xy = np.column_stack(([float(v) for c, v in fields if c == 10],
                           [float(v) for c, v in fields if c == 20]))
     closed=bool(int(attrs[70]) & 1)
-    if (expected_closed != closed or len(xy) != int(attrs[90]) or
+    if ((expected_closed is not None and expected_closed != closed) or len(xy) != int(attrs[90]) or
             len(xy) < (3 if closed else 2) or not np.isfinite(xy).all() or
             np.array_equal(xy[0], xy[-1]) or np.any(np.all(xy[:-1] == xy[1:], axis=1))):
         raise ValueError('动静区输出的轮廓节点或开闭状态无效')

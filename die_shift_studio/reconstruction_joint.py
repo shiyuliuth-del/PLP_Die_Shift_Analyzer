@@ -52,8 +52,9 @@ def prepare(r,grid,progress=lambda *_:None,*,indices=None):
             cancel_check();states=np.zeros((grid.count,3))
             for owner,digit in zip(owners,digits):states[owner]=grid.locals[owner][digit]
             f=r.frame(states,targets=(ref,),diagnostics=False,render_cache=render_cache,_raw=True)
-            row=next(q for q in f['replacements'][ref[0]] if ref[1] in q['indices'])
-            values[digits]=dict(geometry=row['geometry'],pieces=tuple(_compact(q) for q in f['pieces'] if (q['layer'],q['index'])==ref))
+            row=next((q for q in f['replacements'].get(ref[0],()) if ref[1] in q['indices']),None)
+            geometry=row['geometry'] if row is not None else r.model.nodes[r.model.ids[ref]]['poly']
+            values[digits]=dict(geometry=geometry,pieces=tuple(_compact(q) for q in f['pieces'] if (q['layer'],q['index'])==ref))
         bounds=np.array([v['geometry'].bounds for v in values.values()])
         return ref,dict(owners=owners,values=values,envelope=shapely.box(*bounds[:,:2].min(axis=0),*bounds[:,2:].max(axis=0)))
     bank={ref:static(ref) for ref in immutable}

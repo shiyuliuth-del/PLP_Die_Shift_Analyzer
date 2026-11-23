@@ -112,7 +112,7 @@ def write(snapshot,destination,dbu,options=None,issues=(),die_count=0,progress=l
 def export_layout(w):
     from .qt_compat import QtWidgets as W,run_dialog,ACCEPTED
     if w.data is None:w.error('请先打开GDS/OAS');return
-    if w.worker or w.preview_workers or w.preview_pending or w.cut_drag.state or getattr(w,'reconstruction_pending',False):w.error('请先完成当前预演及待应用的重构修改');return
+    if w.worker or w.preview_workers or w.preview_pending or w.cut_drag.state or getattr(w,'reconstruction_pending',False) or getattr(w,'pending_layout_ops',None):w.error('请先完成当前预演及待应用的重构修改');return
     options=OutputOptions.from_dict(configuration(w));root=Path(options.directory or w.data.path).parent if not options.directory else Path(options.directory)
     dialog=W.QFileDialog(w,'输出GDS/OAS',str(root/(Path(w.data.path).stem+'_preview.oas')),'OASIS (*.oas);;GDSII (*.gds)')
     dialog.setAcceptMode(getattr(W.QFileDialog,'AcceptMode',W.QFileDialog).AcceptSave);dialog.setDefaultSuffix('oas')

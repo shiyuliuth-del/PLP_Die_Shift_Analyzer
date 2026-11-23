@@ -24,7 +24,7 @@ def expanded_outlines(modelspace):
         if entity.dxftype()=='INSERT':
             for child in entity.virtual_entities():
                 assert child.dxftype()=='LWPOLYLINE'
-                assert child.dxf.layer=='0'
+                assert child.dxf.layer==entity.dxf.layer
                 yield entity.dxf.layer,np.asarray(list(child.get_points('xy'))),child.closed
         else:
             assert entity.dxftype()=='LWPOLYLINE'

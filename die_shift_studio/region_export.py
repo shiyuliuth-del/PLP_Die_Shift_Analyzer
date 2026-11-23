@@ -66,16 +66,27 @@ def partition_ring(ring,masks):
     polygon overlay rounds one endpoint by a few ULPs. All pieces below reuse
     points on the very same source edge, so A/B/C joins are identical by design.
     """
-    xy=np.asarray(ring.coords);vectors=np.diff(xy,axis=0);length2=np.sum(vectors*vectors,axis=1)
+    xy=np.asarray(ring.coords)
+    if masks['A'].is_empty and masks['C'].is_empty:
+        keep=np.r_[True,np.any(xy[1:]!=xy[:-1],axis=1)]
+        pts=xy[keep]
+        return [('B',pts)] if len(pts)>=2 else []
+    vectors=np.diff(xy,axis=0);length2=np.sum(vectors*vectors,axis=1)
     good=length2>0;starts=xy[:-1][good];ends=xy[1:][good];vectors=vectors[good];length2=length2[good]
     segments=shapely.linestrings(np.stack([starts,ends],axis=1));breaks=[[0.,1.] for _ in segments]
     epsilon=max(1e-10,np.spacing(max(1.,float(np.max(abs(xy)))))*8)
     for kind in 'AC':
         mask=masks[kind]
         if mask.is_empty:continue
-        indices=np.flatnonzero(shapely.intersects(segments,mask))
-        intersections=shapely.intersection(segments[indices],mask)
-        for i,g in zip(indices,intersections):
+        shapely.prepare(mask)
+        hit=shapely.intersects(segments,mask)
+        if not np.any(hit):continue
+        hit_idx=np.flatnonzero(hit)
+        # Segments fully covered by mask never cross its boundary and need no split.
+        partial=hit_idx[~shapely.covers(mask,segments[hit_idx])]
+        if not len(partial):continue
+        intersections=shapely.intersection(segments[partial],mask)
+        for i,g in zip(partial,intersections):
             points=shapely.get_coordinates(g)
             values=np.clip((points-starts[i])@vectors[i]/length2[i],0,1)
             edge_epsilon=epsilon/np.sqrt(length2[i])
@@ -202,6 +213,51 @@ def _exclusive_outlines(groups):
     return [group._replace(paths=paths[i]) for i,group in enumerate(groups) if paths[i]],shared
 
 
+def _join_block_paths(paths):
+    """Join endpoint-touching polylines within one block at degree-2 nodes."""
+    if len(paths)<2:return list(paths)
+    cleaned=[]
+    for xy in paths:
+        arr=np.asarray(xy,float)
+        if len(arr)>=2:cleaned.append(arr)
+    if len(cleaned)<2:return cleaned
+    adj=defaultdict(list)
+    for idx,xy in enumerate(cleaned):
+        u,v=tuple(xy[0]),tuple(xy[-1])
+        adj[u].append((idx,0))
+        if u!=v:adj[v].append((idx,1))
+    used=[False]*len(cleaned)
+    out=[]
+    def walk(start_idx,start_end):
+        used[start_idx]=True
+        pts=cleaned[start_idx] if start_end==0 else cleaned[start_idx][::-1]
+        chain=[pts]
+        while True:
+            tail=tuple(chain[-1][-1])
+            head=tuple(chain[0][0])
+            if tail==head:break
+            incident=adj[tail]
+            if len(incident)!=2:break
+            nxt=next((item for item in incident if not used[item[0]]),None)
+            if nxt is None:break
+            idx,end=nxt
+            used[idx]=True
+            seg=cleaned[idx] if end==0 else cleaned[idx][::-1]
+            chain.append(seg[1:])
+        merged=np.concatenate(chain,axis=0)
+        merged=merged[np.r_[True,np.any(merged[1:]!=merged[:-1],axis=1)]]
+        return merged
+    # First walk open chains from every non-degree-2 vertex.
+    for node,incident in adj.items():
+        if len(incident)==2:continue
+        for idx,end in incident:
+            if not used[idx]:out.append(walk(idx,end))
+    # Then walk any remaining closed degree-2 cycles.
+    for idx in range(len(cleaned)):
+        if not used[idx]:out.append(walk(idx,0))
+    return out
+
+
 def _prepare(snapshot,reconstruction,roles,options,progress):
     tasks=[]
     for key,raw in sorted(snapshot.layers.items()):
@@ -216,6 +272,8 @@ def _prepare(snapshot,reconstruction,roles,options,progress):
         if progress:progress(round(55*(n+1)/max(1,len(tasks))),f'拆分真实轮廓：{tasks[n][0]}')
     if progress:progress(56,'去除完全及局部重叠的轮廓线段')
     groups,shared=_exclusive_outlines(groups)
+    if getattr(options,'region_auto_join',False):
+        groups=[group if group.closed else group._replace(paths=_join_block_paths(group.paths)) for group in groups]
     return groups,shared,inputs,merged
 
 
@@ -256,7 +314,7 @@ def write_regions(snapshot,reconstruction,roles,path,progress=lambda *_:None,*,s
             w.add(0,'ENDSEC');doc._write_objects(w,handles);stream.flush();os.fsync(stream.fileno())
         _verify(temp,count,extent)
         if progress:progress(92,'回读核对CAD块、闭合与重复轮廓')
-        topology=verify_written_contours(temp,expected_blocks=blocks,expected_references=references,shared_layers=shared)
+        topology=verify_written_contours(temp,expected_blocks=blocks,expected_references=references,shared_layers=shared,allow_closed_blocks=bool(getattr(options,'region_auto_join',False)))
         digest=hashlib.sha256()
         with open(temp,'rb') as stream:
             for chunk in iter(lambda:stream.read(1024*1024),b''):digest.update(chunk)

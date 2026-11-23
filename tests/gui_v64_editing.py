@@ -56,8 +56,9 @@ def run():
             qtest=importlib.import_module(QtCore.__name__.split('.')[0]+'.QtTest').QTest
             w.selection.apply_hits([('5/0',1)],'replace')
             w.activateWindow();w.canvas.setFocus();app.processEvents()
-            qtest.keyClick(w.canvas,keys.Key_Delete);wait()
-            assert len(w.data.layers['5/0'])==1 and w.data.deleted_shapes
+            qtest.keyClick(w.canvas,keys.Key_Delete);app.processEvents()
+            assert not w._tasks and not w.preview_pending and not w.coverage_timer.isActive()
+            assert len(w.data.layers['5/0'])==2 and w._effective_deleted_shapes()
             assert w.reconstruction_pending and w.pending_deleted_shapes and w.reconstruction_overlay.staged.get_visible()
 
             w.rulers.start=np.array([1.,2.]);w.rulers.finish(np.array([10.,2.]))
@@ -65,14 +66,23 @@ def run():
             w.setting_fields['space_export_interval_um'].setValue(7.)
             w.undo_button.click()
             assert not w.ignored_width_lines and w.rulers.rows and w.view_settings.space_export_interval_um==7.
-            qtest.keyClick(w.canvas,keys.Key_U);wait()
-            assert not w.rulers.rows and len(w.data.layers['5/0'])==1
-            w.undo_edit();wait()
-            assert len(w.data.layers['5/0'])==2 and not w.pending_deleted_shapes
-            w.redo_button.click();wait()
-            assert len(w.data.layers['5/0'])==1 and w.pending_deleted_shapes
+            qtest.keyClick(w.canvas,keys.Key_U);app.processEvents()
+            assert not w.rulers.rows and len(w.data.layers['5/0'])==2 and w.pending_deleted_shapes
+            w.undo_edit();app.processEvents()
+            assert not w._tasks and len(w.data.layers['5/0'])==2 and not w.pending_deleted_shapes and not w._effective_deleted_shapes()
+            w.redo_button.click();app.processEvents()
+            assert not w._tasks and len(w.data.layers['5/0'])==2 and w.pending_deleted_shapes
             w.compute_reconstruction();wait()
-            assert not w.pending_deleted_shapes
+            assert len(w.data.layers['5/0'])==1 and w.data.deleted_shapes and not w.pending_deleted_shapes
+            # Undo an already-applied deletion while auto-compute is off: must defer & show restore marker
+            w.undo_edit();app.processEvents()
+            assert not w._tasks and len(w.data.layers['5/0'])==1 and w.reconstruction_pending and w.pending_restored_shapes and w.reconstruction_overlay.staged.get_visible()
+            w.compute_reconstruction();wait()
+            assert len(w.data.layers['5/0'])==2 and not w.data.deleted_shapes and not w.pending_restored_shapes
+            w.redo_button.click();app.processEvents()
+            assert not w._tasks and w.pending_deleted_shapes
+            w.compute_reconstruction();wait()
+            assert len(w.data.layers['5/0'])==1 and w.data.deleted_shapes and not w.pending_deleted_shapes
             saved=folder/'saved.dshift.json';w.write_project(saved)
             w.load_project(saved);wait()
             assert len(w.data.layers['5/0'])==1 and w.data.deleted_shapes

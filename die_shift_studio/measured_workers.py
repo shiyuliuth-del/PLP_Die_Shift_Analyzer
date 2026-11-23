@@ -25,9 +25,13 @@ def _compute(rows, policy):
             raise MemoryError('独立计算进程超过批次共享内存预算')
 
     with cancellation_scope(_stop), budget_scope(budget), serial_scope():
-        _, snapshot, details = _session.run(rows,preview=False,output_policy=policy)
-        cancel_check()
-        return snapshot.layers,details
+        from .reconstruction_diagnostic import DiagnosticFailure
+        try:
+            _, snapshot, details = _session.run(rows,preview=False,output_policy=policy)
+            cancel_check()
+            return True, snapshot.layers, details
+        except DiagnosticFailure as exc:
+            return False, str(exc), exc.details
 
 
 class BatchWorkers:
@@ -89,10 +93,18 @@ class BatchWorkers:
             future = pool.submit(_compute,rows,policy)
             while True:
                 try:
-                    return future.result(timeout=.25)
+                    ok, payload, details = future.result(timeout=.25)
+                    if not ok:
+                        from .reconstruction_diagnostic import DiagnosticFailure
+                        raise DiagnosticFailure(payload, None, details)
+                    return payload, details
                 except FutureTimeout:
                     if future.done():
-                        return future.result()
+                        ok, payload, details = future.result()
+                        if not ok:
+                            from .reconstruction_diagnostic import DiagnosticFailure
+                            raise DiagnosticFailure(payload, None, details)
+                        return payload, details
                     cancel_check()
                     self.monitor_memory()
         except InterruptedError:

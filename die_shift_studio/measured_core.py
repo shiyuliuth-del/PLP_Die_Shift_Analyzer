@@ -21,10 +21,13 @@ class Options:
         if type(out.max_threads) is not int or not 0<=out.max_threads<=256:raise ValueError('最大线程须为0～256，0为自动')
         return out
 
-    def memory_budget_mb(self,profile=None):
+    def memory_budget_mb(self,profile=None,*,measured=False):
         profile=profile or resource_profile()
-        available=max(128,int(profile['available_memory_mb']*.35))
-        return min(self.max_memory_mb or profile.get('memory_budget_mb',available),profile.get('memory_budget_mb',available))
+        available=max(128,int(profile['available_memory_mb']*(.65 if measured else .35)))
+        if self.max_memory_mb:
+            ceiling=max(128,int(profile['available_memory_mb']*.85)) if measured else profile.get('memory_budget_mb',available)
+            return min(self.max_memory_mb,ceiling)
+        return available if measured else profile.get('memory_budget_mb',available)
 
 
 def pose_parameters(case,parameters,rows):
@@ -63,24 +66,142 @@ class Session:
         self.lock=threading.Lock();self.plan_lock=threading.Lock();self.local=threading.local();self.instances=[]
         from .session_cache import EphemeralCache
         self.geometry_pool=EphemeralCache(budget=64*1024**2,max_entries=4096)
+        self._nominal_wkb=None;self._ref_owners=None;self._always_active_refs=None;self._zero_pose_cache={}
+    def _static_signature(self,p):
+        d=asdict(p);d.pop('die_pivots',None);return repr(d)
     def model(self,p):
         from .contact import ContactModel
         from .reconstruction import Reconstructor
         from .reconstruction_status import clone_plan_pool
-        key=repr(asdict(p));saved=getattr(self.local,'model',None)
-        if saved is not None and saved[0]==key:return saved[1:]
+        from .pivots import rotation_centers
+        key=self._static_signature(p);saved=getattr(self.local,'model',None)
+        if saved is not None and saved[0]==key:
+            model,r,full_bound=saved[1:]
+            centers=rotation_centers(self.case,p)
+            model.bound.centers=centers;full_bound.centers=centers
+            model.p=p;r.p=p
+            if hasattr(r,'display_drc'):r.display_drc.p=p
+            return model,r
         if saved is not None:
             saved[2].close()
-            with self.lock:self.instances.remove(saved[2])
+            with self.lock:
+                if saved[2] in self.instances:self.instances.remove(saved[2])
         model=ContactModel(self.data,self.case,self.roles,self.case['connections'],self.cache,self.motions,p)
         model.bound.acceleration=self.settings.acceleration
+        full_bound=self.cache.bind(self.case,self.motions,list(self.cache.layers),p)
+        full_bound.acceleration=self.settings.acceleration
         with self.lock:plans=clone_plan_pool(self.plan_pool)
         r=Reconstructor(model,p,self.settings,plan_pool=plans,geometry_pool=self.geometry_pool);r.measured_only=True
-        self.local.model=(key,model,r)
+        self.local.model=(key,model,r,full_bound)
         with self.lock:self.instances.append(r)
         return model,r
+    def _full_bound(self,p):
+        saved=getattr(self.local,'model',None)
+        if saved is not None and saved[0]==self._static_signature(p):
+            return saved[3]
+        bound=self.cache.bind(self.case,self.motions,list(self.cache.layers),p)
+        bound.acceleration=self.settings.acceleration
+        return bound
+    def _nominal_wkbs(self):
+        if self._nominal_wkb is not None:return self._nominal_wkb
+        with self.lock:
+            if self._nominal_wkb is not None:return self._nominal_wkb
+            from .short_edges import contract
+            minimum_edge_um=getattr(self.data,'minimum_edge_um',0.)
+            cached={}
+            for key,values in self.data.layers.items():
+                geoms=self.cache.layers[key]['geometry']
+                blobs=[]
+                for i in range(len(values)):
+                    g=geoms[i]
+                    if g.is_empty:blobs.append(None);continue
+                    try:clean=contract(g,minimum_edge_um)
+                    except ValueError as exc:raise ValueError(f'图层 {key} 无法安全删除短边：{exc}') from exc
+                    if clean.is_empty:blobs.append(None);continue
+                    if not clean.is_valid or not np.isfinite(shapely.get_coordinates(clean)).all():
+                        raise ValueError('重构结果无效，拒绝输出')
+                    blobs.append(clean.wkb)
+                cached[key]=tuple(blobs)
+            self._nominal_wkb=cached
+            return cached
+    def _fast_snapshot(self,frame,*,reconstruction=True,allow_partial=False,progress=None):
+        from .dxf_export import Snapshot
+        if frame and (frame.get('diagnostic_only') or frame.get('reconstruction',{}).get('hard_failures')) and not (allow_partial and frame.get('partial_output_validated')):
+            raise ValueError('当前为重构失败诊断图，不能输出为制造图纸；请修正连接问题。')
+        replacements={}
+        if frame and reconstruction:
+            from .fast_preview import PreviewEngine
+            replacements=PreviewEngine.final_copper({},frame.get('reconstruction',{}).get('replacements',{}))
+        from .short_edges import contract
+        minimum_edge_um=getattr(self.data,'minimum_edge_um',0.)
+        nominal_wkbs=self._nominal_wkbs()
+        layers={}
+        for key,values in self.data.layers.items():
+            current=frame.get('layers',{}).get(key,{}).get('polygons',values) if frame else values
+            items=replacements.get(key,())
+            hidden={i for q in items for i in q['indices']}
+            cached_blobs=nominal_wkbs[key]
+            cache_geoms=self.cache.layers[key]['geometry']
+            out_blobs=[]
+            for i,xy in enumerate(current):
+                if i%256==0:cancel_check()
+                if i in hidden:continue
+                nominal=np.asarray(values[i]);actual=np.asarray(xy)
+                if np.array_equal(nominal,actual):
+                    blob=cached_blobs[i]
+                    if blob is not None:out_blobs.append(blob)
+                    continue
+                g=cache_geoms[i]
+                if g.is_empty:continue
+                if g.geom_type=='Polygon' and not g.interiors:
+                    moved=shapely.Polygon(actual)
+                else:
+                    delta=np.diff(nominal,axis=0);j=int(np.argmax(np.sum(delta*delta,axis=1)))
+                    a=delta[j];b=actual[j+1]-actual[j];norm=float(a@a)
+                    if not norm:raise ValueError(f'图层 {key} 图形 {i+1} 无有效边，不能输出')
+                    co=float(a@b)/norm;si=float(a[0]*b[1]-a[1]*b[0])/norm
+                    rotation=np.array([[co,si],[-si,co]])
+                    moved=shapely.transform(g,lambda points:(points-nominal[j])@rotation+actual[j])
+                try:clean=contract(moved,minimum_edge_um)
+                except ValueError as exc:raise ValueError(f'图层 {key} 无法安全删除短边：{exc}') from exc
+                if not clean.is_empty:
+                    if not clean.is_valid or not np.isfinite(shapely.get_coordinates(clean)).all():
+                        raise ValueError('重构结果无效，拒绝输出')
+                    out_blobs.append(clean.wkb)
+            for q in items:
+                cancel_check()
+                try:clean=contract(q['geometry'],minimum_edge_um)
+                except ValueError as exc:raise ValueError(f'图层 {key} 无法安全删除短边：{exc}') from exc
+                if not clean.is_empty:
+                    if not clean.is_valid or not np.isfinite(shapely.get_coordinates(clean)).all():
+                        raise ValueError('重构结果无效，拒绝输出')
+                    out_blobs.append(clean.wkb)
+            layers[key]=tuple(out_blobs)
+        return Snapshot(layers,self.data.top_name,None if frame is None else np.array(frame['states'],copy=True),
+                        len(getattr(self.data,'ignored_geometry',())),minimum_edge_um)
+    def _zero_die_index(self,r):
+        if self._ref_owners is not None:return self._ref_owners,self._always_active_refs
+        with self.lock:
+            if self._ref_owners is not None:return self._ref_owners,self._always_active_refs
+            catalogue=r._plans_for_all_poses(None)
+            by_ref={}
+            for entry in catalogue:
+                by_ref.setdefault((entry['layer'],entry['index']),[]).append(entry)
+            ref_owners={};always_active=set()
+            for ref,entries in by_ref.items():
+                owners=set()
+                for entry in entries:
+                    owners.add(entry['owner'])
+                    owners.update(entry.get('follow_owners',()))
+                    part,_=r.interval(entry)
+                    if part is not None and part.get('box_invalid'):always_active.add(ref)
+                for v in r.vias_by_target.get(ref,()):
+                    if v['owner']>=0:owners.add(v['owner'])
+                ref_owners[ref]=frozenset(o for o in owners if o>=0)
+            self._ref_owners=ref_owners;self._always_active_refs=frozenset(always_active)
+            return ref_owners,self._always_active_refs
     def prepare(self,progress=None):
-        _,r=self.model(self.p);self.ensure_plans(r,progress)
+        _,r=self.model(self.p);self.ensure_plans(r,progress);self._nominal_wkbs()
     def ensure_plans(self,r,progress):
         # First batch request plans once; other lanes clone immutable nominal
         # routes instead of running the same expensive tracing concurrently.
@@ -96,9 +217,49 @@ class Session:
         self.ensure_plans(r,progress_slice(progress,0,.2))
         # Measured commands check their own actual-copper DRC; no other poses,
         # probability, width analysis or yield work is started.
-        result=r.frame(states,progress=progress_slice(progress,20,.5),diagnostics=preview)
-        bound=self.cache.bind(self.case,self.motions,list(self.cache.layers),p)
-        bound.acceleration=self.settings.acceleration
+        zero_dies={d for d in range(len(states)) if not np.any(states[d])}
+        use_zero_skip=(not preview and bool(zero_dies))
+        if use_zero_skip:
+            ref_owners,always_active=self._zero_die_index(r)
+            from .ignored_motion import linked_owners
+            linked,link_failures=linked_owners(r,states)
+            linked_active={ref for ref in ref_owners if any(linked.get((v['key'],v['index']),v['owner']) not in zero_dies for v in r.vias_by_target.get(ref,()))}
+            active_refs=set(always_active)|linked_active|{ref for ref,owners in ref_owners.items() if any(o not in zero_dies for o in owners)}
+            if not active_refs and not link_failures and len(zero_dies)==len(states):
+                result=r.frame(states,progress=progress_slice(progress,20,.5),targets=set(),diagnostics=False)
+                if not result.get('hard_failures') and not result.get('replacements') and not result.get('pieces'):
+                    cached_zero=self._zero_pose_cache.get(output_policy)
+                    if cached_zero is not None:
+                        z_frame,z_snap,z_details=cached_zero
+                        return dict(z_frame,rotation_centers=model.bound.centers.copy()),z_snap,copy.deepcopy(z_details)
+            elif not link_failures and len(active_refs)<len(ref_owners):
+                result=r.frame(states,progress=progress_slice(progress,20,.5),targets=active_refs,diagnostics=False)
+                # Safety guard: if any moving net collided or needed electrical repair near a
+                # skipped stationary zero-die feature, fall back to full reconstruction so
+                # pair separation produces identical results.
+                if result.get('hard_failures') or result.get('repair_refs'):
+                    skipped=set(ref_owners)-active_refs
+                    if skipped:
+                        touched_refs=set(result.get('repair_refs',()))|{tuple(ref) for ref,_ in result.get('hard_failures',())}
+                        pad=r.rule_space+r.tol*32
+                        need_full=False
+                        for tref in touched_refs:
+                            if tref in skipped:need_full=True;break
+                            g=next((row['geometry'] for row in result['replacements'].get(tref[0],()) if tref[1] in row['indices']),None)
+                            if g is None and tref in model.ids:g=model.nodes[model.ids[tref]]['poly']
+                            if g is None:continue
+                            b=g.bounds;box=shapely.box(b[0]-pad,b[1]-pad,b[2]+pad,b[3]+pad)
+                            for sref in skipped:
+                                if sref[0].split('/')[0]==tref[0].split('/')[0] and sref in model.ids and model.nodes[model.ids[sref]]['poly'].intersects(box):
+                                    need_full=True;break
+                            if need_full:break
+                        if need_full:
+                            result=r.frame(states,progress=progress_slice(progress,20,.5),diagnostics=False)
+            else:
+                result=r.frame(states,progress=progress_slice(progress,20,.5),diagnostics=False)
+        else:
+            result=r.frame(states,progress=progress_slice(progress,20,.5),diagnostics=preview)
+        bound=self._full_bound(p)
         layers=bound.transform(states)
         frame=dict(states=states,layers=layers,rotation_centers=model.bound.centers.copy(),reconstruction=result,
                    checks={i:dict(failures=[],problem_percent=0) for i in (1,2,3)},contact={'issues':[],'regions':[]},motion_issues=[])
@@ -129,22 +290,27 @@ class Session:
             if diagnostic:return frame,None,details
             raise DiagnosticFailure(failure_message(result['hard_failures']),frame,details)
         failures=[dict(layer=q['layer'],index=q['index'],reason=q.get('warning','无法连接')) for q in result['pieces'] if q.get('connection_failed')]
-        from .dxf_export import snapshot
-        frozen=snapshot(self.data,self.cache,frame,reconstruction=True,progress=progress_slice(progress,95,.04),allow_partial=bool(frame.get('partial_output_validated')))
-        for blobs in frozen.layers.values():
-            for b in blobs:
-                cancel_check()
-                g=shapely.from_wkb(b)
-                if not g.is_valid or not np.isfinite(shapely.get_coordinates(g)).all():raise ValueError('重构结果无效，拒绝输出')
-        # Keep the last interactive pose only; batch cannot fill the GUI LRU.
         if not preview:
+            frozen=self._fast_snapshot(frame,reconstruction=True,progress=progress_slice(progress,95,.04),allow_partial=bool(frame.get('partial_output_validated')))
             r.cache.clear()  # retain bounded, immutable per-source and nominal DRC caches
-        return frame,frozen,dict(output_policy=output_policy,partial_output=bool(original_failures),omitted_regions=omissions,omitted_region_count=len(omissions),connection_failures=failures,connection_failure_count=max(len(failures),len(original_failures)),
-                                fixed_rdl_drc_checked=True,drc_issues=issues,drc_count=len(issues),drc_passed=not issues,coordinate_frame='GDS顶层坐标，单位μm；package_relative_bounds_um以名义封装左下角为原点',rule_groups=len(result.get('violations',())),
-                                scope='当前实测姿态的实际铜DRC及连接检查；不计算其他姿态、概率或良率，不代表工艺签核')
+        else:
+            from .dxf_export import snapshot
+            frozen=snapshot(self.data,self.cache,frame,reconstruction=True,progress=progress_slice(progress,95,.04),allow_partial=bool(frame.get('partial_output_validated')))
+            for blobs in frozen.layers.values():
+                for b in blobs:
+                    cancel_check()
+                    g=shapely.from_wkb(b)
+                    if not g.is_valid or not np.isfinite(shapely.get_coordinates(g)).all():raise ValueError('重构结果无效，拒绝输出')
+        details=dict(output_policy=output_policy,partial_output=bool(original_failures),omitted_regions=omissions,omitted_region_count=len(omissions),connection_failures=failures,connection_failure_count=max(len(failures),len(original_failures)),
+                     fixed_rdl_drc_checked=True,drc_issues=issues,drc_count=len(issues),drc_passed=not issues,coordinate_frame='GDS顶层坐标，单位μm；package_relative_bounds_um以名义封装左下角为原点',rule_groups=len(result.get('violations',())),
+                     scope='当前实测姿态的实际铜DRC及连接检查；不计算其他姿态、概率或良率，不代表工艺签核')
+        if use_zero_skip and len(zero_dies)==len(states) and not active_refs and not link_failures and not result.get('hard_failures') and not result.get('replacements') and not result.get('pieces'):
+            with self.lock:
+                self._zero_pose_cache[output_policy]=(frame,frozen,copy.deepcopy(details))
+        return frame,frozen,details
     def close(self):
         for r in self.instances:r.close()
-        self.instances.clear();self.geometry_pool.clear();self.local=threading.local()
+        self.instances.clear();self.geometry_pool.clear();self.local=threading.local();self._zero_pose_cache.clear()
 
 
 def write_gds(snapshot,destination,dbu):

@@ -10,12 +10,13 @@ class DxfSettings:
     scale:float=1.
     separate_holes:bool=False
     show_fill:bool=False
+    region_auto_join:bool=False
 
     @classmethod
     def from_dict(cls,values=None):
         if values is not None and not isinstance(values,dict):raise ValueError('DXF输出参数必须是对象')
         names={f.name for f in fields(cls)};q=cls(**{k:v for k,v in (values or {}).items() if k in names})
-        for key in ('merge_layers','separate_holes','show_fill'):
+        for key in ('merge_layers','separate_holes','show_fill','region_auto_join'):
             if type(getattr(q,key)) is not bool:raise ValueError('DXF '+key+'必须为布尔值')
         if q.layer_scope not in ('all','visible','participating'):raise ValueError('无效DXF导出图层范围')
         if q.polygon_mode not in ('outline','hatch'):raise ValueError('无效DXF实体类型')

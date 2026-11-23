@@ -217,7 +217,8 @@ class MainWindow(W.QMainWindow):
         self.properties_shortcut.activated.connect(self.show_properties)
         self.selection=GeometrySelection(self);self.escape_shortcut=(QtGui.QShortcut if hasattr(QtGui,'QShortcut') else W.QShortcut)(QtGui.QKeySequence('Escape'),self);self.escape_shortcut.activated.connect(self.escape_action);self.scene_renderer=SceneRenderer(self.canvas,self.ax);self.refresh_jobs()
         from .edit_history import EditHistory
-        self.edit_history=EditHistory(self);self.pending_deleted_shapes={}
+        self.edit_history=EditHistory(self);self.pending_deleted_shapes={};self.pending_restored_shapes={}
+        self._staged_deletions=None;self.pending_layout_ops=[];self._staged_restored_edits=None
         self.edit_shortcuts=[]
         for key,fn,parent in (('Delete',self.delete_selected_shapes,self.canvas),('U',self.undo_edit,self),('Shift+U',self.redo_edit,self)):
             action=shortcut(QtGui.QKeySequence(key),parent)
@@ -575,6 +576,7 @@ class MainWindow(W.QMainWindow):
         spin(drc_group,'drc_tolerance_um','尺寸容差 ± / μm',-10000,10000,3)
         self.setting_fields['drc_tolerance_um'].setToolTip('有效最小值 = 工艺值 − 容差。正值放宽，负值收紧；默认0.1 μm。线宽、线距、包围量、机械净距和图形距边框共用；实体偏移分布不变。')
         self.process_layout.addStretch()
+        for header in self.process_sections.values():header.setChecked(True)
         recon=group('重构预演')
         choices['reconstruction_die_mode']=[('自动','auto'),('DIE内随动','follow'),('DIE内静止','stationary')]
         choice(recon,'reconstruction_die_mode','DIE内动区判断')
@@ -1105,12 +1107,13 @@ class MainWindow(W.QMainWindow):
         self.start_worker(read_and_prepare,accepted)
     def set_data(self,data,project=None,project_path=None,*,request_analysis=True):
         self.cut_drag.cancel();self.reconstruction_overlay.hide();self.constraint_feedback.cancel()
-        self.pending_deleted_shapes={}
+        self.pending_deleted_shapes={};self.pending_restored_shapes={}
+        self._staged_deletions=None;self.pending_layout_ops=[];self._staged_restored_edits=None
         self.reconstruction_pending=False;self._reconstruction_apply_once=False;self._applied_preview_settings=None
         self.exit_region_mode()
         from .session_cache import logical_fingerprint
         project=normalize_project(project) if project else {}
-        if project and project.get('geometry_indexing')!='merged-v39':
+        if project and (project.get('geometry_indexing')!='merged-v39' or tuple(getattr(data,'deleted_shapes',()))!=tuple(tuple(r) for r in project.get('deleted_shapes',()))):
             from .gds_merge import restore_project_geometry
             data,project=restore_project_geometry(data,project)
         if data.node_edits!=project.get('node_edits',[]):
@@ -1141,7 +1144,9 @@ class MainWindow(W.QMainWindow):
             self.problem_filter.blockSignals(True);self.problem_filter.setCurrentIndex({'all':0,'drc':1,'failed':2}[view['filter_mode']]);self.problem_filter.blockSignals(False)
             self._initial_extreme_page=view['page']-1
             for title,header in self.setting_sections.items():header.setChecked(title in project.get('expanded_settings',[]))
-            for title,header in self.process_sections.items():header.setChecked(title in project.get('expanded_process',[]))
+            expanded_process=project.get('expanded_process')
+            for title,header in self.process_sections.items():
+                header.setChecked(True if not project or expanded_process is None else (title in expanded_process))
             self.view_settings=replace(cache_settings,evaluation_scope=self.grid_mode.currentData(),reconstruction_ignored=tuple(sorted(restored_width_ignores(project,data,'ignored_reconstruction'))));self.load_view_settings();self.layer_styles=project.get('layer_styles',{})
             for name,value in project_overlays(project).items():
                 toggle=self.overlay_widget(name)
@@ -1448,9 +1453,101 @@ class MainWindow(W.QMainWindow):
         except Exception as exc:self.log_bus.emit(f'待计算动区预览未生成：{exc}')
         self.statusBar().showMessage('重构修改待应用；已标记调整图形，点击“重构计算”统一计算。')
 
+    def _effective_deleted_shapes(self):
+        if self._staged_deletions is not None:return tuple(self._staged_deletions)
+        return tuple(getattr(self.data,'deleted_shapes',()))
+
+    def _can_defer_deletion_edit(self):
+        return bool(self.data is not None and self.reconstruction_toggle.isChecked() and not self.view_settings.reconstruction_auto)
+
+    def _has_pending_deletion_changes(self):
+        if self._staged_deletions is None:return False
+        return tuple(self._staged_deletions)!=tuple(getattr(self.data,'deleted_shapes',())) or bool(self.pending_layout_ops)
+
+    def _clear_pending_layout_markers(self):
+        self.pending_deleted_shapes={};self.pending_restored_shapes={}
+        self._staged_deletions=None;self.pending_layout_ops=[];self._staged_restored_edits=None
+
+    def _shape_marker_geometry(self,layer,raw_index):
+        original=self.data
+        indices=getattr(original,'area_indices',{}).get(layer,range(len(original.layers.get(layer,()))))
+        if raw_index in indices:
+            index=indices.index(raw_index)
+            moved=next((row['geometry'] for row in self.selection.replacements().get(layer,()) if index in row['indices']),None)
+            if moved is None:
+                cache=self.geometry_cache or GeometryCache(original)
+                moved=cache.layers[layer]['geometry'][index]
+                model=getattr(self.engine,'contact',None)
+                if model is not None and (node:=model.ids.get((layer,index))) is not None and self.shown_states is not None:
+                    moved=model.moved(moved,model.nodes[node]['owner'],self.shown_states)
+            return moved
+        from .gds_merge import filled_polygon
+        source=getattr(original,'_area_base',original)
+        layers=source.layers.get(layer,())
+        if 0<=raw_index<len(layers):
+            return filled_polygon(layers[raw_index],True)
+        return shapely.GeometryCollection()
+
+    def _merge_staged_restored_edits(self,project):
+        staged=self._staged_restored_edits
+        if not staged:return project
+        edits,width=staged
+        cfg=project.setdefault('settings',{})
+        for name,rows in edits.items():
+            if not rows:continue
+            existing=list(cfg.get(name,()))
+            seen=set(existing)
+            for row in rows:
+                if row not in seen:existing.append(row);seen.add(row)
+            cfg[name]=existing
+        if width:
+            refs=project.setdefault('ignored_width_lines',dict(sha256=self.data.sha256,top_cell=self.data.top_name,refs=[]))
+            refs['refs']=sorted({tuple(r) for r in refs.get('refs',())} | {tuple(r) for r in width})
+        if 'reconstruction_ignored' in cfg:
+            project.setdefault('ignored_reconstruction',dict(sha256=self.data.sha256,top_cell=self.data.top_name,refs=[]))['refs']=[list(r) for r in cfg['reconstruction_ignored']]
+        return project
+
+    def _replay_pending_deletions(self):
+        """Apply queued delete/restore operations in exact order to verify net target."""
+        actual={tuple(q[:2]):q[2] for q in getattr(self.data,'deleted_shapes',())}
+        if self._staged_deletions is not None:
+            for item in self._staged_deletions:actual.setdefault(tuple(item[:2]),item[2])
+        rows={tuple(q[:2]):q[2] for q in getattr(self.data,'deleted_shapes',())}
+        for op,items in self.pending_layout_ops:
+            if op=='delete':
+                for ref,fp in items:rows[tuple(ref)]=fp
+            elif op=='restore':
+                for ref in items:rows.pop(tuple(ref),None)
+        if self._staged_deletions is not None:
+            return list(self._staged_deletions)
+        return [(*ref,rows[ref]) for ref in sorted(rows)]
+
+    def _sync_staged_deletion_markers(self,target_deletions):
+        actual={tuple(q[:2]) for q in getattr(self.data,'deleted_shapes',())}
+        target={tuple(q[:2]) for q in target_deletions}
+        prev_del=self.pending_deleted_shapes;prev_res=self.pending_restored_shapes
+        self.pending_deleted_shapes={ref:(prev_del[ref] if ref in prev_del else self._shape_marker_geometry(*ref)) for ref in sorted(target-actual)}
+        self.pending_restored_shapes={ref:(prev_res[ref] if ref in prev_res else self._shape_marker_geometry(*ref)) for ref in sorted(actual-target)}
+        self._staged_deletions=tuple(target_deletions) if (target!=actual or self.pending_layout_ops) else None
+
     def compute_reconstruction(self):
         if self.remote_locked or self.data is None:return
-        self.pending_deleted_shapes={}
+        if self.worker is not None:
+            self.statusBar().showMessage('上一项操作尚未完成，请稍候。');return
+        if self._has_pending_deletion_changes():
+            from .area_filter import canonical_project
+            target_deletions=self._replay_pending_deletions()
+            actual_deletions=list(getattr(self.data,'deleted_shapes',()))
+            if tuple(target_deletions)!=tuple(actual_deletions):
+                project=canonical_project(self.data,self.project_settings())
+                project=self._merge_staged_restored_edits(project)
+                project['deleted_shapes']=target_deletions
+                project.setdefault('overlays',{})['reconstruction']=True
+                pose=None if self.manual_states is None else tuple(map(tuple,self.manual_states))
+                extreme=self.active_preview
+                self.apply_layout_edit(project,commit=lambda:None,pose=pose,extreme=extreme,force_reconstruct=True)
+                return
+        self._clear_pending_layout_markers()
         self.reconstruction_pending=False;self._reconstruction_apply_once=True
         if hasattr(self,'reconstruction_overlay'):
             self.reconstruction_overlay.staged_overlay=None
@@ -2315,7 +2412,7 @@ class MainWindow(W.QMainWindow):
             self.extreme_table.blockSignals(True);self.extreme_table.setCurrentCell(-1 if manual is not None else row,0);self.extreme_table.blockSignals(False)
         else:self.tabs.setCurrentIndex(0);self.preview_tabs.setCurrentIndex(0)
         self.plot_layout(preserve=preserve)
-        self.request_preview(pose_change=bool(self.pending_deleted_shapes));self.width_yield.refresh();self.analysis.activate()
+        self.request_preview(pose_change=bool(self.pending_deleted_shapes or self.pending_restored_shapes or self._reconstruction_apply_once));self.width_yield.refresh();self.analysis.activate()
         self.statusBar().showMessage('评估完成：选择极端情况预演；进入结果分析后计算安全范围与良率')
     def render_analysis_result(self,r,preserve=False):
         rec=r['recommendation']
@@ -2677,7 +2774,7 @@ class MainWindow(W.QMainWindow):
         settings=retire_pad_intervals(self.view_settings,solver)
         return dict(schema_version=5,app_version=__version__,rulers=self.rulers.rows,sha256=self.data.sha256,top_cell=self.data.top_name,
                     roles=self.roles(),parameters=asdict(self.params()),settings=asdict(settings),node_edits=list(self.data.node_edits),
-                    deleted_shapes=list(getattr(self.data,'deleted_shapes',())),
+                    deleted_shapes=list(self._effective_deleted_shapes()),
                     geometry_indexing=getattr(self.data,'geometry_indexing','legacy'),legacy_node_edits=list(getattr(self.data,'legacy_node_edits',[])),
                     layout_output=__import__('die_shift_studio.layout_export',fromlist=['configuration']).configuration(self),
                     dxf_directory=self.dxf_directory,dxf_options=asdict(self.dxf_settings),measured_output=self.measured_output.configuration(),
@@ -2811,44 +2908,49 @@ class MainWindow(W.QMainWindow):
         original=self.data;roles=self.roles()
         source=getattr(original,'_area_base',original)
         base=getattr(source,'_source_snapshot',source)
-        project=canonical_project(original,self.project_settings())
-        rows={tuple(q[:2]):q[2] for q in project['deleted_shapes']}
+        rows={tuple(q[:2]):q[2] for q in self._effective_deleted_shapes()}
+        added=[]
+        removed_selected=set()
         for key,index in self.selection.selected:
             if roles.get(key) in ('芯片边框','封装边框') or not 0<=index<len(original.layers.get(key,())):continue
             raw=getattr(original,'area_indices',{}).get(key,range(len(original.layers[key])))[index]
+            if (key,raw) in rows:continue
             kind,coords,_=shape_nodes(base,key,raw)
-            rows[key,raw]=node_fingerprint(kind,coords)
-        if len(rows)==len(project['deleted_shapes']):return
-        project['deleted_shapes']=[(*ref,rows[ref]) for ref in sorted(rows)]
+            fp=node_fingerprint(kind,coords)
+            rows[key,raw]=fp;added.append(((key,raw),fp));removed_selected.add((key,index))
+        if not added:return
+        target_deletions=tuple((*ref,rows[ref]) for ref in sorted(rows))
         before=self.edit_history.capture()
+        if self._can_defer_deletion_edit():
+            self.pending_layout_ops.append(('delete',tuple(added)))
+            self._sync_staged_deletion_markers(target_deletions)
+            self.selection.selected=[item for item in self.selection.selected if item not in removed_selected]
+            self.selection.draw()
+            self.edit_history.record(before)
+            self.defer_reconstruction(stage=True)
+            self.statusBar().showMessage(f'已暂存删除 {len(added)} 个图形（保持特殊标记，点击“重构计算”按顺序应用）')
+            return
+        project=canonical_project(original,self.project_settings())
+        project['deleted_shapes']=list(target_deletions)
         self.apply_layout_edit(project,commit=lambda:self.edit_history.record(before),
                                pose=before['pose'],extreme=before['extreme'])
 
-    def apply_layout_edit(self,project,*,commit,pose=None,extreme=None):
+    def apply_layout_edit(self,project,*,commit,pose=None,extreme=None,force_reconstruct=False):
         """Publish a source-bound geometry edit only after reindexing succeeds."""
         original=self.data;view=(self.ax.get_xlim(),self.ax.get_ylim())
         was_assessed=self.result is not None
         selected=list(self.selection.selected)
-        stage=self.reconstruction_toggle.isChecked() and not self.view_settings.reconstruction_auto
+        stage=not force_reconstruct and self.reconstruction_toggle.isChecked() and not self.view_settings.reconstruction_auto
         from .edit_history import mapped_edits
         previously_applied,_=mapped_edits(original,self.preview_settings(),(),to_source=True)
         pending_before=dict(self.pending_deleted_shapes)
         old_deleted={tuple(q[:2]) for q in getattr(original,'deleted_shapes',())}
         next_deleted={tuple(q[:2]) for q in project['deleted_shapes']}
-        ghosts={ref:g for ref,g in pending_before.items() if ref in next_deleted}
+        ghosts={} if force_reconstruct else {ref:g for ref,g in pending_before.items() if ref in next_deleted}
         if stage and next_deleted-old_deleted:
-            cache=self.geometry_cache or GeometryCache(original)
             for (layer,raw) in next_deleted-old_deleted:
-                indices=getattr(original,'area_indices',{}).get(layer,range(len(original.layers.get(layer,()))))
-                if raw in indices:
-                    index=indices.index(raw)
-                    moved=next((row['geometry'] for row in self.selection.replacements().get(layer,()) if index in row['indices']),None)
-                    if moved is None:
-                        moved=cache.layers[layer]['geometry'][index]
-                        model=getattr(self.engine,'contact',None)
-                        if model is not None and (node:=model.ids.get((layer,index))) is not None and self.shown_states is not None:
-                            moved=model.moved(moved,model.nodes[node]['owner'],self.shown_states)
-                    ghosts[layer,raw]=moved
+                g=self._shape_marker_geometry(layer,raw)
+                if not g.is_empty:ghosts[layer,raw]=g
         def prepare(progress):
             progress(5,'校验图纸编辑')
             from .area_filter import apply
@@ -2868,7 +2970,10 @@ class MainWindow(W.QMainWindow):
             self.manual_states=None if pose is None else np.array(pose,float)
             self.active_preview=extreme
             self.pending_deleted_shapes=ghosts
-            if ghosts:
+            if force_reconstruct:
+                self._clear_pending_layout_markers()
+                self.reconstruction_pending=False;self._reconstruction_apply_once=True
+            elif ghosts:
                 self.reconstruction_pending=True
                 applied,_=mapped_edits(updated,previously_applied,(),to_source=False)
                 self._applied_preview_settings=replace(self.view_settings,**applied)
@@ -2881,7 +2986,7 @@ class MainWindow(W.QMainWindow):
                 if source_index in present:mapped.append((key,present.index(source_index)))
             self.selection.selected=mapped
             self.plot_layout(preserve=True)
-            if case is not None and (was_assessed or self.width_toggle.isChecked() or self.reconstruction_toggle.isChecked()):
+            if case is not None and (force_reconstruct or was_assessed or self.width_toggle.isChecked() or self.reconstruction_toggle.isChecked()):
                 self._evaluation_requested=True;self._coverage_pending=True;self.coverage_timer.start()
             elif case is not None:self.request_preview(pose_change=True)
             commit()
@@ -2898,6 +3003,7 @@ class MainWindow(W.QMainWindow):
         source=local_source(path,gds)
         from .area_filter import canonical_project
         project=dict(canonical_project(self.data,self.project_settings()),gds_path=source)
+        project=self._merge_staged_restored_edits(project)
         if self.remote_locked or getattr(self,'requested_measured',False):
             for name,value in self.measured_output.saved_overlays.items():
                 project['overlays']['footprint' if name=='probability' else name]=value
@@ -2909,7 +3015,7 @@ class MainWindow(W.QMainWindow):
             # project result. Keep a valid existing engineering sidecar instead.
             try:
                 old=json.loads(path.read_text(encoding='utf8'));clean=clean_json(project)
-                keys=('sha256','top_cell','roles','parameters','settings','node_edits','layer_order')
+                keys=('sha256','top_cell','roles','parameters','settings','node_edits','deleted_shapes','layer_order')
                 if all(old.get(k)==clean.get(k) for k in keys) and old.get('saved_results'):project['saved_results']=old['saved_results']
             except (OSError,ValueError):pass
         else:

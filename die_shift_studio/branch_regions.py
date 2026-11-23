@@ -27,7 +27,14 @@ def terminal_tree(moving,fixed):
     return result
 
 
-def interior_interfaces(source,domain,rigid,tolerance):
+def _fast_union(geoms):
+    non_empty=[g for g in geoms if g is not None and not g.is_empty]
+    if not non_empty:return shapely.Polygon()
+    if len(non_empty)==1:return non_empty[0]
+    return shapely.union_all(non_empty)
+
+
+def interior_interfaces(source,domain,rigid,tolerance,*,exterior=None):
     """Only material-to-material seams are controls, never source perimeter.
 
     Snapped Boolean operations can leave sub-DBU slivers along the exterior.
@@ -35,12 +42,17 @@ def interior_interfaces(source,domain,rigid,tolerance):
     sliver contour and transforms it into a long, detached drag handle.
     This display-only trim leaves copper partitions and exported seams intact.
     """
-    exterior=source.boundary.buffer(tolerance*4)
-    interfaces=[g.boundary.intersection(domain.buffer(tolerance*.05)).difference(exterior) for g in rigid]
+    if not rigid:return shapely.GeometryCollection()
+    if exterior is None:exterior=source.boundary.buffer(tolerance*4)
+    dom_buf=domain.buffer(tolerance*.05)
+    dx0,dy0,dx1,dy1=dom_buf.bounds
+    local_ext=exterior.intersection(shapely.box(dx0-tolerance,dy0-tolerance,dx1+tolerance,dy1+tolerance))
+    interfaces=[g.boundary.intersection(dom_buf).difference(local_ext) for g in rigid]
     lines=[line for g in interfaces for line in shapely.get_parts(g)
            if line.geom_type=='LineString' and line.length>tolerance*8]
+    if not lines:return shapely.GeometryCollection()
     from .straight_controls import straight
-    return straight(shapely.line_merge(shapely.union_all(lines)),tolerance)
+    return straight(shapely.line_merge(_fast_union(lines)),tolerance)
 
 
 def path_sections(rows):
@@ -93,14 +105,27 @@ def transition_domains(source,rows,tol,sections=None):
             blade=shapely.LineString([xy[0]-v*tol*32,xy[-1]+v*tol*32])
             blades.setdefault(blade.normalize().wkb,blade)
     for blade in blades.values():
-        components=[piece for g in components for piece in (parts(split(g,blade)) if g.intersects(blade) else [g])]
+        bx0,by0,bx1,by1=blade.bounds
+        next_components=[]
+        for g in components:
+            gx0,gy0,gx1,gy1=g.bounds
+            if gx0<=bx1 and gx1>=bx0 and gy0<=by1 and gy1>=by0 and g.intersects(blade):
+                next_components.extend(parts(split(g,blade)))
+            else:
+                next_components.append(g)
+        components=next_components
     selected=[];rigid=[]
+    interval_tree=shapely.STRtree(intervals) if intervals else None
     for g in components:
-        target=selected if any(g.intersection(line).length>tol*4 for line in intervals) else rigid
-        target.append(g)
+        if interval_tree is not None:
+            hits=interval_tree.query(g,predicate='intersects')
+            is_selected=any(g.intersection(intervals[int(idx)]).length>tol*4 for idx in hits)
+        else:
+            is_selected=False
+        (selected if is_selected else rigid).append(g)
     # Keep the split cells. Re-differencing their union from the original
     # outline can weld independent rigid branches along an ulp-wide residue.
-    return shapely.union_all(selected),rigid
+    return _fast_union(selected),rigid
 
 
 def merge_rigid_cells(cells,tol):
@@ -149,16 +174,19 @@ def assemble(r,source,rows,states):
     if len(domains)>1 and not any(q.get('strict_box') is not None for q in rows):
         gap_limit=max(r._rule_width*2.5,50.)
         absorbed=set()
+        domain_tree=shapely.STRtree(domains)
         for i,g in enumerate(rigid):
             if i in known:continue
-            touching=[d for d in domains if d.distance(g)<=r.tol*4]
+            hit_ids=domain_tree.query(g,predicate='dwithin',distance=r.tol*4*(1+1e-6))
+            if len(hit_ids)<2:continue
+            touching=[domains[int(idx)] for idx in hit_ids if domains[int(idx)].distance(g)<=r.tol*4]
             if len(touching)<2:continue
             equiv_width=2.*g.area/max(g.length,1e-6)
             min_gap=min(a.distance(b) for ix,a in enumerate(touching) for b in touching[ix+1:])
             if min_gap<=gap_limit or equiv_width<=gap_limit:
                 absorbed.add(i)
         if absorbed:
-            active=shapely.union_all([active,*(rigid[i] for i in absorbed)])
+            active=_fast_union([active,*(rigid[i] for i in absorbed)])
             new_rigid=[];new_known={}
             for i,g in enumerate(rigid):
                 if i in absorbed:continue
@@ -171,8 +199,14 @@ def assemble(r,source,rows,states):
     for g,v in ((moving,1.),(fixed,0.)):
         known[len(rigid)]=v;rigid.append(g)
     neighbours=[];edges={}
+    rigid_non_empty=[(i,g) for i,g in enumerate(rigid) if not g.is_empty]
+    rigid_tree=shapely.STRtree([g for _,g in rigid_non_empty]) if rigid_non_empty else None
     for domain in domains:
-        ids=[i for i,g in enumerate(rigid) if not g.is_empty and domain.distance(g)<=r.tol*4]
+        if rigid_tree is not None:
+            ids=sorted(rigid_non_empty[int(k)][0] for k in rigid_tree.query(domain,predicate='dwithin',distance=r.tol*4*(1+1e-6))
+                       if domain.distance(rigid_non_empty[int(k)][1])<=r.tol*4)
+        else:
+            ids=[]
         neighbours.append(ids)
         for ix,i in enumerate(ids):
             for j in ids[ix+1:]:edges[i,j]=edges.get((i,j),0.)+1/max(r._rule_width,rigid[i].distance(rigid[j]))
@@ -189,8 +223,9 @@ def assemble(r,source,rows,states):
         solved=np.linalg.lstsq(mat,rhs,rcond=None)[0]
         values.update((i,float(np.clip(v,0,1))) for i,v in zip(unknown,solved))
     mobile=[i for i in range(physical_count) if values[i]>1e-12];static=[i for i in range(physical_count) if i not in mobile]
-    c=shapely.union_all([rigid[i] for i in mobile]);b=shapely.union_all([rigid[i] for i in static])
-    cposed=shapely.union_all([clean_overlay(transform(rigid[i],center,pose*values[i]),r.tol) for i in mobile]);style=r.settings.reconstruction_style
+    c=_fast_union([rigid[i] for i in mobile]);b=_fast_union([rigid[i] for i in static])
+    cposed=_fast_union([clean_overlay(transform(rigid[i],center,pose*values[i]),r.tol) for i in mobile]);style=r.settings.reconstruction_style
+    source_exterior=source.boundary.buffer(r.tol*4)
     def deform(g,ids):
         if not shifted:return g
         dense=shapely.segmentize(g,max(r.tol*8,min(r._rule_width/3,5.)))
@@ -215,21 +250,25 @@ def assemble(r,source,rows,states):
     for q,part in zip(rows,sections):
         left,right=q['interval'];trim=min(r.tol*4,(right-left)*.05)
         paths.append((q,part,substring(q['route_plan'].route,left+trim,right-trim)))
+    path_tree=shapely.STRtree([line for _,_,line in paths]) if paths else None
+    strict_rows=[(idx,q,part) for idx,(q,part,_) in enumerate(paths) if q.get('strict_box') is not None]
     for domain_index,(group,ids) in enumerate(zip(domains,neighbours)):
-        contributors=[(q,part) for q,part,line in paths
-                      if (q.get('strict_box') is not None and group.intersection(q['nominal_regions']['A']).area>r.tol*r.tol)
-                      or group.intersection(line).length>r.tol*4]
+        cand_idx=set(int(k) for k in path_tree.query(group,predicate='intersects')) if path_tree is not None else set()
+        cand_idx.update(idx for idx,_,_ in strict_rows)
+        contributors=[(paths[idx][0],paths[idx][1]) for idx in sorted(cand_idx)
+                      if (paths[idx][0].get('strict_box') is not None and group.intersection(paths[idx][0]['nominal_regions']['A']).area>r.tol*r.tol)
+                      or group.intersection(paths[idx][2]).length>r.tol*4]
         members=[q for q,part in contributors]
         if not members or not ids:continue
         q=dict(members[0]);posed=None;flow_steps=0
         high=max(values[i] for i in ids);low=min(values[i] for i in ids)
         if high-low<=1e-10 and high<=1e-10:continue  # fixed-to-fixed copper has no moving terminal
-        guides=[shapely.union_all([part[name] for _,part in contributors if part is not None]) for name in ('near','far')]
+        guides=[_fast_union([part[name] for _,part in contributors if part is not None]) for name in ('near','far')]
         def face(weight,side):
             # Difference/union can leave ulp-different seam coordinates. A
             # display-only sub-DBU neighbourhood recovers the real line; isolated
             # touch points are NOT whole-pad controls.
-            seam=interior_interfaces(source,group,[rigid[i] for i in ids if i<physical_count and abs(values[i]-weight)<1e-10],r.tol)
+            seam=interior_interfaces(source,group,[rigid[i] for i in ids if i<physical_count and abs(values[i]-weight)<1e-10],r.tol,exterior=source_exterior)
             if any(m.get('strict_box') is not None for m in members):
                 from .manual_regions import partition
                 faces=[partition(m['route_plan'],m['strict_box']) for m in members if m.get('strict_box') is not None]

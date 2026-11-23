@@ -6,7 +6,7 @@ been combined. No nearest-DIE or fabricated cross-hole conductor is introduced.
 import math
 import numpy as np
 import shapely
-from .reconstruction_route import RoutePlan,EMPTY
+from .reconstruction_route import RoutePlan,EMPTY,parts
 
 
 class PlaneRoute(RoutePlan):
@@ -35,9 +35,11 @@ class PlaneRoute(RoutePlan):
             # Intersecting infinite cut planes at a bend cannot turn their
             # remote overlap into a spurious active copper island.
             return RoutePlan.partition(self,a,b,angles)
-        c=c.difference(overlap);fixed=fixed.difference(overlap)
-        active=self.source.difference(shapely.union_all([c,fixed]))
-        if active.is_empty:return None
+        c_parts=parts(c.difference(overlap));c=c_parts[0] if len(c_parts)==1 else shapely.union_all(c_parts) if c_parts else EMPTY
+        f_parts=parts(fixed.difference(overlap));fixed=f_parts[0] if len(f_parts)==1 else shapely.union_all(f_parts) if f_parts else EMPTY
+        a_parts=parts(self.source.difference(shapely.union_all([c,fixed])))
+        active=a_parts[0] if len(a_parts)==1 else shapely.union_all(a_parts) if a_parts else EMPTY
+        if active.is_empty or fixed.is_empty or (a>0 and c.is_empty):return None
         near=shapely.Point(self.route.coords[0]) if a==0 else active.boundary.intersection(c.boundary)
         far=active.boundary.intersection(fixed.boundary)
         if near.is_empty or (a>0 and near.length<=self.tolerance) or far.length<=self.tolerance:return None

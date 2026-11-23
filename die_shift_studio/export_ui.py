@@ -6,8 +6,8 @@ from .qt_compat import QtWidgets as W,run_dialog,ACCEPTED
 def export_dxf(window,regions=False):
     if window.data is None:
         window.error('请先打开GDS');return
-    if window.worker is not None or getattr(window,'preview_workers',None) or getattr(window,'preview_pending',None) or getattr(getattr(window,'cut_drag',None),'state',None):
-        window.error('图纸操作尚未完成，请完成后再输出');return
+    if window.worker is not None or getattr(window,'preview_workers',None) or getattr(window,'preview_pending',None) or getattr(getattr(window,'cut_drag',None),'state',None) or getattr(window,'reconstruction_pending',False) or getattr(window,'pending_layout_ops',None):
+        window.error('请先完成当前预演及待应用的重构修改后再输出');return
     if regions and (window.case is None or window.engine is None):
         window.error('请先设置封装、芯片及金属层用途，并完成一次重构预演');return
     root=Path(window.dxf_directory) if getattr(window,'dxf_directory','') else Path(window.data.path).parent
