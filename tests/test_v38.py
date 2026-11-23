@@ -135,8 +135,8 @@ class V38Tests(unittest.TestCase):
                 import ezdxf
                 doc=ezdxf.readfile(out)
                 self.assertEqual(len(doc.modelspace().query('INSERT')),3)
-                self.assertTrue(all(closed==(layer in ('RKG_REF','DIE_REF'))
-                                    for layer,_,closed in expanded_outlines(doc.modelspace())))
+                self.assertTrue(all(closed for layer,_,closed in expanded_outlines(doc.modelspace())
+                                    if layer in ('PKG_REF','DIE_REF')))
         finally:e.close()
 
     def test_holes_scale_merge_and_failed_export_preserves_file(self):

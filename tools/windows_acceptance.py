@@ -13,6 +13,17 @@ import tempfile
 import time
 
 ROOT=Path(__file__).resolve().parents[1]
+LAUNCHERS=('DieShiftAnalyze_RUN.bat','RealDataAnalyze_RUN.bat')
+
+
+def launcher_result(directory, launcher, arguments, output, env):
+    subprocess.run(['cmd','/d','/c','call',launcher,*map(str,arguments)],
+                   cwd=directory,env=env,check=True,timeout=30)
+    until=time.monotonic()+120
+    while time.monotonic()<until:
+        try:return json.loads(output.read_text(encoding='utf8'))
+        except (FileNotFoundError,json.JSONDecodeError):time.sleep(.15)
+    raise RuntimeError(f'{launcher} did not produce {output.name}')
 
 def normal_launch(exe,cwd,title):
     import psutil
@@ -106,14 +117,13 @@ def main():
             assert record['dxf_export']['polygons']==1 and not record['dxf_export']['arc_restore'],record
             assert Path(record['jobs']).samefile(install/'Jobs') and (install/'logs').is_dir()
             assert marker.read_bytes()==b'{}' and not list(cwd.iterdir())
-        # Exercise the single BAT through cmd.exe with a spaced, Unicode argument.
+        # Source copies have no dist/ EXE to take precedence over the script.
+        scripts=base/'源码 脚本'
+        shutil.copytree(source,scripts,ignore=shutil.ignore_patterns('dist','build','Jobs'))
         source_out=base/'源码 launch.json'
         no_samples=base/'no samples'
         env=dict(os.environ,DIE_SHIFT_SMOKE_EXAMPLES=str(no_samples),DIE_SHIFT_PYTHON=sys.executable)
-        subprocess.run(['cmd','/d','/c','call','RUN.bat','--smoke-test',str(source_out)],cwd=source,env=env,check=True,timeout=30)
-        until=time.monotonic()+90
-        while not source_out.is_file() and time.monotonic()<until:time.sleep(.15)
-        source_report=json.loads(source_out.read_text(encoding='utf8'))
+        source_report=launcher_result(scripts,LAUNCHERS[0],['--smoke-test',source_out],source_out,env)
         assert source_report['status']=='PASS' and not source_report['frozen']
         assert records[0]['standalone'] and records[1]['reconstruction_routes']>=1
         ipc_env=dict(os.environ,DIE_SHIFT_TEST_EXE=str(exe))
@@ -122,6 +132,24 @@ def main():
         client=install/'RealDataAnalyse.exe'
         shutil.copy2(source/'dist'/client.name,client)
         normal_launch(client,cwd,'RealDataAnalyse '+__version__)
+        for launcher in LAUNCHERS:
+            path=source/'dist'/launcher
+            assert path.read_bytes()==(source/launcher).read_bytes()
+            shutil.copy2(path,install/launcher)
+        assert not (install/'main.py').exists() and not (install/'RealDataAnalyse').exists()
+        frozen_env=dict(env,DIE_SHIFT_PYTHON=str(base/'missing python.exe'))
+        # Check both the sibling and dist/ EXE paths with an invalid Python override.
+        for folder in (install,source):
+            gpu_out=base/(folder.name+' BAT GPU.json')
+            assert launcher_result(folder,LAUNCHERS[0],['--gpu-info',gpu_out],gpu_out,frozen_env)['backend'] in ('cuda','cpu')
+        files=sorted((source/'Jobs'/'GD55'/'RealDataAnalyse'/'Excel').glob('*.xlsx'))
+        for i,(folder,batch_env) in enumerate(((scripts,env),(install,frozen_env),(source,frozen_env))):
+            config,result=base/f'批次 {i}.json',base/f'实测 {i}.json'
+            config.write_text(json.dumps(dict(paths=list(map(str,files)),database=str(base/f'批次 {i}.sqlite'),
+                                              die_count=3,workers=1)),encoding='utf8')
+            response=launcher_result(folder,LAUNCHERS[1],['--import-data',config,'--result',result],result,batch_env)
+            assert response['packages']==36,response
+        print('WINDOWS_LAUNCHERS_PASS: both scripts, sibling EXEs without sources, dist EXE precedence',flush=True)
         paired_env=dict(ipc_env,REALDATA_TEST_EXE=str(client))
         subprocess.run([sys.executable,str(ROOT/'tests/gui_sh22_measurements.py')],cwd=ROOT,
                        env=dict(paired_env,SH22_TEST_CASE=str(source/'Jobs/SH22')),check=True,timeout=330)
@@ -138,6 +166,6 @@ def main():
         subprocess.run([sys.executable,str(ROOT/'tests/gui_realdata_errors.py')],cwd=ROOT,env=gd55_env,check=True,timeout=2400)
         print('FROZEN_GD55_XLSX_PASS: actual packaged Excel parser, paired EXEs and bundled case',flush=True)
     print('WINDOWS_SOURCE_BUILD_PASS',__version__,platform.platform(),
-          f'normal window {elapsed:.2f}s, {icons} icon sizes, source BAT and isolated EXE verified; no binary published',flush=True)
+          f'normal window {elapsed:.2f}s, {icons} icon sizes, both launchers and isolated EXEs verified; no binary published',flush=True)
 
 if __name__=='__main__':main()

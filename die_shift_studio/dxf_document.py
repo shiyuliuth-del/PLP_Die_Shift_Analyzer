@@ -219,7 +219,8 @@ def _write_blocks(writer, handles, blocks=()):
         ))
         # Layer 0 inside a block inherits the layer of its INSERT.
         for xy, handle in zip(block["outlines"], block.get("children", ())):
-            _write_outline(writer, dict(vertices=xy, closed=False), "0", handle, owner, model=False)
+            closed=tuple(xy[0])==tuple(xy[-1])
+            _write_outline(writer, dict(vertices=xy[:-1] if closed else xy, closed=closed), "0", handle, owner, model=False)
         writer.extend((
             (0, "ENDBLK"), (5, block["end"]),
             (330, owner), (100, "AcDbEntity"), (8, "0"),

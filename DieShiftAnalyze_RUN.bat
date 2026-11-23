@@ -1,12 +1,15 @@
 @echo off
 setlocal DisableDelayedExpansion
 cd /d "%~dp0" || exit /b 1
-if /i "%~1"=="build" goto interpreter
-if exist "%~dp0Die_Shift_Analyze.exe" (
-    start "" "%~dp0Die_Shift_Analyze.exe" %*
+for %%E in ("%~dp0Die_Shift_Analyze.exe" "%~dp0dist\Die_Shift_Analyze.exe") do if exist "%%~fE" (
+    start "" /d "%%~dpE." "%%~fE" %*
     exit /b
 )
-:interpreter
+if not exist "%~dp0main.py" (
+    echo Die_Shift_Analyze.exe and main.py were not found next to the launcher.
+    if not defined CI pause
+    exit /b 1
+)
 set "DSA_PYTHON=%DIE_SHIFT_PYTHON%"
 if defined DSA_PYTHON goto selected
 if defined VIRTUAL_ENV if exist "%VIRTUAL_ENV%\Scripts\python.exe" set "DSA_PYTHON=%VIRTUAL_ENV%\Scripts\python.exe"
@@ -16,19 +19,8 @@ if not defined DSA_PYTHON for /f "delims=" %%P in ('py -c "import sys; print(sys
 :selected
 if not exist "%DSA_PYTHON%" (
     echo Python was not found. Set DIE_SHIFT_PYTHON to the existing python.exe.
-    if /i not "%~1"=="build" if not defined CI pause
+    if not defined CI pause
     exit /b 1
-)
-if /i "%~1"=="build" (
-    "%DSA_PYTHON%" -m die_shift_studio.dependencies
-    if errorlevel 1 exit /b 1
-    "%DSA_PYTHON%" -m PyInstaller --clean --noconfirm "%~dp0Die_Shift_Analyze.spec"
-    if errorlevel 1 exit /b 1
-    "%DSA_PYTHON%" -m PyInstaller --clean --noconfirm "%~dp0RealDataAnalyse\RealDataAnalyse.spec"
-    if errorlevel 1 exit /b 1
-    "%DSA_PYTHON%" -m RealDataAnalyse.projects --install-case "%~dp0dist"
-    if errorlevel 1 exit /b 1
-    exit /b 0
 )
 for %%P in ("%DSA_PYTHON%") do if exist "%%~dpPpythonw.exe" set "DSA_PYTHON=%%~dpPpythonw.exe"
 start "" "%DSA_PYTHON%" "%~dp0main.py" %*

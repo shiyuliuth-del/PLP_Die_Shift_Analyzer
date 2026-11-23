@@ -31,14 +31,20 @@ try:
  assert not hasattr(w,'repair_toggle')
  assert w.fields['package_clearance_um'].value()==10
  assert w.view_settings.reconstruction_boundary_mode=='wide'
+ assert w.setting_fields['reconstruction_box_mode'].currentData()=='aligned'
+ assert '接触标记' not in w.setting_sections
+ drc_row=w._drc_policy_editors[1].boxes['width'].parentWidget()
+ assert w.setting_fields['contact_marker_size'].parentWidget() is drc_row.parentWidget()
  w.manual_states=np.array([[8.,5.,.003]]);w.request_preview();wait()
  frame=w.current_frame;w.show_issues.setChecked(False);w.plot_layout(preserve=True)
  assert not any(a.get_visible() for a in (w.drc_overlay.area,w.drc_overlay.points,w.drc_overlay.links))
  w.show_issues.setChecked(True);wait()
  # A queued statistics task is not a completed result, even before its
  # worker appears in the active-task registry.
- queued=folder/'queued.dshift.json';w.reconstruction_yield.timer.start(2000)
+ from die_shift_studio.jobs import job_path, PROJECT_DIRECTORIES
+ queued=job_path(w.jobs_dir,'queued');w.reconstruction_yield.timer.start(2000)
  w.write_project(queued);assert not json.loads(queued.read_text()).get('saved_results')
+ assert all((queued.parent/name).is_dir() for name in PROJECT_DIRECTORIES)
  w.reconstruction_yield.timer.stop()
  saved=folder/'restore.dshift.json';w.write_project(saved);doc=json.loads(saved.read_text());assert doc['saved_results'],w.runtime_view.toPlainText()[-3000:]
  assert (saved.parent/doc['saved_results']['path']).is_file()
@@ -81,7 +87,7 @@ try:
   wait();model=ezdxf.readfile(target).modelspace()
   assert model.query('INSERT')
   rows=list(expanded_outlines(model))
-  assert all(closed==(layer in ('RKG_REF','DIE_REF')) for layer,_,closed in rows)
+  assert all(closed for layer,_,closed in rows if layer in ('PKG_REF','DIE_REF'))
   outputs.append(sorted((layer,tuple(map(tuple,xy)),closed) for layer,xy,closed in rows))
  assert outputs[0]==outputs[1]
  w.manual_states=None;w.request_preview();wait()

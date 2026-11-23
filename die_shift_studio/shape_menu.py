@@ -71,12 +71,20 @@ def show_shape_menu(window,event,point):
         delete_all={(picked[0]['layer'],picked[0]['index'])} if picked else selected&zoned
         if delete_all:
             menu.addAction('删除全部动区',lambda:edit_zone('delete_all',refs=delete_all))
-        at_cursor=[ref for ref in selection.hits(Point(point).buffer(window.cut_drag._tolerance()),point=True) if window.roles().get(ref[0])=='固定RDL']
-        if picked or at_cursor:
-            ref=(picked[0]['layer'],picked[0]['index']) if picked else at_cursor[0]
-            action=menu.addAction('增加动区',lambda:edit_zone('add',ref=ref,point=point))
-            if solver is None or ref not in solver.vias_by_target:
-                action.setEnabled(False);action.setToolTip('此固定RDL没有可追溯的运动过孔连接')
+        selected_roles={roles.get(layer) for layer,_ in refs}
+        if selected_roles!={'固定过孔'}:
+            hits=selection.hits(Point(point).buffer(window.cut_drag._tolerance()),point=True)
+            at_cursor=[ref for ref in hits if roles.get(ref[0])=='固定RDL']
+            if selected_roles=={'运动过孔'}:
+                via=next((item for item in hits if item in refs),refs[0])
+                targets=solver.model.connections.fixed_interfaces(*via) if solver is not None else ()
+                ref=next((item for item in at_cursor if item in targets),targets[0] if targets else None)
+            else:
+                ref=(picked[0]['layer'],picked[0]['index']) if picked else at_cursor[0] if at_cursor else None
+            if ref is not None or selected_roles=={'运动过孔'}:
+                action=menu.addAction('增加动区',lambda:edit_zone('add',ref=ref,point=point))
+                if solver is None or ref not in solver.vias_by_target:
+                    action.setEnabled(False);action.setToolTip('没有可重构的运动过孔与固定RDL连接')
         if solver is not None and window.view_settings.reconstruction_fixed_via_mode=='individual':
             from .ignored_motion import linked_fixed_vias
             eligible=set(linked_fixed_vias(solver,pieces))&set(refs)

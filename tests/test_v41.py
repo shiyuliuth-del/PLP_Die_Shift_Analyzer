@@ -200,16 +200,16 @@ class V41Tests(unittest.TestCase):
             doc=ezdxf.readfile(path);model=doc.modelspace()
             self.assertFalse(doc.audit().errors)
             self.assertEqual(len(model.query('INSERT')),3)
-            self.assertEqual({e.dxf.layer for e in model},{'L5_D0_A','L5_D0_B','L5_D0_C','RKG_REF','DIE_REF'})
+            self.assertEqual({e.dxf.layer for e in model},{'L5_D0_A','L5_D0_B','L5_D0_C','PKG_REF','DIE_REF'})
             lines=[]
             for layer,xy,closed in expanded_outlines(model):
-                self.assertEqual(closed,layer in ('RKG_REF','DIE_REF'))
+                if layer in ('PKG_REF','DIE_REF'):self.assertTrue(closed)
                 if layer=='L5_D0_A':self.assertLessEqual(xy[:,0].max(),30)
                 if layer=='L5_D0_B':self.assertGreaterEqual(xy[:,0].min(),70)
                 if layer=='L5_D0_C':
                     self.assertGreaterEqual(xy[:,0].min(),30)
                     self.assertLessEqual(xy[:,0].max(),70)
-                if not closed:lines.append(LineString(xy))
+                if layer.startswith('L5_'):lines.append(LineString(np.vstack((xy,xy[:1])) if closed else xy))
             lines=shapely.union_all(lines)
             self.assertLess(lines.hausdorff_distance(source.boundary),1e-12)
             self.assertTrue(result['topology']['L5_D0']['closed'])

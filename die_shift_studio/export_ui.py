@@ -73,7 +73,7 @@ def export_dxf(window,regions=False):
     def complete(result):
         message=f"DXF已输出：{result['path']} · {result['polygons']}个图形，{result['layers']}层；Flatten已完成，Merge {'开启' if result['merge_layers'] else '关闭'}（{result['input_polygons']}→{result['merged_polygons']}）；比例{result['scale']:g}，单位μm。"
         if result.get('regions'):
-            message+=' 固定RDL按 _A 运动侧、_B 固定侧、_C 动区输出CAD块；封装和芯片完整轮廓分别在 RKG_REF、DIE_REF。'
+            message+=' 固定RDL按 _A 运动侧、_B 固定侧、_C 动区输出CAD块；封装和芯片完整轮廓分别在 PKG_REF、DIE_REF。'
             if result.get('unresolved_regions'):message+=f" {result['unresolved_regions']}个重构区域未完成有效连接；输出当前实际实体，红色提示区不导出。"
         if result['ignored']:message+=f"已跳过导入时未能识别的{result['ignored']}个图形。"
         window.log_bus.emit(message);window.statusBar().showMessage(message)

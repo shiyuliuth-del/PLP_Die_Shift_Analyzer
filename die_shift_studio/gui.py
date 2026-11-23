@@ -431,12 +431,7 @@ class MainWindow(W.QMainWindow):
     def build_settings(self,page):
         self.setting_sections={}
         def group(title):
-            target=self.process_layout if title=='DRC' else page
-            if title=='DRC' and target.count() and target.itemAt(target.count()-1).spacerItem():target.takeAt(target.count()-1)
-            registry=self.process_sections if title=='DRC' else self.setting_sections
-            header,body,form=self.collapsible(target,'其他' if title=='DRC' else title,registry)
-            if title=='DRC':target.addStretch()
-            return form
+            return self.collapsible(page,title,self.setting_sections)[2]
         general=group('通用')
         summary=label('方案1：动静区之间局部重构RDL。\n方案2：RDL整体随动，固定RDL窗口捕获。\n方案3：预制运动RDL，动静接口适配。');summary.setObjectName('Notice');general.addRow(summary)
         self.shortcut_label=label('快捷键（鼠标位于图中）：F 恢复视图，M 手动偏移，K 两次单击测量（吸附图形；Ctrl八方向、Shift水平垂直；Shift/Ctrl+K清空），Shift＋点选/框选追加，Ctrl＋点选/框选扣除，Q 查看或编辑选中图形节点，ESC 退出/取消选择。\n画布获得焦点后：方向键平移当前视野的20%；测量时中键仍可平移。\n普通模式：滚轮缩放，中键平移，右键单击查看选中图形、拖框缩放。\n手动偏移：右键拖动芯片，滚轮旋转，Ctrl＋滚轮缩放。');general.addRow(self.shortcut_label)
@@ -584,18 +579,16 @@ class MainWindow(W.QMainWindow):
         spin(recon,'reconstruction_corner_guard_um','拐角吸附预留 / μm',0,1000,2)
         recon.addRow(label('动区沿原图追溯路径定义，所有姿态共用。两端蓝色边界分别拖动；圆点仅用于运动过孔侧。'))
         from .drc_policy import build as build_drc_policy
-        build_drc_policy(self,page)
-        drawing=group('接触标记');
+        drawing=build_drc_policy(self,page)
         markers=W.QCheckBox('显示DRC问题');self.setting_fields['show_contact_markers']=markers;drawing.addRow(markers);markers.toggled.connect(self.settings_changed)
         spin(drawing,'intrusion_alpha','侵入面积不透明度',.05,.85,2)
         for _,key,title,_,_ in RANGES:
             check=W.QCheckBox('显示'+title+'虚线');self.setting_fields[key]=check;drawing.addRow(check)
             check.setToolTip('只控制结果图形中的范围轮廓，接触、侵入面积和评估仍按工艺规则计算。')
             check.toggled.connect(self.settings_changed)
-        for prefix,title in [('contact','接触空心圆')]:
-            color=ColorButton();self.setting_fields[prefix+'_marker_color']=color;drawing.addRow(title+'颜色',color);color.valueChanged.connect(self.settings_changed)
-            spin(drawing,prefix+'_marker_size',title+'直径 / pt 或 μm',.1,10000,2)
-            check=W.QCheckBox(title+'使用图纸绝对大小 / μm');self.setting_fields[prefix+'_marker_absolute']=check;drawing.addRow(check);check.toggled.connect(self.settings_changed)
+        color=ColorButton();self.setting_fields['contact_marker_color']=color;drawing.addRow('接触空心圆颜色',color);color.valueChanged.connect(self.settings_changed)
+        spin(drawing,'contact_marker_size','接触空心圆直径 / pt 或 μm',.1,10000,2)
+        check=W.QCheckBox('接触空心圆使用图纸绝对大小 / μm');self.setting_fields['contact_marker_absolute']=check;drawing.addRow(check);check.toggled.connect(self.settings_changed)
         space.addRow(label('平滑只改变热图显示，不改变线距需求、连接归属和接触判定。资源由CPU/内存自动限额，多线程计算几何和概率，切换预演复用数值结果。'))
         page.addStretch();self.load_view_settings()
     def discover_hardware(self):
@@ -2738,12 +2731,11 @@ class MainWindow(W.QMainWindow):
         self.start_worker(prepare,accepted)
 
     def write_project(self,path):
-        import os
         path=Path(path).resolve();gds=Path(self.data.path).resolve()
-        # Windows cannot express a relative path between different volumes or UNC shares.
-        portable=gds.anchor.casefold()==path.anchor.casefold() and gds.is_relative_to(installation_root())
         from .jobs import local_source,provision_project
-        if not path.exists():
+        # A named Jobs project owns its client workspace. Also provision any
+        # new project saved elsewhere while preserving legacy external jobs.
+        if not path.exists() or path.parent.parent==self.jobs_dir.resolve():
             provision_project(path.parent)
         source=local_source(path,gds)
         from .area_filter import canonical_project
