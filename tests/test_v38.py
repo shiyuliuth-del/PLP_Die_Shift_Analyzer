@@ -18,6 +18,19 @@ from die_shift_studio.region_export import contours,write_regions
 from die_shift_studio.project import project_overlays,normalize_project
 
 
+def expanded_outlines(modelspace):
+    """Read CAD blocks as visible layer/vertex/closed tuples."""
+    for entity in modelspace:
+        if entity.dxftype()=='INSERT':
+            for child in entity.virtual_entities():
+                assert child.dxftype()=='LWPOLYLINE'
+                assert child.dxf.layer=='0'
+                yield entity.dxf.layer,np.asarray(list(child.get_points('xy'))),child.closed
+        else:
+            assert entity.dxftype()=='LWPOLYLINE'
+            yield entity.dxf.layer,np.asarray(list(entity.get_points('xy'))),entity.closed
+
+
 def fixture(bent=False):
     route=LineString([(0,0),(250,0),(250,300)]) if bent else LineString([(0,0),(600,0)])
     source=route.buffer(15,cap_style=1,join_style=1).union(Point(0,0).buffer(30)).union(Point(route.coords[-1]).buffer(30))
@@ -112,7 +125,7 @@ class V38Tests(unittest.TestCase):
             abc=[LineString(xy) for name,xy in shapes if name.startswith('L5_D0')]
             source=f['reconstruction']['replacements']['5/0'][0]['geometry']
             self.assertLess(shapely.union_all(abc).symmetric_difference(source.boundary).length,1e-6)
-            self.assertEqual({n for n,_ in shapes if n.startswith('L5_D0')},{'L5_D0A','L5_D0B','L5_D0C'})
+            self.assertEqual({n for n,_ in shapes if n.startswith('L5_D0')},{'L5_D0_A','L5_D0_B','L5_D0_C'})
             self.assertFalse(any(g.is_ring for g in abc))
             with tempfile.TemporaryDirectory() as tmp:
                 out=Path(tmp)/'区.dxf';write_regions(snap,f['reconstruction'],e.roles,out)
@@ -120,15 +133,17 @@ class V38Tests(unittest.TestCase):
                 for i in range(0,len(pairs)-1,2):
                     if pairs[i]=='70' and i>0:pass
                 import ezdxf
-                doc=ezdxf.readfile(out);entities=list(doc.modelspace())
-                self.assertTrue(all(q.dxftype()=='LWPOLYLINE' and not q.closed for q in entities))
+                doc=ezdxf.readfile(out)
+                self.assertEqual(len(doc.modelspace().query('INSERT')),3)
+                self.assertTrue(all(closed==(layer in ('RKG_REF','DIE_REF'))
+                                    for layer,_,closed in expanded_outlines(doc.modelspace())))
         finally:e.close()
 
     def test_holes_scale_merge_and_failed_export_preserves_file(self):
         poly=box(0,0,100,100).difference(box(20,20,40,40));snap=Snapshot({'5/0':(poly.wkb,)},'T',None,0)
         cfg=DxfSettings(scale=2,separate_holes=True,polygon_mode='hatch',show_fill=True)
         shapes,_,_=contours(snap,{'pieces':[]},{'5/0':'固定RDL'},cfg)
-        self.assertEqual({k for k,_ in shapes},{'L5_D0C'})  # V41: public C=static; holes stay in the same ABC layer
+        self.assertEqual({k for k,_ in shapes},{'L5_D0_B'})  # Fixed-side outer and hole contours share one layer.
         self.assertLess(shapely.union_all([LineString(xy) for _,xy in shapes]).symmetric_difference(shapely.transform(poly,lambda a:a*2).boundary).length,1e-8)
         with tempfile.TemporaryDirectory() as tmp:
             out=Path(tmp)/'kept.dxf';out.write_bytes(b'previous')

@@ -264,8 +264,10 @@ class Reconstruction40Tests(unittest.TestCase):
             with patch('die_shift_studio.region_export.resource_profile',return_value=serial):a=contours(snap,frame['reconstruction'],e.roles,DxfSettings())[0]
             with tempfile.TemporaryDirectory() as tmp:
                 result=write_regions(snap,frame['reconstruction'],e.roles,Path(tmp)/'abc.dxf');doc=ezdxf.readfile(result['path'])
-                b=[(x.dxf.layer,np.array(list(x.get_points('xy')))) for x in doc.modelspace()]
-                self.assertEqual(len(a),len(b));self.assertTrue(all(not x.closed for x in doc.modelspace()))
+                from test_v38 import expanded_outlines
+                b=[(layer,np.vstack((xy,xy[:1])) if closed else xy)
+                   for layer,xy,closed in expanded_outlines(doc.modelspace())]
+                self.assertEqual(len(a),len(b))
                 for (ka,xy),(kb,uv) in zip(a,b):self.assertEqual(ka,kb);np.testing.assert_allclose(xy,uv,atol=1e-10,rtol=0)
         finally:e.close()
 

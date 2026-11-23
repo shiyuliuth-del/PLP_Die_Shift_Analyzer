@@ -6,7 +6,7 @@ import shapely
 from shapely.geometry import Polygon,Point,box
 from shapely.ops import nearest_points,unary_union
 from shapely.strtree import STRtree
-from .stack import PHYSICAL
+from .stack import MOVING,PHYSICAL
 from .preview import rigid_transform,default_motion
 from .statistics import statistical_state
 from .fast_preview import GeometryCache
@@ -74,7 +74,13 @@ class ContactModel:
         self.network_count=len({x['net'] for x in self.nodes})
         roots={}
         for node in self.nodes:
-            roots.setdefault(node['net'],set()).update(connections.possible_owners.get(node['key'],[()] * len(self.cache.layers[node['key']]['geometry']))[node['index']])
+            key=node['key']
+            if roles[key] not in MOVING:continue
+            # A fixed pad under another DIE is part of the net, not a second
+            # moving endpoint. Include the applied owner for positional fallbacks.
+            owners=roots.setdefault(node['net'],set())
+            owners.update(connections.possible_owners[key][node['index']])
+            if node['owner']>=0:owners.add(node['owner'])
         self.interdie_networks=[dict(network=net,dies=[i+1 for i in sorted(owners)]) for net,owners in roots.items() if len(owners)>1]
         self.node_geometry=np.array([x['poly'] for x in self.nodes],object)
         self.by_feature={(r['key'],r['index']):r for r in self.records}

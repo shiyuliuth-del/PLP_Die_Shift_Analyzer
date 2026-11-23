@@ -70,6 +70,7 @@ try:
  # Native dialog contract and real DXF output must be independent of pose.
  from die_shift_studio.export_ui import export_dxf
  from die_shift_studio.qt_compat import ACCEPTED
+ from test_v38 import expanded_outlines
  import ezdxf,shapely
  outputs=[]
  for index,pose in enumerate((np.array([[8.,5.,.003]]),np.array([[-10.,-4.,-.004]]))):
@@ -78,8 +79,10 @@ try:
   def choose(dialog):dialog.selectFile(str(target));return ACCEPTED
   with patch('die_shift_studio.export_ui.run_dialog',choose):export_dxf(w,regions=True)
   wait();model=ezdxf.readfile(target).modelspace()
-  outputs.append(sorted((ent.dxf.layer,tuple(tuple(v) for v in ent.get_points('xy'))) for ent in model))
-  assert all(not ent.closed and ent.dxftype()=='LWPOLYLINE' for ent in model)
+  assert model.query('INSERT')
+  rows=list(expanded_outlines(model))
+  assert all(closed==(layer in ('RKG_REF','DIE_REF')) for layer,_,closed in rows)
+  outputs.append(sorted((layer,tuple(map(tuple,xy)),closed) for layer,xy,closed in rows))
  assert outputs[0]==outputs[1]
  w.manual_states=None;w.request_preview();wait()
  from die_shift_studio.reconstruction_edits import change_zone

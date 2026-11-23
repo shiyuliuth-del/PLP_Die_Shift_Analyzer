@@ -206,6 +206,30 @@ class Connections:
         for ids in reversed(self.plane_nodes):
             for component in {uf.find(i) for i in ids}:
                 for child in down[component]:sets[component].update(sets[child])
+        # Fixed package wiring preserves electrical continuity, but its terminal
+        # coordinates cannot identify which rigid chip carries a moving via.
+        # Prefer a reachable terminal on the moving side. A via fully contained
+        # in a DIE is a local terminal when no such path continues below it.
+        moving_down={component:children for component,children in down.items()
+                     if all(self.roles[self.nodes[node][0]]!='固定RDL'
+                            for node in self.components[component])}
+        local={component:set() for component in moving_down}
+        for key in self.order:
+            if self.roles.get(key)!='运动过孔':continue
+            for i,poly in enumerate(self.geometry[key]):
+                owners=tree.query(poly,predicate='covered_by')
+                if len(owners)==1:
+                    component=self.component(key,i)
+                    if component in local:local[component].add(int(owners[0]))
+        anchored={}
+        for ids in reversed(self.plane_nodes):
+            for component in {uf.find(i) for i in ids}:
+                if component not in local:continue
+                reached=set().union(*(anchored.get(child,()) for child in moving_down[component]))
+                anchored[component]=reached or local[component]
+        for component,owners in anchored.items():
+            if owners and any(self.roles[self.nodes[node][0]] in MOVING for node in self.components[component]):
+                sets[component]=owners
         self.possible_owners={key:[tuple(sorted(sets[uf.find(self.ids[key,i])])) for i in range(len(self.geometry[key]))]
                               for key in self.order if self.roles.get(key) in PHYSICAL}
         self.ownership={key:np.array([p[0] if len(p)==1 else -2 for p in values],np.int32) for key,values in self.possible_owners.items()}
@@ -214,10 +238,6 @@ class Connections:
             if self.roles[key] not in MOVING:continue
             for i,owners in enumerate(values):
                 if len(owners)!=1:self.ownership_notes.append(dict(layer=key,index=i+1,dies=[n+1 for n in owners],reason='连接多颗芯片，不能作单一刚体' if owners else '未沿相邻下层连接追溯到芯片；请检查该层用途、层序及名义接触'))
-        # Moving metal that reaches no chip through the stack still rides a die:
-        # the nearest one by geometry. Left unowned it would keep its nominal
-        # position while the rest of its die moved away, so every moved die would
-        # read as shorted against copper that should have travelled with it.
         # Moving metal that reaches no chip - or reaches several - still rides
         # the nearest die by geometry: a wire tying two chips together cannot be
         # a single rigid body, but leaving it at its nominal position reads as a
@@ -251,4 +271,4 @@ class Connections:
                     positional_ownership_by_layer={k:sum(q['layer']==k for q in self.positional_ownership)
                                                    for k in self.order if any(q['layer']==k for q in self.positional_ownership)},
                     chip_terminal_plane=sorted({k for row in getattr(self,'terminal_planes_by_die',[]) for k in row['layers']}),chip_terminal_planes_by_die=getattr(self,'terminal_planes_by_die',[]),ignored_empty_metal_layers=self.empty_metal_layers,
-                    rule='按上→下相邻非空金属连接追溯；各DIE最深的局部末端接触定义根；跨DIE扇出不按坐标就近归属；完全没有连接到芯片、或同时连接多颗DIE的运动层金属按位置归到最近的DIE（记为推定归属）；仅运动过孔—固定RDL界面参与不足和叠加')
+                    rule='优先沿运动侧连接追溯DIE端口；无进一步运动端证据时使用完全位于单颗DIE内的运动过孔；不能用固定RDL另一端覆盖运动侧归属；证据缺失或多根时保留推定诊断；仅运动过孔—固定RDL界面参与不足和叠加')

@@ -196,14 +196,21 @@ class V41Tests(unittest.TestCase):
         roles={'5/0':'固定RDL','4/0':'运动过孔','127/0':'封装边框','128/0':'芯片边框'}
         with tempfile.TemporaryDirectory() as folder:
             path=Path(folder)/'regions.dxf';result=write_regions(snap,{'pieces':[dict(layer='5/0',regions=regions)]},roles,path)
-            model=ezdxf.readfile(path).modelspace();rows=list(model);names={e.dxf.layer for e in rows}
-            self.assertEqual(names,{'L5_D0A','L5_D0B','L5_D0C','L127_D0','L128_D0'})
-            for e in rows:
-                self.assertFalse(e.closed)
-                xy=np.array(e.get_points())[:,:2]
-                if e.dxf.layer=='L5_D0B':self.assertLessEqual(xy[:,0].max(),30)
-                if e.dxf.layer=='L5_D0C':self.assertGreaterEqual(xy[:,0].min(),70)
-            lines=shapely.union_all([LineString(np.array(e.get_points())[:,:2]) for e in rows if e.dxf.layer.startswith('L5_')])
+            from test_v38 import expanded_outlines
+            doc=ezdxf.readfile(path);model=doc.modelspace()
+            self.assertFalse(doc.audit().errors)
+            self.assertEqual(len(model.query('INSERT')),3)
+            self.assertEqual({e.dxf.layer for e in model},{'L5_D0_A','L5_D0_B','L5_D0_C','RKG_REF','DIE_REF'})
+            lines=[]
+            for layer,xy,closed in expanded_outlines(model):
+                self.assertEqual(closed,layer in ('RKG_REF','DIE_REF'))
+                if layer=='L5_D0_A':self.assertLessEqual(xy[:,0].max(),30)
+                if layer=='L5_D0_B':self.assertGreaterEqual(xy[:,0].min(),70)
+                if layer=='L5_D0_C':
+                    self.assertGreaterEqual(xy[:,0].min(),30)
+                    self.assertLessEqual(xy[:,0].max(),70)
+                if not closed:lines.append(LineString(xy))
+            lines=shapely.union_all(lines)
             self.assertLess(lines.hausdorff_distance(source.boundary),1e-12)
             self.assertTrue(result['topology']['L5_D0']['closed'])
             # Mutating one serialized node is rejected even if in-memory

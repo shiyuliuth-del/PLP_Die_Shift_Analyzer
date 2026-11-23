@@ -10,7 +10,7 @@ from die_shift_studio.gds_merge import restore_project_geometry,winding_outline,
 from die_shift_studio.region_export import line_parts,contours,write_regions
 from die_shift_studio.dxf_export import Snapshot
 from die_shift_studio.dxf_settings import DxfSettings
-from test_v38 import fixture
+from test_v38 import expanded_outlines,fixture
 from die_shift_studio.reconstruction_route import warp
 
 
@@ -28,12 +28,13 @@ class V39ExtraTests(unittest.TestCase):
         self.assertTrue(shapes)
         self.assertTrue(all(not np.array_equal(xy[0],xy[-1]) for _,xy in shapes))
         ends={name:[tuple(p) for n,xy in shapes if n==name for p in (xy[0],xy[-1])] for name,_ in shapes}
-        self.assertEqual(set(ends['L5_D0B']) & set(ends['L5_D0C']),{(3.5,0.),(3.5,7.)})
+        self.assertEqual(set(ends['L5_D0_A']) & set(ends['L5_D0_B']),{(3.5,0.),(3.5,7.)})
         with tempfile.TemporaryDirectory() as tmp:
             path=Path(tmp)/'regions.dxf';write_regions(snap,data,{'5/0':'固定RDL'},path,settings=cfg)
             import ezdxf
-            entities=list(ezdxf.readfile(path).modelspace())
-            self.assertTrue(all(q.dxftype()=='LWPOLYLINE' and not q.closed for q in entities))
+            model=ezdxf.readfile(path).modelspace()
+            self.assertEqual(len(model.query('INSERT')),2)
+            self.assertTrue(all(not closed for _,_,closed in expanded_outlines(model)))
 
     def test_fractured_circle_is_one_whole_imported_shape(self):
         with tempfile.TemporaryDirectory() as tmp:

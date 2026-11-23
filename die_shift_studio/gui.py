@@ -358,7 +358,7 @@ class MainWindow(W.QMainWindow):
         self._width_grid_summary=None;self._problem_tag=None
         self.filter_job=None;self._coupled_key=None;self._coupled_data=None;self._coupled_error=False
         self.width_toggle=W.QCheckBox('宽度分析');self.width_toggle.setToolTip('按实际线路穿越数量检查局部通道容量：矩形颜色显示宽度余量，轮廓高亮风险线路；不代表全局可布通证明。');corner_layout.addWidget(self.width_toggle);self.width_toggle.toggled.connect(self.width_changed)
-        self.reconstruction_toggle=W.QCheckBox('重构预演');self.reconstruction_toggle.setToolTip('沿原始走线划分A动区、B平移区、C静区；所有偏移状态共用端点。拖动蓝色边界可分别调整，动区轮廓可输出DXF。');corner_layout.addWidget(self.reconstruction_toggle);self.reconstruction_toggle.toggled.connect(self.reconstruction_changed)
+        self.reconstruction_toggle=W.QCheckBox('重构预演');self.reconstruction_toggle.setToolTip('沿原始走线划分运动侧、固定侧和动区；所有偏移状态共用端点。拖动蓝色边界可分别调整，动区轮廓可输出DXF。');corner_layout.addWidget(self.reconstruction_toggle);self.reconstruction_toggle.toggled.connect(self.reconstruction_changed)
         self.preview_tabs.setCornerWidget(corner)
         self.probability_toggle.toggled.connect(self.footprint_changed);self.space_toggle.toggled.connect(self.space_changed)
         extreme_page=W.QWidget();ep=W.QVBoxLayout(extreme_page);ep.setContentsMargins(0,0,0,0)
