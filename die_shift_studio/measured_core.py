@@ -54,15 +54,18 @@ def pose_parameters(case,parameters,rows):
 
 
 class Session:
-    def __init__(self,data,case,roles,motions,parameters,settings,cache,plan_pool=None):
+    def __init__(self,data,case,roles,motions,parameters,settings,cache,plan_pool=None,compensation=None,compensated_sources=None):
         self.data=data;self.case=case;self.roles=dict(roles);self.motions=dict(motions);self.p=pose_parameters(case,parameters,[dict(die=i+1,dx_um=0.,dy_um=0.,angle_deg=0.) for i in range(len(case['dies']))])[1]
         from .pivots import rotation_centers
         centers=rotation_centers(case,self.p)
         self.p=replace(self.p,die_pivots=[['custom',*(c-np.asarray(d.centroid.coords[0]))] for c,d in zip(centers,case['dies'])])
         self.settings=copy.deepcopy(settings);self.cache=cache;self.plan_pool=plan_pool or {}
+        from .output_compensation import normalize
+        self.compensation=normalize(compensation)
+        self._compensated_sources=compensated_sources
         from .session_cache import logical_fingerprint
         from . import __version__
-        self.identity=logical_fingerprint((__version__,data.geometry_id,data.top_name,self.roles,list(cache.layers),self.motions,asdict(self.p),asdict(self.settings)))
+        self.identity=logical_fingerprint((__version__,data.geometry_id,data.top_name,self.roles,list(cache.layers),self.motions,asdict(self.p),asdict(self.settings),self.compensation))
         self.lock=threading.Lock();self.plan_lock=threading.Lock();self.local=threading.local();self.instances=[]
         from .session_cache import EphemeralCache
         self.geometry_pool=EphemeralCache(budget=64*1024**2,max_entries=4096)
@@ -109,8 +112,9 @@ class Session:
             from .short_edges import contract
             minimum_edge_um=getattr(self.data,'minimum_edge_um',0.)
             cached={}
+            compensated=self.prepare_output()
             for key,values in self.data.layers.items():
-                geoms=self.cache.layers[key]['geometry']
+                geoms=compensated.get(key,self.cache.layers[key]['geometry'])
                 blobs=[]
                 for i in range(len(values)):
                     g=geoms[i]
@@ -124,6 +128,15 @@ class Session:
                 cached[key]=tuple(blobs)
             self._nominal_wkb=cached
             return cached
+    def prepare_output(self):
+        if self._compensated_sources is None:
+            from .output_compensation import prepared_sources
+            self._compensated_sources=prepared_sources(self.cache,self.compensation,self.data.dbu_um)
+        return self._compensated_sources
+
+    def nominal_snapshot(self):
+        return self._fast_snapshot(None)
+
     def _fast_snapshot(self,frame,*,reconstruction=True,allow_partial=False,progress=None):
         from .dxf_export import Snapshot
         if frame and (frame.get('diagnostic_only') or frame.get('reconstruction',{}).get('hard_failures')) and not (allow_partial and frame.get('partial_output_validated')):
@@ -141,7 +154,8 @@ class Session:
             items=replacements.get(key,())
             hidden={i for q in items for i in q['indices']}
             cached_blobs=nominal_wkbs[key]
-            cache_geoms=self.cache.layers[key]['geometry']
+            compensated=self._compensated_sources.get(key)
+            cache_geoms=compensated if compensated is not None else self.cache.layers[key]['geometry']
             out_blobs=[]
             for i,xy in enumerate(current):
                 if i%256==0:cancel_check()
@@ -153,7 +167,7 @@ class Session:
                     continue
                 g=cache_geoms[i]
                 if g.is_empty:continue
-                if g.geom_type=='Polygon' and not g.interiors:
+                if compensated is None and g.geom_type=='Polygon' and not g.interiors:
                     moved=shapely.Polygon(actual)
                 else:
                     delta=np.diff(nominal,axis=0);j=int(np.argmax(np.sum(delta*delta,axis=1)))
@@ -168,9 +182,13 @@ class Session:
                     if not clean.is_valid or not np.isfinite(shapely.get_coordinates(clean)).all():
                         raise ValueError('重构结果无效，拒绝输出')
                     out_blobs.append(clean.wkb)
-            for q in items:
+            changed=[q['geometry'] for q in items]
+            if changed and compensated is not None:
+                from .output_compensation import sized
+                changed=sized(((g,) for g in changed),self.compensation[key],self.data.dbu_um)
+            for geometry in changed:
                 cancel_check()
-                try:clean=contract(q['geometry'],minimum_edge_um)
+                try:clean=contract(geometry,minimum_edge_um)
                 except ValueError as exc:raise ValueError(f'图层 {key} 无法安全删除短边：{exc}') from exc
                 if not clean.is_empty:
                     if not clean.is_valid or not np.isfinite(shapely.get_coordinates(clean)).all():
@@ -290,10 +308,11 @@ class Session:
             if diagnostic:return frame,None,details
             raise DiagnosticFailure(failure_message(result['hard_failures']),frame,details)
         failures=[dict(layer=q['layer'],index=q['index'],reason=q.get('warning','无法连接')) for q in result['pieces'] if q.get('connection_failed')]
-        if not preview:
+        if not preview or self.compensation:
             frozen=self._fast_snapshot(frame,reconstruction=True,progress=progress_slice(progress,95,.04),allow_partial=bool(frame.get('partial_output_validated')))
+        if not preview:
             r.cache.clear()  # retain bounded, immutable per-source and nominal DRC caches
-        else:
+        elif not self.compensation:
             from .dxf_export import snapshot
             frozen=snapshot(self.data,self.cache,frame,reconstruction=True,progress=progress_slice(progress,95,.04),allow_partial=bool(frame.get('partial_output_validated')))
             for blobs in frozen.layers.values():

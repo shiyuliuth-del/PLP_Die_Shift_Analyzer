@@ -213,7 +213,7 @@ class V38Tests(unittest.TestCase):
         p=Parameters.from_dict({'annulus_um':21},require_rdl=False);self.assertEqual(p.moving_annulus_um,21)
         cfg=ViewSettings.from_dict({'deformation_iterations':64,'deformation_min_angle_deg':45})
         self.assertFalse(hasattr(cfg,'deformation_iterations'));self.assertEqual(cfg.drc_min_angle_deg,45)
-        self.assertFalse(cfg.show_contact_markers or cfg.show_low_contact);self.assertTrue(cfg.reconstruction_live)
+        self.assertTrue(cfg.show_contact_markers);self.assertFalse(cfg.show_low_contact);self.assertTrue(cfg.reconstruction_live)
         saved=project_overlays({'overlays':{'probability':True,'footprint':False,'deformation':True}})
         self.assertTrue(saved['footprint']);self.assertNotIn('deformation',saved);self.assertNotIn('probability',saved)
         e,_,_=fixture()

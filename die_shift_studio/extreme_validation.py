@@ -141,14 +141,14 @@ def status_for(factors,digits):
     return dict(safe=not (failures or drc or contact),checked=True,moving_drc=moving,contact=contact,failures=failures,drc=drc,unadapted=0,width_failures=0)
 
 
-def catalogue_status(grid,catalogue,base,evidence=None,*,reconstruct=False):
+def catalogue_status(grid,catalogue,base,evidence=None,*,reconstruct=False,approved=()):
     """Fold the calculation scope, including zero, independently of table pages."""
     from .extreme_filter import ProblemIndex,current_drc_factors
     from .pose_filter import filter_rules
     selected=getattr(catalogue,'indices',None)
     indices=None if selected is None else tuple(sorted({-1,*selected}))
-    def has(factors):
-        index=ProblemIndex(grid,factors)
+    def has(factors,excluded=()):
+        index=ProblemIndex(grid,factors,excluded)
         return bool(index.total or index.zero) if indices is None else any(index.matches(grid.choices(i) if i>=0 else [0]*grid.count) for i in indices)
     source_ok=bool(base and base.get('checked'))
     if source_ok and 'pose_status' in base:
@@ -163,6 +163,6 @@ def catalogue_status(grid,catalogue,base,evidence=None,*,reconstruct=False):
     rules=filter_rules(1,reconstruct,base,evidence)
     if rules is None:
         rules=current_drc_factors(base,moving_only=reconstruct)
-    if has(rules) or reconstruct and evidence and has(evidence.get('red_factors',())):
+    if has(rules,approved) or reconstruct and evidence and has(evidence.get('red_factors',()),approved):
         return dict(checked=True,safe=False)
     return dict(checked=source_ok and (not reconstruct or complete),safe=True if source_ok and (not reconstruct or complete) else None)

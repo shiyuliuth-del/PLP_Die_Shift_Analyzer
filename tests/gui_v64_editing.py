@@ -70,7 +70,9 @@ def run():
             assert not w.rulers.rows and len(w.data.layers['5/0'])==2 and w.pending_deleted_shapes
             w.undo_edit();app.processEvents()
             assert not w._tasks and len(w.data.layers['5/0'])==2 and not w.pending_deleted_shapes and not w._effective_deleted_shapes()
-            w.redo_button.click();app.processEvents()
+            control=getattr(getattr(Qt,'KeyboardModifier',Qt),'ControlModifier')
+            shift=getattr(getattr(Qt,'KeyboardModifier',Qt),'ShiftModifier')
+            qtest.keyClick(w.canvas,keys.Key_U,control);app.processEvents()
             assert not w._tasks and len(w.data.layers['5/0'])==2 and w.pending_deleted_shapes
             w.compute_reconstruction();wait()
             assert len(w.data.layers['5/0'])==1 and w.data.deleted_shapes and not w.pending_deleted_shapes
@@ -79,13 +81,47 @@ def run():
             assert not w._tasks and len(w.data.layers['5/0'])==1 and w.reconstruction_pending and w.pending_restored_shapes and w.reconstruction_overlay.staged.get_visible()
             w.compute_reconstruction();wait()
             assert len(w.data.layers['5/0'])==2 and not w.data.deleted_shapes and not w.pending_restored_shapes
-            w.redo_button.click();app.processEvents()
+            qtest.keyClick(w.canvas,keys.Key_U,shift);app.processEvents()
             assert not w._tasks and w.pending_deleted_shapes
             w.compute_reconstruction();wait()
             assert len(w.data.layers['5/0'])==1 and w.data.deleted_shapes and not w.pending_deleted_shapes
             saved=folder/'saved.dshift.json';w.write_project(saved)
             w.load_project(saved);wait()
             assert len(w.data.layers['5/0'])==1 and w.data.deleted_shapes
+            assert w.show_issues.isChecked() and not w.view_settings.animation_enabled
+            assert w.view_settings.reconstruction_boundary_mode=='perpendicular' and w.dxf_settings.region_auto_join
+            w.compensation_boxes['5/0'].setValue(-12.345)
+            assert w.output_compensation()=={'5/0':-12.345}
+            from shapely.geometry import box
+            from die_shift_studio.drc_waivers import pose_id
+            w.problem_filter.setCurrentIndex(0);app.processEvents()
+            w.select_preview(1,0);wait()
+            assert w.active_preview is not None
+            frame=dict(w.current_frame,drc=[dict(kind='线宽不足',layer='5/0',geometry=box(40,0,45,5))])
+            frame.pop('drc_locations',None)
+            frame['reconstruction']=dict(frame['reconstruction'],constraints_complete=True,hard_failures=())
+            w.current_frame=frame
+            w.fill_issues()
+            def click_waiver(expected):
+                def select_menu():
+                    menu=app.activePopupWidget()
+                    assert isinstance(menu,W.QMenu)
+                    action,=menu.actions()
+                    assert action.text()==expected
+                    action.trigger();menu.close()
+                QtCore.QTimer.singleShot(30,select_menu)
+                w.issue_menu(w.issue_table.visualItemRect(w.issue_table.item(0,0)).center())
+                app.processEvents()
+            click_waiver('忽略此问题')
+            assert len(frame['drc'])==1 and w.issue_table.item(0,0).background().color().name()=='#e4f4e8'
+            assert w.active_preview in w.approved_drc_poses()
+            click_waiver('取消忽略此问题')
+            assert not w.ignored_drc and not w.approved_drc_poses()
+            w.undo_edit()
+            assert pose_id(frame['states']) in w.ignored_drc
+            w.write_project(saved)
+            w.load_project(saved);wait()
+            assert w.ignored_drc and w.output_compensation()=={'5/0':-12.345}
             w.clear_cached_results();wait()
             assert not w.undo_button.isEnabled() and not w.redo_button.isEnabled()
         finally:

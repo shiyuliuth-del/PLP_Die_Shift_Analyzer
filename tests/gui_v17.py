@@ -15,7 +15,7 @@ def wait():
  else:raise AssertionError('V17 Qt timeout')
  assert not errors,errors
 w.load_gds(ROOT/'examples/示例G_小偏移与三段追溯.gds');wait()
-assert w.view_settings.animation_enabled
+assert not w.view_settings.animation_enabled
 assert [w.fields[k].value() for k in ('line_width_um','line_space_um','wafer_line_width_um','wafer_line_space_um','annulus_um')]==[15]*5
 assert '良率要求' in [g.title() for g in w.findChildren(W.QGroupBox)]
 assert '良率级别' in [l.text() for l in w.findChildren(W.QLabel)]

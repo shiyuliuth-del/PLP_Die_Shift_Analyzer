@@ -10,7 +10,7 @@ class DxfSettings:
     scale:float=1.
     separate_holes:bool=False
     show_fill:bool=False
-    region_auto_join:bool=False
+    region_auto_join:bool=True
 
     @classmethod
     def from_dict(cls,values=None):

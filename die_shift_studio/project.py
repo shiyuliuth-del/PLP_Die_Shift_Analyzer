@@ -5,7 +5,7 @@ from .core import Parameters
 # Optional schema-5 fields. Older GDS-backed jobs use the same view defaults
 # as a newly opened drawing, independent of the previously open project.
 
-OVERLAY_DEFAULTS = dict(drc=False, space=False,
+OVERLAY_DEFAULTS = dict(drc=True, space=False,
                         width=False, width_sufficient=False, reconstruction=False, footprint=False)
 
 
@@ -23,7 +23,8 @@ def project_overlays(project):
     if not isinstance(saved,dict):
         raise ValueError('工程图形选项必须为对象')
     for key in options:
-        value = saved.get(key,legacy if key=='reconstruction' else options[key])
+        default=(project.get('settings') or {}).get('show_contact_markers',True) if key=='drc' else legacy if key=='reconstruction' else options[key]
+        value = saved.get(key,default)
         if not isinstance(value,bool):
             raise ValueError(f'工程图形选项 {key} 必须为布尔值')
         options[key] = value
@@ -99,6 +100,10 @@ def normalize_project(project):
     p['layout_output']=asdict(OutputOptions.from_dict(p.get('layout_output')))
     from .dxf_settings import DxfSettings
     p['dxf_options']=asdict(DxfSettings.from_dict(p.get('dxf_options')))
+    from .output_compensation import normalize as normalize_compensation
+    p['layer_compensation']=normalize_compensation(p.get('layer_compensation'))
+    from .drc_waivers import normalize as normalize_waivers
+    p['ignored_drc']=normalize_waivers(p.get('ignored_drc'))
     if not isinstance(p.setdefault('dxf_directory',''),str):raise ValueError('DXF输出目录必须为文本')
     view=p.get('extreme_view',{})
     if not isinstance(view,dict):raise ValueError('工程极端情况视图必须是对象')
@@ -115,7 +120,6 @@ def normalize_project(project):
     p['extreme_view']=dict(filter_mode=mode,filter_problems=mode!='all',mode=view['mode'],page=1+(view['page']-1)*view['page_size']//page_size,page_size=page_size)
     p['overlays']=project_overlays(p)
     p['settings']=asdict(settings)
-    p['settings']['show_contact_markers']=bool(p['settings']['show_contact_markers'] or p['overlays'].get('drc',False))
-    p['overlays']['drc']=p['settings']['show_contact_markers']
+    p['settings']['show_contact_markers']=p['overlays']['drc']
     p['schema_version']=5;p.pop('geometry',None)
     return p

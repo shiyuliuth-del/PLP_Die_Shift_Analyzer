@@ -7,8 +7,11 @@ from collections import OrderedDict
 import json
 
 _REGIONS=OrderedDict()
-def region(kdb,polygons,identity=None):
-    key=identity or json.dumps(polygons,separators=(',',':'))
+def region(kdb,polygons,identity=None,*,cached=True):
+    if not cached:
+        key=None
+    else:
+        key=identity or json.dumps(polygons,separators=(',',':'))
     if key in _REGIONS:
         _REGIONS.move_to_end(key);return _REGIONS[key].dup()
     r=kdb.Region()
@@ -16,7 +19,9 @@ def region(kdb,polygons,identity=None):
         q=kdb.Polygon([kdb.Point(*point) for point in rings[0]])
         for ring in rings[1:]:q.insert_hole([kdb.Point(*point) for point in ring])
         r.insert(q)
-    r.merge();_REGIONS[key]=r
+    r.merge()
+    if key is None:return r
+    _REGIONS[key]=r
     while len(_REGIONS)>192:_REGIONS.popitem(last=False)
     return r.dup()
 
@@ -68,6 +73,9 @@ def execute(kdb,request):
         return dict(version=str(getattr(kdb,'__version__','desktop')),self_check=True)
     if op=='clear':_REGIONS.clear();return {}
     if op=='template_shapes':return template_shapes(kdb,request['path'])
+    if op=='size_groups':
+        return [encode(region(kdb,polys,cached=False).sized(request['distance'],2).merged())
+                for polys in request['groups']]
     a=region(kdb,request['a'],request.get('akey'))
     if op in ('width','space','notch','separation'):
         options=dict(whole_edges=False,ignore_angle=5.+1e-8,metrics=kdb.Region.Projection,shielded=False)

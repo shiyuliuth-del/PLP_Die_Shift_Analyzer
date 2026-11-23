@@ -179,7 +179,7 @@ class Reconstruction40Tests(unittest.TestCase):
             normalized=normalize_project(p)
             self.assertEqual(restored_width_ignores(normalized,d,'ignored_reconstruction'),{('5/0',0)})
             normalized['ignored_reconstruction']['sha256']='wrong';self.assertFalse(restored_width_ignores(normalized,d,'ignored_reconstruction'))
-            self.assertEqual(ViewSettings.from_dict({}).reconstruction_boundary_mode,'wide')
+            self.assertEqual(ViewSettings.from_dict({}).reconstruction_boundary_mode,'perpendicular')
             cfg=ViewSettings(reconstruction_boundary_mode='balanced',reconstruction_ignored=(('5/0',0),))
             self.assertEqual(ViewSettings.from_dict(json.loads(json.dumps(asdict(cfg)))),cfg)
         finally:e.close()

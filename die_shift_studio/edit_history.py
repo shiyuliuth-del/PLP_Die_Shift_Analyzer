@@ -50,8 +50,8 @@ class EditHistory:
             edits={name:tuple(dict.fromkeys(tuple(edits[name])+tuple(staged_edits.get(name,())))) for name in EDIT_FIELDS}
             width=tuple(sorted(set(width)|set(staged_width)))
         deletions=w._effective_deleted_shapes() if hasattr(w,'_effective_deleted_shapes') else tuple(getattr(data,'deleted_shapes',()))
-        return dict(edits=edits,width=tuple(sorted(width)),
-                    nodes=tuple(getattr(base,'node_edits',())),
+        return dict(edits=edits,width=tuple(sorted(width)),drc=getattr(w,'ignored_drc',{}),
+                    nodes=w._effective_node_edits() if hasattr(w,'_effective_node_edits') else tuple(getattr(base,'node_edits',())),
                     deletions=deletions,
                     rulers=tuple(tuple(map(tuple,row)) for row in w.rulers.rows),
                     pose=None if w.manual_states is None else tuple(map(tuple,w.manual_states)),
@@ -108,7 +108,7 @@ class EditHistory:
         def committed():
             source.pop();target.append(before);self.trim()
         if (state['nodes'],state['deletions'])!=(before['nodes'],before['deletions']):
-            if state['nodes']==before['nodes'] and hasattr(w,'_can_defer_deletion_edit') and w._can_defer_deletion_edit():
+            if hasattr(w,'_can_defer_deletion_edit') and w._can_defer_deletion_edit():
                 before_map={tuple(q[:2]):q[2] for q in before['deletions']}
                 target_map={tuple(q[:2]):q[2] for q in state['deletions']}
                 restored=tuple(sorted(set(before_map)-set(target_map)))
@@ -116,6 +116,7 @@ class EditHistory:
                 if restored:w.pending_layout_ops.append(('restore',restored))
                 if deleted:w.pending_layout_ops.append(('delete',deleted))
                 w._sync_staged_deletion_markers(state['deletions'])
+                if state['nodes']!=before['nodes']:w._stage_history_nodes(state['nodes'])
                 actual_refs={(layer,raw) for layer,indices in getattr(w.data,'area_indices',{}).items() for raw in indices}
                 if actual_refs:
                     missing_edits={name:tuple(row for row in state['edits'].get(name,()) if len(row)>=2 and (row[0],int(row[1])) not in actual_refs) for name in EDIT_FIELDS}
@@ -135,7 +136,7 @@ class EditHistory:
                 w.extreme_table.setCurrentCell(row,0);w.extreme_table.blockSignals(blocked)
                 w._selected_grid_pose=w.extremes[w.active_preview]['states'] if w.extremes is not None and w.active_preview is not None else None
                 if state['width']!=before['width']:w.width_yield.refresh()
-                has_pending=bool(w.pending_deleted_shapes or w.pending_restored_shapes or (w._applied_preview_settings is not None and w.view_settings.reconstruction_key()!=w._applied_preview_settings.reconstruction_key()))
+                has_pending=bool(w.pending_deleted_shapes or w.pending_restored_shapes or w.pending_node_shapes or (w._applied_preview_settings is not None and w.view_settings.reconstruction_key()!=w._applied_preview_settings.reconstruction_key()))
                 if has_pending:
                     w.defer_reconstruction(stage=True)
                 else:
@@ -143,16 +144,17 @@ class EditHistory:
                     w.reconstruction_pending=False
                     if hasattr(w,'reconstruction_overlay'):w.reconstruction_overlay.staged_overlay=None
                     w.plot_layout(preserve=True)
-                action='撤销删除' if restored else '删除图形'
+                action='撤销删除' if restored else '删除图形' if deleted else '节点修改'
                 if has_pending:
                     w.statusBar().showMessage(f'已暂存：{action}（保持特殊标记，点击“重构计算”按顺序应用）')
                 else:
                     w.statusBar().showMessage(f'已撤销未计算的{action}，无需重新计算')
+                if before['drc']!=state['drc']:w.replace_drc_waivers(state['drc'])
                 committed()
                 return
             from .area_filter import canonical_project
             project=canonical_project(w.data,w.project_settings())
-            project.update(node_edits=list(state['nodes']),deleted_shapes=list(state['deletions']),rulers=state['rulers'])
+            project.update(node_edits=list(state['nodes']),deleted_shapes=list(state['deletions']),rulers=state['rulers'],ignored_drc=state['drc'])
             project['settings'].update(state['edits'])
             project['ignored_width_lines']['refs']=list(state['width'])
             project['ignored_reconstruction']['refs']=list(state['edits']['reconstruction_ignored'])
@@ -170,8 +172,15 @@ class EditHistory:
         w.extreme_table.setCurrentCell(row,0);w.extreme_table.blockSignals(blocked)
         w._selected_grid_pose=w.extremes[w.active_preview]['states'] if w.extremes is not None and w.active_preview is not None else None
         if state['edits']!=before['edits']:
-            w.invalidate_reconstruction_edit()
+            applied=w._applied_preview_settings
+            if (w._can_defer_deletion_edit() and applied is not None and not (w.pending_layout_ops or w.pending_node_shapes)
+                    and w.view_settings.reconstruction_key()==applied.reconstruction_key()):
+                w.reconstruction_pending=False;w.reconstruction_overlay.staged_overlay=None
+                w.reconstruction_overlay.draft_frame=w.reconstruction_overlay.draft_data=w.reconstruction_overlay.draft_key=None
+                w.reconstruction_yield.refresh()
+            else:w.invalidate_reconstruction_edit()
         if state['width']!=before['width']:w.width_yield.refresh()
+        if before['drc']!=state['drc']:w.replace_drc_waivers(state['drc'])
         w.plot_layout(preserve=True)
         if any(state[key]!=before[key] for key in ('edits','width','pose','extreme')):
             w.request_preview(quiet=True,pose_change=state['pose']!=before['pose'] or state['extreme']!=before['extreme'])

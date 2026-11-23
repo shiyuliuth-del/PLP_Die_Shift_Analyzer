@@ -65,7 +65,8 @@ class V62Tests(TestCase):
         roles={'2/0':'固定RDL','127/0':'封装边框','128/0':'芯片边框'}
         with tempfile.TemporaryDirectory() as tmp:
             path=Path(tmp)/'out.dxf'
-            write_regions(snapshot,{},roles,path)
+            from die_shift_studio.dxf_settings import DxfSettings
+            write_regions(snapshot,{},roles,path,settings=DxfSettings(region_auto_join=False))
             drawing=ezdxf.readfile(path);model=drawing.modelspace()
             self.assertFalse(drawing.audit().errors)
             outlines=list(model.query('LWPOLYLINE'))

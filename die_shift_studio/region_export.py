@@ -128,10 +128,17 @@ class ContourGroup(NamedTuple):
 
 
 def layer_contours(task):
-    key,raw,rows,role,options=task;cancel_check()
+    key,raw,rows,role,options,amount,dbu,minimum_edge=task;cancel_check()
     polygons=[p for blob in raw for p in shapely.get_parts(shapely.from_wkb(blob)) if not p.is_empty]
     if any(p.geom_type!='Polygon' or not p.is_valid for p in polygons):raise ValueError(f'图层 {key} 的输出几何无效')
     inputs=len(polygons)
+    nominal=shapely.union_all(polygons) if amount else None
+    if amount and not nominal.is_empty:
+        from .output_compensation import sized
+        from .short_edges import contract
+        adjusted,=sized([(nominal,)],amount,dbu)
+        adjusted=contract(adjusted,minimum_edge)
+        polygons=[p for p in shapely.get_parts(adjusted) if not p.is_empty]
     if role in REFERENCE_LAYERS:
         return [ContourGroup(REFERENCE_LAYERS[role],
                              [np.asarray(ring.coords) * options.scale for ring in (p.exterior, *p.interiors)],
@@ -140,6 +147,9 @@ def layer_contours(task):
     polygons=list(shapely.get_parts(shapely.union_all(polygons)))
     base='L'+key.replace('/','_D');groups=[]
     masks={k:shapely.union_all([q['regions'][k] for q in rows]) for k in 'AC'}
+    if amount>0 and polygons:
+        from .output_compensation import extended_masks
+        masks=extended_masks(nominal,shapely.union_all(polygons),masks,amount,dbu)
     trees={kind:shapely.STRtree(shapely.get_parts(g)) for kind,g in masks.items()}
     for polygon in polygons:
         cancel_check()
@@ -258,11 +268,14 @@ def _join_block_paths(paths):
     return out
 
 
-def _prepare(snapshot,reconstruction,roles,options,progress):
+def _prepare(snapshot,reconstruction,roles,options,progress,compensation=None,dbu=.001):
     tasks=[]
+    compensation=compensation or {}
     for key,raw in sorted(snapshot.layers.items()):
         if roles.get(key) in EXPORT_ROLES:
-            tasks.append((key,raw,[p for p in reconstruction.get('pieces',()) if p['layer']==key],roles[key],options))
+            amount=round(compensation.get(key,0.)/dbu)*dbu
+            tasks.append((key,raw,[p for p in reconstruction.get('pieces',()) if p['layer']==key],roles[key],
+                          options,amount,dbu,snapshot.minimum_edge_um))
     profile=resource_profile()
     largest=max((sum(map(len,raw)) for _,raw,*_ in tasks),default=1)
     profile=dict(profile,workers=min(len(tasks) or 1,geometry_budget(profile,largest)))
@@ -277,15 +290,15 @@ def _prepare(snapshot,reconstruction,roles,options,progress):
     return groups,shared,inputs,merged
 
 
-def contours(snapshot,reconstruction,roles,options,progress=lambda *_:None):
-    groups,_,inputs,merged=_prepare(snapshot,reconstruction,roles,options,progress)
+def contours(snapshot,reconstruction,roles,options,progress=lambda *_:None,*,compensation=None,dbu=.001):
+    groups,_,inputs,merged=_prepare(snapshot,reconstruction,roles,options,progress,compensation,dbu)
     return [(q.layer,xy) for q in groups for xy in q.paths],inputs,merged
 
 
-def write_regions(snapshot,reconstruction,roles,path,progress=lambda *_:None,*,settings=None):
+def write_regions(snapshot,reconstruction,roles,path,progress=lambda *_:None,*,settings=None,compensation=None,dbu=.001):
     from .dxf_settings import DxfSettings
     options=settings or DxfSettings();path=Path(path)
-    groups,shared,inputs,merged=_prepare(snapshot,reconstruction,roles,options,progress)
+    groups,shared,inputs,merged=_prepare(snapshot,reconstruction,roles,options,progress,compensation,dbu)
     if not groups:raise ValueError('当前没有可导出的有效轮廓')
     blocks=[];references=[];names=set();lo=np.array([np.inf,np.inf]);hi=-lo
     count=0

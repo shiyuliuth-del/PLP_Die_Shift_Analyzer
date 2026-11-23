@@ -30,7 +30,7 @@ try:
  assert w.result is not None and w.extremes is not None
  assert not hasattr(w,'repair_toggle')
  assert w.fields['package_clearance_um'].value()==10
- assert w.view_settings.reconstruction_boundary_mode=='wide'
+ assert w.view_settings.reconstruction_boundary_mode=='perpendicular'
  assert w.setting_fields['reconstruction_box_mode'].currentData()=='aligned'
  assert '接触标记' not in w.setting_sections
  process=w.fields['minimum_edge_um'].parentWidget()

@@ -35,6 +35,7 @@ def export_dxf(window,regions=False):
         selected=frozenset(k for k in selected if roles.get(k) in EXPORT_ROLES)
         if not selected:window.error('所选范围没有封装边框、芯片边框或固定RDL');return
     process=window.params();view=window.view_settings;model=window.engine.contact if regions else None
+    compensation=window.output_compensation()
     export_plans={}
     if regions and getattr(window.engine,'reconstructor',None) is not None:
         from .reconstruction_status import clone_plan_pool
@@ -67,8 +68,12 @@ def export_dxf(window,regions=False):
         current=replace(current,layers={k:v for k,v in current.layers.items() if k in selected})
         if regions:
             from .region_export import write_regions
-            result=write_regions(current,split,roles,destination,progress_slice(progress,20,.8),settings=options)
-        else:result=write(current,destination,progress_slice(progress,20,.8),settings=options)
+            result=write_regions(current,split,roles,destination,progress_slice(progress,20,.8),settings=options,
+                                 compensation=compensation,dbu=data.dbu_um)
+        else:
+            from .output_compensation import compensate_snapshot
+            current=compensate_snapshot(current,compensation,data.dbu_um)
+            result=write(current,destination,progress_slice(progress,20,.8),settings=options)
         result['states']=current.states.tolist() if current.states is not None else None
         return result
     def complete(result):
