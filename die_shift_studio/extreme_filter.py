@@ -12,7 +12,7 @@ class PoseClause:
 
 
 class ProblemIndex:
-    def __init__(self,grid,factors):
+    def __init__(self,grid,factors,excluded=()):
         self.grid=grid
         sizes=grid.radices
         self.suffix=[math.prod(sizes[i:]) for i in range(len(sizes)+1)]
@@ -46,6 +46,15 @@ class ProblemIndex:
                 owners,table=factor
                 term=encode(owners,np.asarray(table,bool))
             self.root=either(self.root,term)
+        def exclude(node,digits,axis):
+            if not node or axis==len(sizes):return 0
+            hit,children=self.nodes[node] if node>=2 else (-1,())
+            children=list(children) if hit==axis else [node]*sizes[axis]
+            digit=digits[axis]
+            children[digit]=exclude(children[digit],digits,axis+1)
+            return branch(axis,children)
+        for index in sorted(excluded):
+            self.root=exclude(self.root,grid.choices(index) if index>=0 else [0]*grid.count,0)
         @lru_cache(None)
         def count(n,level):
             if n<2:return n*self.suffix[level]

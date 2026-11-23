@@ -218,9 +218,12 @@ class MainWindow(W.QMainWindow):
         self.selection=GeometrySelection(self);self.escape_shortcut=(QtGui.QShortcut if hasattr(QtGui,'QShortcut') else W.QShortcut)(QtGui.QKeySequence('Escape'),self);self.escape_shortcut.activated.connect(self.escape_action);self.scene_renderer=SceneRenderer(self.canvas,self.ax);self.refresh_jobs()
         from .edit_history import EditHistory
         self.edit_history=EditHistory(self);self.pending_deleted_shapes={};self.pending_restored_shapes={}
+        self.ignored_drc={}
         self._staged_deletions=None;self.pending_layout_ops=[];self._staged_restored_edits=None
+        self._staged_node_edits=None;self.pending_node_shapes={}
         self.edit_shortcuts=[]
-        for key,fn,parent in (('Delete',self.delete_selected_shapes,self.canvas),('U',self.undo_edit,self),('Shift+U',self.redo_edit,self)):
+        for key,fn,parent in (('Delete',self.delete_selected_shapes,self.canvas),('U',self.undo_edit,self),
+                              ('Shift+U',self.redo_edit,self),('Ctrl+U',self.redo_edit,self)):
             action=shortcut(QtGui.QKeySequence(key),parent)
             action.setContext(getattr(Qt,'ShortcutContext',Qt).WidgetWithChildrenShortcut)
             action.activated.connect(fn);self.edit_shortcuts.append(action)
@@ -298,7 +301,8 @@ class MainWindow(W.QMainWindow):
         row=W.QHBoxLayout();row.addWidget(W.QLabel('顶层Cell'));self.top=W.QComboBox();self.top.currentTextChanged.connect(self.top_changed);row.addWidget(self.top,1);page.addLayout(row)
         self.open_gds_button=W.QPushButton('打开GDS/OAS');self.open_gds_button.setStyleSheet('QPushButton {background:#e5f2ee;color:#245e52;border:1px solid #a5c9bd;border-radius:4px;padding:5px;} QPushButton:hover {background:#d3e9e1;}');self.open_gds_button.clicked.connect(self.open_gds);page.addWidget(self.open_gds_button)
         self.layer_split=W.QSplitter(VERTICAL);self.layer_split.setChildrenCollapsible(False);page.addWidget(self.layer_split)
-        self.layer_table=table(['显示','选中','层 / 类型','用途']);self.layer_table.setMinimumHeight(110);self.layer_split.addWidget(self.layer_table)
+        self.layer_table=table(['显示','选中','层 / 类型','用途','补偿']);self.layer_table.setMinimumHeight(110);self.layer_split.addWidget(self.layer_table)
+        self.compensation_boxes={}
         below=W.QWidget();below_layout=W.QVBoxLayout(below);below_layout.setContentsMargins(0,0,0,0);self.layer_split.addWidget(below)
         page=below_layout;self.layer_split.setSizes([300,300])
         self.layer_table.verticalHeader().setSectionsMovable(True)
@@ -397,7 +401,7 @@ class MainWindow(W.QMainWindow):
         self.manual_preview=ManualPreview(self);self.restore_button=self.manual_preview.restore_button
         self.state_table=table(['芯片','DX / μm','DY / μm','转角 / °','组合方向'])
         issue_page=W.QWidget();iv=W.QVBoxLayout(issue_page);iv.setContentsMargins(0,0,0,0);ir=W.QHBoxLayout()
-        self.show_issues=W.QCheckBox('显示DRC问题');self.show_issues.setChecked(False)
+        self.show_issues=W.QCheckBox('显示DRC问题');self.show_issues.setChecked(ViewSettings().show_contact_markers)
         ir.addWidget(self.show_issues);self.issue_prev=W.QPushButton('上一页');self.issue_next=W.QPushButton('下一页');ir.addWidget(self.issue_prev);ir.addWidget(self.issue_next);self.issue_summary=label('第 1/1 页');ir.addWidget(self.issue_summary,1);iv.addLayout(ir)
         self.issue_page=0
         self.issue_prev.clicked.connect(lambda:self.show_issue_page(self.issue_page-1));self.issue_next.clicked.connect(lambda:self.show_issue_page(self.issue_page+1))
@@ -405,6 +409,8 @@ class MainWindow(W.QMainWindow):
         for col,width in enumerate((142,76,90,100,100)):self.issue_table.setColumnWidth(col,width)
         self.issue_table.horizontalHeader().setStretchLastSection(True)
         self.issue_table.currentCellChanged.connect(self.issue_row_changed);self.issue_table.cellClicked.connect(lambda *_:self.issue_navigation.start())
+        self.issue_table.setContextMenuPolicy(getattr(getattr(Qt,'ContextMenuPolicy',Qt),'CustomContextMenu'))
+        self.issue_table.customContextMenuRequested.connect(self.issue_menu)
         self.show_issues.toggled.connect(self.contact_markers_changed)
         for panel,grid,layout in ((extreme_page,self.extreme_table,ep),(issue_page,self.issue_table,iv)):
             panel.setStyleSheet(COMPACT_PREVIEW_STYLE);layout.setSpacing(2)
@@ -481,7 +487,7 @@ class MainWindow(W.QMainWindow):
         history_box.addWidget(undo_steps,1)
         self.undo_button=W.QToolButton();self.redo_button=W.QToolButton()
         for button,arrow,tip,slot in ((self.undo_button,'LeftArrow','撤销（U）',self.undo_edit),
-                                      (self.redo_button,'RightArrow','取消撤销（Shift+U）',self.redo_edit)):
+                                      (self.redo_button,'RightArrow','取消撤销（Ctrl+U / Shift+U）',self.redo_edit)):
             button.setArrowType(getattr(getattr(Qt,'ArrowType',Qt),arrow))
             button.setToolTip(tip);button.setAccessibleName(tip);button.setEnabled(False)
             button.clicked.connect(slot);history_box.addWidget(button)
@@ -609,7 +615,9 @@ class MainWindow(W.QMainWindow):
         self.setting_fields['reconstruction_grid_nodes'].setToolTip('完整有限网格，按区间概率质量积分；增大节点可检查连续空间误差。不是等概率极端计数。')
         live=W.QCheckBox('实时反馈动区变化');self.setting_fields['reconstruction_live']=live;recon.addRow(live);live.toggled.connect(self.settings_changed)
         spin(recon,'reconstruction_corner_guard_um','拐角吸附预留 / μm',0,1000,2)
-        recon.addRow(label('动区沿原图追溯路径定义，所有姿态共用。两端蓝色边界分别拖动；圆点仅用于运动过孔侧。'))
+        spin(recon,'reconstruction_node_snap_um','边界节点拖动吸附 / μm',-1,1000,3).setToolTip(
+            '−1 关闭，0 按当前缩放自动选择距离，正值为实际距离。')
+        spin(recon,'reconstruction_node_snap_strength','吸附强度',0,1,2).setToolTip('0 无吸引，1 最大吸引。')
         from .drc_policy import build as build_drc_policy
         drawing=build_drc_policy(self,page)
         markers=W.QCheckBox('显示DRC问题');self.setting_fields['show_contact_markers']=markers;drawing.addRow(markers);markers.toggled.connect(self.settings_changed)
@@ -680,6 +688,12 @@ class MainWindow(W.QMainWindow):
     def settings_changed(self,*_):
         if self.loading:return
         values={k:(w.currentData() if isinstance(w,W.QComboBox) else w.isChecked() if isinstance(w,W.QCheckBox) else w.text() if isinstance(w,W.QLineEdit) else w.value()) for k,w in self.setting_fields.items()}
+        if -1 < values['reconstruction_node_snap_um'] < 0:
+            field=self.setting_fields['reconstruction_node_snap_um']
+            blocked=field.blockSignals(True)
+            field.setValue(-1)
+            field.blockSignals(blocked)
+            values['reconstruction_node_snap_um']=-1.
         updated=ViewSettings.from_dict(dict(asdict(self.view_settings),**values))
         if updated.space_export_interval_um!=self.view_settings.space_export_interval_um:
             self.view_settings=updated
@@ -729,6 +743,10 @@ class MainWindow(W.QMainWindow):
                 else:self._layout_pending=True
             return
         presentation=('drc_visible','show_contact_markers','reconstruction_live','width_show_probability','width_display','width_label_font_pt','width_label_decimals','width_yield_decimals','show_low_contact','show_low_width',*ranges)
+        interaction=('reconstruction_node_snap_um','reconstruction_node_snap_strength')
+        if all(getattr(updated,k)==getattr(self.view_settings,k) for k in values if k not in interaction):
+            self.view_settings=updated
+            return
         if all(getattr(updated,k)==getattr(self.view_settings,k) for k in values if k not in (*presentation,'cache_max_entries')):
             display_change=any(getattr(updated,k)!=getattr(self.view_settings,k) for k in presentation)
             self.view_settings=updated;self.show_issues.setChecked(updated.show_contact_markers);self.cache_group.limit(updated.cache_max_entries);self.refresh_cache_status()
@@ -791,6 +809,9 @@ class MainWindow(W.QMainWindow):
     def overlay_widget(self,name):
         return self.show_issues if name=='drc' else getattr(self,name+'_toggle')
     def motions(self):return {key:default_motion(role) for key,role in self.roles().items()}
+    def output_compensation(self):
+        from .output_compensation import normalize
+        return normalize({key:box.value() for key,box in self.compensation_boxes.items()})
     def params(self):
         data={k:w.value() for k,w in self.fields.items()}
         if self.data:data.update(self.auto_values)
@@ -1109,6 +1130,7 @@ class MainWindow(W.QMainWindow):
         self.cut_drag.cancel();self.reconstruction_overlay.hide();self.constraint_feedback.cancel()
         self.pending_deleted_shapes={};self.pending_restored_shapes={}
         self._staged_deletions=None;self.pending_layout_ops=[];self._staged_restored_edits=None
+        self._staged_node_edits=None;self.pending_node_shapes={}
         self.reconstruction_pending=False;self._reconstruction_apply_once=False;self._applied_preview_settings=None
         self.exit_region_mode()
         from .session_cache import logical_fingerprint
@@ -1132,6 +1154,8 @@ class MainWindow(W.QMainWindow):
             from .project import restored_width_ignores
             self.measured_output.restore(project.get('measured_output'))
             self.ignored_width_lines=restored_width_ignores(project,data);self.dxf_directory=project.get('dxf_directory','')
+            self.ignored_drc=project.get('ignored_drc',{})
+            self._waiver_cache=None
             self.apd_options=project.get('apd_export',{})
             from .dxf_settings import DxfSettings
             from .dxf_controls import restore as restore_dxf_controls
@@ -1157,7 +1181,8 @@ class MainWindow(W.QMainWindow):
             self.layer_split.setSizes([project.get('layer_table_height',300),max(220,self.layer_split.height()-project.get('layer_table_height',300))])
             selected_roles=project.get('roles',data.auto_roles)
             self.stage_hints=project.get('stage_hints',{})
-            self.role_boxes={};self.visible_boxes={};self.selectable_boxes={};self._layer_keys=stack_order(data,selected_roles,project.get('layer_order'))
+            self.role_boxes={};self.visible_boxes={};self.selectable_boxes={};self.compensation_boxes={}
+            self._layer_keys=stack_order(data,selected_roles,project.get('layer_order'))
             self.layer_table.setRowCount(0);self.layer_table.setRowCount(len(self._layer_keys))
             header=self.layer_table.verticalHeader()
             for i in range(header.count()):header.moveSection(header.visualIndex(i),i)
@@ -1171,7 +1196,11 @@ class MainWindow(W.QMainWindow):
                 box=W.QComboBox();box.addItems(ROLES);box.setCurrentText(role)
                 self.role_boxes[key]=box;self.layer_table.setCellWidget(i,3,box);self.layer_drag.watch(box)
                 box.currentTextChanged.connect(lambda _,k=key:self.role_changed(k))
-            for j,width in enumerate([38,38,100,180]):self.layer_table.setColumnWidth(j,width)
+                compensation=W.QDoubleSpinBox();compensation.setDecimals(3);compensation.setRange(-1000,1000)
+                compensation.setKeyboardTracking(False);compensation.setValue(project.get('layer_compensation',{}).get(key,0.))
+                compensation.setToolTip('输出层轮廓补偿 / μm。负值内缩，正值外扩。')
+                self.compensation_boxes[key]=compensation;self.layer_table.setCellWidget(i,4,compensation)
+            for j,width in enumerate([38,38,80,128,98]):self.layer_table.setColumnWidth(j,width)
             self.layer_table.horizontalHeader().setStretchLastSection(True)
             for key,w in self.fields.items():w.setValue(getattr(pars,key))
             self.reference_nsigma=pars.reference_nsigma;self.per_die_pivots=[list(v) for v in pars.die_pivots];self.pivot_editor.setValue([pars.rotation_center,pars.rotation_x_um,pars.rotation_y_um])
@@ -1309,7 +1338,9 @@ class MainWindow(W.QMainWindow):
         self.transition.start(duration,steps,update,complete)
     def show_frame_status(self,frame):
         issues=getattr(self,'display_issues',getattr(self,'filtered_issues',()))
-        message=('预演已更新' if frame is not None else '名义位置')+f' · 当前 DRC {len(issues)} 处违规'
+        ignored=sum(bool(issue.get('ignored')) for issue in issues)
+        message=('预演已更新' if frame is not None else '名义位置')+f' · 当前 DRC {len(issues)-ignored} 处违规'
+        if ignored:message+=f' · 已忽略 {ignored} 处'
         if frame is not None:
             from .statistics import mean_and_bounds
             params=self.params();mu,_=mean_and_bounds(params,len(frame['states']));bounds=np.array([mean_and_bounds(params.for_die(i),len(frame['states']))[1] for i in range(len(frame['states']))])
@@ -1457,6 +1488,17 @@ class MainWindow(W.QMainWindow):
         if self._staged_deletions is not None:return tuple(self._staged_deletions)
         return tuple(getattr(self.data,'deleted_shapes',()))
 
+    def _effective_node_edits(self):
+        base=getattr(self.data,'_area_base',self.data)
+        return tuple(getattr(base,'node_edits',())) if self._staged_node_edits is None else self._staged_node_edits
+
+    def _stage_history_nodes(self,rows):
+        actual={(q['layer'],q['index']):q for q in getattr(getattr(self.data,'_area_base',self.data),'node_edits',())}
+        target={(q['layer'],q['index']):q for q in rows}
+        changed={ref for ref in actual.keys() | target.keys() if actual.get(ref)!=target.get(ref)}
+        self._staged_node_edits=tuple(rows) if changed else None
+        self.pending_node_shapes={ref:self._shape_marker_geometry(*ref) for ref in changed}
+
     def _can_defer_deletion_edit(self):
         return bool(self.data is not None and self.reconstruction_toggle.isChecked() and not self.view_settings.reconstruction_auto)
 
@@ -1467,6 +1509,7 @@ class MainWindow(W.QMainWindow):
     def _clear_pending_layout_markers(self):
         self.pending_deleted_shapes={};self.pending_restored_shapes={}
         self._staged_deletions=None;self.pending_layout_ops=[];self._staged_restored_edits=None
+        self._staged_node_edits=None;self.pending_node_shapes={}
 
     def _shape_marker_geometry(self,layer,raw_index):
         original=self.data
@@ -1534,14 +1577,15 @@ class MainWindow(W.QMainWindow):
         if self.remote_locked or self.data is None:return
         if self.worker is not None:
             self.statusBar().showMessage('上一项操作尚未完成，请稍候。');return
-        if self._has_pending_deletion_changes():
+        if self._has_pending_deletion_changes() or self._staged_node_edits is not None:
             from .area_filter import canonical_project
             target_deletions=self._replay_pending_deletions()
             actual_deletions=list(getattr(self.data,'deleted_shapes',()))
-            if tuple(target_deletions)!=tuple(actual_deletions):
+            if tuple(target_deletions)!=tuple(actual_deletions) or self._staged_node_edits is not None:
                 project=canonical_project(self.data,self.project_settings())
                 project=self._merge_staged_restored_edits(project)
                 project['deleted_shapes']=target_deletions
+                project['node_edits']=list(self._effective_node_edits())
                 project.setdefault('overlays',{})['reconstruction']=True
                 pose=None if self.manual_states is None else tuple(map(tuple,self.manual_states))
                 extreme=self.active_preview
@@ -2555,12 +2599,13 @@ class MainWindow(W.QMainWindow):
             recon=self.reconstruction_toggle.isChecked()
             source_facts=(self.result or {}).get('extreme_factors');evidence=self.reconstruction_yield.evidence if recon else None
             mode=self.problem_filter.currentIndex()
-            tag=(id(self.extremes),id(source_facts),id(evidence),recon,mode)
+            approved=self.approved_drc_poses() if mode==1 else ()
+            tag=(id(self.extremes),id(source_facts),id(evidence),recon,mode,approved)
             if self.dirty:waiting=True
             elif tag!=getattr(self,'_problem_tag',None):
                 rules=filter_rules(mode,recon,source_facts,evidence)
                 if rules is None:waiting=True
-                else:self._problem_index=ProblemIndex(self.extremes,rules);self._problem_tag=tag
+                else:self._problem_index=ProblemIndex(self.extremes,rules,approved);self._problem_tag=tag
             if not waiting:catalogue=FilteredCatalog(source,self._problem_index)
         size=self.view_settings.table_page_limit-1
         pages=max(1,(catalogue.total+size-1)//size);page=max(0,min(page,pages-1))
@@ -2596,10 +2641,12 @@ class MainWindow(W.QMainWindow):
         current_key=(frame['states'].tobytes() if frame is not None else None)
         current=frame_status(frame) if current_key is not None else {}
         catalog=self.scoped_catalog() or self.extremes
-        scope_key=(id(catalog),id(factors),id(self.reconstruction_yield.evidence),self.reconstruction_toggle.isChecked(),self.dirty)
+        approved=self.approved_drc_poses()
+        scope_key=(id(catalog),id(factors),id(self.reconstruction_yield.evidence),self.reconstruction_toggle.isChecked(),self.dirty,approved)
         if getattr(self,'_zero_scope_key',None)!=scope_key:
             from .extreme_validation import catalogue_status
-            self._zero_scope_status=catalogue_status(self.extremes,catalog,factors,self.reconstruction_yield.evidence if not self.dirty else None,reconstruct=self.reconstruction_toggle.isChecked())
+            self._zero_scope_status=catalogue_status(self.extremes,catalog,factors,self.reconstruction_yield.evidence if not self.dirty else None,
+                                                    reconstruct=self.reconstruction_toggle.isChecked(),approved=approved)
             self._zero_scope_key=scope_key
         version=(scope_key,id(self.result),self.dirty,current_key,tuple(current.items()),self.reconstruction_toggle.isChecked(),self.preview_page)
         if getattr(self,'_paint_pass',None)==version:return
@@ -2625,6 +2672,8 @@ class MainWindow(W.QMainWindow):
                     from .reconstruction_events import scene_failure
                     status=dict(checked=True,safe=not (frame.get('drc') or frame['reconstruction'].get('hard_failures')),drc=len(frame.get('drc',())),connection_failures=len(frame['reconstruction'].get('hard_failures',())),reason='按当前实际铜DRC和连接检查')
             if item is None:status=self._zero_scope_status
+            elif self.page_items[row-1][0] in approved:
+                status=dict(checked=True,safe=True,reason='该姿态剩余 DRC 均已忽略')
             safe=status.get('safe') is True
             if status.get('checked') and 'drc' in status:safe=status['drc']==0 and not status.get('connection_failures')
             check=('通过已检查规则' if safe else '存在已检查的问题' if status.get('safe') is False else '未作完整校验') if item else '名义位置 / 当前组合最严重结果'
@@ -2707,12 +2756,73 @@ class MainWindow(W.QMainWindow):
             frame['drc_locations']=locations(frame.get('drc',()))
         return frame['drc_locations']
 
+    def drc_waiver_context(self):
+        from .session_cache import logical_fingerprint
+        cfg=self.preview_settings();reconstruct=self.reconstruction_toggle.isChecked()
+        reconstruction=cfg.reconstruction_key() if reconstruct else ()
+        return logical_fingerprint((self.data.geometry_id,self.data.top_name,self.roles(),self.ordered_layers(),
+                                    asdict(self.params()),cfg.drc_checks,cfg.drc_tolerance_um,cfg.drc_min_angle_deg,reconstruction))
+
+    def approved_drc_poses(self):
+        if not self.ignored_drc or self.extremes is None or self.dirty:return frozenset()
+        from .drc_waivers import approved
+        context=self.drc_waiver_context()
+        key=(id(self.extremes),id(self.ignored_drc),context)
+        cached=getattr(self,'_waiver_cache',None)
+        if cached is not None and cached[0]==key:return cached[1]
+        def states_at(index):
+            return self.extremes[index]['states'] if index>=0 else np.zeros((self.extremes.count,3))
+        poses=approved(self.ignored_drc,context,self.extremes,states_at)
+        self._waiver_cache=(key,poses)
+        return poses
+
+    def issue_menu(self,pos):
+        row=self.issue_table.indexAt(pos).row()
+        if self.remote_locked or not 0<=row<len(self.filtered_issues):return
+        issue=self.filtered_issues[row]
+        menu=W.QMenu(self.issue_table)
+        action=menu.addAction('取消忽略此问题' if issue.get('ignored') else '忽略此问题')
+        action.triggered.connect(lambda:self.toggle_drc_issue(issue))
+        getattr(menu,'exec',getattr(menu,'exec_',None))(self.issue_table.viewport().mapToGlobal(pos))
+
+    def toggle_drc_issue(self,issue):
+        from .drc_waivers import pose_id,record
+        frame=self.current_frame
+        if self.remote_locked or self.data is None or frame is None or 'drc' not in frame:return
+        rows=self.contact_entries(frame);pose=pose_id(frame['states'])
+        index=-2  # A manual pose has no catalogue row.
+        if not np.any(frame['states']):index=-1
+        elif self.extremes is not None and self.active_preview is not None:
+            if pose==pose_id(self.extremes[self.active_preview]['states']):index=self.active_preview
+        if self.reconstruction_toggle.isChecked() and not frame.get('reconstruction',{}).get('constraints_complete'):
+            index=-2
+        old=self.ignored_drc.get(pose,{})
+        entry=record(frame,rows,old,issue,self.drc_waiver_context(),index)
+        self.edit_history.record()
+        records=dict(self.ignored_drc)
+        if entry['ignored']:records[pose]=entry
+        else:records.pop(pose,None)
+        self.replace_drc_waivers(records)
+
+    def replace_drc_waivers(self,records):
+        self.ignored_drc=records;self._issue_table_stamp=None;self._paint_pass=None
+        self.fill_issues()
+        if self.extremes is not None and self.problem_filter.currentIndex()==1:
+            self.show_extreme_page(self.preview_page,redraw=False,keep_pose=True)
+        else:self.refresh_extreme_colors(self.current_frame)
+        self.drc_overlay.draw()
+        self.render_scene()
+
     def fill_issues(self):
         entries=self.contact_entries(self.current_frame)
-        stamp=(id(entries),self.view_settings.drc_checks,self.view_settings.drc_visible)
+        stamp=(id(entries),self.view_settings.drc_checks,self.view_settings.drc_visible,id(self.ignored_drc))
         if stamp==self._issue_table_stamp:return
         from .drc_policy import visible
         entries=[q for q in entries if visible(self.view_settings,q)]
+        if entries and self.ignored_drc:
+            from .drc_waivers import pose_id,witness_id
+            waived=set(self.ignored_drc.get(pose_id(self.current_frame['states']),{}).get('ignored',()))
+            if waived:entries=[dict(q,ignored=witness_id(q) in waived) for q in entries]
         self._issue_table_stamp=stamp;self.display_issues=entries
         self.show_issue_page(self.issue_page)
     def show_issue_page(self,page):
@@ -2724,7 +2834,11 @@ class MainWindow(W.QMainWindow):
             actual=(f"{row['actual_deg']:.3f}°" if row.get('actual_deg') is not None else f"{row['actual_um']:.3f} μm" if row.get('actual_um') is not None else '—')
             values=[row['kind'],'、'.join(row.get('layers',(row['layer'],))),required,actual,*[fmt(v) for v in row['point']]]
             for j,value in enumerate(values):
-                item=W.QTableWidgetItem(str(value));item.setToolTip('当前姿态实际铜的DRC；显隐不影响检查。');self.issue_table.setItem(i,j,item)
+                item=W.QTableWidgetItem(str(value))
+                if row.get('ignored'):
+                    item.setBackground(QtGui.QColor('#e4f4e8'));item.setToolTip('已忽略，仍保留原始检查和位置。')
+                else:item.setToolTip('当前姿态实际铜的DRC；显隐不影响检查。')
+                self.issue_table.setItem(i,j,item)
         self.issue_table.setVerticalHeaderLabels([str(start+i+1) for i in range(len(self.filtered_issues))]);self.issue_table.blockSignals(False)
         self.issue_summary.setText(f'第 {self.issue_page+1}/{pages} 页');self.issue_prev.setEnabled(self.issue_page>0);self.issue_next.setEnabled(self.issue_page+1<pages)
     def contact_markers_changed(self,enabled):
@@ -2778,7 +2892,7 @@ class MainWindow(W.QMainWindow):
                     geometry_indexing=getattr(self.data,'geometry_indexing','legacy'),legacy_node_edits=list(getattr(self.data,'legacy_node_edits',[])),
                     layout_output=__import__('die_shift_studio.layout_export',fromlist=['configuration']).configuration(self),
                     dxf_directory=self.dxf_directory,dxf_options=asdict(self.dxf_settings),measured_output=self.measured_output.configuration(),
-                    apd_export=self.apd_options,
+                    apd_export=self.apd_options,layer_compensation=self.output_compensation(),ignored_drc=self.ignored_drc,
                     ignored_reconstruction=dict(sha256=self.data.sha256,top_cell=self.data.top_name,refs=[list(r) for r in self.view_settings.reconstruction_ignored]),
                     ignored_width_lines=dict(sha256=self.data.sha256,top_cell=self.data.top_name,refs=[list(r) for r in sorted(self.ignored_width_lines)]),
                     extreme_view=dict(filter_mode=('all','drc','failed')[self.problem_filter.currentIndex()],filter_problems=bool(self.problem_filter.currentIndex()),mode=self.grid_mode.currentData(),page_size=self.view_settings.table_page_limit-1,page=(self.preview_page if self.extremes is not None else self._initial_extreme_page)+1),
@@ -3004,6 +3118,7 @@ class MainWindow(W.QMainWindow):
         from .area_filter import canonical_project
         project=dict(canonical_project(self.data,self.project_settings()),gds_path=source)
         project=self._merge_staged_restored_edits(project)
+        if self._staged_node_edits is not None:project['node_edits']=list(self._staged_node_edits)
         if self.remote_locked or getattr(self,'requested_measured',False):
             for name,value in self.measured_output.saved_overlays.items():
                 project['overlays']['footprint' if name=='probability' else name]=value

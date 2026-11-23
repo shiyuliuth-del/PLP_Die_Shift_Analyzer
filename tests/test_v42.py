@@ -230,7 +230,7 @@ class V42Tests(unittest.TestCase):
    self.assertEqual(portable_path(target,Path.cwd()),str(target.resolve()))
  def test_defaults_and_removed_patch_options(self):
   self.assertEqual(Parameters().package_clearance_um,10)
-  self.assertEqual(ViewSettings().reconstruction_boundary_mode,'wide')
+  self.assertEqual(ViewSettings().reconstruction_boundary_mode,'perpendicular')
   self.assertFalse(hasattr(ViewSettings.from_dict({'repair_landing_pad':True}),'repair_landing_pad'))
 
 if __name__=='__main__':unittest.main()

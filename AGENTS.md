@@ -1,8 +1,10 @@
 # Agent 自动入口
 
-源码、GitHub与发布只在本规范检出工作。先读 [Agent.md](Agent.md)、[AI交接](docs/AI_HANDOFF.md)、[现行合同](docs/DESIGN_REQUIREMENTS.md)、[已知问题](docs/KNOWN_ISSUES.md) 和 [轮次记录](docs/Agents.md)。当前说明见 [V66 使用说明](docs/V66_使用说明.md)。
+源码、GitHub与发布只在本规范检出工作。先读 [Agent.md](Agent.md)、[AI交接](docs/AI_HANDOFF.md)、[现行合同](docs/DESIGN_REQUIREMENTS.md)、[已知问题](docs/KNOWN_ISSUES.md) 和 [轮次记录](docs/Agents.md)。当前说明见 [V67 使用说明](docs/V67_使用说明.md)。
 
 唯一长期主线是main；最新用户要求优先。保留其他Agent的在途分支，不重写历史tag，不把研究目录整体提交。每轮同步主线、补有意义的回归、记录工程兼容与实际验收，通过PR提交GitHub。正式Release仅源码与校验值，根目录保留 BUILD.bat、DieShiftAnalyze_RUN.bat 和 RealDataAnalyze_RUN.bat。
+
+V67 逐姿态忽略精确 DRC 位置，原始检查和实测诊断保留。图层补偿只应用于输出，ABC 分界按同一已补偿外轮廓重取，实测复用预先偏置的名义图形。默认显示 DRC、关动画、边界垂直、ABC 自动 JOIN。禁用自动计算时撤销和重做更新草稿标记。
 
 V63 起，最短边长、最小铜图形内角、尺寸容差位于工艺的其他栏目。实测模式不创建百分比回调。取消、内存监控、任务状态与 OAS 检查点独立于界面进度。动静区 DXF 恢复 V61 开放分段，保留 `PKG_REF`、`DIE_REF` 及原 CAD 块归组。
 

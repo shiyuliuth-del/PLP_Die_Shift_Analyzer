@@ -54,7 +54,8 @@ class V66Tests(unittest.TestCase):
                 dict(q, regions=q['nominal_regions']) for q in frame['reconstruction']['pieces']
             ])
             nom = snapshot(data, engine.contact.cache, dict(states=states), reconstruction=False)
-            self.assertFalse(DxfSettings().region_auto_join)
+            self.assertTrue(DxfSettings().region_auto_join)
+            self.assertFalse(DxfSettings.from_dict({'region_auto_join': False}).region_auto_join)
             self.assertTrue(DxfSettings.from_dict({'region_auto_join': True}).region_auto_join)
             with self.assertRaises(ValueError):
                 DxfSettings.from_dict({'region_auto_join': 'yes'})

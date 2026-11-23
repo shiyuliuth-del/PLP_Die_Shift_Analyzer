@@ -314,7 +314,8 @@ class ReconstructionOverlay:
         allow_pad=w.view_settings.reconstruction_allow_moving_pad
         deleted=getattr(w,'pending_deleted_shapes',None) if self.active() and getattr(w,'reconstruction_pending',False) else None
         restored=getattr(w,'pending_restored_shapes',None) if self.active() and getattr(w,'reconstruction_pending',False) else None
-        stamp=(id(data),id(bank),vis,w.view_bounds,order,nominal,pose_low,threshold,edit_stamp,repr(w.layer_styles),id(staged_info),allow_pad,tuple(sorted(deleted)) if deleted else (),tuple(sorted(restored)) if restored else ())
+        nodes=getattr(w,'pending_node_shapes',None) if self.active() and getattr(w,'reconstruction_pending',False) else None
+        stamp=(id(data),id(bank),vis,w.view_bounds,order,nominal,pose_low,threshold,edit_stamp,repr(w.layer_styles),id(staged_info),allow_pad,tuple(sorted(deleted)) if deleted else (),tuple(sorted(restored)) if restored else (),id(nodes))
         if stamp==self.stamp:self.draw_labels();return
         if self.stamp is not None and self.stamp[0]!=id(data) and edit is None:
             if self.hover is not None:self.hover.set_visible(False)
@@ -444,6 +445,12 @@ class ReconstructionOverlay:
             staged.append(patch(g));staged_faces.append(to_rgba(face));staged_edges.append(to_rgba(edge))
             if len(tag_items)<12:
                 point=g.representative_point();tag_items.append((point.x,point.y,'待算：撤销删除',edge))
+        for (layer,_),g in (nodes or {}).items():
+            if layer not in vis or g.is_empty or not _in_view(g.bounds,w.view_bounds):continue
+            face,edge='#5992b638','#2b6ea3'
+            staged.append(patch(g));staged_faces.append(to_rgba(face));staged_edges.append(to_rgba(edge))
+            if len(tag_items)<12:
+                point=g.representative_point();tag_items.append((point.x,point.y,'待算：节点修改',edge))
         self.staged.set_paths(staged);self.staged.set_visible(bool(staged))
         if staged:
             self.staged.set_facecolors(staged_faces);self.staged.set_edgecolors(staged_edges);self.staged.set_alpha(None)
@@ -646,6 +653,7 @@ class CutDrag:
         self.state['press_projection']=piece['interval'][side]
         self.state['projection_cursor']=origin.copy();self.state['projection']=piece['interval'][side]
         self.state['press_interval']=piece['interval'][side]
+        self.state['node_snap_cache']={}
         peer_limit=None
         if getattr(plan,'ownership_domain',None) is not None:
             ref=(piece['layer'],piece['index'])
@@ -696,11 +704,22 @@ class CutDrag:
                 route_cursor=cursor+state['drag_offset']
                 projection=plan.drag_projection(route_cursor,state['projection'],state['projection_cursor'])
                 state['projection']=projection;state['projection_cursor']=route_cursor.copy()
+                target_s=state['press_interval']+projection-state['press_projection']
+                options=self.w.view_settings
+                radius=options.reconstruction_node_snap_um
+                if radius==0:
+                    radius=5*abs(self.w.ax.get_xlim()[1]-self.w.ax.get_xlim()[0])/max(1.,self.w.ax.bbox.width)
+                if radius>0 and options.reconstruction_node_snap_strength:
+                    from .reconstruction_snap import node_snap
+                    angle=piece.get('boundary_angles',(0.,0.))[which]
+                    snapped=node_snap(plan,target_s,radius,options.reconstruction_node_snap_strength,
+                                      state['node_snap_cache'],angle)
+                    cursor=cursor+(snapped-target_s)*plan.tangent(target_s)
+                    target_s=snapped
                 from .manual_regions import move_side
                 edit=move_side(state['settings'],plan,state['nominal_press'],cursor,piece.get('strict_box')) if piece.get('strict_box') is not None else None
                 if edit:state['updated'],part=edit
                 else:
-                    target_s=state['press_interval']+projection-state['press_projection']
                     if which==1 and state.get('peer_limit') is not None:target_s=min(target_s,state['peer_limit'])
                     part,clamped=plan.edit_pose(*piece['interval'],which,target_s,*relative_pose(piece,frame),self.w.view_settings.reconstruction_style,cursor=route_cursor)
                     if part is not None:

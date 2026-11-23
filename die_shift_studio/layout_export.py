@@ -125,14 +125,14 @@ def export_layout(w):
     data=w.data;cache=w.geometry_cache;frame=w.current_frame;roles=w.roles();settings=w.view_settings;p=w.params();case=w.case
     selected=set(data.layers) if options.layer_scope=='all' else {k for k,v in w.visible_boxes.items() if v.isChecked()} if options.layer_scope=='visible' else {k for k,v in roles.items() if v!='不参与'}
     show_drc=w.show_issues.isChecked();reconstruction=w.reconstruction_toggle.isChecked();motions=w.motions()
+    compensation=w.output_compensation()
     def work(progress):
         from .fast_preview import GeometryCache
         from .resources import progress_slice
         from .dxf_export import snapshot
         from .measured_issues import catalogue
         gc=cache or GeometryCache(data);current=frame;issues=[]
-        if show_drc:
-            if case is None:raise ValueError('输出DRC问题需要有效的芯片/封装用途及方案评估')
+        if show_drc and case is not None:
             from .contact import ContactModel
             from .drc import GlobalDRC
             model=ContactModel(data,case,roles,case['connections'],gc,motions,p)
@@ -144,6 +144,8 @@ def export_layout(w):
             issues=catalogue(current,case,model)
         frozen=snapshot(data,gc,current,reconstruction=reconstruction,progress=progress_slice(progress,35,.2))
         frozen=replace(frozen,layers={k:v for k,v in frozen.layers.items() if k in selected})
+        from .output_compensation import compensate_snapshot
+        frozen=compensate_snapshot(frozen,compensation,data.dbu_um)
         if not frozen.layers:raise ValueError('导出范围没有图形层')
         return write(frozen,path,data.dbu_um,options,issues,len(case['dies']) if case else 0,progress_slice(progress,55,.45))
     def done(result):

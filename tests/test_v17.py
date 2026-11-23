@@ -15,7 +15,7 @@ class V17Tests(unittest.TestCase):
     def test_defaults_and_tolerance_validation(self):
         p=Parameters();cfg=ViewSettings()
         self.assertEqual((p.line_width_um,p.line_space_um,p.wafer_line_width_um,p.wafer_line_space_um,p.annulus_um),(15,)*5)
-        self.assertTrue(cfg.animation_enabled);self.assertEqual(effective_rules(p,cfg),(14.9,14.9))
+        self.assertFalse(cfg.animation_enabled);self.assertEqual(effective_rules(p,cfg),(14.9,14.9))
         for tolerance,rule in ((1,14),(-1,16)):
             q=replace(cfg,drc_tolerance_um=tolerance);self.assertEqual(effective_rules(p,q),(rule,rule));self.assertNotEqual(cfg.reconstruction_key(),q.reconstruction_key())
         with self.assertRaises(ValueError):effective_rules(p,replace(cfg,drc_tolerance_um=15))

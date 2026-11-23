@@ -47,7 +47,7 @@ try:
  assert w.probability_toggle is w.footprint_toggle
  assert list(w.setting_sections).count('极端足迹')==1 and '缓存管理' not in w.setting_sections
  assert w.regions_dxf_button.text()=='动静区输出'
- assert not w.show_issues.isChecked() and not w.view_settings.show_low_contact
+ assert w.show_issues.isChecked() and not w.view_settings.show_low_contact
  w.load_project(ROOT/'Jobs/示例F_逐芯片幅度与迭代窗口.dshift.json');wait()
  # This suite checks whole-input reconstructed yields; focus has its own suite.
  w.grid_mode.setCurrentIndex(0);wait()

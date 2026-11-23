@@ -28,6 +28,8 @@ class ViewSettings:
     max_threads:int=0
     max_memory_mb:int=0
     reconstruction_pad_trigger_um:float=5.
+    reconstruction_node_snap_um:float=0.
+    reconstruction_node_snap_strength:float=0.4
     save_project_results:bool=True
     result_cache_directory:str=''
     width_display:dict=field(default_factory=lambda:dict(DEFAULTS),hash=False)
@@ -39,7 +41,7 @@ class ViewSettings:
     width_yield_exponent:int=12
     width_yield_seed:int=510
     width_grid_nodes:int=5
-    show_contact_markers:bool=False
+    show_contact_markers:bool=True
     show_low_contact:bool=False
     show_low_width:bool=True
     cache_max_entries:int=2000
@@ -75,7 +77,7 @@ class ViewSettings:
     probability_gamma:float=.35
     probability_interpolation:str='nearest'
     space_scope:str='moving'
-    animation_enabled:bool=True
+    animation_enabled:bool=False
     animation_return_zero:bool=True
     animation_strategy:str='prepared'
     evaluation_scope:str='all'
@@ -106,7 +108,7 @@ class ViewSettings:
     reconstruction_live:bool=True
     reconstruction_allow_moving_pad:bool=False
     reconstruction_style:str="linear"
-    reconstruction_boundary_mode:str="wide"
+    reconstruction_boundary_mode:str="perpendicular"
     reconstruction_ignored:tuple=()
     reconstruction_following:tuple=() # ignored whole-source rigid following; absent means static
     reconstruction_forced:tuple=()  # explicit edits override enclosure-based auto-ignore
@@ -234,6 +236,8 @@ class ViewSettings:
         limits.update(table_page_limit=(2,2000),max_threads=(0,1024),max_memory_mb=(0,16777216))
         limits['max_undo_steps']=(0,1000);integers.add('max_undo_steps')
         limits['space_export_interval_um']=(.001,10000.)
+        limits.update(reconstruction_node_snap_um=(-1,1000),reconstruction_node_snap_strength=(0,1))
+        if -1 < q.reconstruction_node_snap_um < 0:raise ValueError('边界节点拖动吸附可填写 −1、0 或正距离')
         limits.update(width_yield_exponent=(8,20),width_yield_seed=(0,2147483647),width_grid_nodes=(3,21))
         limits.update(reconstruction_pad_trigger_um=(0,1000),reconstruction_grid_nodes=(3,9),reconstruction_corner_guard_um=(0,1000),cache_max_entries=(10,100000),yield_sample_exponent=(8,20),yield_box_budget=(64,65536),yield_tolerance=(.000001,.1),
 

@@ -1,3 +1,15 @@
+# V67 DRC 忽略、输出补偿和边界吸附
+
+`drc_waivers` 使用姿态摘要和检查见证指纹存储编辑。只有完整见证均被忽略、分析身份仍匹配且无硬连接失败，极端组合才从 DRC 风险索引中排除。保留底层缓存和实际问题目录。工程恢复、历史撤销和右键菜单使用同一状态。
+
+`output_compensation` 经 `native_ops.size_groups` 调用 KLayout mode 2 偏置。GDS/OAS 与 DXF 冻结后逐层应用；ABC 对名义外轮廓偏置，继续原分界到偏置后的轮廓，再按共享节点分层。实测在冻结工程时预处理源形并复用到各计算进程，新的型变铜单独偏置。同步启动器和 RealDataAnalyse 计时见 [V67 使用说明](V67_使用说明.md)。
+
+`reconstruction_snap` 根据当前路径段沿截面法向投影实际外轮廓节点，排除远端分支，应用衰减吸力。保留原鼠标投影用于下一帧，端孔与拐角几何约束仍由原切口逻辑判定。
+
+# V67 进度条常驻计时
+
+RealDataAnalyse 的进度条同时显示开始时间、总耗时与完成数量。独立的 Qt 定时器在任务开始后每秒刷新文字，计时以单调时钟为准。任务结束时停止定时器并保留最终耗时，结束时刻可悬停查看。
+
 # V66 动静区图层/JOIN、延迟删除、实测高并发与多动区性能
 
 `dxf_document._write_blocks` 将动静区 CAD 块内部实体写入块对应的 `_A` / `_B` / `_C` 图层，`region_contract.verify_written_contours` 核对块内所有实体图层与块 INSERT 图层一致。`DxfSettings.region_auto_join`（默认 `False`）在 `dxf_controls.py` 暴露为「动静区自动JOIN」，勾选时 `region_export._join_block_paths` 合并块内首尾相接的多段线并允许闭合环通过回读校验。

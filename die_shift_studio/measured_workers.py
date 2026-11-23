@@ -61,7 +61,8 @@ class BatchWorkers:
                 self.session.prepare()
                 cancel_check()
                 s = self.session
-                inputs = (s.data,s.case,s.roles,s.motions,s.p,s.settings,s.cache,s.plan_pool)
+                inputs = (s.data,s.case,s.roles,s.motions,s.p,s.settings,s.cache,s.plan_pool,
+                          s.compensation,s.prepare_output())
                 self.pool = ProcessPoolExecutor(self.count,mp_context=self.context,initializer=_initialize,
                                                 initargs=(inputs,self.stop,self.over_budget))
             return self.pool

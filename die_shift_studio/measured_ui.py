@@ -246,6 +246,7 @@ class MeasuredOutput(QtCore.QObject):
                 self.transition=t;self.fail_transition('工程未能打开');return
             try:
                 data,roles,motions,p,settings,cache=w.data,w.roles(),w.motions(),w.params(),w.view_settings,w.geometry_cache
+                compensation=w.output_compensation()
                 existing_case=w.case
             except Exception as exc:
                 self.transition=t;self.fail_transition(str(exc));return
@@ -254,8 +255,9 @@ class MeasuredOutput(QtCore.QObject):
                 from .fast_preview import GeometryCache
                 actual_cache=cache or GeometryCache(data)
                 case=existing_case or build_case(data,roles,layer_order=t['order'])
-                session=Session(data,case,roles,motions,p,settings,actual_cache)
+                session=Session(data,case,roles,motions,p,settings,actual_cache,compensation=compensation)
                 try:
+                    session.prepare_output()
                     if t.get('plan'):session.prepare()
                     return session
                 except Exception:session.close();raise
@@ -318,7 +320,7 @@ class MeasuredOutput(QtCore.QObject):
             if self.session:self.session.close();self.session=None
             if command=='project.close':
                 w.drop_result();w.data=None;w.case=None;w.project_path=None;w.geometry_cache=None;w.connections=None
-                w.layer_table.setRowCount(0);w.role_boxes={};w.visible_boxes={};w._layer_keys=[];w.gds_label.clear()
+                w.layer_table.setRowCount(0);w.role_boxes={};w.visible_boxes={};w.compensation_boxes={};w._layer_keys=[];w.gds_label.clear()
                 w.top.blockSignals(True);w.top.clear();w.top.blockSignals(False)
                 w.ax.clear();w.canvas.draw_idle();w.refresh_jobs();return dict(status='completed',result={'closed':True})
             path=Path(args['path']).expanduser().resolve()
@@ -447,9 +449,8 @@ class MeasuredOutput(QtCore.QObject):
                 store=batch['store']
                 origin=session.case['board'].bounds[:2]
                 if use_nominal:
-                    from .dxf_export import snapshot
                     receipt=commit(store,lambda:store.add_nominal(
-                        name,position,origin,lambda:snapshot(session.data,session.cache).layers))
+                        name,position,origin,lambda:session.nominal_snapshot().layers))
                     self.check_batch_memory(batch)
                     return dict(receipt,use_nominal=True,fixed_rdl_drc_checked=False,drc_passed=None,
                                 position_um=position.tolist(),output_policy=batch['output_policy'])
