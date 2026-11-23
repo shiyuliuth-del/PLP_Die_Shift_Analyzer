@@ -44,9 +44,15 @@ class EditHistory:
         w=self.w;data=w.data
         base=getattr(data,'_area_base',data)
         edits,width=mapped_edits(data,w.view_settings,w.ignored_width_lines,to_source=True)
+        staged=getattr(w,'_staged_restored_edits',None)
+        if staged:
+            staged_edits,staged_width=staged
+            edits={name:tuple(dict.fromkeys(tuple(edits[name])+tuple(staged_edits.get(name,())))) for name in EDIT_FIELDS}
+            width=tuple(sorted(set(width)|set(staged_width)))
+        deletions=w._effective_deleted_shapes() if hasattr(w,'_effective_deleted_shapes') else tuple(getattr(data,'deleted_shapes',()))
         return dict(edits=edits,width=tuple(sorted(width)),
                     nodes=tuple(getattr(base,'node_edits',())),
-                    deletions=tuple(getattr(data,'deleted_shapes',())),
+                    deletions=deletions,
                     rulers=tuple(tuple(map(tuple,row)) for row in w.rulers.rows),
                     pose=None if w.manual_states is None else tuple(map(tuple,w.manual_states)),
                     extreme=w.active_preview)
@@ -102,6 +108,48 @@ class EditHistory:
         def committed():
             source.pop();target.append(before);self.trim()
         if (state['nodes'],state['deletions'])!=(before['nodes'],before['deletions']):
+            if state['nodes']==before['nodes'] and hasattr(w,'_can_defer_deletion_edit') and w._can_defer_deletion_edit():
+                before_map={tuple(q[:2]):q[2] for q in before['deletions']}
+                target_map={tuple(q[:2]):q[2] for q in state['deletions']}
+                restored=tuple(sorted(set(before_map)-set(target_map)))
+                deleted=tuple((ref,target_map[ref]) for ref in sorted(set(target_map)-set(before_map)))
+                if restored:w.pending_layout_ops.append(('restore',restored))
+                if deleted:w.pending_layout_ops.append(('delete',deleted))
+                w._sync_staged_deletion_markers(state['deletions'])
+                actual_refs={(layer,raw) for layer,indices in getattr(w.data,'area_indices',{}).items() for raw in indices}
+                if actual_refs:
+                    missing_edits={name:tuple(row for row in state['edits'].get(name,()) if len(row)>=2 and (row[0],int(row[1])) not in actual_refs) for name in EDIT_FIELDS}
+                    missing_width=tuple(ref for ref in state['width'] if tuple(ref) not in actual_refs)
+                    w._staged_restored_edits=(missing_edits,missing_width) if (any(missing_edits.values()) or missing_width) else None
+                else:
+                    w._staged_restored_edits=None
+                mapping,width=mapped_edits(w.data,state['edits'],state['width'],to_source=False)
+                w.view_settings=replace(w.view_settings,**mapping)
+                w.ignored_width_lines=frozenset(width)
+                w.rulers.restore(state['rulers'])
+                w.manual_states=None if state['pose'] is None else np.array(state['pose'],float)
+                w.active_preview=state['extreme']
+                row=next((row for row,(index,_) in enumerate(w.page_items,1) if index==w.active_preview),-1)
+                if w.active_preview is None and w.manual_states is None:row=0
+                blocked=w.extreme_table.blockSignals(True)
+                w.extreme_table.setCurrentCell(row,0);w.extreme_table.blockSignals(blocked)
+                w._selected_grid_pose=w.extremes[w.active_preview]['states'] if w.extremes is not None and w.active_preview is not None else None
+                if state['width']!=before['width']:w.width_yield.refresh()
+                has_pending=bool(w.pending_deleted_shapes or w.pending_restored_shapes or (w._applied_preview_settings is not None and w.view_settings.reconstruction_key()!=w._applied_preview_settings.reconstruction_key()))
+                if has_pending:
+                    w.defer_reconstruction(stage=True)
+                else:
+                    w._clear_pending_layout_markers()
+                    w.reconstruction_pending=False
+                    if hasattr(w,'reconstruction_overlay'):w.reconstruction_overlay.staged_overlay=None
+                    w.plot_layout(preserve=True)
+                action='撤销删除' if restored else '删除图形'
+                if has_pending:
+                    w.statusBar().showMessage(f'已暂存：{action}（保持特殊标记，点击“重构计算”按顺序应用）')
+                else:
+                    w.statusBar().showMessage(f'已撤销未计算的{action}，无需重新计算')
+                committed()
+                return
             from .area_filter import canonical_project
             project=canonical_project(w.data,w.project_settings())
             project.update(node_edits=list(state['nodes']),deleted_shapes=list(state['deletions']),rulers=state['rulers'])

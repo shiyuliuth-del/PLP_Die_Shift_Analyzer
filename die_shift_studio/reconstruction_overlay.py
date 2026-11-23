@@ -61,7 +61,7 @@ def display_material(data,visible_layers):
 
 class ReconstructionOverlay:
     def __init__(self,window):
-        self.draft_frame=self.draft_data=self.draft_key=None;self.staged_overlay=None
+        self.draft_frame=self.draft_data=self.draft_key=None;self.staged_overlay=None;self._stage_worker=None;self._stage_pending=None;self._stage_ref_keys={}
         self.w=window;self.artists={};self.cuts=None;self.stamp=self.table_stamp=None
         self.selected=self.selected_kind=None;self.hover=None;self.hover_key=None
         self.end_artists=[];self.region_artists=[];self.arrow_artists=[];self.path_cache={};self.handles={};self.union_cache={};self.labels=[];self.staged_tags=[];self.text_sizes={};self.zone_views={};self.zone_low={};self.zone_clips={}
@@ -119,18 +119,96 @@ class ReconstructionOverlay:
                     elif name in ('intervals','cuts','extra_cuts','second_cuts'):tag(ref,'调整动区')
                     elif name=='box_excluded' and row in cur:tag(ref,'删除动区')
         all_refs=rdl_refs|via_refs
-        self.staged_overlay=dict(refs=all_refs,boxes=tuple(staged_boxes),actions={k:tuple(v) for k,v in actions.items()},key=cfg.reconstruction_key())
-        if frame and frame.get('reconstruction') and solver is not None:
+        key=cfg.reconstruction_key()
+        self.staged_overlay=dict(refs=all_refs,boxes=tuple(staged_boxes),actions={k:tuple(v) for k,v in actions.items()},key=key)
+        if frame and frame.get('reconstruction') and solver is not None and rdl_refs:
             data=frame['reconstruction']
-            from .reconstruction_zones import live_serial
-            local=frame
-            for ref in sorted(rdl_refs):
-                try:local=live_serial(solver,cfg,local,ref,draft=True)
-                except Exception:pass
-            self.draft_frame=frame;self.draft_key=cfg.reconstruction_key()
             draft_refs=all_refs or {(q['layer'],q['index']) for q in data['pieces']}
-            self.draft_data=dict(local['reconstruction'],draft_refs=draft_refs)
+            # Only recompute refs whose per-ref settings changed since the last draft
+            # on this same frame, instead of rebuilding every previously staged shape.
+            def ref_sig(target):
+                return (target in cfg.reconstruction_ignored,target in cfg.reconstruction_following,target in cfg.reconstruction_forced,target in cfg.reconstruction_box_excluded,
+                        tuple(r for r in cfg.reconstruction_intervals if (r[0],r[1])==target),
+                        tuple(r for r in cfg.reconstruction_angles if (r[0],r[1])==target),
+                        tuple(r for r in cfg.reconstruction_added if (r[0],r[1])==target),
+                        tuple(r for r in cfg.reconstruction_deleted if (r[0],r[1])==target),
+                        tuple(r for r in cfg.reconstruction_cuts if (r[0],r[1])==target),
+                        tuple(r for r in cfg.reconstruction_extra_cuts if (r[0],r[1])==target),
+                        tuple(r for r in cfg.reconstruction_second_cuts if (r[0],r[1])==target),
+                        tuple(r for r in cfg.reconstruction_dropped_cuts if (r[0],r[1])==target),
+                        cfg.reconstruction_boxes,cfg.reconstruction_angle_boxes,cfg.reconstruction_regions,
+                        cfg.reconstruction_style,cfg.reconstruction_boundary_mode,cfg.reconstruction_allow_moving_pad)
+            reuse_draft=(self.draft_frame is frame and self.draft_data is not None)
+            base_frame=dict(frame,reconstruction=self.draft_data) if reuse_draft else frame
+            prev_sigs=self._stage_ref_keys if reuse_draft else {}
+            new_sigs={ref:ref_sig(ref) for ref in rdl_refs}
+            dirty_refs=sorted(ref for ref in rdl_refs if prev_sigs.get(ref)!=new_sigs[ref])
+            if not dirty_refs and reuse_draft:
+                self.draft_key=key
+                self.draft_data=dict(self.draft_data,draft_refs=draft_refs)
+            else:
+                piece_count=sum(1 for q in data['pieces'] if (q['layer'],q['index']) in dirty_refs)
+                if piece_count>8 and not getattr(w,'_closing',False):
+                    # Heavy multi-zone polygon: paint staged markers immediately on the main
+                    # thread and compute the local draft asynchronously so the UI never hangs.
+                    self._stage_pending=(frame,base_frame,solver,cfg,dirty_refs,new_sigs,draft_refs,key)
+                    self._start_stage_worker()
+                else:
+                    self._cancel_stage_worker()
+                    from .reconstruction_zones import live_serial
+                    local=base_frame
+                    for ref in dirty_refs:
+                        try:local=live_serial(solver,cfg,local,ref,draft=True)
+                        except Exception:pass
+                    self.draft_frame=frame;self.draft_key=key;self._stage_ref_keys=new_sigs
+                    self.draft_data=dict(local['reconstruction'],draft_refs=draft_refs)
+        elif frame and frame.get('reconstruction') and solver is not None:
+            self._cancel_stage_worker()
+            data=frame['reconstruction']
+            self.draft_frame=frame;self.draft_key=key;self._stage_ref_keys={}
+            draft_refs=all_refs or {(q['layer'],q['index']) for q in data['pieces']}
+            self.draft_data=dict(data,draft_refs=draft_refs)
         self.stamp=None
+
+    def _cancel_stage_worker(self):
+        self._stage_pending=None
+        if self._stage_worker is not None:
+            self._stage_worker.cancelled.set()
+
+    def _start_stage_worker(self):
+        if self._stage_worker is not None:
+            self._stage_worker.cancelled.set()
+            return
+        if self._stage_pending is None or getattr(self.w,'_closing',False):return
+        from .gui import Worker
+        from .reconstruction_zones import live_serial
+        frame,base_frame,solver,cfg,dirty_refs,new_sigs,draft_refs,key=self._stage_pending
+        self._stage_pending=None
+        def work(_):
+            local=base_frame
+            for ref in dirty_refs:
+                local=live_serial(solver,cfg,local,ref,draft=True)
+            return local
+        worker=Worker(work,self.w)
+        self._stage_worker=worker
+        def accepted(local):
+            if worker.cancelled.is_set() or getattr(self.w,'_closing',False):return
+            if self.w.current_frame is not frame or not getattr(self.w,'reconstruction_pending',False):return
+            if self.w.view_settings.reconstruction_key()!=key:return
+            self.draft_frame=frame;self.draft_key=key;self._stage_ref_keys=new_sigs
+            self.draft_data=dict(local['reconstruction'],draft_refs=draft_refs)
+            self.stamp=None;self.draw();self.w.render_scene()
+        def finished():
+            if self._stage_worker is worker:self._stage_worker=None
+            worker.deleteLater()
+            if getattr(self.w,'_closing',False):
+                QtCore.QTimer.singleShot(0,self.w.close)
+            elif self._stage_pending is not None:
+                self._start_stage_worker()
+        worker.done.connect(accepted)
+        worker.failed.connect(lambda msg:self.w.log_bus.emit(f'待计算动区预览未生成：{msg}'))
+        worker.finished.connect(finished)
+        worker.start()
 
     def pieces(self):return [q for q in (self.data() or {}).get('pieces',()) if self.active() and self.w.visible_boxes[q['layer']].isChecked()]
     def piece_for(self,key):return next((q for q in self.pieces() if self._key(q)==key),None)
@@ -235,7 +313,8 @@ class ReconstructionOverlay:
         staged_info=self.staged_overlay if (self.active() and getattr(w,'reconstruction_pending',False)) else None
         allow_pad=w.view_settings.reconstruction_allow_moving_pad
         deleted=getattr(w,'pending_deleted_shapes',None) if self.active() and getattr(w,'reconstruction_pending',False) else None
-        stamp=(id(data),id(bank),vis,w.view_bounds,order,nominal,pose_low,threshold,edit_stamp,repr(w.layer_styles),id(staged_info),allow_pad,id(deleted))
+        restored=getattr(w,'pending_restored_shapes',None) if self.active() and getattr(w,'reconstruction_pending',False) else None
+        stamp=(id(data),id(bank),vis,w.view_bounds,order,nominal,pose_low,threshold,edit_stamp,repr(w.layer_styles),id(staged_info),allow_pad,tuple(sorted(deleted)) if deleted else (),tuple(sorted(restored)) if restored else ())
         if stamp==self.stamp:self.draw_labels();return
         if self.stamp is not None and self.stamp[0]!=id(data) and edit is None:
             if self.hover is not None:self.hover.set_visible(False)
@@ -359,6 +438,12 @@ class ReconstructionOverlay:
             staged.append(patch(g));staged_faces.append(to_rgba(face));staged_edges.append(to_rgba(edge))
             if len(tag_items)<12:
                 point=g.representative_point();tag_items.append((point.x,point.y,'待算：删除图形',edge))
+        for (layer,_),g in (restored or {}).items():
+            if layer not in vis or g.is_empty or not _in_view(g.bounds,w.view_bounds):continue
+            face,edge='#5eb38238','#277a4d'
+            staged.append(patch(g));staged_faces.append(to_rgba(face));staged_edges.append(to_rgba(edge))
+            if len(tag_items)<12:
+                point=g.representative_point();tag_items.append((point.x,point.y,'待算：撤销删除',edge))
         self.staged.set_paths(staged);self.staged.set_visible(bool(staged))
         if staged:
             self.staged.set_facecolors(staged_faces);self.staged.set_edgecolors(staged_edges);self.staged.set_alpha(None)
@@ -455,8 +540,14 @@ class ReconstructionOverlay:
             if best and best[0]<=tolerance:return best[1:]
         if handles_only:return None
         for q in self.pieces():
-            if q.get('problem_region') is not None and q['problem_region'].covers(point):return q,None,'problem'
-            if q['bridge'].covers(point):return q,None,'bridge'
+            pr=q.get('problem_region')
+            if pr is not None and not pr.is_empty:
+                b=pr.bounds
+                if b[0]<=x<=b[2] and b[1]<=y<=b[3] and pr.covers(point):return q,None,'problem'
+            br=q['bridge']
+            if not br.is_empty:
+                b=br.bounds
+                if b[0]<=x<=b[2] and b[1]<=y<=b[3] and br.covers(point):return q,None,'bridge'
         return None
     def highlight(self,picked):
         if self.hover is None or self.hover.axes is not self.w.ax:
@@ -465,10 +556,14 @@ class ReconstructionOverlay:
             visible=self.hover.get_visible();self.hover.set_visible(False);self.pulse_timer.stop();self.hover_key=None
             if visible and hasattr(self.w,'scene_renderer'):self.w.render_scene()
             return False
-        q,xy,kind=picked;self.hover.set_data(xy.T);self.hover.set_visible(True)
+        q,xy,kind=picked
+        new_key=(self._key(q),kind)
+        if self.hover_key==new_key and self.hover.get_visible() and self.w.cut_drag.state is None:
+            return True
+        self.hover.set_data(xy.T);self.hover.set_visible(True)
         self.hover.set_color(SECOND_CUT_COLOR if kind=='extra' else CUT_COLOR)
         self.hover.set_marker('o' if np.linalg.norm(xy[-1]-xy[0])<1e-8 else '');self.hover.set_markersize(9)
-        self.hover_key=(self._key(q),kind)
+        self.hover_key=new_key
         if not self.pulse_timer.isActive():self.pulse_timer.start()
         return True
     def pulse(self):
@@ -480,6 +575,7 @@ class ReconstructionOverlay:
         self.w.scene_renderer.draw_feedback(self.hover,(id(self.data()),self.stamp),self.w.legend)
     def clear_hover(self):self.highlight(None)
     def hide(self):
+        self._cancel_stage_worker();self._stage_ref_keys={}
         self.w.cut_drag.retained=None
         self.staged_overlay=None
         self.clear_hover();self.stamp=None;self.handles={};self.zone_views={};self.zone_clips={};self.hit_items=[];self.hit_geometry=None
@@ -553,10 +649,15 @@ class CutDrag:
         peer_limit=None
         if getattr(plan,'ownership_domain',None) is not None:
             ref=(piece['layer'],piece['index'])
-            peers=[shapely.union_all([other['nominal_regions']['A'],other['nominal_regions']['C']])
-                   for other in overlay.pieces()
-                   if (other['layer'],other['index'])==ref and (other['die']!=owner or (other.get('via_refs') and set(other['via_refs']).isdisjoint(piece['via_refs']))) and not other.get('ignored')]
-            peers=[g for g in peers if not g.is_empty]
+            rb=plan.route.bounds
+            peers=[]
+            for other in overlay.pieces():
+                if (other['layer'],other['index'])!=ref or other.get('ignored'):continue
+                if not (other['die']!=owner or (other.get('via_refs') and set(other['via_refs']).isdisjoint(piece['via_refs']))):continue
+                for g in (other['nominal_regions']['A'],other['nominal_regions']['C']):
+                    if not g.is_empty:
+                        gb=g.bounds
+                        if gb[0]<=rb[2] and gb[2]>=rb[0] and gb[1]<=rb[3] and gb[3]>=rb[1]:peers.append(g)
             if peers:
                 from .reconstruction_route import terminal_marks
                 marks=terminal_marks(plan.route,shapely.union_all(peers))

@@ -84,7 +84,8 @@ def normalize_project(project):
             '缓存管理':'硬件与计算资源','过孔实体覆盖概率':'极端足迹','视图与预演运动':'动画',
             '连续无异常接触范围':'结果分析','固定RDL重构预演':'重构预演','DRC检查':'DRC','Space Map':'避让空间','SpaceMap':'避让空间'}
     p['expanded_settings']=list(dict.fromkeys(titles.get(title,title) for title in sections if not title.startswith('预演分析')))
-    process=p.get('expanded_process',[title for title in p['expanded_settings'] if title=='DRC'])
+    default_process=['线宽线距','过孔包围量','图形过滤','芯片距离','其他']
+    process=p.get('expanded_process',default_process if 'expanded_process' not in p else [])
     if not isinstance(process,list) or any(not isinstance(v,str) for v in process):raise ValueError('工艺栏目列表必须由标题字符串组成')
     p['expanded_process']=list(dict.fromkeys({'DRC':'其他','机械净距':'芯片距离'}.get(title,title) for title in process))
     # V50 has a separate DRC category panel in Settings as well as process

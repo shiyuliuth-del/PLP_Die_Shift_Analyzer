@@ -1,3 +1,17 @@
+# V66 动静区图层/JOIN、延迟删除、实测高并发与多动区性能
+
+`dxf_document._write_blocks` 将动静区 CAD 块内部实体写入块对应的 `_A` / `_B` / `_C` 图层，`region_contract.verify_written_contours` 核对块内所有实体图层与块 INSERT 图层一致。`DxfSettings.region_auto_join`（默认 `False`）在 `dxf_controls.py` 暴露为「动静区自动JOIN」，勾选时 `region_export._join_block_paths` 合并块内首尾相接的多段线并允许闭合环通过回读校验。
+
+`ViewSettings.space_export_interval_um` 默认值调整为 `100.0`。新建/未显式指定 `expanded_process` 的工程默认展开「工艺」全部 5 个栏目。
+
+关闭「自动计算」且处于重构预演时，`MainWindow.delete_selected_shapes` 与 `EditHistory.step` 对删除及撤销删除操作仅记录有序暂存队列（`pending_layout_ops`、`_staged_deletions`）并绘制「待算：删除图形 / 待算：撤销删除」标记，不触发几何重建或计算，直至「重构计算」按顺序应用。`export_ui.py` 与 `layout_export.py` 在存在待算修改时阻止导出旧图；GDS/OAS、DXF、动静区导出及工程保存/重开均完整反映节点编辑与图形删除且保持原 GDS 只读。
+
+实测输出方面，`measured_core.Session.model` 在每封装变化的 `rotation_center_um` 下复用线程内 `ContactModel`、`Reconstructor` 与 `GlobalDRC`，`Session._fast_snapshot` 缓存名义静态多边形 WKB，`current_drc.frame` 缓存同归属孔盘缓冲与名义包围校验；对平移和旋转均为 0 的 DIE 跳过静止源重构（附异网碰撞回退保护），实测对比 GD55/GD55_1119/SH22 提速 3.6×～6.2×（全零位 >12×）且几何 XOR 为 0、DRC 目录完全一致。`measured_ui.py` 在实测模式下停用无关界面定时器、按状态节流锁定刷新并扩大多进程并发上限（`requested_count>=4` 即支持多进程，兼顾 `strict` 与 `omit_failed_regions`）。
+
+大型图纸与多动区单金属编辑：`area_filter.apply` 采用批量 C 多边形构建与向量化短边检测（6000 图形提速约 9×）；`region_export.partition_ring` 与 `region_contract.overlapping_edges` 跳过纯静态边与非共线邻边；`branch_regions` 复用单次外框缓冲并以 `STRtree` 替换二次循环；`reconstruction_zones.live_serial` 复用 `geometry_pool` 与 `plan.cache` 并避免单图形线程池开销；`ReconstructionOverlay.stage` 按脏源增量刷新，对多动区（>8 区）采用后台 `Worker` 异步更新草稿防止主线程卡死。
+
+修复 `reconstruction_route._warp_geometry` 与 `plane_route.partition` 中布尔运算返回 `GeometryCollection` 导致 `reconstruction_angles.measure` 在 SH22 拐角一阶连接拖动时抛出 `AttributeError: 'NoneType' object has no attribute 'difference'` 弹窗的问题，以及 `reconstruction_joint.prepare` 在替换表缺层时抛出 `KeyError` 的问题。回归见 `tests/test_v66.py`，操作见 [V66 使用说明](V66_使用说明.md)。
+
 # V65 实测阈值开关、进度与命令显示
 
 项目设置分别保存 `bypass_enabled` 和 `bypass_limits`。缺少开关的旧项目默认关闭，已冻结的旧计划和无界面配置沿用各自原有阈值。未启用的项目或计划向 Runner 传入全零阈值。数值先按三位小数呈现，再保存或执行。

@@ -715,9 +715,14 @@ def _warp_geometry(part,plan,center,state,style="c2",variant=0):
         if repairs:full=shapely.union_all([full,*repairs])
     if len(parts(full))!=len(parts(plan.source)) or not full.is_valid or sum(len(q.interiors) for q in parts(full))!=expected_holes:
         return None,'重构连接不能闭合'
-    fixed=shapely.intersection(full,shapely.set_precision(raw['B'],plan.tolerance))
-    rigid=shapely.union_all(parts(shapely.intersection(full,shapely.set_precision(raw['C'],plan.tolerance)))).difference(fixed)
-    result={'A':full.difference(shapely.union_all([fixed,rigid])),'B':fixed,'C':rigid}
+    def _polygonal(g):
+        ps=parts(g)
+        return ps[0] if len(ps)==1 else shapely.union_all(ps) if ps else EMPTY
+    fixed=_polygonal(shapely.intersection(full,shapely.set_precision(raw['B'],plan.tolerance)))
+    rigid=_polygonal(_polygonal(shapely.intersection(full,shapely.set_precision(raw['C'],plan.tolerance))).difference(fixed))
+    active_final=_polygonal(full.difference(shapely.union_all([fixed,rigid])))
+    if active_final.is_empty:return None,'动区退化为空图形'
+    result={'A':active_final,'B':fixed,'C':rigid}
     size=int(sum(shapely.get_num_coordinates(g) for g in result.values()))*24+512
     if size<=plan.memo_budget:
         plan.pose_memo[memo_key]=(dict(result),None,size);plan.memo_bytes+=size

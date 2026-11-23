@@ -140,6 +140,7 @@ def frame(checker,states,replacements,settings,progress,owners=None,scopes=None,
             for ref in m.connections.fixed_interfaces(record['key'],record['index']):
                 catalogue.setdefault(((record['key'],record['index']),ref[0].split('/')[0],'固定RDL'),set()).add(tuple(ref))
         checker.enclosures=catalogue
+        checker._enclosure_buffers={};checker._enclosure_same={}
     catalogue=checker.enclosures
     for (ref,plane,role),receivers in (catalogue.items() if enabled(settings,'enclosure') else ()):
         cancel_check();node=m.nodes[m.ids[ref]];owner=linked.get(ref,node['owner'])
@@ -149,18 +150,37 @@ def frame(checker,states,replacements,settings,progress,owners=None,scopes=None,
         enclosure=clearances.moving_annulus_um if role=='运动RDL' else clearances.annulus_um
         # Buffer BEFORE the rigid transform: rotating the tessellation after
         # buffering preserves a common motion exactly, unlike re-buffering it.
-        required=node['poly'].buffer(enclosure/math.cos(math.pi/128),quad_segs=32)
-        target=[]
-        for receiver in receivers:
-            original=m.nodes[m.ids[receiver]]
-            target.append(original['poly'] if same else (overrides[receiver] if receiver in overrides else m.moved(original['poly'],original['owner'],states)))
-        missing=(required if same else m.moved(required,owner,states)).difference(shapely.union_all(target))
+        buf_key=(ref,enclosure)
+        required=checker._enclosure_buffers.get(buf_key)
+        if required is None:
+            required=node['poly'].buffer(enclosure/math.cos(math.pi/128),quad_segs=32)
+            checker._enclosure_buffers[buf_key]=required
+        if same:
+            same_key=(ref,plane,role,enclosure)
+            cached_same=checker._enclosure_same.get(same_key)
+            if cached_same is None:
+                union_target=shapely.union_all([m.nodes[m.ids[receiver]]['poly'] for receiver in receivers])
+                missing0=required.difference(union_target)
+                cached_same=(missing0,union_target) if missing0.area>dbu*dbu else (None,None)
+                checker._enclosure_same[same_key]=cached_same
+            missing,union_target=cached_same
+            if missing is not None:
+                missing=m.moved(missing,owner,states)
+                layers=tuple(sorted({k for k,i in receivers}))
+                moved_via=m.moved(node['poly'],owner,states)
+                items.append(dict(layer=layers[0],layers=layers,geometry=missing,kind='孔盘包围不足',owner=deps[0] if len(deps)==1 else -1,dependencies=deps,rdl_role=role,
+                                  source_layer=ref[0],source_index=ref[1],refs=(ref,*sorted(receivers)),
+                                  origin=list(moved_via.centroid.coords[0]),required_um=enclosure,_measurement_enclosure=(moved_via,m.moved(union_target,owner,states))))
+            continue
+        target=[overrides[receiver] if receiver in overrides else m.moved(m.nodes[m.ids[receiver]]['poly'],m.nodes[m.ids[receiver]]['owner'],states) for receiver in receivers]
+        union_target=shapely.union_all(target)
+        missing=m.moved(required,owner,states).difference(union_target)
         if missing.area>dbu*dbu:
-            if same:missing=m.moved(missing,owner,states)
             layers=tuple(sorted({k for k,i in receivers}))
+            moved_via=m.moved(node['poly'],owner,states)
             items.append(dict(layer=layers[0],layers=layers,geometry=missing,kind='孔盘包围不足',owner=deps[0] if len(deps)==1 else -1,dependencies=deps,rdl_role=role,
                               source_layer=ref[0],source_index=ref[1],refs=(ref,*sorted(receivers)),
-                              origin=list(m.moved(node['poly'],owner,states).centroid.coords[0]),required_um=enclosure,_measurement_enclosure=(m.moved(node['poly'],owner,states),shapely.union_all([m.moved(g,owner,states) for g in target]) if same else shapely.union_all(target))))
+                              origin=list(moved_via.centroid.coords[0]),required_um=enclosure,_measurement_enclosure=(moved_via,union_target)))
     from .edge_clearance import edge_violations
     from .width_keepout import violations as keepout_violations
     for row in [*(edge_violations(m,states,p,settings,replacements,owners) if enabled(settings,'board') else ()),*(keepout_violations(m,states,replacements) if enabled(settings,'keepout') else ())]:

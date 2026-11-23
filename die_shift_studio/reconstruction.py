@@ -722,6 +722,9 @@ class Reconstructor:
 
     def frame(self,states,deformation=None,progress=None,quick=False,*,targets=None,diagnostics=True,render_cache=None,_raw=False):
         if _raw:return self._raw_frame(states,deformation,progress,quick,targets=targets,diagnostics=diagnostics,render_cache=render_cache)
+        if targets is not None and len(targets)==0 and not diagnostics and getattr(self,'measured_only',False):
+            return dict(complete=True,replacements={},pieces=[],repair_refs=set(),hard_failures=[],violations=[],original_violations=(),electrically_valid=True,constraints_complete=False,
+                        summary=dict(pieces=0,bridges=0,conflicts=0,warnings=0,electrical_repairs=0,unroutable=0))
         states=np.asarray(states,float);key=(states.tobytes(),'electrical-continuity',bool(quick),bool(diagnostics),None if targets is None else tuple(sorted(targets)))
         hit=self.cache.get(key) if diagnostics else None
         if hit is not None:return hit

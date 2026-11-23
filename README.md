@@ -1,4 +1,6 @@
-# Die Shift Analyze V65
+# Die Shift Analyze V66
+
+V66 完善动静区 DXF 块内 ABC 图层与「动静区自动JOIN」选项，默认展开工艺栏目并将避让空间间隔默认设为 100 μm，优化关闭自动计算时的延迟删除/撤销删除标记与按序应用，确保 GDS/DXF/动静区导出与工程保存重开完整反映版图编辑与删除（不改源 GDS），并大幅优化实测输出并发/零位 DIE 跳过、大型图纸导入与多动区单金属编辑流畅度，同时修复一阶拐角重构弹窗与良率 `KeyError`。详见 [V66 使用说明](docs/V66_使用说明.md)。
 
 V65 为 RealDataAnalyse 增加「忽略阈值」开关，统一批量任务进度计数，并在实时命令页隐藏时暂停界面刷新。详见 [V65 使用说明](docs/V65_使用说明.md)。
 
@@ -31,7 +33,7 @@ V50：芯片对重点组合、分叉边界修正、当前姿态GDS/OAS与旋转E
 软件分析Die-first封装的DIE平移与旋转，提供三方案初筛、实体覆盖与极端足迹、通道宽度风险、重构动区编辑、规则/联合模型良率、工程结果保存、GDS/OAS导入、实测IPC及批量OAS输出。长度均为μm，GDS/OAS只读，工程节点可编辑。
 
 - [实测IPC接口与注意事项](docs/MEASURED_OUTPUT_API.md) · [GD55-1105独立验证脚本](tools/verify_measured_gd55.py)
-- [用户操作](docs/V65_使用说明.md)
+- [用户操作](docs/V66_使用说明.md)
 - [AI交接：主要功能、代码地图、算法和后续重点](docs/AI_HANDOFF.md)
 - [现行设计合同](docs/DESIGN_REQUIREMENTS.md)
 - [已知边界](docs/KNOWN_ISSUES.md)

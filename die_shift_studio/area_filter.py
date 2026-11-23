@@ -71,16 +71,46 @@ def apply(data,project,*,reference=None):
     invalid=[]
     previous=getattr(reference,'fabrication_filter',None)
     reuse=getattr(reference,'_area_base',None) is data and previous is not None and previous[:2]==(threshold,edge)
+    from .fast_preview import polygons_from_arrays
+    edge2=edge*edge
     for key,arrays in data.layers.items():
         values=[];metadata=[];indices=[];descriptions=data.shape_info.get(key,[None]*len(arrays))
         retained=dict(zip(reference.area_indices[key],zip(reference.layers[key],reference.shape_info[key]))) if reuse else {}
+        pending_idx=[i for i in range(len(arrays)) if (key,i) not in removed_refs and i not in retained]
+        fast_polys={}
+        if pending_idx:
+            # Batch-build simple polygons in C via shapely.polygons; fall back to
+            # filled_polygon only for invalid/self-touching winding outlines.
+            batch_arrays=[arrays[i] for i in pending_idx]
+            batch_geos=polygons_from_arrays(batch_arrays)
+            valid_mask=shapely.is_valid(batch_geos)
+            areas=shapely.area(batch_geos)
+            hole_counts=shapely.get_num_interior_rings(batch_geos)
+            for pos,i in enumerate(pending_idx):
+                if valid_mask[pos] and areas[pos]>0 and hole_counts[pos]==0:
+                    fast_polys[i]=(batch_geos[pos],float(areas[pos]))
         for i,xy in enumerate(arrays):
             if (key,i) in removed_refs:continue
             if i in retained:
                 xy,meta=retained[i]
                 mapping[key,i]=len(values);indices.append(i);values.append(xy);metadata.append(meta)
                 continue
-            g=filled_polygon(xy,True)
+            fast=fast_polys.get(i)
+            if fast is not None:
+                g,area=fast
+                if edge>0:
+                    arr=np.asarray(xy,float)
+                    if len(arr)>1 and np.array_equal(arr[0],arr[-1]):arr=arr[:-1]
+                    d=np.roll(arr,-1,axis=0)-arr
+                    needs_contract=bool(np.any(d[:,0]*d[:,0]+d[:,1]*d[:,1]<edge2))
+                else:
+                    needs_contract=False
+                if not needs_contract:
+                    if area<threshold:removed+=1;continue
+                    mapping[key,i]=len(values);indices.append(i);values.append(xy);metadata.append(descriptions[i])
+                    continue
+            else:
+                g=filled_polygon(xy,True)
             try:clean=contract(g,edge)
             except ValueError:
                 invalid.append(f'{key} #{i+1}');continue

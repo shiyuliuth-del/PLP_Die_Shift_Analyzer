@@ -14,7 +14,7 @@ class MeasuredOutput(QtCore.QObject):
     incoming=Signal(object,object,object);finished=Signal(str,object,object)
     def __init__(self,w,layout):
         super().__init__(w);self.w=w;self.server=None;self.session=None;self.options=Options();self.jobs=OrderedDict()
-        self.pending_enable=False;self.pool=None;self.generation=0;self.batch=None;self.current=None;self.render_engine=None;self.ready=False;self.last_error=None;self.transition=None;self.running={};self.stopping=False;self.requests=OrderedDict()
+        self.pending_enable=False;self.pool=None;self.generation=0;self.batch=None;self.current=None;self.render_engine=None;self.ready=False;self.last_error=None;self.transition=None;self.running={};self.stopping=False;self.requests=OrderedDict();self._lock_signature=None
         self.incoming.connect(self.dispatch);self.finished.connect(self.complete)
         self.toggle=W.QCheckBox('实测输出');self.toggle.setStyleSheet('font-weight:bold; padding:4px 2px;');layout.addWidget(self.toggle)
         self.settings_header,self.settings_body,form=w.collapsible(layout,'实测输出参数',w.setting_sections);self.toggle.toggled.connect(self.toggled)
@@ -31,9 +31,13 @@ class MeasuredOutput(QtCore.QObject):
         if self.active() and not force:return
         self.options=Options.from_dict(values);self.directory.setText(self.options.output_directory);self.memory.setValue(self.options.max_memory_mb);self.threads.setValue(self.options.max_threads)
     def active(self):return self.server is not None
-    def apply_lock(self):
-        if hasattr(self.w,'manual_preview'):self.w.manual_preview.setEnabled(not self.active())
+    def apply_lock(self,force=False):
         locked=bool(self.w.remote_locked)
+        busy=bool(self.running or self.transition or self.w._tasks)
+        sig=(self.active(),locked,self.stopping,self.pending_enable,busy)
+        if not force and sig==self._lock_signature:return
+        self._lock_signature=sig
+        if hasattr(self.w,'manual_preview'):self.w.manual_preview.setEnabled(not self.active())
         for i in range(min(3,self.w.controls.count())):self.w.controls.widget(i).setEnabled(not locked)
         for widget in (self.w.run_button,self.w.job_combo,self.w.save_button,self.w.preview_tabs):widget.setEnabled(not locked)
         for name in ('reconstruction_toggle','width_toggle','show_issues','space_toggle','probability_toggle','footprint_toggle'):
@@ -42,7 +46,7 @@ class MeasuredOutput(QtCore.QObject):
         for widget in (self.directory,self.memory,self.threads):widget.setEnabled(not self.active())
         self.toggle.setEnabled(not self.stopping and not self.pending_enable)
         if locked:
-            self.w.task_control.button.setVisible(bool(self.running or self.transition or self.w._tasks))
+            self.w.task_control.button.setVisible(busy)
             self.w.task_control.button.setEnabled(not self.stopping)
     def toggled(self,on):
         if on:
@@ -81,9 +85,16 @@ class MeasuredOutput(QtCore.QObject):
         for name in self.saved_overlays:
             widget=w.overlay_widget(name);widget.blockSignals(True);widget.setChecked(False);widget.blockSignals(False)
         w.width_yield.reset();w.reconstruction_yield.reset();w.constraint_feedback.cancel()
+        if hasattr(w,'analysis'):w.analysis.cancel()
+        for timer_name in ('cache_status_timer','viewport_timer','coverage_timer','issue_navigation'):
+            timer=getattr(w,timer_name,None)
+            if timer is not None:timer.stop()
+        if hasattr(w,'reconstruction_overlay'):w.reconstruction_overlay.pulse_timer.stop()
         self.endpoint.setText(str(self.server.endpoint));w.remote_locked=True;w.progress.hide();self.ready=False;self.last_error=None;self.current=None
-        self.pool=ThreadPoolExecutor(max_workers=max(1,min(32,self.options.max_threads or resource_profile()['workers'])),thread_name_prefix='dsa-measured')
-        self.transition={'job':self.new_job('session.freeze'),'phase':'freeze'} if w.data is not None else None;self.apply_lock()
+        profile=resource_profile();cpu=profile['cpu']
+        cpu_target=min(cpu,self.options.max_threads) if self.options.max_threads else max(1,cpu-1 if cpu>=4 else cpu)
+        self.pool=ThreadPoolExecutor(max_workers=max(2,min(32,cpu_target)),thread_name_prefix='dsa-measured')
+        self.transition={'job':self.new_job('session.freeze'),'phase':'freeze'} if w.data is not None else None;self.apply_lock(force=True)
         w.log_bus.emit('实测输出已开启；等待指令，不进行方案评估或良率计算。IPC：'+str(self.server.endpoint))
     def new_job(self,command):
         key=uuid.uuid4().hex;self.jobs[key]=dict(task_id=key,command=command,status='queued',progress=0,created=time.time())
@@ -222,8 +233,13 @@ class MeasuredOutput(QtCore.QObject):
                 if not getattr(w,'_closing',False) and w.data is not None:
                     w.plot_layout(preserve=True);w.request_preview()
                     w.statusBar().showMessage('实测输出已关闭，恢复工程参数和零偏移预览。')
-                self.apply_lock();w.task_control.button.hide();w.task_control.button.setEnabled(True)
-        if self.active():self.apply_lock()
+                if hasattr(w,'cache_status_timer') and not getattr(w,'_closing',False):w.cache_status_timer.start()
+                self.timer.setInterval(75)
+                self.apply_lock(force=True);w.task_control.button.hide();w.task_control.button.setEnabled(True)
+        if self.active():
+            self.apply_lock()
+            desired=250 if self.batch else 75
+            if self.timer.interval()!=desired:self.timer.setInterval(desired)
         if self.transition and not w.worker and not w.preview_workers and not w._tasks:
             t=self.transition;self.transition=None
             if w.data is None:
@@ -369,8 +385,11 @@ class MeasuredOutput(QtCore.QObject):
             error_layer=choose_error_layer(occupied)
             error2_layer=choose_error_layer(occupied,reserved=[error_layer])
             failure_layer=choose_error_layer(occupied,reserved=[error_layer,error2_layer])
-            profile=resource_profile();memory=self.options.memory_budget_mb(profile)
-            per_lane=max(96,int(self.session.cache.bytes*24/1024**2));lanes=max(1,min(self.options.max_threads or profile['workers'],profile['workers'],int(memory*.7)//per_lane))
+            profile=resource_profile();memory=self.options.memory_budget_mb(profile,measured=True)
+            cpu=profile['cpu']
+            cpu_target=min(cpu,self.options.max_threads) if self.options.max_threads else max(1,cpu-1 if cpu>=4 else cpu)
+            per_lane=max(96,int(self.session.cache.bytes*24/1024**2))
+            lanes=max(1,min(cpu_target,int(memory*.85)//per_lane))
             if per_lane>memory:raise MemoryError(f'此图纸估计单任务需{per_lane} MB，超过批次内存限额{memory} MB')
             destination=self.destination(args.get('filename','measured.oas'),'.oas')
             try:
@@ -380,20 +399,21 @@ class MeasuredOutput(QtCore.QObject):
             requested_count=args.get('package_count',0)
             if type(requested_count) is not int or not 0<=requested_count<=10**9:
                 raise ValueError('package_count须为非负整数')
-            # Separate CPU-bound reconstruction and native caches across
-            # processes for large lots, bounded by the same CPU/memory budget.
-            process_memory=max(320,per_lane+160)
-            process_lanes=min(lanes,profile['process_workers'],int(memory*.8)//process_memory,requested_count//3)
-            use_processes=(policy=='omit_failed_regions' and process_lanes>=2
-                           and requested_count>=16)
+            # Dedicated measured output locks the GUI and disables overlays/charts,
+            # so use high-concurrency spawn processes across available CPU cores
+            # while honoring user thread and memory limits.
+            process_memory=max(224,per_lane+128)
+            process_cap=61 if os.name=='nt' else cpu
+            process_lanes=min(lanes,process_cap,int(memory*.85)//process_memory,max(1,requested_count//2) if requested_count else 0)
+            use_processes=(process_lanes>=2 and requested_count>=4)
             if use_processes:
                 lanes=process_lanes
             self.batch=dict(id=uuid.uuid4().hex,client_id=client_id,store=Store(destination.parent,self.session.data.dbu_um,max(1024**2,memory*1024**2//5),checkpoint_destination=destination.with_name(destination.stem+'.'+uuid.uuid4().hex[:12]+'.partial.oas'),error_layer=error_layer,error2_layer=error2_layer,failure_layer=failure_layer,template=template),lock=threading.Lock(),path=destination,baseline=baseline,budget_lock=threading.Lock(),budget_sample=0.,over_budget=False,
-                            executor=ThreadPoolExecutor(max_workers=lanes + max(1,lanes//2) if use_processes else lanes,thread_name_prefix='dsa-batch'),processes=None,pending=set(),inflight=set(),completed=0,failed=0,failures=[],ending=False,lanes=lanes,memory_mb=memory,template_sha256=template_sha256,semaphore=threading.Semaphore(lanes),output_policy=policy,nominal_bypass=nominal_bypass)
+                            executor=ThreadPoolExecutor(max_workers=lanes*2 if use_processes else lanes,thread_name_prefix='dsa-batch'),processes=None,pending=set(),inflight=set(),completed=0,failed=0,failures=[],ending=False,lanes=lanes,memory_mb=memory,template_sha256=template_sha256,semaphore=threading.Semaphore(lanes),output_policy=policy,nominal_bypass=nominal_bypass)
             if use_processes:
                 from .measured_workers import BatchWorkers
                 try:
-                    self.batch['processes']=BatchWorkers(self.session,lanes,int(memory*.8))
+                    self.batch['processes']=BatchWorkers(self.session,lanes,int(memory*.85))
                 except Exception:
                     self.close_batch()
                     raise

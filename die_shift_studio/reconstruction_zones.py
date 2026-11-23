@@ -108,14 +108,30 @@ def live_serial(original,settings,old,ref,draft=False):
     """Recompose every serial segment together, including intermediate copper."""
     from .reconstruction import Reconstructor
     from .reconstruction_status import clone_plan_pool
-    from .resources import cancel_check
+    from .resources import cancel_check,serial_scope
     cancel_check()
     # Only this source's nominal paths are needed during a pointer move. Reuse
     # completed ownership/enclosure classification; do not rebuild all targets.
     base=getattr(original,'_base_plans',None)
-    pool=clone_plan_pool({'local':[q for q in base if (q['layer'],q['index'])==ref]}) if base is not None else clone_plan_pool(original.plan_pool)
+    if base is not None:
+        local_entries=[]
+        for q in base:
+            if (q['layer'],q['index'])!=ref:continue
+            entry=dict(q)
+            if entry.get('plan') is not None:
+                plan=copy.copy(entry['plan'])
+                # Plan caches are keyed by immutable (mode, style, part_key, pose);
+                # reusing a shallow copy avoids recomputing unchanged zones on a
+                # multi-zone polygon during interactive editing.
+                plan.cache=dict(plan.cache)
+                plan.pose_memo=OrderedDict();plan.memo_bytes=0
+                entry['plan']=plan
+            local_entries.append(entry)
+        pool={'local':local_entries}
+    else:
+        pool=clone_plan_pool(original.plan_pool)
     same_rules=(settings.drc_checks,settings.drc_tolerance_um,settings.drc_min_angle_deg)==(original.settings.drc_checks,original.settings.drc_tolerance_um,original.settings.drc_min_angle_deg)
-    rebuilt=Reconstructor(original.model,original.p,settings,plan_pool=pool,reference=original if same_rules else None)
+    rebuilt=Reconstructor(original.model,original.p,settings,plan_pool=pool,geometry_pool=getattr(original,'geometry_pool',None),reference=original if same_rules else None)
     rebuilt.vias_by_target={ref:original.vias_by_target[ref]} if ref in original.vias_by_target else {}
     rebuilt._envelopes=getattr(original,'_envelopes',None)
     if base is not None:
@@ -126,7 +142,8 @@ def live_serial(original,settings,old,ref,draft=False):
         elif pool['local'] and (not draft or ref not in settings.reconstruction_ignored or ref in rebuilt.box_refs):
             rebuilt._base_plans=list(pool['local']);rebuilt._plans=expand(rebuilt,pool['local'])
     try:
-        local=rebuilt.frame(old['states'],targets={ref},diagnostics=False,quick=True,_raw=True)
+        with serial_scope():
+            local=rebuilt.frame(old['states'],targets={ref},diagnostics=False,quick=True,_raw=True)
         data=old['reconstruction']
         rows=[q for q in data['pieces'] if (q['layer'],q['index'])!=ref]+local['pieces']
         changed={k:[v for v in values if not (k==ref[0] and ref[1] in v['indices']) and (draft or 'motion_owner' not in v)] for k,values in data['replacements'].items()}

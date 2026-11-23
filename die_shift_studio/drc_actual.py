@@ -30,8 +30,13 @@ def measured(item,witness):
     if enclosure is not None:
         via,copper=enclosure
         if copper.covers(via):
-            rim=copper.boundary.intersection(witness.buffer(1e-5))
-            return {'actual_um':float(via.boundary.distance(rim if not rim.is_empty else copper.boundary))}
+            from .reconstruction_route import parts
+            c_parts=parts(copper);v_parts=parts(via)
+            if not c_parts or not v_parts:return {}
+            c_poly=c_parts[0] if len(c_parts)==1 else shapely.union_all(c_parts)
+            v_poly=v_parts[0] if len(v_parts)==1 else shapely.union_all(v_parts)
+            rim=c_poly.boundary.intersection(witness.buffer(1e-5))
+            return {'actual_um':float(v_poly.boundary.distance(rim if not rim.is_empty else c_poly.boundary))}
         outside=via.difference(copper).intersection(witness.buffer(1e-5))
         points=shapely.points(shapely.get_coordinates(outside))
         return {'actual_um':-float(np.max(shapely.distance(points,copper),initial=0.))}
