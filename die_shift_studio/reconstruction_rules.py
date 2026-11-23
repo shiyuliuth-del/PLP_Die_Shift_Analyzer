@@ -206,15 +206,17 @@ class FixedRules:
                 _,old=plan.pose_memo.popitem(last=False);plan.memo_bytes-=old[2]
         return dict(best),None,best_score
 
-    def check(self,replacements,states,progress=lambda *_:None):
-        if not self.cfg.drc_checks:progress(100,'尺寸DRC未启用');return []
+    def check(self,replacements,states,progress=None):
+        if not self.cfg.drc_checks:
+            if progress:progress(100,'尺寸DRC未启用')
+            return []
         geos=self.geometries(replacements);out=[];keys=list(geos)
         linked={(layer,i):row['motion_owner'] for layer,rows in (replacements or {}).items() for row in rows if 'motion_owner' in row for i in row['indices']}
         layers={key:tuple(sorted({r[0] for r in self.nets[key]})) for key in keys}
         planes=defaultdict(list)
         for n,key in enumerate(keys):
             cancel_check()
-            progress(round(70*n/max(1,len(keys))),'检查重构线宽、线距与包围量')
+            if progress:progress(round(70*n/max(1,len(keys))),'检查重构线宽、线距与包围量')
             ports=[(ref,linked.get(ref,owner),required) for ref,owner,required in self.vias[key]] if linked else None
             for kind,g in self.local(key,geos[key],states,ports):
                 out.append(dict(kind=kind,geometry=g,layers=layers[key],net=key))
@@ -232,7 +234,7 @@ class FixedRules:
                         if not g.is_empty:
                             a,b=selected[i],selected[j]
                             out.append(dict(kind='异网短接 / 线距不足',geometry=g,layers=tuple(sorted(set(layers[a])|set(layers[b]))),net=(a,b)))
-        progress(100,f'重构约束检查完成 · {len(out)} 组违规')
+        if progress:progress(100,f'重构约束检查完成 · {len(out)} 组违规')
         return out
 
     def candidate_mass(self,plan,part,grid,style,limit=math.inf):

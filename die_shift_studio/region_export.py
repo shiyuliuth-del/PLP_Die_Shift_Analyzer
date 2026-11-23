@@ -216,8 +216,8 @@ def _prepare(snapshot,reconstruction,roles,options,progress):
     groups=[];inputs=merged=0
     for n,(rows,i,m) in enumerate(parallel_iter(layer_contours,tasks,profile)):
         groups.extend(rows);inputs+=i;merged+=m
-        progress(round(55*(n+1)/max(1,len(tasks))),f'拆分真实轮廓：{tasks[n][0]}')
-    progress(56,'去除完全及局部重叠的轮廓线段')
+        if progress:progress(round(55*(n+1)/max(1,len(tasks))),f'拆分真实轮廓：{tasks[n][0]}')
+    if progress:progress(56,'去除完全及局部重叠的轮廓线段')
     groups,shared=_exclusive_outlines(groups)
     return [_merge_outlines(group) for group in groups],shared,inputs,merged
 
@@ -255,10 +255,10 @@ def write_regions(snapshot,reconstruction,roles,path,progress=lambda *_:None,*,s
             for i,block in enumerate(blocks):
                 cancel_check()
                 doc._write_insert(w,block,handles['block_record_model'])
-                if i%128==0:progress(65+round(25*i/len(blocks)),'写出按源图形和图层分组的CAD块')
+                if progress and i%128==0:progress(65+round(25*i/len(blocks)),'写出按源图形和图层分组的CAD块')
             w.add(0,'ENDSEC');doc._write_objects(w,handles);stream.flush();os.fsync(stream.fileno())
         _verify(temp,count,extent)
-        progress(92,'回读核对CAD块、闭合与重复轮廓')
+        if progress:progress(92,'回读核对CAD块、闭合与重复轮廓')
         topology=verify_written_contours(temp,expected_blocks=blocks,expected_references=references,shared_layers=shared)
         digest=hashlib.sha256()
         with open(temp,'rb') as stream:
@@ -267,7 +267,7 @@ def write_regions(snapshot,reconstruction,roles,path,progress=lambda *_:None,*,s
         os.replace(temp,path)
     finally:
         if os.path.exists(temp):os.unlink(temp)
-    progress(100,'动静区DXF输出完成')
+    if progress:progress(100,'动静区DXF输出完成')
     return dict(path=str(path),polygons=count,layers=len(names),sha256=digest.hexdigest(),ignored=snapshot.ignored_count,
                 input_polygons=inputs,merged_polygons=merged,flattened=True,merge_layers=True,scale=options.scale,regions=True,topology=topology,
                 unresolved_regions=sum(not q.get('valid',True) for q in reconstruction.get('pieces',())))

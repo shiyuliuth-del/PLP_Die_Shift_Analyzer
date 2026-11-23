@@ -248,7 +248,7 @@ def _adopt(rows,geometry,tol,reason):
                  warning=reason,compensation_region=overlay(delta,a.buffer(tol*4),'intersection'))
 
 
-def resolve(r,replacements,pieces,states,progress=lambda *_:None):
+def resolve(r,replacements,pieces,states,progress=None):
     """Deterministic whole-pose collision resolution; immutable source identities."""
     out={k:[dict(v) for v in values] for k,values in replacements.items()}
     pieces=[dict(q,regions=dict(q['regions'])) for q in pieces];by_ref={};ports={}
@@ -341,7 +341,8 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
     # Recover electrical discontinuities first; the actual posed foreign copper
     # is an obstacle even when full native DRC artwork was not requested.
     for number,ref in enumerate(sorted(mutable)):
-        cancel_check();progress(round(40*number/max(1,len(mutable))),f'核验实际连接 {number+1}/{len(mutable)} · {ref[0]} #{ref[1]+1}')
+        cancel_check()
+        if progress:progress(round(40*number/max(1,len(mutable))),f'核验实际连接 {number+1}/{len(mutable)} · {ref[0]} #{ref[1]+1}')
         current=objects[ref]
         collided=foreign_hits(ref,current)
         missing=bool(np.any(states) and pad_loss(current,protected[ref],r.tol)>0.)
@@ -356,7 +357,9 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
     # A rerouted candidate is checked against every current neighbour before use.
     refs=list(objects)
     for iteration in range(max(1,len(refs)*2)):
-        cancel_check();progress(40+round(30*iteration/max(1,len(refs)*2)),f'消除异网接触 · 第 {iteration+1} 轮');pairs=foreign_pairs(objects,nets)
+        cancel_check()
+        if progress:progress(40+round(30*iteration/max(1,len(refs)*2)),f'消除异网接触 · 第 {iteration+1} 轮')
+        pairs=foreign_pairs(objects,nets)
         if not pairs:break
         progressed=False
         for left,right in pairs:
@@ -418,8 +421,9 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
     if changed:checked.update(inspect_many(r,{ref:objects[ref] for ref in changed},original,ports,manual_masks,manual_before,terminals))
     previous_percent=-1
     for number,ref in enumerate(sorted(objects)):
-        percent=70+round(20*number/max(1,len(objects)))
-        if percent!=previous_percent:progress(percent,f'最终连接核验 {number+1}/{len(objects)}');previous_percent=percent
+        if progress:
+            percent=70+round(20*number/max(1,len(objects)))
+            if percent!=previous_percent:progress(percent,f'最终连接核验 {number+1}/{len(objects)}');previous_percent=percent
         if any(q.get('box_invalid') for q in by_ref.get(ref,())):blocked.append((ref,'框选动区没有切断运动—固定连接路径，严格区域不能完成适配'))
         if not checked[ref][0]:blocked.append((ref,'无法获得包含全部过孔且保持原拓扑的连通铜'))
         if checked[ref][1]:blocked.append((ref,'固定RDL进入禁布区，无法在保持电连接的同时避让'))
@@ -447,7 +451,7 @@ def resolve(r,replacements,pieces,states,progress=lambda *_:None):
     for layer,rows in out.items():
         for row in rows:
             if len(row['indices'])==1:row['geometry']=objects[layer,row['indices'][0]]
-    progress(100,f'电连接核验完成 · {len(set(blocked))} 项未完成连接')
+    if progress:progress(100,f'电连接核验完成 · {len(set(blocked))} 项未完成连接')
     return out,pieces,tuple(sorted(changed)),tuple(sorted(set(blocked)))
 
 

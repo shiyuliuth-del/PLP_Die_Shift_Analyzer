@@ -17,7 +17,7 @@ def offset_active(part,plan,center,state,style,factor=1.):
     co,si=np.cos(state[2]),np.sin(state[2]);rotation=np.array([[co,-si],[si,co]])
     for j,face in enumerate((near,far)):
         s=effective['a'] if j==0 else effective['b']
-        t=sum(_side_tangent(plan.source,p,plan.tangent(s),plan.tolerance) for p in face)
+        t=sum(_side_tangent(plan,p,plan.tangent(s)) for p in face)
         t/=max(np.linalg.norm(t),1e-20);tangents.append(rotation@t if j==0 else t)
     t0,t1=tangents;c0=moved.mean(axis=0);c1=far.mean(axis=0)
     n0=np.array([-t0[1],t0[0]]);n1=np.array([-t1[1],t1[0]])

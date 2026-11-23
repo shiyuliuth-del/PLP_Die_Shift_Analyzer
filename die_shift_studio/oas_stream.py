@@ -246,7 +246,7 @@ class Store:
         finally:
             if os.path.exists(name):os.unlink(name)
 
-    def write(self,destination,progress=lambda *_:None):
+    def write(self,destination,progress=None):
         if self.finished:raise RuntimeError('Batch OAS already finalized')
         if not self.count:raise ValueError('批次没有成功的封装Cell，不替换已有文件')
         self.flush();destination=Path(destination);self.emit(b'\x0e'+string('TopCell'))
@@ -254,7 +254,7 @@ class Store:
         total=self.db.execute('select count(*) from cells').fetchone()[0]
         for i,(name,x,y) in enumerate(self.db.execute('select target,x,y from packages order by name')):
             cancel_check();self.emit(placement(name,(x,y),dbu=self.dbu))
-            if i%256==0:progress(round(90*i/max(self.count,1)),'输出TopCell封装引用')
+            if progress and i%256==0:progress(round(90*i/max(self.count,1)),'输出TopCell封装引用')
         self.emit(b'\x02'+uint(248)+b'\0'*248+b'\x01');self.stream.write(struct.pack('<I',self.crc))
         self.stream.flush();os.fsync(self.stream.fileno());self.stream.close();self.finished=True
         if not verify_crc(self.stage):raise ValueError('OAS checksum validation failed')

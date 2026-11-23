@@ -4,7 +4,7 @@ import shapely
 from .session_cache import SessionCache, EphemeralCache
 from .preview import rigid_transform
 from .drc_rules import effective_rules
-from .resources import cancel_check
+from .resources import cancel_check,progress_slice
 
 AUTO_LANDING_DIAMETERS=2.5
 SCOPE='名义路径上的共用A/B/C分区；明确分区的连接失败时保留两侧实体并断开标红；无法确定分区时保留源图，不代表产线签认或完整DRC。'
@@ -190,6 +190,7 @@ class Reconstructor:
         self.vias=[];self.stays=[];self.vias_by_target={};self._plans=None;self.manual_quality={};self.manual_masses={}
         self.plan_pool=plan_pool if plan_pool is not None else {}
         self._last_raw_frames={}
+        self._nominal_intervals={}
         from .resources import resource_profile
         geometry_mb=max(4,min(512,resource_profile()['memory_budget_mb']//24))
         self.geometry_pool=geometry_pool if geometry_pool is not None else EphemeralCache(
@@ -523,7 +524,7 @@ class Reconstructor:
                     row=build_source(source,landing(via),[anchor],[via],pair_route=True)
                     row.update(graph_branch=True,moving_nominal=land,fixed_nominal=shapely.union_all(fixed))
                     rows.append(row)
-                    if number%8==0:progress(25,f'分叉连接 {layer} #{index+1}：{number+1}/{len(pairs)}')
+                    if progress and number%8==0:progress(25,f'分叉连接 {layer} #{index+1}：{number+1}/{len(pairs)}')
                 if rows and all(q['plan'] is not None for q in rows):return rows
             from .reconstruction_route import branch_sources
             branches=branch_sources(source,land,fixed,mine[0]['center'],self._rule_width,self.tol,self.settings.reconstruction_corner_guard_um)
@@ -572,7 +573,7 @@ class Reconstructor:
         missing=[(key,task) for key,task in zip(keys,groups) if key not in self.plan_pool]
         from .resources import native_phase_profile
         built=parallel_map(lambda item:(item[0],build(item[1])),missing,profile=native_phase_profile(),
-                           progress=lambda n,total:progress(round(65*n/max(1,total)),f'建立全姿态共用动区 {n}/{total}'))
+                           progress=(lambda n,total:progress(round(65*n/max(1,total)),f'建立全姿态共用动区 {n}/{total}')) if progress else None)
         self.plan_pool.update(built)
         keep=set(keys)
         for old_key in list(self.plan_pool):
@@ -707,31 +708,31 @@ class Reconstructor:
         updated=replace(self.settings,reconstruction_intervals=tuple(rows))
         return updated,dict(part,clamped=clamped)
 
-    def complete_copper(self,raw,states,progress=lambda *_:None,*,quick=False,deformation=None):
+    def complete_copper(self,raw,states,progress=None,*,quick=False,deformation=None):
         """Validate the supplied raw copper once and reuse it for the fallback decision."""
         from .topology_routing import resolve
-        out,pieces,changed,blocked=resolve(self,raw['replacements'],raw['pieces'],states,lambda n,t:progress(35+round(n*.3),t))
+        out,pieces,changed,blocked=resolve(self,raw['replacements'],raw['pieces'],states,progress_slice(progress,35,.3))
         if blocked and not quick:
             blocked_refs={tuple(ref) for ref,_ in blocked}
             if any((q['layer'],q['index']) in blocked_refs and not q.get('ignored') and (q.get('route_available') or q.get('route_plan') is not None) for q in pieces):
-                alternate=self._raw_frame(states,deformation,lambda n,t:progress(65+round(n*.1),t),True,diagnostics=False)
-                ao,ap,ac,ab=resolve(self,alternate['replacements'],alternate['pieces'],states,lambda n,t:progress(75+round(n*.15),t))
+                alternate=self._raw_frame(states,deformation,progress_slice(progress,65,.1),True,diagnostics=False)
+                ao,ap,ac,ab=resolve(self,alternate['replacements'],alternate['pieces'],states,progress_slice(progress,75,.15))
                 if len(ab)<len(blocked):raw,out,pieces,changed,blocked=alternate,ao,ap,ac,ab
         return raw,out,pieces,changed,blocked
 
-    def frame(self,states,deformation=None,progress=lambda *_:None,quick=False,*,targets=None,diagnostics=True,render_cache=None,_raw=False):
+    def frame(self,states,deformation=None,progress=None,quick=False,*,targets=None,diagnostics=True,render_cache=None,_raw=False):
         if _raw:return self._raw_frame(states,deformation,progress,quick,targets=targets,diagnostics=diagnostics,render_cache=render_cache)
         states=np.asarray(states,float);key=(states.tobytes(),'electrical-continuity',bool(quick),bool(diagnostics),None if targets is None else tuple(sorted(targets)))
         hit=self.cache.get(key) if diagnostics else None
         if hit is not None:return hit
-        raw=self._raw_frame(states,deformation,lambda n,t:progress(round(n*.35),t),quick,diagnostics=False,render_cache=render_cache)
+        raw=self._raw_frame(states,deformation,progress_slice(progress,0,.35),quick,diagnostics=False,render_cache=render_cache)
         raw,out,pieces,changed,blocked=self.complete_copper(raw,states,progress,quick=quick,deformation=deformation)
         from .topology_routing import spacing
         from .ignored_motion import add_linked_geometry
         out=add_linked_geometry(self,out,states)
         result=dict(raw,replacements=out,pieces=pieces,repair_refs=changed,hard_failures=blocked,
                     electrically_valid=not bool(blocked),constraints_complete=bool(diagnostics))
-        result['violations']=self.rules.check(out,states,lambda n,t:progress(90+round(n*.09),t)) if diagnostics else []
+        result['violations']=self.rules.check(out,states,progress_slice(progress,90,.09)) if diagnostics else []
         result['original_violations']=self.rules.nominal_check() if diagnostics else ()
         if diagnostics:spacing(self,out,pieces)
         decorate_problems(result)
@@ -746,24 +747,25 @@ class Reconstructor:
         if diagnostics:
             if not np.any(states) and targets is None:self.cache.pin(key)
             self.cache[key]=result
-        progress(100,f'重构预演完成；{len(changed)}处电连接补偿，{len(blocked)}处无可用解')
+        if progress:progress(100,f'重构预演完成；{len(changed)}处电连接补偿，{len(blocked)}处无可用解')
         return result
 
-    def _raw_frame(self,states,deformation=None,progress=lambda *_:None,quick=False,*,targets=None,diagnostics=True,render_cache=None):
+    def _raw_frame(self,states,deformation=None,progress=None,quick=False,*,targets=None,diagnostics=True,render_cache=None):
         from .reconstruction_route import warp,EMPTY,failed_connection,missing_area
         states=np.asarray(states,float)
         key=(states.tobytes(),'shared-route-v42-quick' if quick else 'shared-route-v42',bool(diagnostics),None if targets is None else tuple(sorted(targets)))
         hit=self.cache.get(key) if diagnostics else None
         if hit is not None:return hit
-        entries=self._plans_for_all_poses(progress);pieces=[];features={}
+        catalogue=self._plans_for_all_poses(progress);pieces=[];features={}
+        if self._entry_catalogue is not catalogue:
+            by_ref={}
+            for entry in catalogue:
+                by_ref.setdefault((entry['layer'],entry['index']),[]).append(entry)
+            self._entries_by_ref=by_ref;self._entry_catalogue=catalogue
+            self._nominal_intervals={}
         selected=None if targets is None else set(map(tuple,targets))
-        if selected is not None:
-            if self._entry_catalogue is not entries:
-                by_ref={}
-                for entry in entries:
-                    by_ref.setdefault((entry['layer'],entry['index']),[]).append(entry)
-                self._entries_by_ref=by_ref;self._entry_catalogue=entries
-            entries=[q for ref in sorted(selected) for q in self._entries_by_ref.get(ref,())]
+        entries=catalogue if selected is None else [q for ref in sorted(selected) for q in self._entries_by_ref.get(ref,())]
+        nominal_intervals=self._nominal_intervals
         from .reconstruction_incremental import reusable
         retained,retained_pieces=reusable(self,states,selected)
         retained_refs={(layer,i) for layer,rows in retained.items() for row in rows for i in row['indices']}
@@ -786,10 +788,14 @@ class Reconstructor:
             if render_cache is not None and token in render_cache:
                 part,manual,regions,error,warning=render_cache[token]
                 return part,manual,None if regions is None else dict(regions),error,warning
-            cancel_check();part,manual=self.interval(entry)
+            cancel_check()
+            if token[0] not in nominal_intervals:
+                nominal_intervals[token[0]]=self.interval(entry)
+            part,manual=nominal_intervals[token[0]]
             if part is None:return part,manual,None,None,entry['warning']
             from .reconstruction_route import part_key
-            local_key=(entry['plan'].key,entry['plan'].identity,part_key(part),part.get('manual_angles'),bool(manual),bool(diagnostics),bool(quick),self.rules.identity,self.settings.reconstruction_style,self.settings.reconstruction_boundary_mode,tuple(self.model.bound.centers[entry['owner']]),token[1],entry.get('serial_left'),entry.get('serial_right'),entry.get('serial_block',shapely.Polygon()).wkb)
+            block=entry.get('serial_block',EMPTY)
+            local_key=(entry['plan'].key,entry['plan'].identity,part_key(part),part.get('manual_angles'),bool(manual),bool(diagnostics),bool(quick),self.rules.identity,self.settings.reconstruction_style,self.settings.reconstruction_boundary_mode,tuple(self.model.bound.centers[entry['owner']]),token[1],entry.get('serial_left'),entry.get('serial_right'),block.wkb)
             cached=self.geometry_pool.get(local_key)
             if cached is not None:
                 saved_part,saved_manual,saved_regions,saved_error,saved_warning=cached
@@ -930,7 +936,7 @@ class Reconstructor:
                                  rule_space_um=self.rule_space,movable_area_um2=sum(q['movable_area_um2'] for q in pieces),
                                  fixed_area_um2=sum(q['fixed_area_um2'] for q in pieces),cover_area_um2=sum(q['bridge_area_um2'] for q in pieces),
                                  max_shift_um=max((q['shift_um'] for q in pieces),default=0.),regions_used=len(self.settings.reconstruction_regions),regions_ambiguous=0))
-        result['violations']=self.rules.check(out,states,lambda n,t:progress(90+round(n*.09),t)) if diagnostics else []
+        result['violations']=self.rules.check(out,states,progress_slice(progress,90,.09)) if diagnostics else []
         result['original_violations']=self.rules.nominal_check() if diagnostics else ()
         result['constraints_complete']=bool(diagnostics)
         decorate_problems(result)
@@ -940,5 +946,5 @@ class Reconstructor:
         if targets is None:
             self._last_raw_frames[states.tobytes()]=result
             while len(self._last_raw_frames)>4:self._last_raw_frames.pop(next(iter(self._last_raw_frames)))
-        progress(100,f'重构预演：{len(pieces)} 个共用动区')
+        if progress:progress(100,f'重构预演：{len(pieces)} 个共用动区')
         return result

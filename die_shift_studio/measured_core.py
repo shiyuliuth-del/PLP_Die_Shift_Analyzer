@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import shapely
 from .core import Parameters
-from .resources import cancel_check,resource_profile
+from .resources import cancel_check,resource_profile,progress_slice
 
 
 @dataclass(frozen=True)
@@ -79,7 +79,7 @@ class Session:
         self.local.model=(key,model,r)
         with self.lock:self.instances.append(r)
         return model,r
-    def prepare(self,progress):
+    def prepare(self,progress=None):
         _,r=self.model(self.p);self.ensure_plans(r,progress)
     def ensure_plans(self,r,progress):
         # First batch request plans once; other lanes clone immutable nominal
@@ -90,13 +90,13 @@ class Session:
             with self.lock:r.plan_pool.update(clone_plan_pool(self.plan_pool))
             r._plans_for_all_poses(progress)
             with self.lock:self.plan_pool.update(clone_plan_pool(r.plan_pool))
-    def run(self,rows,progress=lambda *_:None,*,preview=True,diagnostic=False,output_policy='strict'):
+    def run(self,rows,progress=None,*,preview=True,diagnostic=False,output_policy='strict'):
         if output_policy not in ('strict','omit_failed_regions'):raise ValueError('未知实测输出策略')
         states,p=pose_parameters(self.case,self.p,rows);model,r=self.model(p)
-        self.ensure_plans(r,lambda n,t:progress(round(n*.2),t))
+        self.ensure_plans(r,progress_slice(progress,0,.2))
         # Measured commands check their own actual-copper DRC; no other poses,
         # probability, width analysis or yield work is started.
-        result=r.frame(states,progress=lambda n,t:progress(20+round(n*.5),t),diagnostics=preview)
+        result=r.frame(states,progress=progress_slice(progress,20,.5),diagnostics=preview)
         bound=self.cache.bind(self.case,self.motions,list(self.cache.layers),p)
         bound.acceleration=self.settings.acceleration
         layers=bound.transform(states)
@@ -109,13 +109,13 @@ class Session:
         from .measured_issues import catalogue
         from .reconstruction_diagnostic import markers
         if not hasattr(r,'display_drc'):r.display_drc=GlobalDRC(model,p)
-        frame['drc']=r.display_drc.frame(states,result['replacements'],self.settings,lambda n,t:progress(70+round(n*.15),t),electrical=True)
+        frame['drc']=r.display_drc.frame(states,result['replacements'],self.settings,progress_slice(progress,70,.15),electrical=True)
         frame['drc'].extend(markers(result,self.data.dbu_um));frame['measure_drc']=bool(preview)
         original_failures=tuple(result.get('hard_failures',()));omissions=[]
         if original_failures and output_policy=='omit_failed_regions':
             from .partial_output import omit
             frame,omissions=omit(model,frame)
-            frame['drc'].extend(r.display_drc.frame(states,frame['reconstruction']['replacements'],self.settings,lambda n,t:progress(85+round(n*.1),t),electrical=True))
+            frame['drc'].extend(r.display_drc.frame(states,frame['reconstruction']['replacements'],self.settings,progress_slice(progress,85,.1),electrical=True))
             for q in omissions:
                 if q.get('quantization'):frame['drc'].append(dict(layer=q['layer'],layers=(q['layer'],),refs=((q['layer'],q['index']),),kind=q['reason'],geometry=shapely.box(*q['bounds_um']),connection_failure=True))
         frame['drc_locations']=locations(frame['drc'],measure=preview,separate_shorts=True)
@@ -130,9 +130,10 @@ class Session:
             raise DiagnosticFailure(failure_message(result['hard_failures']),frame,details)
         failures=[dict(layer=q['layer'],index=q['index'],reason=q.get('warning','无法连接')) for q in result['pieces'] if q.get('connection_failed')]
         from .dxf_export import snapshot
-        frozen=snapshot(self.data,self.cache,frame,reconstruction=True,progress=lambda n,t:progress(95+round(n*.04),t),allow_partial=bool(frame.get('partial_output_validated')))
+        frozen=snapshot(self.data,self.cache,frame,reconstruction=True,progress=progress_slice(progress,95,.04),allow_partial=bool(frame.get('partial_output_validated')))
         for blobs in frozen.layers.values():
             for b in blobs:
+                cancel_check()
                 g=shapely.from_wkb(b)
                 if not g.is_valid or not np.isfinite(shapely.get_coordinates(g)).all():raise ValueError('重构结果无效，拒绝输出')
         # Keep the last interactive pose only; batch cannot fill the GUI LRU.

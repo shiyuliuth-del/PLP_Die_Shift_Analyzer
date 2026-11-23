@@ -16,14 +16,21 @@ def _angle(v):return math.atan2(v[1],v[0])
 def wrap(v):return (v+math.pi)%(2*math.pi)-math.pi
 
 
-def side_direction(sides,point,fallback):
-    """Tangent of the actual reconstructed edge, excluding the artificial cut."""
-    best=None
+def _side_segments(sides):
+    segments=[]
     for side in sides:
         xy=np.asarray(side.coords);a=xy[:-1];v=np.diff(xy,axis=0);length=np.linalg.norm(v,axis=1)
-        good=length>1e-12;a=a[good];v=v[good];length=length[good]
-        if not len(a):continue
-        t=np.clip(np.sum((point-a)*v,axis=1)/length**2,0,1)
+        good=length>1e-12
+        if np.any(good):
+            segments.append((a[good],v[good],length[good],length[good]**2))
+    return segments
+
+
+def side_direction(segments,point,fallback):
+    """Tangent of the actual reconstructed edge, excluding the artificial cut."""
+    best=None
+    for a,v,length,length_squared in segments:
+        t=np.clip(np.sum((point-a)*v,axis=1)/length_squared,0,1)
         distances=np.linalg.norm(a+t[:,None]*v-point,axis=1);i=int(np.argmin(distances))
         if best is None or distances[i]<best[0]:best=(distances[i],v[i]/length[i])
     if best is None:return fallback
@@ -41,17 +48,19 @@ def measure(part,plan,center,pose,regions):
     sides=[g for g in shapely.get_parts(body.boundary.difference(faces)) if g.geom_type=='LineString']
     sides=sorted(sides,key=lambda g:g.length,reverse=True)[:2]
     width=float(sides[0].distance(sides[1])) if len(sides)==2 else 0.
+    segments=_side_segments(sides)
     # Transverse cut angles measured against BOTH neighbouring boundary sides.
     co,si=np.cos(pose[2]),np.sin(pose[2]);rotation=np.array([[co,-si],[si,co]])
+    face0=moved[1]-moved[0];face0/=np.linalg.norm(face0);face1=far[1]-far[0];face1/=np.linalg.norm(face1)
+    t_near=plan.tangent(effective['a']);t_far=plan.tangent(effective['b'])
     angles=[]
     for j in range(2):
         direction=far[j]-moved[j];length=np.linalg.norm(direction)
         if length<plan.tolerance:angles.extend((0.,0.));continue
         direction/=length
-        a=rotation@_side_tangent(plan.source,near[j],plan.tangent(effective['a']),plan.tolerance)
-        b=_side_tangent(plan.source,far[j],plan.tangent(effective['b']),plan.tolerance)
-        left=side_direction(sides,moved[j],direction);right=side_direction(sides,far[j],direction)
-        face0=moved[1]-moved[0];face0/=np.linalg.norm(face0);face1=far[1]-far[0];face1/=np.linalg.norm(face1)
+        a=rotation@_side_tangent(plan,near[j],t_near)
+        b=_side_tangent(plan,far[j],t_far)
+        left=side_direction(segments,moved[j],direction);right=side_direction(segments,far[j],direction)
         angles.extend(math.acos(np.clip(abs(edge@face),0,1)) for edge,face in ((a,face0),(left,face0),(b,face1),(right,face1)))
     # A slanted cut shares its turning burden with BOTH adjacent zones. The
     # smallest of the four corner angles dominates; the average breaks ties.

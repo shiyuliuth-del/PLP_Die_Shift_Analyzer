@@ -42,13 +42,14 @@ def export_dxf(window,regions=False):
     def work(progress):
         from .fast_preview import GeometryCache
         from .dxf_export import snapshot,write
-        progress(0,'冻结当前GDS几何')
+        from .resources import progress_slice
+        if progress:progress(0,'冻结当前GDS几何')
         current_frame=frame
         if regions:
             split=(frame or {}).get('reconstruction')
             reusable=bool(frame is not None and not __import__('numpy').any(frame['states']) and flags['reconstruction'] and split and split.get('complete') and split.get('constraints_complete') and split.get('configuration')==view.reconstruction_key())
             if reusable:
-                progress(4,'复用当前已完成的重构图形')
+                if progress:progress(4,'复用当前已完成的重构图形')
             else:
                 from .reconstruction import Reconstructor
                 import numpy as np
@@ -61,13 +62,13 @@ def export_dxf(window,regions=False):
             split=dict(split,pieces=[dict(q,regions=q['nominal_regions']) for q in split['pieces']])
             flags['reconstruction']=False
             current_frame=dict(states=__import__('numpy').zeros((len(model.case['dies']),3)))
-        current=snapshot(data,cache or GeometryCache(data),current_frame,progress=lambda n,t:progress(round(n*.2),t),**flags)
+        current=snapshot(data,cache or GeometryCache(data),current_frame,progress=progress_slice(progress,0,.2),**flags)
         from dataclasses import replace
         current=replace(current,layers={k:v for k,v in current.layers.items() if k in selected})
         if regions:
             from .region_export import write_regions
-            result=write_regions(current,split,roles,destination,lambda n,t:progress(20+round(n*.8),t),settings=options)
-        else:result=write(current,destination,lambda n,t:progress(20+round(n*.8),t),settings=options)
+            result=write_regions(current,split,roles,destination,progress_slice(progress,20,.8),settings=options)
+        else:result=write(current,destination,progress_slice(progress,20,.8),settings=options)
         result['states']=current.states.tolist() if current.states is not None else None
         return result
     def complete(result):

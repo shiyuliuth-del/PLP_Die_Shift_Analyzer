@@ -7,15 +7,15 @@ import json,os,threading,time,uuid
 import numpy as np
 from .qt_compat import QtCore,QtWidgets as W,Signal
 from .measured_core import Options,Session,write_gds
-from .resources import cancellation_scope,resource_profile,cancel_check
+from .resources import cancellation_scope,resource_profile,cancel_check,budget_scope
 
 
 class MeasuredOutput(QtCore.QObject):
-    incoming=Signal(object,object,object);finished=Signal(str,object,object);progressed=Signal(str,int,str)
+    incoming=Signal(object,object,object);finished=Signal(str,object,object)
     def __init__(self,w,layout):
         super().__init__(w);self.w=w;self.server=None;self.session=None;self.options=Options();self.jobs=OrderedDict()
         self.pending_enable=False;self.pool=None;self.generation=0;self.batch=None;self.current=None;self.render_engine=None;self.ready=False;self.last_error=None;self.transition=None;self.running={};self.stopping=False;self.requests=OrderedDict()
-        self.incoming.connect(self.dispatch);self.finished.connect(self.complete);self.progressed.connect(self.progress)
+        self.incoming.connect(self.dispatch);self.finished.connect(self.complete)
         self.toggle=W.QCheckBox('实测输出');self.toggle.setStyleSheet('font-weight:bold; padding:4px 2px;');layout.addWidget(self.toggle)
         self.settings_header,self.settings_body,form=w.collapsible(layout,'实测输出参数',w.setting_sections);self.toggle.toggled.connect(self.toggled)
         self.directory=W.QLineEdit();self.directory.setPlaceholderText('输出目录，可通过output.configure设置');form.addRow('输出目录',self.directory)
@@ -41,7 +41,9 @@ class MeasuredOutput(QtCore.QObject):
             if widget is not None:widget.setEnabled(not locked)
         for widget in (self.directory,self.memory,self.threads):widget.setEnabled(not self.active())
         self.toggle.setEnabled(not self.stopping and not self.pending_enable)
-        if self.active() or self.stopping:self.w.task_control.button.setEnabled(not self.stopping)
+        if locked:
+            self.w.task_control.button.setVisible(bool(self.running or self.transition or self.w._tasks))
+            self.w.task_control.button.setEnabled(not self.stopping)
     def toggled(self,on):
         if on:
             try:self.enable()
@@ -79,7 +81,7 @@ class MeasuredOutput(QtCore.QObject):
         for name in self.saved_overlays:
             widget=w.overlay_widget(name);widget.blockSignals(True);widget.setChecked(False);widget.blockSignals(False)
         w.width_yield.reset();w.reconstruction_yield.reset();w.constraint_feedback.cancel()
-        self.endpoint.setText(str(self.server.endpoint));w.remote_locked=True;self.ready=False;self.last_error=None;self.current=None
+        self.endpoint.setText(str(self.server.endpoint));w.remote_locked=True;w.progress.hide();self.ready=False;self.last_error=None;self.current=None
         self.pool=ThreadPoolExecutor(max_workers=max(1,min(32,self.options.max_threads or resource_profile()['workers'])),thread_name_prefix='dsa-measured')
         self.transition={'job':self.new_job('session.freeze'),'phase':'freeze'} if w.data is not None else None;self.apply_lock()
         w.log_bus.emit('实测输出已开启；等待指令，不进行方案评估或良率计算。IPC：'+str(self.server.endpoint))
@@ -101,17 +103,11 @@ class MeasuredOutput(QtCore.QObject):
         def work():
             try:
                 with cancellation_scope(event):
-                    last=[0.]
-                    def progress(n,text):
-                        cancel_check();now=time.monotonic()
-                        if now-last[0]>.1:last[0]=now;self.progressed.emit(key,int(n),str(text))
-                    result=fn(progress);cancel_check()
+                    result=fn();cancel_check()
                     from .measured_issues import write
                     if kind=='preview':
-                        self.progressed.emit(key,99,'保存完整DRC问题目录')
                         product,engine=result;frame,snapshot,details=product;result=((frame,snapshot,write(issue_path,key,details)),engine)
                     elif isinstance(result,dict):
-                        if 'drc_issues' in result:self.progressed.emit(key,99,'保存完整DRC问题目录')
                         result=write(issue_path,key,result)
                 self.finished.emit(key,result,None)
             except Exception as exc:
@@ -122,17 +118,13 @@ class MeasuredOutput(QtCore.QObject):
                     from .measured_issues import write
                     try:
                         with cancellation_scope(event):
-                            cancel_check();self.progressed.emit(key,99,'保存完整DRC问题目录')
+                            cancel_check()
                             payload=dict(payload,ipc_details=write(issue_path,key,getattr(exc,'details',{})))
                     except Exception as storage_error:
                         payload=dict(payload,ipc_details=dict(drc_status='catalog_write_error',message=str(storage_error)))
                 self.finished.emit(key,payload,(type(exc).__name__,str(exc)))
         executor=self.batch['executor'] if kind=='batch.pose' and self.batch else self.pool
         executor.submit(work);return dict(status='accepted',task_id=key)
-    def progress(self,key,n,message):
-        if key not in self.jobs:return
-        self.jobs[key].update(progress=max(0,min(100,n)),message=message)
-        self.w.progress.show();self.w.progress.setValue(max(0,min(100,n)));self.w.progress.setFormat(message+' %p%')
     def complete(self,key,result,error):
         event,gen,kind=self.running.pop(key,(None,-1,''));job=self.jobs.get(key)
         if job is None:return
@@ -180,6 +172,24 @@ class MeasuredOutput(QtCore.QObject):
             self.last_error=dict(type='ProjectError',message=str(message))
             self.jobs[self.transition['job']].update(status='error',error=self.last_error);self.transition=None;self.ready=False
             self.w.statusBar().showMessage('实测准备失败：'+str(message).splitlines()[0]+'；关闭实测输出后可调整工程。')
+    @staticmethod
+    def check_batch_memory(batch, *, force=False):
+        if not batch['baseline']:return
+        message='批次增量内存超过配置上限；已分段暂存，任务未输出，请降低并发或提高预算'
+        if batch['over_budget']:raise MemoryError(message)
+        now=time.monotonic()
+        if not force and now-batch['budget_sample']<.25:return
+        with batch['budget_lock']:
+            if batch['over_budget']:raise MemoryError(message)
+            if not force and now-batch['budget_sample']<.25:return
+            batch['budget_sample']=now
+            import psutil
+            budget=batch['memory_mb']//5 if batch['processes'] else batch['memory_mb']
+            if psutil.Process().memory_info().rss-batch['baseline']<=budget*1024**2:return
+            batch['over_budget']=True
+        with batch['lock']:batch['store'].flush()
+        raise MemoryError(message)
+
     def close_batch(self):
         batch=self.batch
         self.batch=None
@@ -212,7 +222,7 @@ class MeasuredOutput(QtCore.QObject):
                 if not getattr(w,'_closing',False) and w.data is not None:
                     w.plot_layout(preserve=True);w.request_preview()
                     w.statusBar().showMessage('实测输出已关闭，恢复工程参数和零偏移预览。')
-                self.apply_lock();w.task_control.button.setEnabled(True)
+                self.apply_lock();w.task_control.button.hide();w.task_control.button.setEnabled(True)
         if self.active():self.apply_lock()
         if self.transition and not w.worker and not w.preview_workers and not w._tasks:
             t=self.transition;self.transition=None
@@ -223,21 +233,18 @@ class MeasuredOutput(QtCore.QObject):
                 existing_case=w.case
             except Exception as exc:
                 self.transition=t;self.fail_transition(str(exc));return
-            def prepare(progress):
+            def prepare():
                 from .core import build_case
                 from .fast_preview import GeometryCache
-                progress(5,'建立实测连接快照')
                 actual_cache=cache or GeometryCache(data)
                 case=existing_case or build_case(data,roles,layer_order=t['order'])
                 session=Session(data,case,roles,motions,p,settings,actual_cache)
                 try:
-                    if t.get('plan'):session.prepare(progress)
-                    progress(100,'实测工程就绪，等待偏移指令');return session
+                    if t.get('plan'):session.prepare()
+                    return session
                 except Exception:session.close();raise
             t['order']=w.ordered_layers()
             self.submit('session.prepare' if t.get('plan') else 'session.freeze',prepare,'prepare',t['job'])
-        if self.active() and not self.running and not w._tasks:
-            w.progress.hide();w.progress.setFormat('%p%')
     def stop(self,disable=False):
         self.pending_enable=False;self.generation+=1;self.ready=False;self.current=None
         if self.batch and self.batch.get('processes'):
@@ -322,8 +329,8 @@ class MeasuredOutput(QtCore.QObject):
             rows=args['dies'];session=self.session
             from .measured_core import pose_parameters
             pose_parameters(session.case,session.p,rows)
-            def preview(progress):
-                product=session.run(rows,progress,preview=False,diagnostic=True);_,p=pose_parameters(session.case,session.p,rows)
+            def preview():
+                product=session.run(rows,preview=False,diagnostic=True);_,p=pose_parameters(session.case,session.p,rows)
                 model,reconstructor=session.model(p)
                 from .fast_preview import PreviewEngine
                 engine=PreviewEngine(session.cache,session.case,session.roles,session.motions,p,None,session.case['connections'],contact_model=model)
@@ -337,7 +344,7 @@ class MeasuredOutput(QtCore.QObject):
             if snapshot is None or details.get('diagnostic_only'):raise ValueError('失败姿态仅用于诊断显示，不能输出制造图纸')
             if details['connection_failure_count'] and not args.get('allow_failed',False):raise ValueError('存在未连接动区，拒绝正常生产输出；可显式allow_failed仅输出诊断用实际铜')
             destination=self.destination(args.get('filename','measured.gds'),'.gds')
-            return self.submit(command,lambda progress:dict(write_gds(snapshot,destination,self.session.data.dbu_um),**details),'export')
+            return self.submit(command,lambda:dict(write_gds(snapshot,destination,self.session.data.dbu_um),**details),'export')
         if command=='batch.begin':
             if self.running or self.batch:raise RuntimeError('已有任务或批次')
             client_id=args.get('client_id')
@@ -381,7 +388,7 @@ class MeasuredOutput(QtCore.QObject):
                            and requested_count>=16)
             if use_processes:
                 lanes=process_lanes
-            self.batch=dict(id=uuid.uuid4().hex,client_id=client_id,store=Store(destination.parent,self.session.data.dbu_um,max(1024**2,memory*1024**2//5),checkpoint_destination=destination.with_name(destination.stem+'.'+uuid.uuid4().hex[:12]+'.partial.oas'),error_layer=error_layer,error2_layer=error2_layer,failure_layer=failure_layer,template=template),lock=threading.Lock(),path=destination,baseline=baseline,
+            self.batch=dict(id=uuid.uuid4().hex,client_id=client_id,store=Store(destination.parent,self.session.data.dbu_um,max(1024**2,memory*1024**2//5),checkpoint_destination=destination.with_name(destination.stem+'.'+uuid.uuid4().hex[:12]+'.partial.oas'),error_layer=error_layer,error2_layer=error2_layer,failure_layer=failure_layer,template=template),lock=threading.Lock(),path=destination,baseline=baseline,budget_lock=threading.Lock(),budget_sample=0.,over_budget=False,
                             executor=ThreadPoolExecutor(max_workers=lanes + max(1,lanes//2) if use_processes else lanes,thread_name_prefix='dsa-batch'),processes=None,pending=set(),inflight=set(),completed=0,failed=0,failures=[],ending=False,lanes=lanes,memory_mb=memory,template_sha256=template_sha256,semaphore=threading.Semaphore(lanes),output_policy=policy,nominal_bypass=nominal_bypass)
             if use_processes:
                 from .measured_workers import BatchWorkers
@@ -416,35 +423,28 @@ class MeasuredOutput(QtCore.QObject):
                         store.flush()
                     return dict(cell=name,checkpoint=str(store.checkpoint_destination),
                                 checkpoint_cells=store.checkpoint_count,**markers)
-            def produce(progress):
+            def produce():
                 store=batch['store']
                 origin=session.case['board'].bounds[:2]
                 if use_nominal:
                     from .dxf_export import snapshot
-                    progress(85,'写入共享名义封装')
                     receipt=commit(store,lambda:store.add_nominal(
                         name,position,origin,lambda:snapshot(session.data,session.cache).layers))
+                    self.check_batch_memory(batch)
                     return dict(receipt,use_nominal=True,fixed_rdl_drc_checked=False,drc_passed=None,
                                 position_um=position.tolist(),output_policy=batch['output_policy'])
                 while not batch['semaphore'].acquire(timeout=.1):cancel_check()
                 try:
                     from .resources import serial_scope
-                    def bounded_progress(n,message):
-                        progress(n,message)
-                        if batch['baseline']:
-                            import psutil
-                            budget=batch['memory_mb']//5 if batch['processes'] else batch['memory_mb']
-                            if psutil.Process().memory_info().rss-batch['baseline']>budget*1024**2:
-                                with batch['lock']:batch['store'].flush()
-                                raise MemoryError('批次增量内存超过配置上限；已分段暂存，任务未输出，请降低并发或提高预算')
                     try:
-                        if batch['processes']:
-                            layers,details=batch['processes'].solve(rows,batch['output_policy'],progress)
-                            bounded_progress(98,'整理并写入实际铜')
-                        else:
-                            with serial_scope():
-                                _,snapshot,details=session.run(rows,bounded_progress,preview=False,output_policy=batch['output_policy'])
-                            layers=snapshot.layers
+                        with budget_scope(lambda:self.check_batch_memory(batch)):
+                            if batch['processes']:
+                                layers,details=batch['processes'].solve(rows,batch['output_policy'])
+                            else:
+                                with serial_scope():
+                                    _,snapshot,details=session.run(rows,preview=False,output_policy=batch['output_policy'])
+                                layers=snapshot.layers
+                            self.check_batch_memory(batch,force=True)
                     except Exception as exc:
                         if hasattr(exc,'details'):
                             from .measured_issues import place
@@ -466,10 +466,10 @@ class MeasuredOutput(QtCore.QObject):
             if batch is None or batch['ending']:raise RuntimeError('没有可结束的批次')
             if args.get('batch_id')!=batch['id']:raise ValueError('批次标识不匹配')
             batch['ending']=True
-            def finish(progress):
+            def finish():
                 while batch['inflight']:cancel_check();time.sleep(.05)
                 if batch['failed']:raise ValueError(f"批次有{batch['failed']}项失败/取消任务，保留旧输出文件。前100任务："+','.join(batch['failures']))
-                with batch['lock']:return dict(batch['store'].write(batch['path'],progress),template_sha256=batch['template_sha256'])
+                with batch['lock']:return dict(batch['store'].write(batch['path']),template_sha256=batch['template_sha256'])
             return self.submit(command,finish,'batch.end')
         raise ValueError('未知命令：'+command)
     def destination(self,name,extension):
