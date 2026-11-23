@@ -63,9 +63,10 @@ def partition(plan,polygon):
         u=np.asarray(edge.coords[-1])-edge.coords[0];v=plan.tangent(s);normal=np.array([-v[1],v[0]])
         angle=math.atan2(u[1],u[0])-math.atan2(normal[1],normal[0])
         return (angle+math.pi/2)%math.pi-math.pi/2
-    whole_moving_pad=not plan.allows_pad_point and not plan.land.is_empty and plan.land.difference(active).area<=plan.tolerance**2
+    allow_pad_point=getattr(plan,'allows_pad_point',True)
+    whole_moving_pad=not allow_pad_point and not plan.land.is_empty and plan.land.difference(active).area<=plan.tolerance**2
     if near.is_empty or whole_moving_pad:
-        if not plan.allows_pad_point:
+        if not allow_pad_point:
             # The selection covered the moving endpoint. Re-establish the nearest
             # legal straight cut and preserve the far blade angle where possible.
             if far.is_empty:return None
