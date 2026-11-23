@@ -53,15 +53,21 @@ class ErrorContracts(unittest.TestCase):
   class LockOnce(FakeService):
    def request(self,command,args=None,**kwargs):
     response=super().request(command,args,**kwargs)
-    if command=='batch.submit' and self.begin_count==1 and args['cell'].endswith('001'):
+    if command=='batch.submit' and self.begin_count==1 and args['cell'].endswith('003'):
      self.tasks[response['task_id']]=RemoteError(dict(status='error',error=dict(type='TimeoutError',message='diagnostic catalogue remained busy')))
     return response
   with tempfile.TemporaryDirectory() as name:
    root=Path(name).resolve();files=generate_example(root,count=3,die_count=2);db=root/'run.sqlite'
    import_files(files,db,2,2,threading.Event());service=LockOnce(root)
    out=root/'Output'/'final.oas';out.parent.mkdir();out.write_bytes(b'previous verified output')
-   result=Runner(db,root/'ipc.json',root/'case.json',out,retries=1,transport=service).run()
+   progress=[]
+   result=Runner(db,root/'ipc.json',root/'case.json',out,workers=1,timeout=2,retries=1,
+                 transport=service,progress=progress.append).run()
    self.assertEqual(result['state'],'completed');self.assertEqual(service.begin_count,2);self.assertEqual(service.launched,0)
+   counters=[value for value in progress if isinstance(value,dict)]
+   self.assertEqual([(v['current'],v['total'],v['published']) for v in counters],
+                    [(0,3,False),(1,3,False),(2,3,False),(3,3,False),(3,3,True)])
+   self.assertTrue(all(v['text']==f'已完成 {v["current"]} / 3' for v in counters))
    with closing(Ledger(db)) as ledger:
     self.assertEqual(ledger.get('attempt'),2);self.assertEqual(ledger.counts(),{'committed':3})
     self.assertTrue(ledger.db.execute("select 1 from events where message like '%等待后补算整批%'").fetchone())

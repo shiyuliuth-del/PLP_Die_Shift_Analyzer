@@ -1,4 +1,6 @@
-# Die Shift Analyze V64
+# Die Shift Analyze V65
+
+V65 为 RealDataAnalyse 增加「忽略阈值」开关，统一批量任务进度计数，并在实时命令页隐藏时暂停界面刷新。详见 [V65 使用说明](docs/V65_使用说明.md)。
 
 V64 增加 APD 23.1 避让空间规则输出、图形删除和全局撤销。运动孔盘圆点改为默认关闭，可在重构预演设置中启用。详见 [V64 使用说明](docs/V64_使用说明.md)。
 
@@ -29,7 +31,7 @@ V50：芯片对重点组合、分叉边界修正、当前姿态GDS/OAS与旋转E
 软件分析Die-first封装的DIE平移与旋转，提供三方案初筛、实体覆盖与极端足迹、通道宽度风险、重构动区编辑、规则/联合模型良率、工程结果保存、GDS/OAS导入、实测IPC及批量OAS输出。长度均为μm，GDS/OAS只读，工程节点可编辑。
 
 - [实测IPC接口与注意事项](docs/MEASURED_OUTPUT_API.md) · [GD55-1105独立验证脚本](tools/verify_measured_gd55.py)
-- [用户操作](docs/V64_使用说明.md)
+- [用户操作](docs/V65_使用说明.md)
 - [AI交接：主要功能、代码地图、算法和后续重点](docs/AI_HANDOFF.md)
 - [现行设计合同](docs/DESIGN_REQUIREMENTS.md)
 - [已知边界](docs/KNOWN_ISSUES.md)

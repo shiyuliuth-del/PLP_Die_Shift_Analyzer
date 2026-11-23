@@ -61,6 +61,8 @@ def validate(snapshot, output, check_hash=False, stop=None):
         raise ValueError('输出位置不是普通文件')
     controls = snapshot['controls']
     nominal_limits(controls.get('bypass_limits',(0,0,0)))
+    if type(controls.get('bypass_enabled',True)) is not bool:
+        raise ValueError('启用忽略阈值须为布尔值')
     if type(controls.get('ignore_measurement_failure',False)) is not bool:
         raise ValueError('忽略测量失败须为布尔值')
     if (not 1 <= controls['dies'] <= 10000 or not 0 <= controls['workers'] <= 64
@@ -267,6 +269,8 @@ class PlanRunner:
 
     def run_one(self, row):
         snapshot = row['snapshot']; plan_id = row['id']; controls = snapshot['controls']
+        # An older plan already froze its effective thresholds on creation.
+        limits = controls.get('bypass_limits',(0,0,0)) if controls.get('bypass_enabled',True) else (0,0,0)
         project = None; transport = None; owned = row.get('owned_instance')
         owned_pid = row.get('owned_pid'); owned_birth = row.get('owned_birth')
         batch_owner = None
@@ -278,7 +282,7 @@ class PlanRunner:
                 fraction = value.get('current',0)/max(1,value.get('total',1))
             else: text, fraction = str(value), None
             if text.startswith(('OAS', '最终提交')): base, span = 85, 14
-            number = last_number[0] if fraction is None else min(99., base + span*max(0., min(1.,fraction)))
+            number = last_number[0] if fraction is None else max(last_number[0], min(99., base + span*max(0., min(1.,fraction))))
             last_number[0] = number
             now = time.monotonic()
             if now-last_update[0] >= .2:
@@ -300,7 +304,7 @@ class PlanRunner:
                     if self.trace: self.trace.set_root(workspace)
                     return Runner(database, meta['config']['endpoint'], meta['config']['project'], row['output'],
                                   stop=self.stop, trace=self.trace, template=snapshot.get('template'),
-                                  bypass_limits=controls.get('bypass_limits',(0,0,0))).run()
+                                  bypass_limits=limits).run()
             validate(snapshot, row['output'], check_hash=True, stop=self.stop)
             project = materialize(row, self.stop)
             configure_logging(workspace)
@@ -342,7 +346,7 @@ class PlanRunner:
                 connect_plan()
             return Runner(database, endpoint, project, row['output'], controls['workers'], controls['memory'], controls['retries'],
                    controls['timeout'], self.stop, report, transport=transport, trace=self.trace,
-                   bypass_limits=controls.get('bypass_limits',(0,0,0)),
+                   bypass_limits=limits,
                    template=snapshot.get('template'), expected_template_sha256=expected.get(snapshot.get('template'))).run()
         finally:
             if transport is not None and (owned or owned_pid):
@@ -395,6 +399,11 @@ class PlanRunner:
             with closing(self.plans.db()) as db, db:
                 db.execute("update plans set status='paused',severity='warning',message='上次执行中断，可继续' where status='running'")
                 last_seq = db.execute('select coalesce(max(seq),0) from plans').fetchone()[0]
+                total = db.execute("select count(*) from plans where status!='completed' and seq<=?",(last_seq,)).fetchone()[0]
+            def report_queue(published=False):
+                self.progress(dict(current=totals['completed'], total=total,
+                                   package_count=True, published=published))
+            report_queue(published=total==0)
             self.plans.recheck(owned=True)
             seq = 0
             while not self.stop.is_set():
@@ -424,5 +433,6 @@ class PlanRunner:
                                       message=f'OAS已校验并提交 · 含问题{summary.get("issue_packages",0)}封装 · '
                                               f'ERROR {ordinary} · ERROR2 {serious} · FAIL {summary.get("failed_packages",0)}封装')
                     totals['completed'] += 1
+                    report_queue(totals['completed']==total)
         state = 'paused' if self.stop.is_set() else ('completed_with_errors' if totals['failed'] or totals['skipped'] else 'completed')
         return dict(state=state, **totals)

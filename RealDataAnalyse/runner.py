@@ -72,17 +72,23 @@ class Runner:
         self.progress = progress
         self.transport = transport or Transport(endpoint, timeout=min(15, timeout) if timeout else 15, trace=trace)
         self.ledger = None
-        self.active_progress = {}
-        self.progress_lock = threading.Lock()
-        self.last_progress = 0
+        self.total = 0
         self.completed_count = 0
 
     def note(self, message, level='INFO'):
         self.ledger.event(message, level)
         self.progress(message)
 
+    def report_packages(self, completed, *, published=False):
+        # A replay replaces the failed temporary OAS. Its work catches up to
+        # the previous attempt without adding the same packages twice.
+        self.completed_count = max(self.completed_count, completed)
+        self.progress(dict(text=f'已完成 {self.completed_count} / {self.total}',
+                           current=self.completed_count, total=self.total,
+                           package_count=True, published=published))
+
     def prepare(self):
-        self.progress(dict(text='连接预演软件 · 核对工程与任务身份', current=0, total=1))
+        self.note('连接预演软件 · 核对工程与任务身份')
         t = self.transport
         try:
             info = t.request('info', stop=self.stop, retries=1)['result']
@@ -91,9 +97,9 @@ class Runner:
                 raise RuntimeError('服务无响应但进程仍活着；无法安全重启，保留任务等待人工处理')
             self.note('服务已退出，尝试启动同目录 Die Shift Analyze', 'WARNING')
             t.launch(self.project)
-            info = t.wait_ready(self.stop, self.timeout, progress=self.progress) if isinstance(t, Transport) else t.wait_ready(self.stop, self.timeout)
+            info = t.wait_ready(self.stop, self.timeout)
         if not info.get('ready'):
-            info = t.wait_ready(self.stop, self.timeout, progress=self.progress) if isinstance(t, Transport) else t.wait_ready(self.stop, self.timeout)
+            info = t.wait_ready(self.stop, self.timeout)
         if Path(info.get('project') or '').resolve() != Path(self.project):
             raise ValueError('已打开的软件工程与本任务不符；请先用调试界面打开正确工程')
         identity = info.get('session_identity')
@@ -166,20 +172,7 @@ class Runner:
         if response.get('status') != 'accepted':
             raise RemoteError(response)
         task = response['task_id']
-        def report(update):
-            with self.progress_lock:
-                self.active_progress[seq] = update
-                now = time.monotonic()
-                if now - self.last_progress < .2:
-                    return
-                self.last_progress = now
-                fraction = sum(min(99, max(0, u.get('current', 0))) / 100 for u in self.active_progress.values())
-                text = f'批次{attempt} · 完成{self.completed_count}/{self.total} · 已提交{len(self.active_progress)} · 封装{seq} {update.get("text", "计算中")}'
-                self.progress(dict(text=text, current=int((self.completed_count + fraction) * 100), total=self.total * 100))
-        if isinstance(self.transport, Transport):
-            result = self.transport.wait_task(task, stop, self.timeout, progress=report)
-        else:
-            result = self.transport.wait_task(task, stop, self.timeout)
+        result = self.transport.wait_task(task, stop, self.timeout)
         self.validate_pose(result, payload['cell'], use_nominal)
         return task, result
 
@@ -265,9 +258,6 @@ class Runner:
         pending = {}
         cursor = ledger.db.execute('select seq,payload from packages order by seq')
         completed = 0
-        self.total = ledger.get('count')
-        self.completed_count = 0
-        self.active_progress.clear()
         # Only O(workers) Futures; never enqueue the entire lot in Python.
         # An interrupted SELECT can retain a Windows file handle through the
         # exception traceback even after Connection.close(). Finalize it here.
@@ -295,8 +285,6 @@ class Runner:
                 receipts = []
                 for future in done:
                     seq = pending.pop(future)
-                    with self.progress_lock:
-                        self.active_progress.pop(seq, None)
                     try:
                         task, result = future.result()
                     except Exception as exc:
@@ -307,7 +295,6 @@ class Runner:
                         self.note(f'封装序号{seq}失败：{exc}', 'ERROR')
                     else:
                         completed += 1
-                        self.completed_count = completed
                         has_issues=bool(result.get('drc_count',0) or result.get('connection_failure_count',0))
                         receipts.append(('computed_with_issues' if has_issues else 'computed', task, dumps(result), seq))
                         counts['failed_packages'] += result.get('failed_packages',0)
@@ -324,17 +311,15 @@ class Runner:
                             self.note(f'计算完成 {completed}/{self.total}；等待整批文件提交')
                 if receipts:
                     ledger.store_receipts(receipts, counts)
-                    self.progress(dict(text=f'批次{attempt} · 完成{completed}/{self.total} · 待回执{len(pending)} · 尚未最终提交', current=completed, total=self.total))
+                    if completed > self.completed_count:
+                        self.report_packages(completed)
         if self.stop.is_set():
             raise InterruptedError('用户停止；保留输入与任务回执，继续时补算未提交批次')
         if error:
             raise error
-        self.progress(dict(text='OAS整理 · 合并TopCell、写入校验尾部', current=0, total=100))
+        self.note('OAS整理 · 合并TopCell、写入校验尾部')
         reply = t.request('batch.end', {'batch_id': batch}, request_id=uuid.uuid5(uuid.UUID(run), f'end:{attempt}').hex, stop=self.stop)
-        if isinstance(t, Transport):
-            receipt = t.wait_task(reply['task_id'], self.stop, self.timeout, progress=lambda u: self.progress(dict(u, text='OAS写入 · ' + u['text'])))
-        else:
-            receipt = t.wait_task(reply['task_id'], self.stop, self.timeout)
+        receipt = t.wait_task(reply['task_id'], self.stop, self.timeout)
         if receipt.get('cells') != ledger.get('count') or Path(receipt['path']).resolve() != stage:
             raise ValueError('OAS完成回执与请求数量或路径不符')
         if not isinstance(receipt.get('error_layer'),dict) or receipt['error_layer'].get('name') != 'ERROR':
@@ -348,10 +333,10 @@ class Runner:
         if self.template and receipt.get('template_sha256')!=self.template_sha256:
             raise ValueError('最终OAS缺少匹配的模板回执')
         from die_shift_studio.oas_validation import verify_crc
-        self.progress(dict(text='OAS验证 · 流式CRC校验', current=0, total=1))
+        self.note('OAS验证 · 流式CRC校验')
         if not verify_crc(stage, stop=self.stop):
             raise ValueError('实际OAS的CRC校验失败')
-        self.progress(dict(text='OAS验证 · 流式SHA-256校验', current=0, total=1))
+        self.note('OAS验证 · 流式SHA-256校验')
         digest = sha256(stage, self.stop)
         # Write-ahead commit record: recover a crash between rename and DB update.
         ledger.set('publish', dict(stage=str(stage), sha256=digest, receipt=receipt))
@@ -389,7 +374,7 @@ class Runner:
         self.validate_failure_receipt(record.get('receipt'))
         if self.stop.is_set():
             raise InterruptedError('已停止发布；验证后的暂存文件保留供继续')
-        self.progress(dict(text='最终提交 · 校验新旧文件与原子替换', current=0, total=1))
+        self.note('最终提交 · 校验新旧文件与原子替换')
         stage = Path(record['stage'])
         digest = record['sha256']
         if self.output.is_file() and sha256(self.output, self.stop) == digest:
@@ -439,9 +424,8 @@ class Runner:
         self.note(f'完成：{ledger.get("count")}封装（原图直出{nominal}），{self.output}，SHA-256 {digest}')
         serious = ledger.get('error2_rectangles', 0)
         ordinary = ledger.get('error_rectangles', 0) - serious
-        self.progress(dict(text=f'完成 · {ledger.get("count")}封装 · 原图直出{nominal} · 含问题{ledger.get("issue_packages",0)}封装 · '
-                                f'ERROR {ordinary} · ERROR2 {serious} · FAIL {ledger.get("failed_packages",0)}封装 · OAS已提交',
-                           current=1, total=1))
+        self.note(f'含问题{ledger.get("issue_packages",0)}封装 · ERROR {ordinary} · ERROR2 {serious} · FAIL {ledger.get("failed_packages",0)}封装')
+        self.report_packages(self.total, published=True)
         return True
 
     def run(self):
@@ -460,8 +444,11 @@ class Runner:
             self.ledger = Ledger(self.database)
             ledger = self.ledger
             try:
-                if not ledger.get('count'):
+                self.total = ledger.get('count', 0)
+                if not self.total:
                     raise ValueError('数据库没有完整导入的封装')
+                self.completed_count = 0
+                self.report_packages(0)
                 self.production = bool(ledger.get('measurement'))
                 if self.managed_output:
                     protected = [Path(self.project), self.database]

@@ -27,7 +27,7 @@ def main():
             if args.run_plans:
                 from RealDataAnalyse.plans import Plans, PlanRunner
                 from RealDataAnalyse.conversation import Conversation
-                trace = Conversation()
+                trace = Conversation(display=False)
                 try:
                     result = PlanRunner(Plans(args.run_plans), trace=trace).run()
                 finally: trace.close()

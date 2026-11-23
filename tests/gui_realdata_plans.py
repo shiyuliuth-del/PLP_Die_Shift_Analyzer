@@ -69,6 +69,8 @@ with tempfile.TemporaryDirectory(prefix='rda-plans-gui-') as name:
             W.QApplication.sendEvent(grip,move)
             QTest.mouseRelease(grip,left,pos=position+QtCore.QPoint(0,31))
             app.processEvents();assert grip.table.height()>old,(old,grip.table.height())
+        w.tabs.setCurrentWidget(w.conversation_tab)
+        app.processEvents()
         w.conversation_limit.setValue(100)
         for i in range(300):w.conversation.record('send','endpoint',dict(id=i,command='info'))
         for _ in range(5):w.flush_conversation()
