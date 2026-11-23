@@ -20,7 +20,7 @@ def check_source():
     with tempfile.TemporaryDirectory(prefix='die-shift-source-qa-') as name:
         stage=Path(name)
         selected=subprocess.check_output(['git','ls-files','-z','--','die_shift_studio','RealDataAnalyse','cases','tests','tools','Jobs','examples',
-                   'main.py','die_shift_model.py','RUN.bat','BUILD.bat','requirements.txt','Die_Shift_Analyze.spec'],cwd=ROOT)
+                   'main.py','die_shift_model.py','DieShiftAnalyze_RUN.bat','RealDataAnalyze_RUN.bat','BUILD.bat','requirements.txt','Die_Shift_Analyze.spec'],cwd=ROOT)
         for value in selected.split(b'\0'):
             if not value:continue
             relative=Path(os.fsdecode(value));dst=stage/relative;dst.parent.mkdir(parents=True,exist_ok=True)
@@ -50,7 +50,7 @@ def check_source():
              platform=sys.platform,verified_runtime_sha256=runtime_hash,gui_suites=len(gui),runs=records)
     (ROOT/'docs/package_verification.json').write_text(json.dumps(out,ensure_ascii=False,indent=2)+'\n',encoding='utf8')
 
-SOURCE_FILES={'main.py','RUN.bat','BUILD.bat','Die_Shift_Analyze.spec','requirements.txt'}
+SOURCE_FILES={'main.py','DieShiftAnalyze_RUN.bat','RealDataAnalyze_RUN.bat','BUILD.bat','Die_Shift_Analyze.spec','requirements.txt'}
 
 def tagged_sources(ref):
     # Read Git objects so checkout EOL settings cannot change the tested ZIP.
@@ -60,7 +60,7 @@ def tagged_sources(ref):
         files={info.name:tar.extractfile(info).read() for info in tar if info.isfile()}
     kernels={'die_shift_studio/cuda_kernels.cu','die_shift_studio/cuda_kernels.ptx'}
     root_files={name for name in files if '/' not in name}
-    client_files={'RealDataAnalyse/'+n for n in ('__init__.py','main.py','gui.py','excel.py','measurements.py','runner.py','storage.py','transport.py','projects.py','conversation.py','instances.py','plans.py','plan_ui.py','widgets.py','RUN.bat','BUILD.bat','RealDataAnalyse.spec','requirements.txt','README.md')}
+    client_files={'RealDataAnalyse/'+n for n in ('__init__.py','main.py','gui.py','excel.py','measurements.py','runner.py','storage.py','transport.py','projects.py','conversation.py','instances.py','plans.py','plan_ui.py','widgets.py','RealDataAnalyse.spec','requirements.txt','README.md')}
     from RealDataAnalyse.projects import GD55_INPUTS, GD55_1119_INPUTS, SH22_INPUTS
     case_files={f'Jobs/{folder}/{name}' for folder, inputs in
                 (('GD55',GD55_INPUTS),('GD55_1119',GD55_1119_INPUTS),('SH22',SH22_INPUTS)) for name in inputs}

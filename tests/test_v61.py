@@ -86,11 +86,12 @@ class V61Tests(unittest.TestCase):
             self.assertFalse(list(model.query('HATCH')))
             lines = []
             for layer, xy, closed in expanded_outlines(model):
-                if closed:
-                    self.assertIn(layer, ('RKG_REF','DIE_REF'))
-                    expected = board if layer == 'RKG_REF' else die
+                if layer in ('PKG_REF','DIE_REF'):
+                    self.assertTrue(closed)
+                    expected = board if layer == 'PKG_REF' else die
                     self.assertTrue(shapely.LinearRing(xy).equals(expected.exterior))
                 else:
+                    if closed:xy=np.vstack((xy,xy[:1]))
                     for p, q in zip(xy[:-1], xy[1:]):
                         lines.append(LineString((p, q)))
             merged = shapely.union_all(lines)

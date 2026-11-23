@@ -7,7 +7,7 @@ import shapely
 from .resources import cancel_check
 
 
-REFERENCE_LAYERS = {'封装边框': 'RKG_REF', '芯片边框': 'DIE_REF'}
+REFERENCE_LAYERS = {'封装边框': 'PKG_REF', '芯片边框': 'DIE_REF'}
 EXPORT_ROLES = frozenset((*REFERENCE_LAYERS, '固定RDL'))
 # The solver still uses A for deformation, B for fixed and C for moving copper.
 PUBLIC_KIND = {'A': '_C', 'B': '_B', 'C': '_A'}
@@ -64,7 +64,7 @@ def verify_written_contours(path, *, expected_blocks=None, expected_references=N
             elif kind == 'ENDBLK':
                 block = None
             elif kind == 'LWPOLYLINE' and block and attrs[8] == '0':
-                contents[block].append(_outline(fields, attrs, False))
+                contents[block].append(_outline(fields, attrs))
             else:
                 raise ValueError('动静区块含不支持的实体')
         elif section == 'ENTITIES':
@@ -122,10 +122,11 @@ def verify_written_contours(path, *, expected_blocks=None, expected_references=N
     return summary
 
 
-def _outline(fields, attrs, closed):
+def _outline(fields, attrs, expected_closed=None):
     xy = np.column_stack(([float(v) for c, v in fields if c == 10],
                           [float(v) for c, v in fields if c == 20]))
-    if (bool(int(attrs[70]) & 1) != closed or len(xy) != int(attrs[90]) or
+    closed=bool(int(attrs[70]) & 1)
+    if ((expected_closed is not None and expected_closed!=closed) or len(xy) != int(attrs[90]) or
             len(xy) < (3 if closed else 2) or not np.isfinite(xy).all() or
             np.array_equal(xy[0], xy[-1]) or np.any(np.all(xy[:-1] == xy[1:], axis=1))):
         raise ValueError('动静区输出的轮廓节点或开闭状态无效')

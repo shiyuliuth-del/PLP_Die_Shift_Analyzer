@@ -113,7 +113,7 @@ class V14Tests(unittest.TestCase):
                 self.assertLess(actual.symmetric_difference(g).area,1e-8);self.assertAlmostEqual(aa,area)
             self.assertEqual(nb.backend().process.pid,pid)
         nb.close()
-        for name in ('RUN.bat',):
+        for name in ('BUILD.bat','DieShiftAnalyze_RUN.bat','RealDataAnalyze_RUN.bat'):
             text=(Path(__file__).resolve().parents[1]/name).read_text()
             self.assertNotIn('pip install',text);self.assertNotIn('-m venv',text)
 

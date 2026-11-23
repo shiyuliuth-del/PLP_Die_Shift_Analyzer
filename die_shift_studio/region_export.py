@@ -1,7 +1,7 @@
 """Export only physical exterior/hole contours, classified A/B/C at the seams.
 
-Internal partition faces are never entities. Open polylines end at identical
-join coordinates, and their union must equal the final physical boundary.
+Internal partition faces are never entities. The end of a split contour uses
+the same coordinates on both layers, and whole rings stay closed.
 """
 import hashlib
 import math
@@ -34,7 +34,7 @@ def line_parts(g):
 
 
 def joined_coordinates(lines):
-    """One float coordinate for every shared seam node; no closing DXF entity."""
+    """Use one float coordinate for each shared seam node."""
     if not lines:return []
     largest=max(1.,max(float(np.max(abs(xy))) for _,xy in lines))
     epsilon=max(1e-10,float(np.spacing(largest))*8)
@@ -51,11 +51,7 @@ def joined_coordinates(lines):
     for name,points in lines:
         xy=np.asarray([node(p) for p in points])
         xy=xy[np.r_[True,np.any(xy[1:]!=xy[:-1],axis=1)]]
-        if len(xy)<2:continue
-        if np.array_equal(xy[0],xy[-1]):
-            middle=(len(xy)-1)//2
-            if middle>0:out.extend(((name,xy[:middle+1]),(name,xy[middle:])))
-        else:out.append((name,xy))
+        if len(xy)>=2:out.append((name,xy))
     return out
 
 
@@ -202,6 +198,13 @@ def _exclusive_outlines(groups):
     return [group._replace(paths=paths[i]) for i,group in enumerate(groups) if paths[i]],shared
 
 
+def _merge_outlines(group):
+    """Join exact endpoints inside one CAD block, stopping at branch points."""
+    if group.closed or len(group.paths)<2:return group
+    merged=shapely.line_merge(shapely.MultiLineString(group.paths))
+    return group._replace(paths=[np.asarray(line.coords) for line in line_parts(merged)])
+
+
 def _prepare(snapshot,reconstruction,roles,options,progress):
     tasks=[]
     for key,raw in sorted(snapshot.layers.items()):
@@ -216,7 +219,7 @@ def _prepare(snapshot,reconstruction,roles,options,progress):
         progress(round(55*(n+1)/max(1,len(tasks))),f'拆分真实轮廓：{tasks[n][0]}')
     progress(56,'去除完全及局部重叠的轮廓线段')
     groups,shared=_exclusive_outlines(groups)
-    return groups,shared,inputs,merged
+    return [_merge_outlines(group) for group in groups],shared,inputs,merged
 
 
 def contours(snapshot,reconstruction,roles,options,progress=lambda *_:None):

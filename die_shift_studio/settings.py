@@ -87,7 +87,7 @@ class ViewSettings:
     reconstruction_regions:tuple=()
     reconstruction_boxes:tuple=()
     reconstruction_angle_boxes:tuple=()
-    reconstruction_box_mode:str="free"
+    reconstruction_box_mode:str="aligned"
     reconstruction_fixed_via_mode:str="off"
     reconstruction_fixed_via_follows:tuple=()
     reconstruction_box_excluded:tuple=()

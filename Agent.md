@@ -16,7 +16,7 @@
 
 - μm；界面角度为度、计算为rad。GDS是只读输入，Q编辑属于工程。边框/用途/层序由用户设置，显隐不得改变计算。
 - 任意界面和结果必须引用同一几何版本、姿态、工艺及连通归属。不能按最近DIE随意覆盖真实连接；无解要显示原因。
-- 求解器内部 A 为适配动区、B 为固定侧、C 为运动侧。仅动静区 DXF 使用 V61 映射 _A 运动侧、_B 固定侧、_C 动区。参考边框用 RKG_REF 和 DIE_REF，导出规则见 [V61 使用说明](docs/V61_使用说明.md)。
+- 求解器内部 A 为适配动区、B 为固定侧、C 为运动侧。仅动静区 DXF 使用 V61 映射 _A 运动侧、_B 固定侧、_C 动区。参考边框用 PKG_REF 和 DIE_REF，同一块内的相接轮廓去重后拼接，见 [V62 使用说明](docs/V62_使用说明.md)。
 - A 颜色来自实际动区的连接及 DRC 状态。两侧独立违规仍进入全局 DRC 和规则良率。零位 A 按所选目录取最严重结果，待核验标灰。
 - 新选项同步校验、旧工程默认、保存恢复、缓存键、图内详情、测试。旧schema5缺失字段采用默认值，显式旧值保留。退役补块字段只忽略，不重新解释。
 - 实测IPC只接收认证本地JSON，不执行外部代码/pickle。全部GUI操作在主线程；批量状态为异步任务，先冻结工程，限并发/增量内存，失败保护旧输出。V49每个指定姿态检查完整实际铜DRC与连接，完整目录可分页；只跳过无关姿态、画布和良率。
@@ -36,7 +36,7 @@
 
 版本每轮递增，当前看 `die_shift_studio/__init__.py`。更新README、使用说明、现行合同、已知问题、轮次记录和本地研究工作区AGENTS入口。
 
-V44联合发布：根目录RUN.bat运行主程序，BUILD.bat一键构建两个EXE到同一dist目录；RealDataAnalyse子目录另有RUN.bat与独立BUILD.bat。正式Release为联合源码ZIP＋SHA-256，不单独发布客户端。按用户本轮明确要求，Jobs/GD55中的图纸、工程、三份合成Excel及说明随包公开；此为历史不附GDS规则的特定例外。其他图纸、图片、EXE、Jobs缓存不得上传。临时Windows EXE仅用于验收。
+联合发布使用根目录的 DieShiftAnalyze_RUN.bat 和 RealDataAnalyze_RUN.bat。BUILD.bat 一键构建两个 EXE 到同一 dist，并复制两份启动脚本。启动先检查同目录和 dist 中的 EXE，再查找 Python。正式Release为联合源码ZIP＋SHA-256，不单独发布客户端。按用户本轮明确要求，Jobs/GD55中的图纸、工程、三份合成Excel及说明随包公开；此为历史不附GDS规则的特定例外。其他图纸、图片、EXE、Jobs缓存不得上传。临时Windows EXE仅用于验收。
 
 使用 `python3 tools/package_release.py make-source`，正式包与GitHub自动源码归档均只含运行必需文件。发布前核对最新头Windows clean/with-cupy检查；发布后回下载Release、自动ZIP/tar，逐文件匹配tag、CRC/SHA/7-Zip验证。失败不得覆盖旧交付物，不重写tag来补文档。发布后证据可补在Release说明。
 

@@ -1,6 +1,6 @@
 # RealDataAnalyse
 
-与 Die Shift Analyze 同包发布的 Python/Qt 实测客户端。Windows 双击本目录 `RUN.bat`，源码使用现有环境的 pythonw，不保留命令行窗口。根目录 `BUILD.bat` 一次构建 `dist/Die_Shift_Analyze.exe` 与 `dist/RealDataAnalyse.exe`；本目录 BUILD 可单独构建客户端。两个 EXE 都是无控制台的 GUI 程序，保持同目录；只在同目录寻找预演软件，不检索系统其他程序目录。构建会将随包 `Jobs/GD55` 复制到 `dist/Jobs/GD55`，已有同名项目不会被覆盖。
+与 Die Shift Analyze 同包发布的 Python/Qt 实测客户端。Windows 双击项目根目录或 `dist` 中的 `RealDataAnalyze_RUN.bat`。启动脚本优先使用同目录或 `dist` 中的 `RealDataAnalyse.exe`，源码模式使用现有环境的 Python。根目录 `BUILD.bat` 一次构建 `dist/Die_Shift_Analyze.exe` 与 `dist/RealDataAnalyse.exe`。两个 EXE 都是无控制台的 GUI 程序，保持同目录；只在同目录寻找预演软件，不检索系统其他程序目录。构建会将随包 `Jobs/GD55` 复制到 `dist/Jobs/GD55`，已有同名项目不会被覆盖。
 
 ## 项目文件夹
 

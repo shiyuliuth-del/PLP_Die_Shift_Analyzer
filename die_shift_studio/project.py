@@ -84,6 +84,7 @@ def normalize_project(project):
     # dimensions. Only legacy projects relocate the old single DRC panel.
     if not any(k in p.get('settings',{}) for k in ('drc_checks','drc_visible')):
         p['expanded_settings']=[v for v in p['expanded_settings'] if v!='DRC']
+    p['expanded_settings']=list(dict.fromkeys('DRC' if v=='接触标记' else v for v in p['expanded_settings']))
     from .measured_core import Options
     p['measured_output']=asdict(Options.from_dict(p.get('measured_output')))
     from .layout_export import OutputOptions

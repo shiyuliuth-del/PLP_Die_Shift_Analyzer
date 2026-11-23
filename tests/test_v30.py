@@ -18,15 +18,24 @@ class V30Tests(unittest.TestCase):
     def test_directory_initialization_and_user_data_survive_relaunch(self):
         with TemporaryDirectory() as d:
             root=Path(d)/'带 空格';root.mkdir();exe=root/'Die_Shift_Analyze.exe';exe.touch()
-            with patch('sys.frozen',True,create=True),patch('sys.executable',str(exe)),patch('sys._MEIPASS',d,create=True):
+            # Check directory provisioning without registering a process-wide
+            # fault stream in the temporary folder. Frozen launches test that separately.
+            with (patch('sys.frozen',True,create=True),patch('sys.executable',str(exe)),
+                  patch('sys._MEIPASS',d,create=True),patch('die_shift_studio.frozen_support._fault_stream',object())):
                 prepare_runtime();marker=root/'Jobs'/'old.json';marker.write_text('keep')
                 (root/'logs').rmdir();prepare_runtime();self.assertEqual(marker.read_text(),'keep')
                 self.assertEqual({p.name for p in root.iterdir()},{exe.name,'Jobs','logs'})
 
-    def test_one_launcher_one_builder_unpinned_requirements_and_icon_sizes(self):
+    def test_two_launchers_one_builder_unpinned_requirements_and_icon_sizes(self):
         root=Path(__file__).resolve().parents[1]
-        self.assertEqual(sorted(p.name for p in root.glob('*.bat')),['BUILD.bat','RUN.bat'])
-        batch=(root/'BUILD.bat').read_text().lower();self.assertIn('run.bat" build',batch)
+        self.assertEqual(sorted(p.name for p in root.glob('*.bat')),['BUILD.bat','DieShiftAnalyze_RUN.bat','RealDataAnalyze_RUN.bat'])
+        self.assertFalse(list((root/'RealDataAnalyse').glob('*.bat')))
+        batch=(root/'BUILD.bat').read_text().lower()
+        for spec in ('die_shift_analyze.spec', r'realdataanalyse\realdataanalyse.spec'):
+            self.assertIn(spec,batch)
+        for launcher in ('DieShiftAnalyze_RUN.bat','RealDataAnalyze_RUN.bat'):
+            script=(root/launcher).read_text()
+            self.assertLess(script.index('start "" /d'),script.index('DIE_SHIFT_PYTHON'))
         self.assertNotIn('pip install',batch);self.assertNotIn('-m venv',batch)
         self.assertFalse((root/'RUN.vbs').exists());self.assertFalse((root/'main.pyw').exists())
         for requirement in (root/'requirements.txt').read_text().splitlines():self.assertRegex(requirement,r'^[a-zA-Z0-9_-]+$')

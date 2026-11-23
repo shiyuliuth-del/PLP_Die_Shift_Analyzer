@@ -39,6 +39,7 @@ def build(w,layout):
             b=W.QCheckBox(label);b.setChecked(True);editor.boxes[key]=b;box.addWidget(b);b.toggled.connect(editor.valueChanged)
         form.addRow(title,row)
     show.valueChanged.connect(w.settings_changed);check.valueChanged.connect(w.settings_changed)
+    return form
 
 
 def contact_parameters(p,settings):
