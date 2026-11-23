@@ -28,7 +28,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert window.job_combo.itemText(0)=='' and window.project_path is None
     assert window.windowTitle().startswith('Die Shift Analyze')
     assert all(b.text()!='打开工程' for b in window.findChildren(W.QPushButton))
-    assert not hasattr(window,'stage_boxes') and window.layer_table.columnCount()==4
+    assert not hasattr(window,'stage_boxes') and window.layer_table.columnCount()==5
     assert all(role=='不参与' for role in window.roles().values())
     for key,role in json.loads((ROOT/'examples/示例C_多芯片晶圆接口.json').read_text())['roles'].items():window.role_boxes[key].setCurrentText(role)
     wait_idle()
