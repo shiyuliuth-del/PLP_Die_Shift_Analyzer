@@ -65,7 +65,7 @@ def prepared_sources(cache, values, dbu):
     """Freeze nominal compensated shapes before producing any measured poses."""
     return {
         layer: tuple(sized(((g,) for g in cache.layers[layer]['geometry']), amount, dbu))
-        for layer, amount in values.items() if layer in cache.layers
+        for layer, amount in values.items() if layer in cache.layers and round(amount/dbu)
     }
 
 
@@ -101,7 +101,14 @@ def extended_masks(original, adjusted, masks, amount, dbu):
         for end, neighbor in ((0, 1), (-1, -2)):
             if boundary.distance(shapely.Point(xy[end])) <= epsilon * 4:
                 direction = xy[end] - xy[neighbor]
-                xy[end] += direction * (extension / np.linalg.norm(direction))
+                direction /= np.linalg.norm(direction)
+                start = xy[end].copy()
+                ray = shapely.LineString([start,start+direction*extension])
+                near = next((g for g in line_parts(ray.intersection(adjusted))
+                             if g.distance(shapely.Point(start)) <= epsilon*4),None)
+                if near is not None:
+                    distance = max((np.asarray(near.coords)-start)@direction)
+                    xy[end] = start+direction*(distance+epsilon*8)
         lines.append(shapely.LineString(xy))
     # Very narrow features can disappear/merge on the output grid. Classify
     # each resulting face by its surviving overlap with nominal material.
