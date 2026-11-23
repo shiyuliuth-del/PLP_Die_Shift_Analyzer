@@ -82,6 +82,8 @@ try:
  assert w.reconstruction_yield.bank and w.reconstruction_yield.bank['total']>0,w.runtime_view.toPlainText()[-6000:]
  q2=next(p for p in w.current_frame['reconstruction']['pieces'] if p['die']==0)
  # Whole landing point pulses while stationary hover and while dragging.
+ w.setting_fields['reconstruction_allow_moving_pad'].setChecked(True);wait()
+ q2=next(p for p in w.current_frame['reconstruction']['pieces'] if p['die']==0)
  qpoint=drag(q2,0,0)
  assert qpoint['moved_cut'].geom_type=='Point'
  point=np.array(w.reconstruction_overlay.handle_geometries([qpoint])[w.reconstruction_overlay._key(qpoint),'moved'].coords[0]);event('motion_notify_event',point)
@@ -98,7 +100,13 @@ try:
  assert qboth['interval'][1]<qboth['route_plan'].fixed_start
  qpoint=drag(qboth,1,qboth['route_plan'].fixed_start-80)
  assert qpoint['extra_cut'].geom_type=='LineString'
- q2=drag(qpoint,0,100)
+ # Turning the mode off applies the closest line immediately and persists it.
+ w.setting_fields['reconstruction_auto'].setChecked(False);wait()
+ w.setting_fields['reconstruction_allow_moving_pad'].setChecked(False);wait()
+ q2=next(p for p in w.current_frame['reconstruction']['pieces'] if p['die']==0)
+ assert q2['moved_cut'].geom_type=='LineString' and abs(q2['interval'][1]-qpoint['interval'][1])<1e-8
+ assert not w.reconstruction_overlay.points.get_visible()
+ w.setting_fields['reconstruction_auto'].setChecked(True);wait()
  assert q2['interval'][0]>0
  # Live preference is applied immediately and does not alter the final result.
  w.setting_fields['reconstruction_live'].setChecked(False);app.processEvents()

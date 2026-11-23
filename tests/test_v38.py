@@ -102,6 +102,7 @@ class V38Tests(unittest.TestCase):
     def test_whole_landing_point_is_reversible(self):
         e,d,c=fixture()
         try:
+            e.configure_reconstruction(True,ViewSettings(reconstruction_allow_moving_pad=True))
             q=e.reconstructor.frame(np.zeros((1,3)))['pieces'][0];plan=q['route_plan']
             cfg,part=e.reconstructor.edited(q,0,plan.route.coords[0]);self.assertEqual(part['a'],0)
             e.configure_reconstruction(True,cfg);f=e.reconstructor.frame(np.array([[20,15,.01]]));q=f['pieces'][0]

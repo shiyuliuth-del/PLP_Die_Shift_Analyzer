@@ -1,3 +1,7 @@
+# V64 运动孔盘圆点许可
+
+`ViewSettings.reconstruction_allow_moving_pad` 控制运动端整孔盘模式，旧工程缺项取关闭。名义路径的 `pad_modes` 同时检查该设置和路径端点的过孔归属。`RoutePlan.moving_line_partition` 将零弧长切口移至孔盘外最近可用截面。二维铜面、手动框选和多分支共享同一限制。预演缓存、逐源复用和动静区 DXF 按新设置区分。改变许可会刷新当前姿态，同时保留已暂存的其他重构编辑。
+
 # V63 实测阈值与输入发现
 
 `measurements.package_rows` 在分组完整后记录所有 DIE 源偏移绝对值的逐轴最大值，避免分组拟合余差跨过阈值。`Runner` 在批次提交前比较阈值，发送 `use_nominal`，同时核对该回执及最终数量。共享 OAS Cell 在第一个直出封装提交时冻结，后续仅写参考。正常任务保留实际铜 DRC、局部失败裁剪和所有诊断层。既有发布和重试逻辑仍保护旧 OAS。

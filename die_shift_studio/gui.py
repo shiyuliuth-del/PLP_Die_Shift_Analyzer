@@ -575,6 +575,9 @@ class MainWindow(W.QMainWindow):
         choice(recon,'reconstruction_style','连接样式')
         choices['reconstruction_boundary_mode']=[('垂直','perpendicular'),('重构区优先','wide'),('两侧平均','balanced')]
         choice(recon,'reconstruction_boundary_mode','边界角度')
+        moving_pad=W.QCheckBox('允许运动孔盘随动');self.setting_fields['reconstruction_allow_moving_pad']=moving_pad
+        recon.addRow(moving_pad);moving_pad.toggled.connect(self.settings_changed)
+        moving_pad.setToolTip('开启后，运动过孔侧可将整个孔盘纳入动区，并以圆点表示。关闭后只使用直线边界。')
         spin(recon,'reconstruction_pad_trigger_um','整孔盘触发余量 / μm',0,1000,3)
         spin(recon,'reconstruction_grid_nodes','良率积分每轴节点',3,9)
         self.setting_fields['reconstruction_grid_nodes'].setToolTip('完整有限网格，按区间概率质量积分；增大节点可检查连续空间误差。不是等概率极端计数。')
@@ -628,6 +631,7 @@ class MainWindow(W.QMainWindow):
             self.show_issues.blockSignals(True);self.show_issues.setChecked(self.view_settings.show_contact_markers);self.show_issues.blockSignals(False)
         self.enable_settings()
     def enable_settings(self):
+        self.setting_fields['reconstruction_pad_trigger_um'].setEnabled(self.view_settings.reconstruction_allow_moving_pad)
         if not self.setting_fields:return
         grid=self.setting_fields['width_yield_method'].currentData()=='grid'
         full=self.view_settings.evaluation_scope=='all'
@@ -652,6 +656,9 @@ class MainWindow(W.QMainWindow):
         if self.loading:return
         values={k:(w.currentData() if isinstance(w,W.QComboBox) else w.isChecked() if isinstance(w,W.QCheckBox) else w.text() if isinstance(w,W.QLineEdit) else w.value()) for k,w in self.setting_fields.items()}
         updated=ViewSettings.from_dict(dict(asdict(self.view_settings),**values))
+        if updated.reconstruction_allow_moving_pad!=self.view_settings.reconstruction_allow_moving_pad:
+            self.change_moving_pad_mode(updated)
+            return
         if updated.table_page_limit!=self.view_settings.table_page_limit:
             old=self.view_settings.table_page_limit;self.view_settings=updated
             size=updated.table_page_limit
@@ -1416,6 +1423,26 @@ class MainWindow(W.QMainWindow):
         if not self.reconstruction_toggle.isChecked():
             self.reconstruction_toggle.blockSignals(True);self.reconstruction_toggle.setChecked(True);self.reconstruction_toggle.blockSignals(False)
         self.invalidate_reconstruction_edit();self.request_preview()
+
+    def change_moving_pad_mode(self,updated):
+        # Apply this control immediately while preserving unrelated staged edits.
+        from .reconstruction_edits import retire_pad_intervals
+        solver=None if getattr(self.engine,'busy',False) else getattr(self.engine,'reconstructor',None)
+        pieces=(self.current_frame or {}).get('reconstruction',{}).get('pieces',())
+        self.view_settings=retire_pad_intervals(updated,solver,pieces)
+        self.enable_settings()
+        if not self.reconstruction_toggle.isChecked() or self.data is None:return
+        if self.cut_drag.state:self.cut_drag.cancel()
+        self.cut_drag.retained=None
+        self.reconstruction_overlay.draft_frame=self.reconstruction_overlay.draft_data=self.reconstruction_overlay.draft_key=None
+        self.reconstruction_overlay.clear_hover();self.reconstruction_overlay.draw();self.render_scene()
+        applied=self._applied_preview_settings
+        if self.reconstruction_pending and applied is not None:
+            self._applied_preview_settings=retire_pad_intervals(replace(
+                applied,reconstruction_allow_moving_pad=updated.reconstruction_allow_moving_pad),solver,pieces)
+        self._reconstruction_apply_once=True
+        self.invalidate_reconstruction_edit()
+        self.request_preview(quiet=True,pose_change=True)
 
     def invalidate_reconstruction_edit(self):
         """Reject old coupled/extreme evidence after a reconstruction edit."""
@@ -2604,8 +2631,11 @@ class MainWindow(W.QMainWindow):
         try:self.write_project(path);self.refresh_jobs();self.statusBar().showMessage('工程已保存：'+Path(path).stem)
         except Exception as exc:self.error(exc)
     def project_settings(self):
+        from .reconstruction_edits import retire_pad_intervals
+        solver=None if getattr(self.engine,'busy',False) else getattr(self.engine,'reconstructor',None)
+        settings=retire_pad_intervals(self.view_settings,solver)
         return dict(schema_version=5,app_version=__version__,rulers=self.rulers.rows,sha256=self.data.sha256,top_cell=self.data.top_name,
-                    roles=self.roles(),parameters=asdict(self.params()),settings=asdict(self.view_settings),node_edits=list(self.data.node_edits),
+                    roles=self.roles(),parameters=asdict(self.params()),settings=asdict(settings),node_edits=list(self.data.node_edits),
                     geometry_indexing=getattr(self.data,'geometry_indexing','legacy'),legacy_node_edits=list(getattr(self.data,'legacy_node_edits',[])),
                     layout_output=__import__('die_shift_studio.layout_export',fromlist=['configuration']).configuration(self),
                     dxf_directory=self.dxf_directory,dxf_options=asdict(self.dxf_settings),measured_output=self.measured_output.configuration(),

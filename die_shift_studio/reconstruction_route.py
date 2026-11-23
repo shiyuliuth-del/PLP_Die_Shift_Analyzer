@@ -268,8 +268,12 @@ class RoutePlan:
         i=min(len(self.lengths)-1,max(0,int(np.searchsorted(self.marks,s,side='right')-1)))
         return (self.xy[i+1]-self.xy[i])/max(self.lengths[i],1e-12)
 
+    @property
+    def allows_pad_point(self):
+        return getattr(self,'pad_modes',(True,False))[0]
+
     def pad_hit(self,cursor,which):
-        if which!=0:return False
+        if which!=0 or not self.allows_pad_point:return False
         if cursor is None:return True
         terminals=getattr(self,'terminal_vias',None)
         if terminals is None:return True
@@ -311,9 +315,8 @@ class RoutePlan:
         if hi<lo:return lo
         s=float(np.clip(s,lo,hi))
         margin=getattr(self,'pad_trigger',0.)
-        modes=getattr(self,'pad_modes',(True,False))
         if which==0 and s<=self.land_end+eps:
-            return 0. if allow_pad and modes[0] and s<=max(0.,self.land_end-margin) else min(hi,self.land_end+eps)
+            return 0. if allow_pad and self.allows_pad_point and s<=max(0.,self.land_end-margin) else min(hi,self.land_end+eps)
         for corner,radius in self.corners:
             if corner-radius<s<corner+radius:
                 options=[x for x in (corner-radius,corner+radius) if lo<=x<=hi]
@@ -381,10 +384,38 @@ class RoutePlan:
         # Convert legacy saved whole-fixed paths to the last real line cut.
         return min(float(s),self.fixed_start-max(self.tolerance*8,1e-4))
 
+    def moving_line_partition(self,b,angles=(0.,0.)):
+        """Find the first usable straight moving-side section beyond the pad."""
+        b=self.fixed_side(b)
+        step=max(self.tolerance*8,1e-4)
+        lo=self.land_end+step
+        hi=b-step
+        if hi<lo:return None
+        part=self.partition(lo,b,angles)
+        if part is not None:return part
+        # Include bend limits so a usable neck is not skipped by uniform probes.
+        ends=[corner+guard for corner,guard in self.corners if lo<corner+guard<hi]
+        stations=sorted(set([*np.linspace(lo,hi,17)[1:],*ends]))
+        previous=lo
+        for pos in stations:
+            cancel_check()
+            part=self.partition(pos,b,angles)
+            if part is None:
+                previous=pos
+                continue
+            while pos-previous>step:
+                mid=(previous+pos)/2
+                candidate=self.partition(mid,b,angles)
+                if candidate is None:previous=mid
+                else:pos=mid;part=candidate
+            return part
+        return None
+
     def partition(self,a,b,angles=(0.,0.)):
         """Return disjoint A/B/C and their real shared boundaries, or no partition."""
         b=self.fixed_side(b)
         if a>=b:return None
+        if a==0 and not self.allows_pad_point:return self.moving_line_partition(b,angles)
         angles=tuple(map(float,angles))
         key=('partition',float(a),b,angles)
         cached=self.cache.get(key)
@@ -477,7 +508,8 @@ class RoutePlan:
             # Bent or branched path: a topology-checked full-length interval.
             for b in np.linspace(auto_end-eps,self.land_end+eps,24):
                 part=self.partition(0.,float(b))
-                if part is not None:candidates.append((float(b),0.,float(b),part));break
+                if part is not None:
+                    candidates.append((part['b']-part['a'],part['a'],part['b'],part));break
         if not candidates:return None
         # A long straight centreline may begin inside a wide junction/pad.
         # Search its interior for a constant-width run instead of ranking the

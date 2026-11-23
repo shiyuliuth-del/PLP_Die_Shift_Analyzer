@@ -35,6 +35,7 @@ on:
       - 'tests/test_v59.py'
       - 'tests/test_v61.py'
       - 'tests/test_v62.py'
+      - 'tests/test_v64.py'
       - 'tests/gui_v59.py'
       - 'tests/test_v51.py'
       - 'tests/test_v50.py'
@@ -336,7 +337,7 @@ jobs:
         shell: cmd
         run: |
           set PYTHONPATH=.;tests
-          "%DIE_SHIFT_PYTHON%" -m unittest test_v59 test_v61 test_v62 test_v30 -v
+          "%DIE_SHIFT_PYTHON%" -m unittest test_v59 test_v61 test_v62 test_v64 test_v30 -v
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" tests/gui_v59.py
       - name: Verify V43 local named-pipe IPC and OAS output

@@ -232,7 +232,8 @@ class ReconstructionOverlay:
         dragging=edit is not None and w.cut_drag.state is edit
         edit_stamp=(id(edit),dragging,0 if dragging else id(edit['marker'])) if edit else None
         staged_info=self.staged_overlay if (self.active() and getattr(w,'reconstruction_pending',False)) else None
-        stamp=(id(data),id(bank),vis,w.view_bounds,order,nominal,pose_low,threshold,edit_stamp,repr(w.layer_styles),id(staged_info))
+        allow_pad=w.view_settings.reconstruction_allow_moving_pad
+        stamp=(id(data),id(bank),vis,w.view_bounds,order,nominal,pose_low,threshold,edit_stamp,repr(w.layer_styles),id(staged_info),allow_pad)
         if stamp==self.stamp:self.draw_labels();return
         if self.stamp is not None and self.stamp[0]!=id(data) and edit is None:
             if self.hover is not None:self.hover.set_visible(False)
@@ -284,6 +285,10 @@ class ReconstructionOverlay:
             if q.get('box_invalid'):continue
             for kind,target,dot_list,line_list in (('moved','moved_cut',dots,first),('extra','extra_cut',far_dots,second)):
                 face=self.handles.get((self._key(q),kind),q.get(target))
+                if face is not None and not allow_pad:
+                    if face.geom_type in ('Point','MultiPoint'):continue
+                    if face.geom_type=='GeometryCollection':
+                        face=shapely.GeometryCollection([part for part in face.geoms if part.geom_type not in ('Point','MultiPoint')])
                 if self.owns_handle(q,kind,edit):
                     if face is None:continue
                     components=list(shapely.get_parts(face))
@@ -496,6 +501,7 @@ class CutDrag:
         piece=editable_piece(piece,(event.xdata,event.ydata),kind)
         if piece.get('route_plan') is not None:
             plan=piece['route_plan']
+            if not w.view_settings.reconstruction_allow_moving_pad and plan.allows_pad_point:return
             saved=next((row for row in w.view_settings.reconstruction_intervals if (row[0],row[1],row[2],normalize_via_refs(row[3]),row[4])==(*plan.key,plan.identity)),None)
             if saved is not None:
                 part=plan.partition(saved[-2],saved[-1])

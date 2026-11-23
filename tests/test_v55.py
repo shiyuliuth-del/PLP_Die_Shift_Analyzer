@@ -73,6 +73,7 @@ class V55Tests(unittest.TestCase):
     def test_manual_modes_and_legacy_fixed_endpoint(self):
         engine, _, _ = fixture()
         try:
+            engine.configure_reconstruction(True,ViewSettings(reconstruction_allow_moving_pad=True))
             plan = engine.frame(np.zeros((1, 3)))['reconstruction']['pieces'][0]['route_plan']
             nominal = box(140, -60, 260, 60)
             polygon = shapely.affinity.rotate(nominal, 12)

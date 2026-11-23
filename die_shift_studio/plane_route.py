@@ -27,6 +27,7 @@ class PlaneRoute(RoutePlan):
     def partition(self,a,b,angles=(0.,0.)):
         b=self.fixed_side(b)
         if not 0<=a<b<=self.length:return None
+        if a==0 and not self.allows_pad_point:return self.moving_line_partition(b,angles)
         c=EMPTY if a==0 else self.half(a,angles[0])
         fixed=self.source.difference(self.half(b,angles[1]))
         overlap=c.intersection(fixed)
@@ -39,7 +40,7 @@ class PlaneRoute(RoutePlan):
         if active.is_empty:return None
         near=shapely.Point(self.route.coords[0]) if a==0 else active.boundary.intersection(c.boundary)
         far=active.boundary.intersection(fixed.boundary)
-        if near.is_empty or far.is_empty:return None
+        if near.is_empty or (a>0 and near.length<=self.tolerance) or far.length<=self.tolerance:return None
         return dict(A=active,B=fixed,C=c,near=near,far=far,a=a,b=b,angles=tuple(angles))
 
 
@@ -52,7 +53,7 @@ def candidate(base,lines,r):
         fixed=tuple(v['poly'] for v in r.stays if v['net']==base['net'] and plan.source.intersects(v['poly']))
         plan.terminal_vias=(tuple(v['poly'] for v in base['mine']),fixed)
         physical=tuple(any(g.buffer(r.p.annulus_um).covers(shapely.Point(route.coords[0 if side==0 else -1])) for g in values) for side,values in enumerate(plan.terminal_vias))
-        plan.pad_modes=(physical[0],False)
+        plan.pad_modes=(r.settings.reconstruction_allow_moving_pad and physical[0],False)
         for side,values in enumerate(plan.terminal_vias):
             if not values or not physical[side]:continue
             endpoint=shapely.Point(route.coords[-1 if side else 0]);pad=min(values,key=endpoint.distance)

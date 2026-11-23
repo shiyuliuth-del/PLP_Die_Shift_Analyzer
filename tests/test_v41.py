@@ -33,6 +33,7 @@ class V41Tests(unittest.TestCase):
         e,_,_=fixture()
         try:
             cfg=replace(e.reconstructor.settings,reconstruction_forced=(('5/0',0),),
+                        reconstruction_allow_moving_pad=True,
                         reconstruction_added=(('5/0',0,0.,0.,'seed-case','seed'),))
             cfg=ViewSettings.from_dict(json.loads(json.dumps(asdict(cfg))))
             e.configure_reconstruction(True,cfg);q=e.frame(np.zeros((1,3)))['reconstruction']['pieces'][0]

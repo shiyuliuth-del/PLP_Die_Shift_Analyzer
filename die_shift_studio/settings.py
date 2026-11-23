@@ -102,6 +102,7 @@ class ViewSettings:
     reconstruction_enabled:bool=False
     reconstruction_auto:bool=True
     reconstruction_live:bool=True
+    reconstruction_allow_moving_pad:bool=False
     reconstruction_style:str="linear"
     reconstruction_boundary_mode:str="wide"
     reconstruction_ignored:tuple=()
@@ -239,7 +240,7 @@ class ViewSettings:
             v=getattr(q,key)
             if not isinstance(v,(int,float)) or not math.isfinite(v) or not lo<=v<=hi or (key in integers and int(v)!=v):
                 raise ValueError(f'设置 {key} 超出范围 {lo}—{hi}')
-        for key in ('reconstruction_auto','save_project_results','show_contact_markers','reconstruction_live','width_show_probability','show_annulus_range','show_spacing_range','show_low_contact','show_low_width','animation_enabled','animation_return_zero','probability_show_ranges','contact_marker_absolute','unadapted_marker_absolute'):
+        for key in ('reconstruction_auto','save_project_results','show_contact_markers','reconstruction_live','reconstruction_allow_moving_pad','width_show_probability','show_annulus_range','show_spacing_range','show_low_contact','show_low_width','animation_enabled','animation_return_zero','probability_show_ranges','contact_marker_absolute','unadapted_marker_absolute'):
             if not isinstance(getattr(q,key),bool):raise ValueError(key+'必须为布尔值')
         import re
         color=lambda v:isinstance(v,str) and re.fullmatch(r'#[0-9a-fA-F]{6}',v)
@@ -260,7 +261,7 @@ class ViewSettings:
 
     def reconstruction_key(self):
         """Everything the reconstruction result depends on besides the pose."""
-        return (True,'nominal-route-continuity-v59',self.reconstruction_die_mode,self.reconstruction_fixed_via_mode,self.reconstruction_fixed_via_follows,self.reconstruction_box_excluded,self.drc_checks,self.evaluation_scope,self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_pad_trigger_um,self.reconstruction_ignored,self.reconstruction_following,self.drc_tolerance_um,self.drc_min_angle_deg,
+        return (True,'nominal-route-continuity-v59',self.reconstruction_die_mode,self.reconstruction_fixed_via_mode,self.reconstruction_fixed_via_follows,self.reconstruction_box_excluded,self.drc_checks,self.evaluation_scope,self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_allow_moving_pad,self.reconstruction_pad_trigger_um,self.reconstruction_ignored,self.reconstruction_following,self.drc_tolerance_um,self.drc_min_angle_deg,
                 self.reconstruction_corner_guard_um,tuple(self.reconstruction_intervals),
                 self.reconstruction_forced,self.reconstruction_angles,self.reconstruction_deleted,self.reconstruction_added,
                 tuple(self.reconstruction_regions),tuple(self.reconstruction_boxes),tuple(self.reconstruction_angle_boxes),tuple(self.reconstruction_cuts),
