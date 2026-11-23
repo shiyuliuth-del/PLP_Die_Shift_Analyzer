@@ -1,4 +1,4 @@
-"""V62 shared inputs, via menu targets and joined CAD polylines."""
+"""Shared inputs, via menu targets and nominal DXF segmentation."""
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import TestCase
@@ -6,13 +6,12 @@ from unittest.mock import Mock, patch
 import tempfile
 
 import ezdxf
-import numpy as np
 import shapely
 from shapely.geometry import box, LineString
 
 from die_shift_studio.dxf_export import Snapshot
 from die_shift_studio.project import normalize_project
-from die_shift_studio.region_export import ContourGroup, _merge_outlines, write_regions
+from die_shift_studio.region_export import write_regions
 from die_shift_studio.settings import ViewSettings
 from die_shift_studio.shape_menu import show_shape_menu
 
@@ -58,16 +57,7 @@ class V62Tests(TestCase):
             contacts.fixed_interfaces.assert_called_once_with('1/0',0)
             edit.assert_called_once_with(window,'add',ref=('2/0',1),point=(2.,4.))
 
-    def test_reversed_unordered_fragments_join_without_connecting_across_a_branch(self):
-        a,b,c,d,e=(0,0),(2,0),(3,1),(4,3),(3,4)
-        group=ContourGroup('L2_D0_B',[np.array(p) for p in ([c,d],[b,a],[c,b])])
-        joined=_merge_outlines(group).paths
-        self.assertEqual(len(joined),1)
-        self.assertTrue(LineString(joined[0]).equals(LineString([a,b,c,d])))
-        branched=_merge_outlines(group._replace(paths=[*group.paths,np.array([e,c])])).paths
-        self.assertEqual(len(branched),3)
-
-    def test_full_rings_are_single_polylines_and_block_preserves_hole(self):
+    def test_abc_block_preserves_open_v61_segments_and_reference_rings(self):
         copper=box(0,0,100,60).difference(box(25,20,75,40))
         board=box(-20,-20,130,90)
         die=box(5,70,15,85)
@@ -78,11 +68,13 @@ class V62Tests(TestCase):
             write_regions(snapshot,{},roles,path)
             drawing=ezdxf.readfile(path);model=drawing.modelspace()
             self.assertFalse(drawing.audit().errors)
-            self.assertEqual({q.dxf.layer for q in model.query('LWPOLYLINE')},{'PKG_REF','DIE_REF'})
+            outlines=list(model.query('LWPOLYLINE'))
+            self.assertEqual({q.dxf.layer for q in outlines},{'PKG_REF','DIE_REF'})
+            self.assertTrue(all(q.closed for q in outlines))
             block,=model.query('INSERT')
             self.assertEqual(block.dxf.layer,'L2_D0_B')
             paths=list(block.virtual_entities())
-            self.assertEqual(len(paths),2)
-            self.assertTrue(all(q.closed for q in paths))
-            actual=shapely.union_all([shapely.LinearRing(q.get_points('xy')) for q in paths])
+            self.assertEqual(len(paths),4)
+            self.assertTrue(all(not q.closed for q in paths))
+            actual=shapely.union_all([LineString(q.get_points('xy')) for q in paths])
             self.assertTrue(actual.equals(copper.boundary))

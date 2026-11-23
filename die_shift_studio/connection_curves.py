@@ -97,6 +97,10 @@ def connection_data(part,plan,center,state):
 def linear_gap(part,plan,center,state):
     try:_,_,_,_,moved,far,t0,t1=connection_data(part,plan,center,state)
     except ValueError:return -float('inf')
+    return _seam_gap(moved,far,t0,t1)
+
+
+def _seam_gap(moved,far,t0,t1):
     direction=t0+t1;length=float(np.linalg.norm(direction))
     if length<1e-12:return -float('inf')
     # Test BOTH sides, not just the centres: a rotated face can cross on one side
@@ -106,8 +110,10 @@ def linear_gap(part,plan,center,state):
 
 def assemble_strip(strip,landing,fixed_landing,moved,far,tolerance):
     """A return loop must not re-enter a preserved pad away from its real seam."""
+    terminals=[g for g in (landing,fixed_landing) if not g.is_empty]
+    if not terminals:return strip
     seam=shapely.union_all([shapely.LineString(moved),shapely.LineString(far)]).buffer(2*tolerance)
-    for terminal in (landing,fixed_landing):
+    for terminal in terminals:
         overlap=strip.intersection(terminal).difference(seam)
         if overlap.area>tolerance*tolerance or overlap.length>4*tolerance:
             raise ValueError('连接段在截面外进入刚性孔盘')
@@ -117,8 +123,8 @@ def assemble_strip(strip,landing,fixed_landing,moved,far,tolerance):
 
 
 def endpoint_active(part,plan,center,state,style):
-    active_part,landing,fixed_landing,near,moved,far,_,_=connection_data(part,plan,center,state)
-    if style=='linear' and linear_gap(part,plan,center,state)<=plan.tolerance*8:raise ValueError('直线端点贴紧或交错')
+    active_part,landing,fixed_landing,near,moved,far,t0,t1=connection_data(part,plan,center,state)
+    if style=='linear' and _seam_gap(moved,far,t0,t1)<=plan.tolerance*8:raise ValueError('直线端点贴紧或交错')
     sides=[]
     for i in range(2):
         if style=='linear':side=np.array([moved[i],far[i]])
