@@ -212,11 +212,13 @@ def _expanded_count(cell, stack=(), cache=None):
     return count
 
 
-def read_gds(path, top_name=None, progress: Callable=lambda *_: None):
+def read_gds(path, top_name=None, progress: Callable | None=None):
+    from .resources import cancel_check
+    cancel_check()
     path=Path(path).expanduser().resolve()
     if not path.is_file():
         raise ValueError("GDS文件不存在："+str(path))
-    progress(5,"读取GDS/OAS并换算为μm")
+    if progress:progress(5,"读取GDS/OAS并换算为μm")
     with path.open('rb') as stream:
         magic=stream.read(13)
     if magic.startswith(b'%SEMI-OASIS'):
@@ -239,12 +241,14 @@ def read_gds(path, top_name=None, progress: Callable=lambda *_: None):
         for chunk in iter(lambda:stream.read(1024*1024),b''):hasher.update(chunk)
     digest=hasher.hexdigest()
     _expanded_count(cell)
-    progress(30,"展开层次、阵列、旋转和镜像")
+    cancel_check()
+    if progress:progress(30,"展开层次、阵列、旋转和镜像")
     from .gds_shapes import import_shapes
     layers,shape_info,warnings,ignored=import_shapes(cell,precision/1e-6)
     if sum(map(len,layers.values()))>500_000:
         raise ValueError("展开图形数量超限；请裁出单个封装")
-    progress(80,"并行识别图层与几何")
+    cancel_check()
+    if progress:progress(80,"并行识别图层与几何")
     data=GDSData(str(path),digest,name,names,precision/1e-6,layers,shape_info=shape_info,import_warnings=warnings)
     data.ignored_geometry=ignored
     from .geometry_errors import sanitize_data
@@ -264,7 +268,8 @@ def read_gds(path, top_name=None, progress: Callable=lambda *_: None):
     for key in ambiguous:tags.pop(key,None)
     data.semantic_tags=tags
     data.auto_roles,data.recognition_notes=recognize(data,tags)
-    progress(100,"已读取全部几何并完成自动识别")
+    cancel_check()
+    if progress:progress(100,"已读取全部几何并完成自动识别")
     return data
 
 

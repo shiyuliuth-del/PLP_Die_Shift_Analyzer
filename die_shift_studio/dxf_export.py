@@ -19,7 +19,7 @@ class Snapshot:
     minimum_edge_um: float = 0.
 
 
-def snapshot(data,cache,frame=None,*,deformation=False,reconstruction=False,progress=lambda *_:None,allow_partial=False):
+def snapshot(data,cache,frame=None,*,deformation=False,reconstruction=False,progress=None,allow_partial=False):
     if frame and (frame.get('diagnostic_only') or frame.get('reconstruction',{}).get('hard_failures')) and not (allow_partial and frame.get('partial_output_validated')):raise ValueError('当前为重构失败诊断图，不能输出为制造图纸；请修正连接问题。')
     """Capture all layers, including hidden/unused ones, at one completed pose."""
     replacements={}
@@ -29,16 +29,19 @@ def snapshot(data,cache,frame=None,*,deformation=False,reconstruction=False,prog
             from .fast_preview import PreviewEngine
             replacements=PreviewEngine.final_copper(replacements,frame.get('reconstruction',{}).get('replacements',{}))
     from .short_edges import contract
+    from .resources import cancel_check
     minimum_edge_um=getattr(data,'minimum_edge_um',0.)
-    layers={};total=max(1,sum(map(len,data.layers.values())));done=0
+    layers={};total=max(1,sum(map(len,data.layers.values()))) if progress else 0;done=0
     for key,values in data.layers.items():
         current=frame.get('layers',{}).get(key,{}).get('polygons',values) if frame else values
         items=replacements.get(key,())
         hidden={i for q in items for i in q['indices']}
         geoms=[]
         for i,xy in enumerate(current):
-            if done%256==0:progress(round(100*done/total),'冻结当前几何轮廓')
-            done+=1
+            if i%256==0:cancel_check()
+            if progress:
+                if done%256==0:progress(round(100*done/total),'冻结当前几何轮廓')
+                done+=1
             if i in hidden:continue
             # Use sanitized geometry including its real holes. Transform by
             # the source outline's rigid displacement without fitting curves.
@@ -125,7 +128,7 @@ def write(snapshot,path,progress=lambda *_:None,*,settings=None):
     if not isinstance(options,DxfSettings):options=DxfSettings.from_dict(options)
     path=Path(path)
     if not path.parent.is_dir():raise ValueError('输出目录不存在')
-    progress(0,'准备当前几何DXF')
+    if progress:progress(0,'准备当前几何DXF')
     polygons=[];names=set();extent=np.array([math.inf,math.inf,-math.inf,-math.inf])
     prepared,source_count,merged_count=prepare(snapshot,options,progress)
     for name,p in prepared:
@@ -152,15 +155,15 @@ def write(snapshot,path,progress=lambda *_:None,*,settings=None):
                     hatch=dict(handle=handle,encoded_layer=name,seed=p.representative_point().coords[0],
                                loops=[dict(vertices=xy,flags=1 if j==0 else 0) for j,xy in enumerate(rings)])
                     doc._write_hatch(writer,hatch,handles['block_record_model'])
-                if i%64==0:progress(15+round(70*i/len(polygons)),'写出DXF直线轮廓')
+                if progress and i%64==0:progress(15+round(70*i/len(polygons)),'写出DXF直线轮廓')
             writer.add(0,'ENDSEC');doc._write_objects(writer,handles);f.flush();os.fsync(f.fileno())
-        progress(90,'核对DXF实体与完整性')
+        if progress:progress(90,'核对DXF实体与完整性')
         _verify(temp,len(polygons),extent)
         digest=hashlib.sha256(Path(temp).read_bytes()).hexdigest()
-        progress(99,'保存已校验的DXF')
+        if progress:progress(99,'保存已校验的DXF')
         os.replace(temp,path)
     finally:
         if os.path.exists(temp):os.unlink(temp)
-    progress(100,'DXF输出完成')
+    if progress:progress(100,'DXF输出完成')
     return dict(path=str(path),polygons=len(polygons),layers=output_layer_count,sha256=digest,ignored=snapshot.ignored_count,
                 input_polygons=source_count,merged_polygons=merged_count,flattened=True,merge_layers=options.merge_layers,scale=options.scale)

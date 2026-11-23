@@ -66,14 +66,15 @@ def write(snapshot,destination,dbu,options=None,issues=(),die_count=0,progress=l
             geos=[contract(poly,snapshot.minimum_edge_um) for g in snapped
                   for poly in shapely.get_parts(shapely.make_valid(g)) if poly.geom_type=='Polygon']
         layers[key]=tuple(g.wkb for g in geos if not g.is_empty)
-        progress(round(30*(n+1)/total),'整理输出层 '+key)
+        if progress:progress(round(30*(n+1)/total),'整理输出层 '+key)
     error_layer=choose_error_layer(layers) if issues else None
     if path.suffix.lower() in ('.oas','.oasis'):
         from .oas_stream import Store
         store=Store(path.parent,dbu,error_layer=error_layer)
         try:
             store.add('CurrentPreview',layers,(0.,0.),(0.,0.),errors=list(issues) if issues else None,die_count=die_count)
-            progress(70,'写入当前姿态OAS');result=store.write(path,progress)
+            if progress:progress(70,'写入当前姿态OAS')
+            result=store.write(path,progress)
         finally:store.close()
         return dict(result,path=str(path),format='OAS',error_layer=error_layer,dbu_um=dbu)
     lib=gdstk.Library(unit=1e-6,precision=dbu*1e-6);top=lib.new_cell('CurrentPreview')
@@ -98,7 +99,8 @@ def write(snapshot,destination,dbu,options=None,issues=(),die_count=0,progress=l
         for blobs in rectangles(list(issues),die_count,dbu).values():add(cell,f'{error_layer[0]}/{error_layer[1]}',blobs)
     fd,temp=tempfile.mkstemp(prefix='.dsa-export-',suffix='.gds',dir=path.parent);os.close(fd)
     try:
-        progress(70,'写入当前姿态GDS');lib.write_gds(temp,max_points=options.max_points)
+        if progress:progress(70,'写入当前姿态GDS')
+        lib.write_gds(temp,max_points=options.max_points)
         # Format integrity is part of atomic writing, not an extra release round.
         check=gdstk.read_gds(temp)
         if not check.top_level():raise ValueError('导出文件无顶层Cell')
@@ -125,6 +127,7 @@ def export_layout(w):
     show_drc=w.show_issues.isChecked();reconstruction=w.reconstruction_toggle.isChecked();motions=w.motions()
     def work(progress):
         from .fast_preview import GeometryCache
+        from .resources import progress_slice
         from .dxf_export import snapshot
         from .measured_issues import catalogue
         gc=cache or GeometryCache(data);current=frame;issues=[]
@@ -135,14 +138,14 @@ def export_layout(w):
             model=ContactModel(data,case,roles,case['connections'],gc,motions,p)
             current=dict(frame or dict(states=np.zeros((len(case['dies']),3))))
             replacements=current.get('reconstruction',{}).get('replacements',{}) if reconstruction else {}
-            current['drc']=GlobalDRC(model,p).frame(current['states'],replacements,settings,lambda n,t:progress(round(n*.35),t))
+            current['drc']=GlobalDRC(model,p).frame(current['states'],replacements,settings,progress_slice(progress,0,.35))
             from .drc_policy import visible
             current['drc']=[q for q in current['drc'] if visible(settings,q)]
             issues=catalogue(current,case,model)
-        frozen=snapshot(data,gc,current,reconstruction=reconstruction,progress=lambda n,t:progress(35+round(n*.2),t))
+        frozen=snapshot(data,gc,current,reconstruction=reconstruction,progress=progress_slice(progress,35,.2))
         frozen=replace(frozen,layers={k:v for k,v in frozen.layers.items() if k in selected})
         if not frozen.layers:raise ValueError('导出范围没有图形层')
-        return write(frozen,path,data.dbu_um,options,issues,len(case['dies']) if case else 0,lambda n,t:progress(55+round(n*.45),t))
+        return write(frozen,path,data.dbu_um,options,issues,len(case['dies']) if case else 0,progress_slice(progress,55,.45))
     def done(result):
         message=f"当前姿态{result['format']}已输出：{result['path']}";w.log_bus.emit(message);w.statusBar().showMessage(message)
     w.start_worker(work,done)

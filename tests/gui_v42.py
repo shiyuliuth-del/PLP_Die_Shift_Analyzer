@@ -33,6 +33,9 @@ try:
  assert w.view_settings.reconstruction_boundary_mode=='wide'
  assert w.setting_fields['reconstruction_box_mode'].currentData()=='aligned'
  assert '接触标记' not in w.setting_sections
+ process=w.fields['minimum_edge_um'].parentWidget()
+ assert '其他' in w.process_sections
+ assert all(w.setting_fields[key].parentWidget() is process for key in ('drc_min_angle_deg','drc_tolerance_um'))
  drc_row=w._drc_policy_editors[1].boxes['width'].parentWidget()
  assert w.setting_fields['contact_marker_size'].parentWidget() is drc_row.parentWidget()
  w.manual_states=np.array([[8.,5.,.003]]);w.request_preview();wait()

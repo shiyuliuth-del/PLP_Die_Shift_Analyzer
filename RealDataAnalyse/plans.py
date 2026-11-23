@@ -15,7 +15,7 @@ from die_shift_studio.jobs import REALDATA_DIRECTORY, atomic_save, provision_pro
 from .excel import import_files
 from .instances import connect
 from .projects import inside, template_file
-from .runner import Runner
+from .runner import Runner, nominal_limits
 from .storage import Lease, sha256, configure_logging
 from .transport import default_endpoint
 
@@ -60,6 +60,9 @@ def validate(snapshot, output, check_hash=False, stop=None):
     if target.exists() and not target.is_file():
         raise ValueError('输出位置不是普通文件')
     controls = snapshot['controls']
+    nominal_limits(controls.get('bypass_limits',(0,0,0)))
+    if type(controls.get('ignore_measurement_failure',False)) is not bool:
+        raise ValueError('忽略测量失败须为布尔值')
     if (not 1 <= controls['dies'] <= 10000 or not 0 <= controls['workers'] <= 64
             or (controls['memory'] != 0 and not 128 <= controls['memory'] <= 1048576)
             or not 0 <= controls['retries'] <= 10 or not 0 <= controls['timeout'] <= 86400):
@@ -295,7 +298,9 @@ class PlanRunner:
                 if record and Path(row['output']).is_file() and sha256(row['output'], self.stop) == record['sha256']:
                     configure_logging(workspace)
                     if self.trace: self.trace.set_root(workspace)
-                    return Runner(database, meta['config']['endpoint'], meta['config']['project'], row['output'], stop=self.stop, trace=self.trace,template=snapshot.get('template')).run()
+                    return Runner(database, meta['config']['endpoint'], meta['config']['project'], row['output'],
+                                  stop=self.stop, trace=self.trace, template=snapshot.get('template'),
+                                  bypass_limits=controls.get('bypass_limits',(0,0,0))).run()
             validate(snapshot, row['output'], check_hash=True, stop=self.stop)
             project = materialize(row, self.stop)
             configure_logging(workspace)
@@ -325,7 +330,8 @@ class PlanRunner:
                     geometry = nominal_geometry(connect_plan())
                 import_files([item['path'] for item in selected], database, controls['dies'], controls['workers'], self.stop,
                              lambda message: report(message,0,15), snapshot['profile'], profiles,
-                             measurement=measurement, geometry=geometry)
+                             measurement=measurement, geometry=geometry,
+                             ignore_measurement_failure=bool(measurement) and controls.get('ignore_measurement_failure',False))
             with closing(sqlite3.connect(database.as_uri()+'?mode=ro', uri=True)) as db:
                 batch_owner = json.loads(db.execute("select value from meta where key='run_id'").fetchone()[0])
                 sources = json.loads(db.execute("select value from meta where key='sources'").fetchone()[0])
@@ -336,6 +342,7 @@ class PlanRunner:
                 connect_plan()
             return Runner(database, endpoint, project, row['output'], controls['workers'], controls['memory'], controls['retries'],
                    controls['timeout'], self.stop, report, transport=transport, trace=self.trace,
+                   bypass_limits=controls.get('bypass_limits',(0,0,0)),
                    template=snapshot.get('template'), expected_template_sha256=expected.get(snapshot.get('template'))).run()
         finally:
             if transport is not None and (owned or owned_pid):

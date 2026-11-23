@@ -1,7 +1,7 @@
 """Export only physical exterior/hole contours, classified A/B/C at the seams.
 
-Internal partition faces are never entities. The end of a split contour uses
-the same coordinates on both layers, and whole rings stay closed.
+Internal partition faces are never entities. Open polylines end at identical
+join coordinates, and their union must equal the final physical boundary.
 """
 import hashlib
 import math
@@ -34,7 +34,7 @@ def line_parts(g):
 
 
 def joined_coordinates(lines):
-    """Use one float coordinate for each shared seam node."""
+    """Use one float coordinate for each shared seam node and keep paths open."""
     if not lines:return []
     largest=max(1.,max(float(np.max(abs(xy))) for _,xy in lines))
     epsilon=max(1e-10,float(np.spacing(largest))*8)
@@ -51,7 +51,11 @@ def joined_coordinates(lines):
     for name,points in lines:
         xy=np.asarray([node(p) for p in points])
         xy=xy[np.r_[True,np.any(xy[1:]!=xy[:-1],axis=1)]]
-        if len(xy)>=2:out.append((name,xy))
+        if len(xy)<2:continue
+        if np.array_equal(xy[0],xy[-1]):
+            middle=(len(xy)-1)//2
+            if middle>0:out.extend(((name,xy[:middle+1]),(name,xy[middle:])))
+        else:out.append((name,xy))
     return out
 
 
@@ -198,13 +202,6 @@ def _exclusive_outlines(groups):
     return [group._replace(paths=paths[i]) for i,group in enumerate(groups) if paths[i]],shared
 
 
-def _merge_outlines(group):
-    """Join exact endpoints inside one CAD block, stopping at branch points."""
-    if group.closed or len(group.paths)<2:return group
-    merged=shapely.line_merge(shapely.MultiLineString(group.paths))
-    return group._replace(paths=[np.asarray(line.coords) for line in line_parts(merged)])
-
-
 def _prepare(snapshot,reconstruction,roles,options,progress):
     tasks=[]
     for key,raw in sorted(snapshot.layers.items()):
@@ -216,10 +213,10 @@ def _prepare(snapshot,reconstruction,roles,options,progress):
     groups=[];inputs=merged=0
     for n,(rows,i,m) in enumerate(parallel_iter(layer_contours,tasks,profile)):
         groups.extend(rows);inputs+=i;merged+=m
-        progress(round(55*(n+1)/max(1,len(tasks))),f'拆分真实轮廓：{tasks[n][0]}')
-    progress(56,'去除完全及局部重叠的轮廓线段')
+        if progress:progress(round(55*(n+1)/max(1,len(tasks))),f'拆分真实轮廓：{tasks[n][0]}')
+    if progress:progress(56,'去除完全及局部重叠的轮廓线段')
     groups,shared=_exclusive_outlines(groups)
-    return [_merge_outlines(group) for group in groups],shared,inputs,merged
+    return groups,shared,inputs,merged
 
 
 def contours(snapshot,reconstruction,roles,options,progress=lambda *_:None):
@@ -255,10 +252,10 @@ def write_regions(snapshot,reconstruction,roles,path,progress=lambda *_:None,*,s
             for i,block in enumerate(blocks):
                 cancel_check()
                 doc._write_insert(w,block,handles['block_record_model'])
-                if i%128==0:progress(65+round(25*i/len(blocks)),'写出按源图形和图层分组的CAD块')
+                if progress and i%128==0:progress(65+round(25*i/len(blocks)),'写出按源图形和图层分组的CAD块')
             w.add(0,'ENDSEC');doc._write_objects(w,handles);stream.flush();os.fsync(stream.fileno())
         _verify(temp,count,extent)
-        progress(92,'回读核对CAD块、闭合与重复轮廓')
+        if progress:progress(92,'回读核对CAD块、闭合与重复轮廓')
         topology=verify_written_contours(temp,expected_blocks=blocks,expected_references=references,shared_layers=shared)
         digest=hashlib.sha256()
         with open(temp,'rb') as stream:
@@ -267,7 +264,7 @@ def write_regions(snapshot,reconstruction,roles,path,progress=lambda *_:None,*,s
         os.replace(temp,path)
     finally:
         if os.path.exists(temp):os.unlink(temp)
-    progress(100,'动静区DXF输出完成')
+    if progress:progress(100,'动静区DXF输出完成')
     return dict(path=str(path),polygons=count,layers=len(names),sha256=digest.hexdigest(),ignored=snapshot.ignored_count,
                 input_polygons=inputs,merged_polygons=merged,flattened=True,merge_layers=True,scale=options.scale,regions=True,topology=topology,
                 unresolved_regions=sum(not q.get('valid',True) for q in reconstruction.get('pieces',())))

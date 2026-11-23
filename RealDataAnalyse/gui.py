@@ -12,7 +12,7 @@ from . import __version__
 from .excel import DEFAULT_PROFILE, HEADERS, import_files
 from .measurements import HEADINGS, SUFFIXES, folders, nominal_geometry
 from .projects import load_folder, save_folder, inside, copy_excel, copy_inputs, template_file
-from .runner import Runner
+from .runner import Runner, nominal_limits
 from .storage import Ledger, configure_logging
 from .transport import Transport, default_endpoint, installation
 from .conversation import Conversation
@@ -27,8 +27,8 @@ COMMANDS = {
     'output.configure': {'output_directory': '', 'max_threads': 0, 'max_memory_mb': 0},
     'preview.submit': {'dies': [{'die': 1, 'dx_um': 0, 'dy_um': 0, 'angle_deg': 0}]},
     'export.gds': {'filename': 'measured.gds'},
-    'batch.begin': {'filename': 'measured.oas', 'output_policy': 'omit_failed_regions'},
-    'batch.submit': {'batch_id': '', 'cell': 'Package_000001', 'position_um': [0, 0], 'dies': []},
+    'batch.begin': {'filename': 'measured.oas', 'output_policy': 'omit_failed_regions', 'nominal_bypass': False},
+    'batch.submit': {'batch_id': '', 'cell': 'Package_000001', 'position_um': [0, 0], 'dies': [], 'use_nominal': False},
     'batch.end': {'batch_id': ''}, 'task.get': {'task_id': ''},
     'task.issues': {'task_id': '', 'offset': 0, 'limit': 128},
     'compute.cancel': {}, 'app.shutdown': {},
@@ -124,6 +124,7 @@ class Window(W.QMainWindow):
         self.page = 0
         self.project_root = None
         self.measurement = None
+        self.excluded_excel = set()
         self.operation = ''
         self.last_log_update = 0
         self.shared_profile = copy.deepcopy(DEFAULT_PROFILE)
@@ -179,6 +180,22 @@ class Window(W.QMainWindow):
         self.timeout = self.spin(controls, '任务超时秒', 0, 86400, 0)
         self.timeout.setSpecialValueText('0（无超时）')
         form.addRow(controls)
+        bypass = W.QHBoxLayout()
+        self.bypass_limits = []
+        for label, maximum in (('X (μm)', 1e9), ('Y (μm)', 1e9), ('旋转 (°)', 360)):
+            bypass.addWidget(W.QLabel(label))
+            field = W.QDoubleSpinBox()
+            field.setRange(0, maximum)
+            field.setDecimals(6)
+            field.setSingleStep(.1)
+            field.setToolTip('封装内每颗DIE的绝对偏移和绝对旋转均严格小于对应阈值时，使用同一名义封装Cell。任一阈值为0时关闭。')
+            bypass.addWidget(field)
+            self.bypass_limits.append(field)
+        form.addRow('原图直出阈值', bypass)
+        self.ignore_measurement_failure = W.QCheckBox('忽略测量失败')
+        self.ignore_measurement_failure.setEnabled(False)
+        self.ignore_measurement_failure.setToolTip('对机台标记失败的芯片，采用该行的 X/Y 偏移与旋转角。适用于机台生产格式。')
+        form.addRow(self.ignore_measurement_failure)
         layout.addWidget(connection)
         tabs = W.QTabWidget()
         self.tabs = tabs
@@ -382,9 +399,10 @@ class Window(W.QMainWindow):
                        self.folder_button, self.import_button, self.create_plan_button, self.run_button, self.send_button,
                        self.endpoint, self.project, self.database, self.output, self.template, self.profile,
                        self.workers, self.memory, self.retries, self.timeout, self.file_view, self.sheet, self.header_row, self.mapping_shared,
-                       *self.path_buttons):
+                       *self.path_buttons, *self.bypass_limits):
             widget.setEnabled(not on)
         self.dies.setEnabled(not on and not self.measurement)
+        self.ignore_measurement_failure.setEnabled(not on and bool(self.measurement))
         self.stop_button.setEnabled(on)
 
     def execute(self, fn, callback=None, failure=None, operation='操作'):
@@ -510,6 +528,7 @@ class Window(W.QMainWindow):
         def done(config):
             self.project_root = Path(config['folder'])
             self.measurement = config.get('measurement')
+            self.excluded_excel = set(map(Path,config['excluded_excel']))
             self.folder.setText(config['folder'])
             self.project.setText(config['project'])
             self.template.setText(config['template'])
@@ -526,6 +545,9 @@ class Window(W.QMainWindow):
             self.set_files(config['files'])
             for name, default in (('dies', 3), ('workers', 0), ('memory', 0), ('retries', 3), ('timeout', 0)):
                 getattr(self, name).setValue(int(config['controls'].get(name, default)))
+            for field, value in zip(self.bypass_limits, nominal_limits(config['controls'].get('bypass_limits',(0,0,0)))):
+                field.setValue(value)
+            self.ignore_measurement_failure.setChecked(config['controls'].get('ignore_measurement_failure') is True)
             self.logger = configure_logging(config['workspace'])
             self.page = 0
             self.table.setRowCount(0)
@@ -631,14 +653,19 @@ class Window(W.QMainWindow):
         columns = {self.profile.item(row, 0).text(): self.profile.item(row, 1).text().strip() for row in range(self.profile.rowCount())}
         return dict(sheet=self.sheet.text().strip(), header_row=self.header_row.value(), columns=columns)
 
+    def controls(self):
+        return {**{key:getattr(self,key).value() for key in ('dies','workers','memory','retries','timeout')},
+                'bypass_limits':[field.value() for field in self.bypass_limits],
+                'ignore_measurement_failure':self.ignore_measurement_failure.isChecked()}
+
     def persist(self):
         if self.project_root is None:
             raise ValueError('请先选择项目文件夹')
         files = self.file_entries()
         profile = copy.deepcopy(self.shared_profile)
         save_folder(self.project_root, self.project.text(), files, self.database.text(), self.output.text(), profile,
-                    {key: getattr(self, key).value() for key in ('dies', 'workers', 'memory', 'retries', 'timeout')},
-                    shared_mapping=self.mapping_mode, template=self.template.text().strip(), measurement=self.measurement)
+                    self.controls(), shared_mapping=self.mapping_mode, template=self.template.text().strip(),
+                    measurement=self.measurement, excluded_excel=self.excluded_excel)
         return files, profile
 
     def select_template(self,path):
@@ -663,6 +690,7 @@ class Window(W.QMainWindow):
         existing = {entry['path'] for entry in entries}
         def done(paths):
             for path in paths:
+                self.excluded_excel.discard(Path(path))
                 if path not in existing:
                     entries.append(dict(path=path, enabled=True))
                     existing.add(path)
@@ -674,13 +702,16 @@ class Window(W.QMainWindow):
             name, ok = W.QInputDialog.getItem(self, '选择芯片目录', '芯片名称', dies, 0, False)
             if not ok:
                 return
-            add = lambda stop, progress: copy_inputs(root, files, stop, str(Path('Excel') / name), SUFFIXES)
+            destination = (Path(self.measurement['root']) / name).relative_to(root / REALDATA_DIRECTORY)
+            add = lambda stop, progress: copy_inputs(root, files, stop, destination, SUFFIXES)
         else:
             add = lambda stop, progress: copy_excel(root, files, stop)
         self.execute(add, done, operation='添加Excel')
 
     def delete_files(self):
+        entries = self.file_entries()
         for row in sorted({index.row() for index in self.file_view.selectedIndexes()}, reverse=True):
+            self.excluded_excel.add(Path(entries[row]['path']))
             self.file_view.removeRow(row)
         try:
             self.persist()
@@ -712,6 +743,7 @@ class Window(W.QMainWindow):
                 self.log_view.appendPlainText('导入警告 · ' + warning)
             self.persist()
         project, measurement = self.project.text(), self.measurement
+        ignore_failure = bool(measurement) and self.ignore_measurement_failure.isChecked()
         endpoint, timeout = self.endpoint.text(), self.timeout.value()
         def prepare(stop, progress):
             geometry = None
@@ -719,7 +751,7 @@ class Window(W.QMainWindow):
                 info = self.linked_project(endpoint, project, stop, progress, timeout, str(output))
                 geometry = nominal_geometry(info)
             result = import_files(files, target, dies, workers, stop, progress, profile, profiles,
-                                  measurement=measurement, geometry=geometry)
+                                  measurement=measurement, geometry=geometry, ignore_measurement_failure=ignore_failure)
             if measurement:
                 result['info'] = info
             return result
@@ -732,7 +764,8 @@ class Window(W.QMainWindow):
             self.log(exc)
             return
         kwargs = dict(database=self.database.text(), endpoint=self.endpoint.text(), project=self.project.text(), output=self.output.text(),
-                      template=self.template.text().strip(), workers=self.workers.value(), memory_mb=self.memory.value(), retries=self.retries.value(), timeout=self.timeout.value())
+                      template=self.template.text().strip(), workers=self.workers.value(), memory_mb=self.memory.value(),
+                      retries=self.retries.value(), timeout=self.timeout.value(), bypass_limits=self.controls()['bypass_limits'])
         entries = self.file_entries()
         selected = sorted(p['path'] for p in entries if p['enabled'])
         profile = copy.deepcopy(self.shared_profile)
@@ -743,8 +776,9 @@ class Window(W.QMainWindow):
                 meta = {k: json.loads(v) for k, v in db.execute('select key,value from meta')}
             if (selected != sorted(p['path'] for p in meta.get('sources', [])) or profile != meta.get('profile')
                     or profiles != meta.get('profiles', {}) or self_die != meta.get('die_count')
-                    or measurement != meta.get('measurement')):
-                raise ValueError('Excel勾选、列映射或DIE数量与任务记录不符，请先校验并创建新任务')
+                    or measurement != meta.get('measurement')
+                    or ignore_failure != meta.get('ignore_measurement_failure',False)):
+                raise ValueError('Excel勾选、列映射、DIE数量或测量失败选项与任务记录不符，请先创建新任务')
             from .storage import sha256
             for index, source in enumerate(meta.get('sources', []), 1):
                 progress(dict(text=f'核对Excel输入 · {index}/{len(selected)} · {Path(source["path"]).name}', current=index - 1, total=len(selected)))
@@ -753,6 +787,7 @@ class Window(W.QMainWindow):
             return Runner(**kwargs, stop=stop, progress=progress, trace=self.conversation).run()
         self_die = self.dies.value()
         measurement = self.measurement
+        ignore_failure = bool(measurement) and self.ignore_measurement_failure.isChecked()
         def done(value):
             if value['state'] != 'completed' or self.pending_close:
                 return
@@ -893,7 +928,9 @@ class Window(W.QMainWindow):
                 state={'computed_with_issues':'已计算（含问题）','committed_with_issues':'已输出（含问题）','committed':'已输出'}.get(state,state)
                 try:
                     receipt=json.loads(result)
-                    if isinstance(receipt,dict) and ('drc_count' in receipt or receipt.get('connection_failure_count')):
+                    if isinstance(receipt,dict) and receipt.get('use_nominal'):
+                        result = '原图直出 · 共享名义封装Cell'
+                    elif isinstance(receipt,dict) and ('drc_count' in receipt or receipt.get('connection_failure_count')):
                         serious = receipt.get('error2_rectangles', 0)
                         ordinary = receipt.get('error_rectangles', 0) - serious
                         result = (f'DRC {receipt.get("drc_count",0)}项 · 连接失败 {receipt.get("connection_failure_count",0)}项 · '
@@ -946,7 +983,7 @@ class Window(W.QMainWindow):
         config = dict(folder=str(self.project_root) if self.project_root else '', project=self.project.text(),
                       files=entries, template=self.template.text().strip(), profile=copy.deepcopy(self.shared_profile), shared_mapping=self.mapping_mode,
                       measurement=self.measurement,
-                      controls={key:getattr(self,key).value() for key in ('dies','workers','memory','retries','timeout')})
+                      controls=self.controls())
         def create(stop,progress):
             progress(dict(text='保存计划快照 · 校验输入摘要',current=0,total=1))
             snapshot = capture_plan(config,stop)

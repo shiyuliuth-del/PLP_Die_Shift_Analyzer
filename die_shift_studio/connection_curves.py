@@ -51,12 +51,17 @@ def _face_ends(plan,face,s):
     return xy[np.argsort(xy@normal)]
 
 
-def _side_tangent(source,point,direction,tol):
+def _side_tangent(plan,point,direction):
     """Real source boundary tangent, oriented toward the route's far end."""
-    rings=[shapely.get_coordinates(line) for line in shapely.get_parts(source.boundary)]
-    a=np.concatenate([xy[:-1] for xy in rings if len(xy)>1]);b=np.concatenate([xy[1:] for xy in rings if len(xy)>1])
-    v=b-a;length=np.linalg.norm(v,axis=1)
-    good=length>tol*.01;a,b,v,length=a[good],b[good],v[good],length[good]
+    source,_,_,starts,ends=plan._source_info()
+    meta=getattr(plan,'_side_meta',None)
+    tol=plan.tolerance
+    if meta is None or meta[0] is not source:
+        v=ends-starts;length=np.linalg.norm(v,axis=1)
+        good=length>tol*.01
+        meta=(source,starts[good],v[good],length[good])
+        plan._side_meta=meta
+    _,a,v,length=meta
     t=np.clip(np.sum((point-a)*v,axis=1)/(length*length),0,1)
     distance=np.linalg.norm(a+t[:,None]*v-point,axis=1)
     choices=np.flatnonzero(distance<=max(tol*2,float(distance.min())+tol*.01))
@@ -92,6 +97,10 @@ def connection_data(part,plan,center,state):
 def linear_gap(part,plan,center,state):
     try:_,_,_,_,moved,far,t0,t1=connection_data(part,plan,center,state)
     except ValueError:return -float('inf')
+    return _seam_gap(moved,far,t0,t1)
+
+
+def _seam_gap(moved,far,t0,t1):
     direction=t0+t1;length=float(np.linalg.norm(direction))
     if length<1e-12:return -float('inf')
     # Test BOTH sides, not just the centres: a rotated face can cross on one side
@@ -101,8 +110,10 @@ def linear_gap(part,plan,center,state):
 
 def assemble_strip(strip,landing,fixed_landing,moved,far,tolerance):
     """A return loop must not re-enter a preserved pad away from its real seam."""
+    terminals=[g for g in (landing,fixed_landing) if not g.is_empty]
+    if not terminals:return strip
     seam=shapely.union_all([shapely.LineString(moved),shapely.LineString(far)]).buffer(2*tolerance)
-    for terminal in (landing,fixed_landing):
+    for terminal in terminals:
         overlap=strip.intersection(terminal).difference(seam)
         if overlap.area>tolerance*tolerance or overlap.length>4*tolerance:
             raise ValueError('连接段在截面外进入刚性孔盘')
@@ -112,14 +123,14 @@ def assemble_strip(strip,landing,fixed_landing,moved,far,tolerance):
 
 
 def endpoint_active(part,plan,center,state,style):
-    active_part,landing,fixed_landing,near,moved,far,_,_=connection_data(part,plan,center,state)
-    if style=='linear' and linear_gap(part,plan,center,state)<=plan.tolerance*8:raise ValueError('直线端点贴紧或交错')
+    active_part,landing,fixed_landing,near,moved,far,t0,t1=connection_data(part,plan,center,state)
+    if style=='linear' and _seam_gap(moved,far,t0,t1)<=plan.tolerance*8:raise ValueError('直线端点贴紧或交错')
     sides=[]
     for i in range(2):
         if style=='linear':side=np.array([moved[i],far[i]])
         else:
-            t0=_side_tangent(plan.source,near[i],plan.tangent(active_part['a']),plan.tolerance)
-            t1=_side_tangent(plan.source,far[i],plan.tangent(active_part['b']),plan.tolerance)
+            t0=_side_tangent(plan,near[i],plan.tangent(active_part['a']))
+            t1=_side_tangent(plan,far[i],plan.tangent(active_part['b']))
             angle=float(state[2]);co,si=math.cos(angle),math.sin(angle)
             t0=np.array([co*t0[0]-si*t0[1],si*t0[0]+co*t0[1]])
             side=biarc(moved[i],far[i],t0,t1,max(plan.tolerance*.5,1e-6))

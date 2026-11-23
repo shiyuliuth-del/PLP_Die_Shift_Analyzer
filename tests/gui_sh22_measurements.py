@@ -53,9 +53,9 @@ def run_case(root):
         assert imported['die_names'] == ['101', '102']
         print(f'SH22_FULL_IMPORT_PASS: 400 packages / 800 rows in {time.monotonic()-start:.2f}s', flush=True)
 
-        # Subset of the shipped file contains a nominal and a measured package.
-        # Dedicated issue-layer tests exercise open circuits and shorts.
-        keys = {(0, 0), (0, 2)}
+        # Two sites fit the bypass. One DIE at the exact X limit in site 0:2
+        # leaves that entire package on the normal reconstruction path.
+        keys = {(0, 0), (0, 2), (0, 3)}
         selected = []
         for path in paths:
             dest = path.with_name('validation.csv')
@@ -69,36 +69,51 @@ def run_case(root):
                 for row in reader:
                     if tuple(map(int, row[:2])) in keys and float(row[3]) > 0:
                         rows.append(row)
-                assert len(rows) == 2
+                assert len(rows) == len(keys)
             with dest.open('w', encoding='utf-8-sig', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow(heading)
                 writer.writerows(rows)
         sample = database.with_name('sample.sqlite')
         imported = client('--import-data', dict(import_args, database=str(sample), paths=list(map(str, selected))))
-        assert imported['packages'] == 2
+        assert imported['packages'] == 3
         info = call(endpoint, 'info')['result']
         output = Path(config['output'])
         published = client('--run', dict(database=str(sample), project=config['project'], endpoint=str(endpoint),
-                                         output=str(output), workers=0, memory_mb=0, retries=0))
+                                         output=str(output), workers=0, memory_mb=0, retries=0,
+                                         bypass_limits=[2.22209,2,.2]))
         assert published['state'] == 'completed' and verify_crc(output)
         assert list(output.parent.iterdir()) == [output]
         lib = gdstk.read_oas(output)
         dbu = lib.precision / lib.unit
         top, = lib.top_level()
-        refs = {ref.cell_name: ref for ref in top.references}
-        assert len(refs) == 2
+        nominal_refs = [ref for ref in top.references if ref.cell_name == 'G_NOMINAL']
+        refs = {ref.cell_name: ref for ref in top.references if ref.cell_name != 'G_NOMINAL'}
+        assert len(nominal_refs) == 2 and len(refs) == 1
+        assert nominal_refs[0].cell is nominal_refs[1].cell
+        source = gdstk.read_gds(folder/'sh22.gds')
+        original = source.top_level()[0].get_polygons(layer=128,datatype=0)
+        nominal = nominal_refs[0].cell.get_polygons(layer=128,datatype=0)
+        assert len(original) == len(nominal) == 2
+        assert not gdstk.boolean(original,nominal,'xor',precision=dbu)
         with closing(sqlite3.connect(sample)) as db:
-            for payload, in db.execute('select payload from packages'):
+            for identity, payload, result in db.execute('select package,payload,result from packages'):
                 package = json.loads(payload)
-                origin = refs[package['cell']].origin
+                receipt = json.loads(result)
+                should_bypass = identity.split(':')[1] != '2'
+                assert receipt.get('use_nominal',False) is should_bypass
+                assert receipt['fixed_rdl_drc_checked'] is not should_bypass
                 expected = [p-b for p,b in zip(package['position_um'], info['board_bounds_um'])]
-                assert all(abs(a-b) <= dbu for a,b in zip(origin, expected)), (origin, expected)
+                candidates = nominal_refs if should_bypass else [refs[package['cell']]]
+                assert sum(all(abs(a-b)<=dbu for a,b in zip(ref.origin,expected)) for ref in candidates)==1
             actual_centers = {}
             for package, die, payload in db.execute('select package,die,payload from measurements'):
                 actual_centers.setdefault(package, {})[die] = json.loads(payload)['actual_center_um']
             for package_id, payload in db.execute('select package,payload from packages'):
-                cell = refs[json.loads(payload)['cell']]
+                key = json.loads(payload)['cell']
+                if key not in refs:
+                    continue
+                cell = refs[key]
                 outlines = cell.get_polygons(layer=128, datatype=0)
                 expected = list(actual_centers[package_id].values())
                 import shapely

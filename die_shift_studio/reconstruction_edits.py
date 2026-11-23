@@ -20,6 +20,7 @@ def blade_angles(settings,plan,a,b,defaults=(0.,0.)):
 def apply_angles(settings,plan,part):
     if part is None:return None
     angles,manual=blade_angles(settings,plan,part['a'],part['b'],part.get('angles',(0.,0.)))
+    if angles==tuple(part.get('angles',(0.,0.))):return dict(part,manual_angles=manual)
     changed=plan.partition(part['a'],part['b'],angles)
     if changed is not None:changed=dict(changed,manual_angles=manual)
     return changed

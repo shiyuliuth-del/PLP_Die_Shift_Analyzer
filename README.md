@@ -1,6 +1,6 @@
-# Die Shift Analyze V62
+# Die Shift Analyze V63
 
-V62 在根目录统一两个应用的 Windows 打包和启动入口，动静区 DXF 改用 `PKG_REF` 并拼接同一块内的相接轮廓，更新过孔菜单、动区框选默认值及 DRC 设置。详见 [V62 使用说明](docs/V62_使用说明.md)。
+V63 增加实测原图直出、测量表自动发现、逐封装跳过日志和可选的「忽略测量失败」。Die Shift Analyze 将三项几何规则移到「工艺 → 其他」，停用实测模式的主窗口进度计算，复用重构的名义动区及边界，并恢复动静区 DXF 的 V61 分段轮廓。两个软件共用根目录打包入口。详见 [V63 使用说明](docs/V63_使用说明.md)。
 
 V61 更新动静区 DXF 的图层、闭合边框、CAD 块和重复轮廓处理，并修复 SH22 跨 DIE 固定布线造成的运动过孔归属错误。详见 [V61 使用说明](docs/V61_使用说明.md)。
 
@@ -27,7 +27,7 @@ V50：芯片对重点组合、分叉边界修正、当前姿态GDS/OAS与旋转E
 软件分析Die-first封装的DIE平移与旋转，提供三方案初筛、实体覆盖与极端足迹、通道宽度风险、重构动区编辑、规则/联合模型良率、工程结果保存、GDS/OAS导入、实测IPC及批量OAS输出。长度均为μm，GDS/OAS只读，工程节点可编辑。
 
 - [实测IPC接口与注意事项](docs/MEASURED_OUTPUT_API.md) · [GD55-1105独立验证脚本](tools/verify_measured_gd55.py)
-- [用户操作](docs/V62_使用说明.md)
+- [用户操作](docs/V63_使用说明.md)
 - [AI交接：主要功能、代码地图、算法和后续重点](docs/AI_HANDOFF.md)
 - [现行设计合同](docs/DESIGN_REQUIREMENTS.md)
 - [已知边界](docs/KNOWN_ISSUES.md)

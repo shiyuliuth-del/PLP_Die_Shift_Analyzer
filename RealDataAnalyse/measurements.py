@@ -2,6 +2,7 @@
 from collections import Counter, defaultdict
 from contextlib import closing, contextmanager
 import csv
+from decimal import Decimal
 from itertools import groupby, islice
 import math
 import sqlite3
@@ -13,6 +14,8 @@ from .storage import dumps, sha256
 HEADINGS = ('行', '列', '是否成功', '理论坐标X', '理论坐标Y', '实际坐标X', '实际坐标Y',
             '偏移X', '偏移Y', '旋转角度')
 SUFFIXES = ('.csv', '.xlsx')
+POSE_COLUMNS = ('r integer,c integer,die integer,tx real,ty real,ax real,ay real,angle real,'
+                'dx real,dy real,failure_override integer,source text,line integer')
 
 
 def folders(root):
@@ -21,6 +24,22 @@ def folders(root):
 
 def table_file(path):
     return path.is_file() and path.suffix.lower() in SUFFIXES and not path.name.startswith('~$')
+
+
+def measurement_root(excel):
+    """Find the DIE directory level, including an archive's enclosing folder."""
+    root = Path(excel)
+    while True:
+        children = [path for path in folders(root) if not path.is_symlink()]
+        if any(any(map(table_file, child.iterdir())) for child in children):
+            return root
+        if any(table_file(path) for path in root.iterdir()):
+            return None
+        if len(children) != 1:
+            break
+        root = children[0]
+    # An empty set of named DIE folders still lets the user add tables by DIE.
+    return Path(excel) if folders(excel) else None
 
 
 def nominal_geometry(info):
@@ -82,10 +101,10 @@ def scalar(value, label):
     return number
 
 
-def import_part(path, die, profile, scratch, stop, progress):
+def import_part(path, die, profile, scratch, stop, progress, ignore_measurement_failure=False):
     before = sha256(path, stop)
     with closing(sqlite3.connect(scratch)) as db:
-        db.execute('create table poses(r integer,c integer,die integer,tx real,ty real,ax real,ay real,angle real,dx real,dy real,source text,line integer)')
+        db.execute(f'create table poses({POSE_COLUMNS})')
         db.execute('create table warnings(line integer, message text)')
 
         def warn(line, message):
@@ -126,20 +145,27 @@ def import_part(path, die, profile, scratch, stop, progress):
                         continue
 
                     ax = ay = dx = dy = angle = None
+                    failure_override = False
                     try:
                         success = scalar(values[2], '是否成功')
                         if success not in (0, 1):
                             raise ValueError('是否成功须为0或1')
                         if success:
                             ax, ay, angle = [scalar(values[i], HEADINGS[i]) for i in (5, 6, 9)]
-                            if abs(angle) > 360:
-                                raise ValueError('角度超出 ±360°')
+                        elif ignore_measurement_failure:
+                            dx, dy, angle = [scalar(values[i], HEADINGS[i]) for i in (7, 8, 9)]
+                            ax, ay = [scalar(Decimal(str(center)) + Decimal(str(offset)), label)
+                                      for center, offset, label in ((tx, dx, HEADINGS[5]), (ty, dy, HEADINGS[6]))]
+                            failure_override = True
+                        if angle is not None and abs(angle) > 360:
+                            raise ValueError('角度超出 ±360°')
                     except ValueError as exc:
                         warn(line, f'已跳过本行的实测姿态：{exc}')
                         ax = ay = angle = None
+                        failure_override = False
                         rejected += 1
 
-                    if angle is not None:
+                    if angle is not None and not failure_override:
                         offsets = []
                         fallback = []
                         for i, actual, nominal in ((7, ax, tx), (8, ay, ty)):
@@ -154,8 +180,8 @@ def import_part(path, die, profile, scratch, stop, progress):
                             warn(line, '使用实际中心减理论中心恢复' + '、'.join(fallback))
                             repaired += 1
 
-                    db.execute('insert into poses values(?,?,?,?,?,?,?,?,?,?,?,?)',
-                               (int(r), int(c), die, tx, ty, ax, ay, angle, dx, dy, str(path), line))
+                    db.execute('insert into poses values(?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                               (int(r), int(c), die, tx, ty, ax, ay, angle, dx, dy, failure_override, str(path), line))
                     count += 1
                     if count % 1000 == 0:
                         progress(dict(text=f'读取测量 · {path.parent.name}/{path.name} · {count} 行', current=0, total=1))
@@ -254,11 +280,16 @@ def select_site(records, names, tolerance, warn):
         warn(f'已跳过封装：缺少芯片 {missing} 的匹配记录')
         return None
 
+    unusable = [die for die, samples in sorted(by_die.items()) if all(sample[4] is None for sample in samples)]
+    if unusable:
+        warn('已跳过封装：没有有效实测姿态的芯片 ' + '、'.join(names[die-1] for die in unusable))
+        return None
+
     selected = []
     for die, samples in sorted(by_die.items()):
         usable = [record for record in samples if record[4] is not None]
-        if not usable:
-            return None  # the machine's unsuccessful flag is counted per package
+        # A valid successful observation takes precedence over a failed repeat.
+        usable = [record for record in usable if not record[-3]] or usable
         if len({(p[2], p[3], p[4]) for p in usable}) != 1:
             examples = '、'.join(f'{Path(record[-2]).name} 第{record[-1]}行' for record in usable[:4])
             warn(f'已跳过封装：芯片 {names[die-1]} 有冲突的实测记录（{examples}）')
@@ -279,11 +310,12 @@ def package_rows(db, geometry, scale, tolerance, stop, progress, names, warn):
     local = [[value - origin for value, origin in zip(center, geometry['board_origin_um'])]
              for center in geometry['centers_um']]
     skipped = index = checked = 0
+    units = Decimal(str(scale))
     total = db.execute('select count(*) from production').fetchone()[0]
     with closing(grid_rows(db)) as cursor:
         for (row, col), records in groupby(cursor, key=lambda entry: entry[:2]):
             by_position = defaultdict(list)
-            for _, _, die, tx, ty, ax, ay, angle, dx, dy, source, line in records:
+            for _, _, die, tx, ty, ax, ay, angle, dx, dy, failure_override, source, line in records:
                 if stop.is_set():
                     raise InterruptedError('已停止封装坐标匹配')
                 checked += 1
@@ -295,7 +327,7 @@ def package_rows(db, geometry, scale, tolerance, stop, progress, names, warn):
                 if max(map(abs, origin)) > 1e9:
                     warn(f'{Path(source).parent.name}/{Path(source).name} 第{line}行：理论坐标超出范围，已跳过')
                     continue
-                by_position[origin].append((die, origin, ax, ay, angle, dx, dy, source, line))
+                by_position[origin].append((die, origin, ax, ay, angle, dx, dy, tx, ty, failure_override, source, line))
 
             for part, site in enumerate(site_components(by_position, tolerance), 1):
                 package = f'{row}:{col}:{part}'
@@ -310,14 +342,21 @@ def package_rows(db, geometry, scale, tolerance, stop, progress, names, warn):
                 position = [math.fsum(record[1][axis] for record in matching)/len(local) for axis in range(2)]
                 poses = []
                 audits = []
-                for die, _, ax, ay, angle, dx, dy, source, line in matching:
+                measured_max = [0., 0., 0.]
+                for die, _, ax, ay, angle, dx, dy, tx, ty, failure_override, source, line in matching:
                     cx, cy = local[die-1]
                     pose = dict(die=die, dx_um=ax*scale-cx-position[0], dy_um=ay*scale-cy-position[1],
                                 angle_deg=angle, rotation_center_um=geometry['centers_um'][die-1])
                     if max(abs(pose['dx_um']), abs(pose['dy_um'])) > 1e9:
                         break
                     poses.append(pose)
+                    deltas = (Decimal(str(dx)), Decimal(str(dy))) if failure_override else (
+                        Decimal(str(ax))-Decimal(str(tx)), Decimal(str(ay))-Decimal(str(ty)))
+                    offsets = [float(delta*units) for delta in deltas]
+                    measured_max = [max(old, abs(value)) for old, value in zip(measured_max, (*offsets, angle))]
                     audit = dict(pose, actual_center_um=[ax*scale, ay*scale], reported_offset=[dx, dy])
+                    if failure_override:
+                        audit['measurement_failure_ignored'] = True
                     audits.append((package, die, *position, dumps(audit), source, line))
                 if len(poses) != len(local):
                     skipped += 1
@@ -326,7 +365,12 @@ def package_rows(db, geometry, scale, tolerance, stop, progress, names, warn):
                 index += 1
                 cell = f'Package_{index:09d}'
                 db.executemany('insert into measurements values(?,?,?,?,?,?,?)', audits)
-                payload = dict(cell=cell, position_um=position, dies=poses)
+                for record in matching:
+                    if record[-3]:
+                        source, line = record[-2:]
+                        path = Path(source)
+                        warn(f'封装 {package} · {path.parent.name}/{path.name} 第{line}行：忽略测量失败，已采用本行偏移和旋转角')
+                payload = dict(cell=cell, position_um=position, dies=poses, measured_max=measured_max)
                 db.execute('insert into packages(seq,package,cell,payload) values(?,?,?,?)',
                            (index, package, cell, dumps(payload)))
     return index, skipped

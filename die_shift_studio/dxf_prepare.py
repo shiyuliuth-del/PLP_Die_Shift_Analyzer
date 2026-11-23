@@ -19,7 +19,7 @@ def prepare(snapshot,options,progress):
             chunks=[]
             for start in range(0,len(polygons),256):
                 chunks.append(shapely.union_all(polygons[start:start+256]))
-                progress(round(12*(j+min(1,(start+256)/len(polygons)))/max(1,len(keys))),f'Merge 图层 {key}')
+                if progress:progress(round(12*(j+min(1,(start+256)/len(polygons)))/max(1,len(keys))),f'Merge 图层 {key}')
             polygons=list(shapely.get_parts(shapely.union_all(chunks)))
         merged_count+=len(polygons)
         name='L'+key.replace('/','_D')
@@ -30,5 +30,5 @@ def prepare(snapshot,options,progress):
                 layers.append((name,shapely.Polygon(polygon.exterior)))
                 layers.extend((name+'_holes',shapely.Polygon(ring)) for ring in polygon.interiors)
             else:layers.append((name,polygon))
-        progress(round(12*(j+1)/max(1,len(keys))),f'准备展开图层 {key}')
+        if progress:progress(round(12*(j+1)/max(1,len(keys))),f'准备展开图层 {key}')
     return layers,source_count,merged_count

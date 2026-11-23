@@ -71,15 +71,31 @@ class Projects(unittest.TestCase):
         removed=Path(files[0]['path'])
         hidden=Path(files.pop(1)['path'])
         files[0]['enabled']=False
-        save_folder(folder,config['project'],files,config['database'],config['output'],config['profile'],{},
-                    template=config['template'])
-        removed.unlink()
         added=folder/'RealDataAnalyse/Excel/NewInput.xlsx'
-        shutil.copyfile(hidden,added)
+        shutil.copyfile(hidden,added)  # arrived after loading, before saving
+        save_folder(folder,config['project'],files,config['database'],config['output'],config['profile'],{},
+                    template=config['template'],excluded_excel=[hidden])
+        removed.unlink()
         loaded=load_folder(folder)
         self.assertEqual({Path(row['path']).name:row['enabled'] for row in loaded['files']},
                          {added.name:True,Path(files[1]['path']).name:True})
         self.assertEqual(loaded['template'],config['template'])
+
+    def test_archive_wrapper_discovers_each_die_and_all_tables(self):
+        excel=self.folder/'RealDataAnalyse/Excel'
+        for table in excel.glob('*.xlsx'):
+            table.unlink()
+        wrapper=excel/'Partition0'
+        for die, files in (('chip X',('01.CSV','02.xlsx')),('第二颗',('A.csv',))):
+            directory=wrapper/die
+            directory.mkdir(parents=True)
+            for name in files:
+                (directory/name).touch()
+        found=load_folder(self.folder)
+        self.assertEqual(found['measurement']['root'],str(wrapper))
+        self.assertEqual(found['controls']['dies'],2)
+        self.assertEqual({Path(item['path']).name for item in found['files']},{'01.CSV','02.xlsx','A.csv'})
+        self.assertTrue(all(item['enabled'] for item in found['files']))
 
     def test_external_copy_collision_and_cancel(self):
         external = self.root/'measurements.xlsx'

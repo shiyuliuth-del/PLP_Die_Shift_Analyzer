@@ -18,6 +18,46 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ProductionMeasurements(unittest.TestCase):
+    def test_opt_in_uses_failed_rows_offsets_and_preserves_successful_repeats(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            excel = root/'Excel'
+            geometry = dict(board_origin_um=[0,0], centers_um=[[10,10],[50,20]])
+            paths = []
+            for name, cx, cy in (('left',10,10),('right',50,20)):
+                path = excel/name/'measure.csv'
+                path.parent.mkdir(parents=True)
+                rows = []
+                for n in range(3):
+                    tx, ty = (1000*n+cx)/1000, cy/1000
+                    rows.append([n,0,1,tx,ty,tx+.002,ty+.003,.002,.003,.1])
+                if name == 'left':
+                    rows[0][2:] = [0,.010,.010,'','',-.007,.004,-1.25]
+                    rows[2][2:] = [0,2.010,.010,0,0,-.007,.004,'bad']
+                    rows.append([1,0,0,1.010,.010,0,0,.090,.090,5])
+                with path.open('w', encoding='utf-8-sig', newline='') as stream:
+                    csv.writer(stream).writerows([HEADINGS,*rows])
+                paths.append(path)
+            digests = [sha256(p) for p in paths]
+            arguments = dict(measurement=dict(root=str(excel)),geometry=geometry)
+            default = import_files(paths, root/'default.sqlite', 2, 0, threading.Event(), **arguments)
+            self.assertEqual((default['packages'],default['skipped_packages']),(1,2))
+            enabled = import_files(paths, root/'enabled.sqlite', 2, 0, threading.Event(),
+                                   ignore_measurement_failure=True, **arguments)
+            self.assertEqual((enabled['packages'],enabled['skipped_packages']),(2,1))
+            with closing(sqlite3.connect(enabled['database'])) as db:
+                records = {site:json.loads(payload) for site, payload in db.execute('select package,payload from packages')}
+                self.assertEqual(records['0:0:1']['measured_max'],[7.,4.,1.25])
+                accepted = records['0:0:1']['dies'][0]
+                self.assertAlmostEqual(accepted['dx_um'],-7)
+                self.assertAlmostEqual(accepted['dy_um'],4)
+                self.assertEqual(accepted['angle_deg'],-1.25)
+                self.assertAlmostEqual(records['1:0:1']['dies'][0]['dx_um'],2)
+                audits = db.execute('select payload from measurements order by package,die').fetchall()
+                self.assertEqual(sum(json.loads(audit).get('measurement_failure_ignored',False) for audit, in audits),1)
+            self.assertTrue(any('忽略测量失败' in message for message in enabled['warnings']))
+            self.assertEqual([sha256(p) for p in paths],digests)
+
     def test_attachment_format_multiple_files_actual_centers_and_repeated_indices(self):
         from openpyxl import Workbook
         with tempfile.TemporaryDirectory() as temp:

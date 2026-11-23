@@ -27,8 +27,8 @@ def turn_active(part,plan,center,state,style,variant):
     length=max(distance,4*max(h0,h1))*reach
     tolerance=max(plan.tolerance*.5,1e-6)
     co,si=np.cos(state[2]),np.sin(state[2]);rotation=np.array([[co,-si],[si,co]])
-    edge0=np.array([rotation@_side_tangent(plan.source,q,plan.tangent(active['a']),plan.tolerance) for q in near])
-    edge1=np.array([_side_tangent(plan.source,q,plan.tangent(active['b']),plan.tolerance) for q in far])
+    edge0=np.array([rotation@_side_tangent(plan,q,plan.tangent(active['a'])) for q in near])
+    edge1=np.array([_side_tangent(plan,q,plan.tangent(active['b'])) for q in far])
     if style=='arc':
         if not bias:height=max(4*max(h0,h1),distance*.3)
         middle=(start+end)/2+normal*height;tm=t0+t1

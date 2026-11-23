@@ -100,9 +100,11 @@ def _read_file(path, profile, scratch, stop, progress):
 
 
 def import_files(paths, database, die_count, workers, stop, progress=lambda _: None, profile=None, profiles=None,
-                 measurement=None, project=None, endpoint=None, geometry=None):
+                 measurement=None, project=None, endpoint=None, geometry=None, ignore_measurement_failure=False):
     """Build a new journal atomically; errors never create a runnable partial run."""
     profile = profile or DEFAULT_PROFILE
+    if type(ignore_measurement_failure) is not bool:
+        raise ValueError('忽略测量失败须为布尔值')
     paths = [Path(p).resolve() for p in paths]
     profiles = {str(Path(path).resolve()): value for path, value in (profiles or {}).items()}
     if set(profiles) - {str(p) for p in paths}:
@@ -124,7 +126,7 @@ def import_files(paths, database, die_count, workers, stop, progress=lambda _: N
         from die_shift_studio.resources import resource_profile
         workers = resource_profile()['workers']
     if measurement:
-        from .measurements import folders, import_part, infer_die_indices, nominal_geometry, package_rows, table_file
+        from .measurements import POSE_COLUMNS, folders, import_part, infer_die_indices, nominal_geometry, package_rows, table_file
         directory = Path(measurement['root']).resolve()
         die_folders = folders(directory)
         order = [folder.name for folder in die_folders]
@@ -173,12 +175,12 @@ def import_files(paths, database, die_count, workers, stop, progress=lambda _: N
                                   (time.time(), 'WARNING', message))
 
             if geometry:
-                ledger.db.execute('create table production(r integer,c integer,die integer,tx real,ty real,ax real,ay real,angle real,dx real,dy real,source text,line integer)')
+                ledger.db.execute(f'create table production({POSE_COLUMNS})')
             with ThreadPoolExecutor(max_workers=max(1, min(workers, len(paths), 16)), thread_name_prefix='excel') as pool:
                 futures = []
                 for i, path in enumerate(paths):
                     arguments = (profiles.get(str(path), profile), Path(temp) / f'{i}.sqlite', stop, progress)
-                    futures.append(pool.submit(import_part, path, path_dies[path.parent], *arguments) if geometry
+                    futures.append(pool.submit(import_part, path, path_dies[path.parent], *arguments, ignore_measurement_failure) if geometry
                                    else pool.submit(_read_file, path, *arguments))
                 sources = []
                 for future in as_completed(futures):
@@ -187,7 +189,7 @@ def import_files(paths, database, die_count, workers, stop, progress=lambda _: N
                         try:
                             with ledger.db:
                                 if geometry:
-                                    ledger.db.executemany('insert into production values(?,?,?,?,?,?,?,?,?,?,?,?)', part.execute('select * from poses'))
+                                    ledger.db.executemany('insert into production values(?,?,?,?,?,?,?,?,?,?,?,?,?)', part.execute('select * from poses'))
                                     path = Path(info['path'])
                                     for line, message in part.execute('select line,message from warnings order by rowid'):
                                         origin = f'{path.parent.name}/{path.name}'
@@ -218,6 +220,8 @@ def import_files(paths, database, die_count, workers, stop, progress=lambda _: N
                 ledger.db.execute('drop table production')
                 ledger.db.commit()
                 ledger.set('measurement', measurement)
+                ledger.set('ignore_measurement_failure', ignore_measurement_failure)
+                ledger.set('measured_max_available', True)
                 ledger.set('nominal_geometry', geometry)
                 ledger.set('die_names', order)
                 ledger.set('skipped_packages', skipped)

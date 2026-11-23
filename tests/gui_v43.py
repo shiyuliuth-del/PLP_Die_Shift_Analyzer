@@ -6,11 +6,19 @@ from dataclasses import asdict
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 ROOT=Path(__file__).resolve().parents[1];sys.path[:0]=[str(ROOT),str(ROOT/'tests')]
 import numpy as np,gdstk
-from die_shift_studio.gui import MainWindow,W
+from die_shift_studio.gui import MainWindow,W,QtCore
+from die_shift_studio.resources import cancel_check
 from die_shift_studio.local_ipc import call
 from test_v38 import fixture
 
 app=W.QApplication([]);temp=tempfile.TemporaryDirectory();folder=Path(temp.name);w=MainWindow(jobs_dir=folder/'Jobs');w.show()
+measured_progress=[]
+class ProgressVisibility(QtCore.QObject):
+ def eventFilter(self,obj,event):
+  types=getattr(QtCore.QEvent,'Type',QtCore.QEvent)
+  if event.type() in (types.Show,types.ShowToParent) and not w.progress_enabled():measured_progress.append(event.type())
+  return False
+progress_filter=ProgressVisibility(w);w.progress.installEventFilter(progress_filter)
 errors=[];original_error=w.error
 def error(text):
  errors.append(str(text))
@@ -79,6 +87,7 @@ try:
  assert not w.requested_measured
  until(lambda:w.measured_output.ready)
  assert w.remote_locked and w.project_path.samefile(project) and project.is_file()
+ assert not w.progress.isVisible() and not measured_progress
  assert rpc('info')['result']['die_count']==1
  rpc('output.configure',{'output_directory':str(folder),'max_threads':2,'max_memory_mb':512})
  rows=[dict(die=1,dx_um=4,dy_um=2,angle_deg=.05,rotation_center_um=[17,-12])]
@@ -108,19 +117,21 @@ try:
  saved=json.loads(project.read_text())
  assert not saved['overlays']['reconstruction'] and saved['parameters']['rotation_center']=='center'
  def slow(*_,**kwargs):
-  # progress is the second positional argument; cancellation checks live in it.
-  progress=_[1]
-  while True:progress(25,'cancel regression');time.sleep(.01)
+  assert len(_)==1 and 'progress' not in kwargs
+  while True:cancel_check();time.sleep(.01)
  with patch.object(w.measured_output.session,'run',side_effect=slow):
   queued=[rpc('batch.submit',{'batch_id':batch['batch_id'],'cell':'cancel'+str(i),'position_um':[i*10,0],'dies':rows})['task_id'] for i in range(4)]
   busy=pool.submit(call,folder/'endpoint.json','batch.submit',{'batch_id':batch['batch_id'],'cell':'overflow','position_um':[0,0],'dies':rows})
   until(busy.done);assert busy.result()['error']['type']=='Busy'
+  assert not w.progress.isVisible() and not measured_progress
+  assert rpc('task.get',{'task_id':queued[0]})['result']['progress']==0
   rpc('compute.cancel');until(lambda:not w.measured_output.stopping)
  assert all(w.measured_output.jobs[key]['status']=='cancelled' for key in queued)
  assert old.read_bytes()==b'keep-old' and not list(folder.glob('.dsa-batch-*'))
  np.testing.assert_array_equal(w.current_frame['states'],shown)
  rpc('compute.cancel');until(lambda:not w.measured_output.stopping)
  task(rpc('session.prepare'));assert rpc('info')['result']['ready']
+ assert not measured_progress
  rpc('project.close');assert rpc('info')['result']['project'] is None
  task(rpc('project.open',{'path':str(project)}));assert w.measured_output.ready
  broken=folder/'broken.dshift.json';broken.write_text(json.dumps({**json.loads(project.read_text()),'gds_path':str(folder/'missing.gds')}))
