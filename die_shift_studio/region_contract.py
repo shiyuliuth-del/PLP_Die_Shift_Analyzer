@@ -64,7 +64,7 @@ def verify_written_contours(path, *, expected_blocks=None, expected_references=N
             elif kind == 'ENDBLK':
                 block = None
             elif kind == 'LWPOLYLINE' and block and attrs[8] == '0':
-                contents[block].append(_outline(fields, attrs))
+                contents[block].append(_outline(fields, attrs, False))
             else:
                 raise ValueError('动静区块含不支持的实体')
         elif section == 'ENTITIES':
@@ -122,11 +122,11 @@ def verify_written_contours(path, *, expected_blocks=None, expected_references=N
     return summary
 
 
-def _outline(fields, attrs, expected_closed=None):
+def _outline(fields, attrs, expected_closed):
     xy = np.column_stack(([float(v) for c, v in fields if c == 10],
                           [float(v) for c, v in fields if c == 20]))
     closed=bool(int(attrs[70]) & 1)
-    if ((expected_closed is not None and expected_closed!=closed) or len(xy) != int(attrs[90]) or
+    if (expected_closed != closed or len(xy) != int(attrs[90]) or
             len(xy) < (3 if closed else 2) or not np.isfinite(xy).all() or
             np.array_equal(xy[0], xy[-1]) or np.any(np.all(xy[:-1] == xy[1:], axis=1))):
         raise ValueError('动静区输出的轮廓节点或开闭状态无效')
