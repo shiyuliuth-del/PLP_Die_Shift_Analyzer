@@ -8,7 +8,7 @@ import tempfile
 
 from die_shift_studio.jobs import REALDATA_DIRECTORY, atomic_save, provision_project
 from .excel import DEFAULT_PROFILE
-from .measurements import HEADINGS, folders, table_file
+from .measurements import HEADINGS, folders, measurement_root, table_file
 from .storage import sha256
 
 SETTINGS = 'RealDataAnalyse.project.json'
@@ -68,10 +68,11 @@ def load_folder(folder):
     known = {inside(root,item['path']) for item in files}
     excluded = {inside(root,path) for path in saved.get('excluded_excel',[])}
     excel = workspace / 'Excel'
-    die_folders = [inside(excel, path) for path in folders(excel)]
+    die_root = measurement_root(excel)
+    die_folders = [inside(excel, path) for path in folders(die_root)] if die_root else []
     measurement = None
     if die_folders:
-        measurement = dict(saved.get('measurement') or {}, root=str(excel))
+        measurement = dict(saved.get('measurement') or {}, root=str(die_root))
         files = [item for item in files if inside(root, item['path']).parent in die_folders]
         known = {inside(root, item['path']) for item in files}
     legacy_excel = inside(root, 'Excel')
@@ -117,10 +118,12 @@ def load_folder(folder):
         profile = copy.deepcopy(default_profile if measurement else profile)
     return dict(folder=str(root), workspace=str(workspace), project=str(project), files=normalized,
                 template=str(template) if template else '', database=str(database), output=str(output),
-                profile=profile, controls=controls, shared_mapping=bool(saved.get('shared_mapping', True)), measurement=measurement)
+                profile=profile, controls=controls, shared_mapping=bool(saved.get('shared_mapping', True)),
+                measurement=measurement, excluded_excel=sorted(map(str,excluded)))
 
 
-def save_folder(folder, project, files, database, output, profile, controls, shared_mapping=True, template=None, measurement=None):
+def save_folder(folder, project, files, database, output, profile, controls, shared_mapping=True, template=None,
+                measurement=None, excluded_excel=()):
     root = Path(folder).resolve()
     workspace = provision_project(root)
     def relative(path):
@@ -132,10 +135,7 @@ def save_folder(folder, project, files, database, output, profile, controls, sha
     if measurement:
         payload['measurement'] = {key: value for key, value in measurement.items() if key != 'root'}
     selected = {inside(root,item['path']) for item in files}
-    payload['excluded_excel'] = [
-        relative(path) for directory in (workspace / 'Excel', inside(root, 'Excel'), *folders(workspace / 'Excel'))
-        for path in sorted(directory.glob('*')) if table_file(path) and path.resolve() not in selected
-    ]
+    payload['excluded_excel'] = sorted(relative(path) for path in excluded_excel if inside(root, path) not in selected)
     atomic_save(inside(workspace, SETTINGS), payload)
 
 

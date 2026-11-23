@@ -2,6 +2,7 @@
 from collections import Counter, defaultdict
 from contextlib import closing, contextmanager
 import csv
+from decimal import Decimal
 from itertools import groupby, islice
 import math
 import sqlite3
@@ -21,6 +22,22 @@ def folders(root):
 
 def table_file(path):
     return path.is_file() and path.suffix.lower() in SUFFIXES and not path.name.startswith('~$')
+
+
+def measurement_root(excel):
+    """Find the DIE directory level, including an archive's enclosing folder."""
+    root = Path(excel)
+    while True:
+        children = [path for path in folders(root) if not path.is_symlink()]
+        if any(any(map(table_file, child.iterdir())) for child in children):
+            return root
+        if any(table_file(path) for path in root.iterdir()):
+            return None
+        if len(children) != 1:
+            break
+        root = children[0]
+    # An empty set of named DIE folders still lets the user add tables by DIE.
+    return Path(excel) if folders(excel) else None
 
 
 def nominal_geometry(info):
@@ -254,11 +271,14 @@ def select_site(records, names, tolerance, warn):
         warn(f'已跳过封装：缺少芯片 {missing} 的匹配记录')
         return None
 
+    unusable = [die for die, samples in sorted(by_die.items()) if all(sample[4] is None for sample in samples)]
+    if unusable:
+        warn('已跳过封装：没有有效实测姿态的芯片 ' + '、'.join(names[die-1] for die in unusable))
+        return None
+
     selected = []
     for die, samples in sorted(by_die.items()):
         usable = [record for record in samples if record[4] is not None]
-        if not usable:
-            return None  # the machine's unsuccessful flag is counted per package
         if len({(p[2], p[3], p[4]) for p in usable}) != 1:
             examples = '、'.join(f'{Path(record[-2]).name} 第{record[-1]}行' for record in usable[:4])
             warn(f'已跳过封装：芯片 {names[die-1]} 有冲突的实测记录（{examples}）')
@@ -279,6 +299,7 @@ def package_rows(db, geometry, scale, tolerance, stop, progress, names, warn):
     local = [[value - origin for value, origin in zip(center, geometry['board_origin_um'])]
              for center in geometry['centers_um']]
     skipped = index = checked = 0
+    units = Decimal(str(scale))
     total = db.execute('select count(*) from production').fetchone()[0]
     with closing(grid_rows(db)) as cursor:
         for (row, col), records in groupby(cursor, key=lambda entry: entry[:2]):
@@ -295,7 +316,7 @@ def package_rows(db, geometry, scale, tolerance, stop, progress, names, warn):
                 if max(map(abs, origin)) > 1e9:
                     warn(f'{Path(source).parent.name}/{Path(source).name} 第{line}行：理论坐标超出范围，已跳过')
                     continue
-                by_position[origin].append((die, origin, ax, ay, angle, dx, dy, source, line))
+                by_position[origin].append((die, origin, ax, ay, angle, dx, dy, tx, ty, source, line))
 
             for part, site in enumerate(site_components(by_position, tolerance), 1):
                 package = f'{row}:{col}:{part}'
@@ -310,13 +331,17 @@ def package_rows(db, geometry, scale, tolerance, stop, progress, names, warn):
                 position = [math.fsum(record[1][axis] for record in matching)/len(local) for axis in range(2)]
                 poses = []
                 audits = []
-                for die, _, ax, ay, angle, dx, dy, source, line in matching:
+                measured_max = [0., 0., 0.]
+                for die, _, ax, ay, angle, dx, dy, tx, ty, source, line in matching:
                     cx, cy = local[die-1]
                     pose = dict(die=die, dx_um=ax*scale-cx-position[0], dy_um=ay*scale-cy-position[1],
                                 angle_deg=angle, rotation_center_um=geometry['centers_um'][die-1])
                     if max(abs(pose['dx_um']), abs(pose['dy_um'])) > 1e9:
                         break
                     poses.append(pose)
+                    offsets = [float((Decimal(str(actual)) - Decimal(str(theory))) * units)
+                               for actual, theory in ((ax, tx), (ay, ty))]
+                    measured_max = [max(old, abs(value)) for old, value in zip(measured_max, (*offsets, angle))]
                     audit = dict(pose, actual_center_um=[ax*scale, ay*scale], reported_offset=[dx, dy])
                     audits.append((package, die, *position, dumps(audit), source, line))
                 if len(poses) != len(local):
@@ -326,7 +351,7 @@ def package_rows(db, geometry, scale, tolerance, stop, progress, names, warn):
                 index += 1
                 cell = f'Package_{index:09d}'
                 db.executemany('insert into measurements values(?,?,?,?,?,?,?)', audits)
-                payload = dict(cell=cell, position_um=position, dies=poses)
+                payload = dict(cell=cell, position_um=position, dies=poses, measured_max=measured_max)
                 db.execute('insert into packages(seq,package,cell,payload) values(?,?,?,?)',
                            (index, package, cell, dumps(payload)))
     return index, skipped

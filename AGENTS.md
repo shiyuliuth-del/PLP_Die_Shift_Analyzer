@@ -1,6 +1,6 @@
 # Agent 自动入口
 
-源码、GitHub与发布只在本规范检出工作。先读 [Agent.md](Agent.md)、[AI交接](docs/AI_HANDOFF.md)、[现行合同](docs/DESIGN_REQUIREMENTS.md)、[已知问题](docs/KNOWN_ISSUES.md) 和 [轮次记录](docs/Agents.md)。当前说明：[V62 使用说明](docs/V62_使用说明.md)。
+源码、GitHub与发布只在本规范检出工作。先读 [Agent.md](Agent.md)、[AI交接](docs/AI_HANDOFF.md)、[现行合同](docs/DESIGN_REQUIREMENTS.md)、[已知问题](docs/KNOWN_ISSUES.md) 和 [轮次记录](docs/Agents.md)。当前说明：[V63 使用说明](docs/V63_使用说明.md)。
 
 唯一长期主线是main；最新用户要求优先。保留其他Agent的在途分支，不重写历史tag，不把研究目录整体提交。每轮同步主线、补有意义的回归、记录工程兼容与实际验收，通过PR提交GitHub。正式Release仅源码与校验值，根目录保留 BUILD.bat、DieShiftAnalyze_RUN.bat 和 RealDataAnalyze_RUN.bat。
 
@@ -45,3 +45,5 @@ V60：[当前使用说明](docs/V60_使用说明.md)。生产芯片目录名仅�
 V61：动静区 DXF 用 _A 运动侧、_B 固定侧、_C 动区，封装及 DIE 参考层为 RKG_REF 和 DIE_REF。同源固定 RDL 外轮廓及孔洞按输出层独立成块。跨层重合统一去重。运动侧寻根优先，固定走线另一端的坐标不覆盖运动过孔的芯片归属。
 
 V62：Windows 两份启动脚本优先选 EXE，源码打包统一走根目录 BUILD.bat。框选缺省按边界角度，显式旧值继续使用。接触标记设置并入 DRC，旧展开状态迁移。动静区封装层为 PKG_REF，同块内首尾相接的轮廓在去重后拼接。
+
+V63：选项目自动发现工作区 Excel 内的测量表，可展开单个外包装目录。包内每颗 DIE 的绝对 X/Y 和旋转都严格低于阈值才共用名义封装 Cell。限值为零关闭，相等继续重构。缺少有效实测姿态的封装逐项记录。

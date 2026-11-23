@@ -48,6 +48,7 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         w.open_folder(folder)
         wait(w)
         assert w.workers.value() == w.memory.value() == 0
+        assert [field.value() for field in w.bypass_limits] == [0,0,0]
         assert w.connect_button.property('connected') is True
         assert w.start_button.property('connected') is True
         assert w.file_view.rowCount() == 3 and w.profile.rowCount() == 9
@@ -85,7 +86,15 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         assert Path(w.output.text()).is_relative_to(folder)
         w.file_view.item(1, 0).setCheckState(getattr(QtCore.Qt, 'CheckState', QtCore.Qt).Unchecked)
         w.sheet.setText('Diagnostic'); w.workers.setValue(2); w.persist()
+        for field, value in zip(w.bypass_limits, (2.5,3,.125)):
+            field.setValue(value)
+        excel = folder/'RealDataAnalyse/Excel'
+        shutil.copyfile(excel/'GD55_SYNTHETIC_DIE1.xlsx', excel/'Z_new.xlsx')
         w.open_folder(folder, link=False); wait(w)
+        assert [field.value() for field in w.bypass_limits] == [2.5,3,.125]
+        assert w.file_view.rowCount() == 4 and w.file_entries()[-1]['enabled']
+        select(3); w.remove_files.click()
+        assert w.file_view.rowCount() == 3 and (excel/'Z_new.xlsx').is_file()
         assert not w.file_entries()[1]['enabled'] and w.sheet.text() == 'Diagnostic' and w.workers.value() == 2
         w.file_view.item(1, 0).setCheckState(getattr(QtCore.Qt, 'CheckState', QtCore.Qt).Checked)
         w.sheet.setText('Measurements')
@@ -125,6 +134,7 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
             runner.return_value.run.return_value = dict(state='completed', output=w.output.text())
             w.run_button.click(); wait(w)
             runner.return_value.run.assert_called_once()
+            assert runner.call_args.kwargs['bypass_limits'] == [2.5,3,.125]
             assert all(label in w.progress.toolTip() for label in ('开始 ', '结束 ', '耗时 '))
             assert w.progress.started is None and w.progress.end_time >= w.progress.start_time
             dialog = w.completion_dialog

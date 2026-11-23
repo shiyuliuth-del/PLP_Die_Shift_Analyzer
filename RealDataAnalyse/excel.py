@@ -218,6 +218,7 @@ def import_files(paths, database, die_count, workers, stop, progress=lambda _: N
                 ledger.db.execute('drop table production')
                 ledger.db.commit()
                 ledger.set('measurement', measurement)
+                ledger.set('measured_max_available', True)
                 ledger.set('nominal_geometry', geometry)
                 ledger.set('die_names', order)
                 ledger.set('skipped_packages', skipped)

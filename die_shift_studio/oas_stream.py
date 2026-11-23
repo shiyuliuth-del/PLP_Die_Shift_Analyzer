@@ -100,7 +100,8 @@ class Store:
         self.db=sqlite3.connect(str(Path(self.temp.name)/'cells.sqlite'),check_same_thread=False)
         self.db.execute('pragma journal_mode=OFF');self.db.execute('pragma temp_store=FILE');self.db.execute('pragma cache_size=-4096')
         self.db.execute('create table cells(name text primary key)')
-        self.db.execute('create table packages(name text primary key, x real, y real)')
+        self.db.execute('create table packages(name text primary key, target text, x real, y real)')
+        self.nominal_count=0
         self.dbu=float(dbu);self.limit=max(1024**2,int(memory_bytes));self.pending=[];self.pending_names=set();self.bytes=0;self.count=0
         self.stage=Path(self.temp.name)/'stage.oas';self.stream=self.stage.open('wb');self.crc=0;self.finished=False
         self.emit(b'%SEMI-OASIS\r\n\x01'+string('1.0')+real(1/self.dbu)+b'\0'+b'\0'*12)
@@ -182,10 +183,22 @@ class Store:
         if shift.shape!=(2,) or not np.isfinite(shift).all():raise ValueError('Package origin must have two finite coordinates')
         return name,cells,body,tuple(shift),marker_count,serious_count,failed,stats
 
-    def commit(self,packet):
+    def add_nominal(self,name,position,board_origin,load_layers):
+        cells=[];stats={}
+        if self.nominal_count==0:
+            body=polygons(load_layers(),self.dbu,stats=stats)
+            if not body:raise ValueError('名义封装在输出格点上没有有效图形')
+            cells.append(('G_NOMINAL',body))
+        shift=np.asarray(position,dtype=float)-np.asarray(board_origin)
+        if shift.shape!=(2,) or not np.isfinite(shift).all():raise ValueError('Package origin must have two finite coordinates')
+        markers=self.commit((name,cells,b'',tuple(shift),0,0,0,stats),target='G_NOMINAL')
+        self.nominal_count+=1
+        return markers
+
+    def commit(self,packet,*,target=None):
         name,cells,body,shift,marker_count,serious_count,failed,stats=packet
         if name in self.pending_names or self.db.execute('select 1 from packages where name=?',(name,)).fetchone():raise ValueError('Duplicate package Cell: '+name)
-        self.pending.append((name,cells,body,tuple(shift)));self.pending_names.add(name);self.bytes+=sum(len(b) for _,b in cells)+len(body)
+        self.pending.append((name,target or name,cells,body,tuple(shift)));self.pending_names.add(name);self.bytes+=sum(len(b) for _,b in cells)+len(body)
         self.count+=1;self.discarded_subgrid_fragments+=stats.get('discarded_subgrid_fragments',0);self.error_rectangles+=marker_count;self.error2_rectangles+=serious_count;self.error_packages+=bool(marker_count);self.failed_packages+=failed
         if self.bytes>=self.limit:self.flush(checkpoint=False)
         return dict(failed_packages=failed,failure_layer=(dict(layer=self.failure_layer[0],datatype=self.failure_layer[1],name='FAIL') if self.failure_layer else None),error_rectangles=marker_count,error2_rectangles=serious_count,discarded_subgrid_fragments=stats.get('discarded_subgrid_fragments',0),error_layer=(dict(layer=self.error_layer[0],datatype=self.error_layer[1],name='ERROR') if self.error_layer else None),error2_layer=self.serious_layer_receipt())
@@ -199,13 +212,14 @@ class Store:
         compressor=zlib.compressobj(3,zlib.DEFLATED,-15);compressed=compressor.compress(body)+compressor.flush()
         self.emit(b'\x22\0'+uint(len(body))+uint(len(compressed))+compressed)
     def flush(self, *, checkpoint=True):
-        for name,cells,body,(x,y) in self.pending:
+        for name,target,cells,body,(x,y) in self.pending:
             cancel_check()
             for child,content in cells:
                 cursor=self.db.execute('insert or ignore into cells values (?)',(child,))
                 if cursor.rowcount:self.cell(child,content)
-            self.db.execute('insert into cells values (?)',(name,));self.cell(name,body)
-            self.db.execute('insert into packages values (?,?,?)',(name,x,y))
+            if target==name:
+                self.db.execute('insert into cells values (?)',(name,));self.cell(name,body)
+            self.db.execute('insert into packages values (?,?,?,?)',(name,target,x,y))
         self.db.commit();self.stream.flush();self.pending.clear();self.pending_names.clear();self.bytes=0
         os.fsync(self.stream.fileno())
         if checkpoint and self.checkpoint_destination and self.count:self.checkpoint()
@@ -224,7 +238,7 @@ class Store:
                     out.write(data);crc=zlib.crc32(data,crc)
                 emit(b'\x0e'+string('TopCell'))
                 if self.template:emit(placement('G_TEMPLATE',dbu=self.dbu))
-                for cell,x,y in self.db.execute('select name,x,y from packages order by name'):
+                for cell,x,y in self.db.execute('select target,x,y from packages order by name'):
                     emit(placement(cell,(x,y),dbu=self.dbu))
                 emit(b'\x02'+uint(248)+b'\0'*248+b'\x01');out.write(struct.pack('<I',crc));out.flush();os.fsync(out.fileno())
             if not verify_crc(name):raise ValueError('阶段OAS校验失败')
@@ -238,14 +252,14 @@ class Store:
         self.flush();destination=Path(destination);self.emit(b'\x0e'+string('TopCell'))
         if self.template:self.emit(placement('G_TEMPLATE',dbu=self.dbu))
         total=self.db.execute('select count(*) from cells').fetchone()[0]
-        for i,(name,x,y) in enumerate(self.db.execute('select name,x,y from packages order by name')):
+        for i,(name,x,y) in enumerate(self.db.execute('select target,x,y from packages order by name')):
             cancel_check();self.emit(placement(name,(x,y),dbu=self.dbu))
             if i%256==0:progress(round(90*i/max(self.count,1)),'输出TopCell封装引用')
         self.emit(b'\x02'+uint(248)+b'\0'*248+b'\x01');self.stream.write(struct.pack('<I',self.crc))
         self.stream.flush();os.fsync(self.stream.fileno());self.stream.close();self.finished=True
         if not verify_crc(self.stage):raise ValueError('OAS checksum validation failed')
         cancel_check();os.replace(self.stage,destination)
-        return dict(path=str(destination.resolve()),cells=self.count,failed_packages=self.failed_packages,failure_layer=(dict(layer=self.failure_layer[0],datatype=self.failure_layer[1],name='FAIL') if self.failure_layer else None),unique_geometry_cells=total-self.count,bytes=destination.stat().st_size,dbu_um=self.dbu,top_cell='TopCell',error_layer=(dict(layer=self.error_layer[0],datatype=self.error_layer[1],name='ERROR') if self.error_layer else None),error_rectangles=self.error_rectangles,error2_layer=self.serious_layer_receipt(),error2_rectangles=self.error2_rectangles,error_packages=self.error_packages,discarded_subgrid_fragments=self.discarded_subgrid_fragments)
+        return dict(path=str(destination.resolve()),cells=self.count,nominal_packages=self.nominal_count,failed_packages=self.failed_packages,failure_layer=(dict(layer=self.failure_layer[0],datatype=self.failure_layer[1],name='FAIL') if self.failure_layer else None),unique_geometry_cells=total-self.count+self.nominal_count,bytes=destination.stat().st_size,dbu_um=self.dbu,top_cell='TopCell',error_layer=(dict(layer=self.error_layer[0],datatype=self.error_layer[1],name='ERROR') if self.error_layer else None),error_rectangles=self.error_rectangles,error2_layer=self.serious_layer_receipt(),error2_rectangles=self.error2_rectangles,error_packages=self.error_packages,discarded_subgrid_fragments=self.discarded_subgrid_fragments)
     def close(self):
         if not self.stream.closed:self.stream.close()
         self.db.close();self.temp.cleanup()

@@ -1,3 +1,9 @@
+# V63 实测阈值与输入发现
+
+`measurements.package_rows` 在分组完整后记录所有 DIE 源偏移绝对值的逐轴最大值，避免分组拟合余差跨过阈值。`Runner` 在批次提交前比较阈值，发送 `use_nominal`，同时核对该回执及最终数量。共享 OAS Cell 在第一个直出封装提交时冻结，后续仅写参考。正常任务保留实际铜 DRC、局部失败裁剪和所有诊断层。既有发布和重试逻辑仍保护旧 OAS。
+
+`projects.load_folder` 查找 Excel 的 DIE 目录所在层级。项目保存仅排除用户明确从表格删除的文件，不将尚未扫描的新文件误删。工作区及 Windows 构建沿用 V62。详见 [V63 使用说明](V63_使用说明.md) 和 [IPC约定](MEASURED_OUTPUT_API.md)。
+
 # V62 启动入口、工程目录和 DXF 轮廓拼接
 
 根目录 `BUILD.bat` 一次构建两个 EXE，复制两份独立启动脚本到 `dist`。启动脚本检查同目录和 `dist` 的可执行文件，再检查源码和解释器。项目目录继续通过 `jobs.provision_project` 管理，首次保存工程并预置实测目录。Windows 验收用源码、只有 EXE 的目录和含 `dist` 的源码目录分别调用两个脚本。
