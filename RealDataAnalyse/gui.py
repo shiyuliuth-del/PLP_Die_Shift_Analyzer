@@ -64,6 +64,7 @@ class ProgressBar(W.QProgressBar):
         self.end_time = None
         self.elapsed = 0
         self.failed = False
+        self.count_only = False
 
     def paintEvent(self, event):
         painter = QtGui.QPainter(self)
@@ -77,14 +78,14 @@ class ProgressBar(W.QProgressBar):
         painter.setPen(QtGui.QColor('#8796a5'))
         painter.drawRect(rect)
         painter.setPen(QtGui.QColor('#142536'))
-        label = self.label(fraction)
+        label = self.label(fraction, show_times=not self.count_only)
         alignment = getattr(QtCore.Qt, 'AlignmentFlag', QtCore.Qt).AlignCenter
         elide = getattr(QtCore.Qt, 'TextElideMode', QtCore.Qt).ElideRight
         painter.drawText(rect.adjusted(8, 0, -8, 0), alignment, self.fontMetrics().elidedText(label, elide, rect.width() - 16))
 
-    def label(self, fraction):
-        percent = f'{round(fraction * 100)}% · ' if self.maximum() > 1 else ''
-        if self.start_time is None:
+    def label(self, fraction, *, show_times=True):
+        percent = f'{round(fraction * 100)}% · ' if not self.count_only and self.maximum() > 1 else ''
+        if self.start_time is None or not show_times:
             return percent + self.detail
         elapsed = int(time.monotonic() - self.started) if self.started is not None else self.elapsed
         started = time.strftime('%H:%M:%S', time.localtime(self.start_time))
@@ -97,6 +98,7 @@ class ProgressBar(W.QProgressBar):
         self.started = time.monotonic()
         self.start_time = time.time()
         self.end_time = None
+        self.count_only = False
 
     def finish(self):
         self.end_time = time.time()
@@ -111,6 +113,11 @@ class ProgressBar(W.QProgressBar):
             self.setValue(int(current))
         self.setToolTip(self.label(self.value() / max(1, self.maximum())))
         self.update()
+
+    def package_status(self, completed, total, published):
+        self.count_only = True
+        fill = round(10000 * completed / max(1,total))
+        self.status(f'已完成 {completed} / {total}', 10000 if published else min(fill, 9900), 10000)
 
 
 class Window(W.QMainWindow):
@@ -135,7 +142,7 @@ class Window(W.QMainWindow):
         self.settings = QtCore.QSettings('DieShiftAnalyze', 'RealDataAnalyse')
         self.logger = configure_logging(installation())
         self.logger.info('RealDataAnalyse %s started', __version__)
-        self.conversation = Conversation(message_limit=4000)
+        self.conversation = Conversation(message_limit=4000, display=False)
         self.conversation.set_root(installation())
         self.bindings = {}
         self.plan_store = Plans(plan_path or installation()/'Jobs'/'.RealDataAnalyse'/'plans.sqlite')
@@ -181,17 +188,23 @@ class Window(W.QMainWindow):
         self.timeout.setSpecialValueText('0（无超时）')
         form.addRow(controls)
         bypass = W.QHBoxLayout()
+        self.bypass_enabled = W.QCheckBox()
+        self.bypass_enabled.setAccessibleName('启用忽略阈值')
+        self.bypass_enabled.setToolTip('勾选后按 X、Y 和旋转角度过滤')
+        bypass.addWidget(self.bypass_enabled)
         self.bypass_limits = []
         for label, maximum in (('X (μm)', 1e9), ('Y (μm)', 1e9), ('旋转 (°)', 360)):
             bypass.addWidget(W.QLabel(label))
             field = W.QDoubleSpinBox()
             field.setRange(0, maximum)
-            field.setDecimals(6)
+            field.setDecimals(3)
+            field.setEnabled(False)
             field.setSingleStep(.1)
             field.setToolTip('封装内每颗DIE的绝对偏移和绝对旋转均严格小于对应阈值时，使用同一名义封装Cell。任一阈值为0时关闭。')
             bypass.addWidget(field)
             self.bypass_limits.append(field)
-        form.addRow('原图直出阈值', bypass)
+        form.addRow('忽略阈值', bypass)
+        self.bypass_enabled.toggled.connect(self.sync_bypass_fields)
         self.ignore_measurement_failure = W.QCheckBox('忽略测量失败')
         self.ignore_measurement_failure.setEnabled(False)
         self.ignore_measurement_failure.setToolTip('对机台标记失败的芯片，采用该行的 X/Y 偏移与旋转角。适用于机台生产格式。')
@@ -291,6 +304,7 @@ class Window(W.QMainWindow):
         self.response.setReadOnly(True)
         debug_layout.addWidget(self.response, 2)
         conversation_tab = W.QWidget()
+        self.conversation_tab = conversation_tab
         tabs.addTab(conversation_tab, '实时命令信息')
         conversation_layout = W.QVBoxLayout(conversation_tab)
         conversation_controls = W.QHBoxLayout()
@@ -309,7 +323,7 @@ class Window(W.QMainWindow):
         self.conversation_timer = QtCore.QTimer(self)
         self.conversation_timer.setInterval(100)
         self.conversation_timer.timeout.connect(self.flush_conversation)
-        self.conversation_timer.start()
+        conversation_tab.installEventFilter(self)
 
         self.log_view = W.QPlainTextEdit()
         self.log_view.setReadOnly(True)
@@ -382,7 +396,11 @@ class Window(W.QMainWindow):
 
     def log(self, message):
         if isinstance(message, dict):
-            self.progress.status(message.get('text', ''), message.get('current'), message.get('total'))
+            if message.get('package_count'):
+                self.progress.package_status(message['current'], message['total'], message['published'])
+                return
+            if not self.progress.count_only:
+                self.progress.status(message.get('text', ''), message.get('current'), message.get('total'))
             now = time.monotonic()
             if now - self.last_log_update >= 1:
                 self.last_log_update = now
@@ -392,27 +410,36 @@ class Window(W.QMainWindow):
             return
         text = str(message)
         self.log_view.appendPlainText(time.strftime('%H:%M:%S ') + text)
-        self.progress.status(text)
+        if not self.progress.count_only:
+            self.progress.status(text)
+
+    def sync_bypass_fields(self):
+        for field in self.bypass_limits:
+            field.setEnabled(self.bypass_enabled.isEnabled() and self.bypass_enabled.isChecked())
 
     def busy(self, on):
         for widget in (self.connect_button, self.start_button, self.add_files, self.remove_files,
                        self.folder_button, self.import_button, self.create_plan_button, self.run_button, self.send_button,
                        self.endpoint, self.project, self.database, self.output, self.template, self.profile,
                        self.workers, self.memory, self.retries, self.timeout, self.file_view, self.sheet, self.header_row, self.mapping_shared,
-                       *self.path_buttons, *self.bypass_limits):
+                       *self.path_buttons, self.bypass_enabled):
             widget.setEnabled(not on)
+        self.sync_bypass_fields()
         self.dies.setEnabled(not on and not self.measurement)
         self.ignore_measurement_failure.setEnabled(not on and bool(self.measurement))
         self.stop_button.setEnabled(on)
 
-    def execute(self, fn, callback=None, failure=None, operation='操作'):
+    def execute(self, fn, callback=None, failure=None, operation='操作', count_only=False):
         if self.worker:
             return
         self.operation = operation
         self.busy(True)
         self.progress.failed = False
         self.progress.begin()
-        self.progress.status(operation + ' · 正在开始', 0, 100)
+        if count_only:
+            self.progress.package_status(0, 0, False)
+        else:
+            self.progress.status(operation + ' · 正在开始', 0, 100)
         worker = Worker(fn, self)
         self.worker = worker
         worker.message.connect(self.log)
@@ -425,7 +452,9 @@ class Window(W.QMainWindow):
                 self.response.setPlainText(json.dumps(value, ensure_ascii=False, indent=2))
                 self.log_view.appendPlainText(time.strftime('%H:%M:%S ') + operation + '完成')
                 detail = self.progress.detail if self.progress.detail.startswith(('完成 ·', '导入完成 ·')) else operation + '完成'
-                if isinstance(value, dict) and value.get('state') == 'paused':
+                if count_only:
+                    self.progress.failed = isinstance(value, dict) and value.get('state') == 'completed_with_errors'
+                elif isinstance(value, dict) and value.get('state') == 'paused':
                     self.progress.status('计划任务已暂停')
                 elif isinstance(value, dict) and value.get('state') == 'completed_with_errors':
                     self.progress.failed = True
@@ -437,7 +466,8 @@ class Window(W.QMainWindow):
                 self.logger.error('%s', exc)
                 self.response.setPlainText(str(exc))
                 self.progress.failed = True
-                self.progress.status(operation + '停止 · ' + str(exc))
+                if not count_only:
+                    self.progress.status(operation + '停止 · ' + str(exc))
                 if failure:
                     failure(str(exc))
         worker.done.connect(result)
@@ -547,6 +577,7 @@ class Window(W.QMainWindow):
                 getattr(self, name).setValue(int(config['controls'].get(name, default)))
             for field, value in zip(self.bypass_limits, nominal_limits(config['controls'].get('bypass_limits',(0,0,0)))):
                 field.setValue(value)
+            self.bypass_enabled.setChecked(config['controls'].get('bypass_enabled') is True)
             self.ignore_measurement_failure.setChecked(config['controls'].get('ignore_measurement_failure') is True)
             self.logger = configure_logging(config['workspace'])
             self.page = 0
@@ -656,6 +687,7 @@ class Window(W.QMainWindow):
     def controls(self):
         return {**{key:getattr(self,key).value() for key in ('dies','workers','memory','retries','timeout')},
                 'bypass_limits':[field.value() for field in self.bypass_limits],
+                'bypass_enabled':self.bypass_enabled.isChecked(),
                 'ignore_measurement_failure':self.ignore_measurement_failure.isChecked()}
 
     def persist(self):
@@ -765,7 +797,8 @@ class Window(W.QMainWindow):
             return
         kwargs = dict(database=self.database.text(), endpoint=self.endpoint.text(), project=self.project.text(), output=self.output.text(),
                       template=self.template.text().strip(), workers=self.workers.value(), memory_mb=self.memory.value(),
-                      retries=self.retries.value(), timeout=self.timeout.value(), bypass_limits=self.controls()['bypass_limits'])
+                      retries=self.retries.value(), timeout=self.timeout.value(),
+                      bypass_limits=[field.value() for field in self.bypass_limits] if self.bypass_enabled.isChecked() else (0,0,0))
         entries = self.file_entries()
         selected = sorted(p['path'] for p in entries if p['enabled'])
         profile = copy.deepcopy(self.shared_profile)
@@ -774,6 +807,7 @@ class Window(W.QMainWindow):
             import sqlite3
             with closing(sqlite3.connect(Path(kwargs['database']).resolve().as_uri() + '?mode=ro', uri=True)) as db:
                 meta = {k: json.loads(v) for k, v in db.execute('select key,value from meta')}
+            progress(dict(current=0, total=meta.get('count',0), package_count=True, published=False))
             if (selected != sorted(p['path'] for p in meta.get('sources', [])) or profile != meta.get('profile')
                     or profiles != meta.get('profiles', {}) or self_die != meta.get('die_count')
                     or measurement != meta.get('measurement')
@@ -809,7 +843,7 @@ class Window(W.QMainWindow):
                 self.completion_path = output_path
             self.completion_path.setText(value['output'])
             self.completion_dialog.show()
-        self.execute(run, done, operation='批量计算与OAS输出')
+        self.execute(run, done, operation='批量计算与OAS输出', count_only=True)
 
     def command_changed(self, command):
         args = dict(COMMANDS[command])
@@ -970,6 +1004,17 @@ class Window(W.QMainWindow):
         layout.addWidget(text)
         dialog.exec() if hasattr(dialog,'exec') else dialog.exec_()
 
+    def eventFilter(self, obj, event):
+        if obj is getattr(self, 'conversation_tab', None):
+            kinds = getattr(QtCore.QEvent, 'Type', QtCore.QEvent)
+            if event.type() == kinds.Show:
+                self.conversation.set_display(True)
+                self.conversation_timer.start()
+            elif event.type() == kinds.Hide:
+                self.conversation_timer.stop()
+                self.conversation.set_display(False)
+        return super().eventFilter(obj, event)
+
     def flush_conversation(self):
         lines = self.conversation.drain(80)
         if lines:self.conversation_view.appendPlainText('\n'.join(lines))
@@ -1000,7 +1045,7 @@ class Window(W.QMainWindow):
             finally:
                 configure_logging(workspace)
                 self.conversation.set_root(workspace)
-        self.execute(run, operation='顺序执行计划任务')
+        self.execute(run, operation='顺序执行计划任务', count_only=True)
 
     def closeEvent(self, event):
         if self.worker:

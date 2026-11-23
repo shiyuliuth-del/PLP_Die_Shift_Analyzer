@@ -17,13 +17,21 @@ def redacted(value):
 
 
 class Conversation:
-    def __init__(self, capacity=1000, message_limit=16000):
+    def __init__(self, capacity=1000, message_limit=16000, *, display=True):
         self.lock = threading.RLock()
         self.events = deque(maxlen=capacity)
         self.message_limit = message_limit
         self.dropped = 0
         self.handler = None
         self.root = None
+        self.display = display
+
+    def set_display(self, enabled):
+        with self.lock:
+            self.display = enabled
+            if not enabled:
+                self.events.clear()
+                self.dropped = 0
 
     def set_root(self, root):
         root = Path(root).resolve()
@@ -47,6 +55,8 @@ class Conversation:
         with self.lock:
             if self.handler:
                 self.handler.emit(logging.LogRecord('IPC', logging.INFO, '', 0, line, (), None))
+            if not self.display:
+                return
             if len(self.events) == self.events.maxlen:
                 self.dropped += 1
             visible = line[:self.message_limit]

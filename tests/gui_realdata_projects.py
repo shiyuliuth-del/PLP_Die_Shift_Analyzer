@@ -49,6 +49,24 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         wait(w)
         assert w.workers.value() == w.memory.value() == 0
         assert [field.value() for field in w.bypass_limits] == [0,0,0]
+        assert not w.bypass_enabled.text() and not w.bypass_enabled.isChecked()
+        assert all(field.decimals() == 3 and not field.isEnabled() for field in w.bypass_limits)
+        assert not w.conversation_timer.isActive()
+        w.conversation.record('send',endpoint,{'id':'hidden-tab'})
+        assert not w.conversation.drain() and not w.conversation_view.toPlainText()
+        w.tabs.setCurrentWidget(w.conversation_tab)
+        app.processEvents()
+        assert w.conversation_timer.isActive()
+        w.conversation.record('receive',endpoint,{'id':'visible-tab'})
+        w.flush_conversation()
+        assert 'visible-tab' in w.conversation_view.toPlainText()
+        w.tabs.setCurrentIndex(0)
+        app.processEvents()
+        assert not w.conversation_timer.isActive()
+        w.conversation.record('send',endpoint,{'id':'background-only'})
+        assert 'background-only' not in w.conversation_view.toPlainText()
+        trace = (folder/'RealDataAnalyse/logs/IPC-conversation.log').read_text('utf8')
+        assert all(token in trace for token in ('hidden-tab','visible-tab','background-only'))
         assert w.connect_button.property('connected') is True
         assert w.start_button.property('connected') is True
         assert w.file_view.rowCount() == 3 and w.profile.rowCount() == 9
@@ -86,12 +104,15 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         assert Path(w.output.text()).is_relative_to(folder)
         w.file_view.item(1, 0).setCheckState(getattr(QtCore.Qt, 'CheckState', QtCore.Qt).Unchecked)
         w.sheet.setText('Diagnostic'); w.workers.setValue(2); w.persist()
+        w.bypass_enabled.click()
+        assert all(field.isEnabled() for field in w.bypass_limits)
         for field, value in zip(w.bypass_limits, (2.5,3,.125)):
             field.setValue(value)
         excel = folder/'RealDataAnalyse/Excel'
         shutil.copyfile(excel/'GD55_SYNTHETIC_DIE1.xlsx', excel/'Z_new.xlsx')
         w.open_folder(folder, link=False); wait(w)
         assert [field.value() for field in w.bypass_limits] == [2.5,3,.125]
+        assert w.bypass_enabled.isChecked()
         assert w.file_view.rowCount() == 4 and w.file_entries()[-1]['enabled']
         select(3); w.remove_files.click()
         assert w.file_view.rowCount() == 3 and (excel/'Z_new.xlsx').is_file()
@@ -132,6 +153,13 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         w.file_view.item(1, 0).setCheckState(getattr(QtCore.Qt, 'CheckState', QtCore.Qt).Checked)
         with patch('RealDataAnalyse.gui.Runner') as runner:
             runner.return_value.run.return_value = dict(state='completed', output=w.output.text())
+            w.bypass_enabled.click()
+            assert all(not field.isEnabled() for field in w.bypass_limits)
+            w.run_button.click(); wait(w)
+            assert list(runner.call_args.kwargs['bypass_limits']) == [0,0,0]
+            w.completion_dialog.accept()
+            runner.reset_mock()
+            w.bypass_enabled.click()
             w.run_button.click(); wait(w)
             runner.return_value.run.assert_called_once()
             assert runner.call_args.kwargs['bypass_limits'] == [2.5,3,.125]
@@ -146,7 +174,9 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         assert (folder/'RealDataAnalyse/logs/RealDataAnalyse.log').is_file()
         # Continuous fill has no alternating Windows segments; text fits by elision.
         w.progress.failed = False
-        w.progress.status('批次1 · 完成6/12 · 并行2 · 封装8 重构几何 · 写入OAS', 6, 12)
+        w.progress.package_status(6,12,False)
+        w.log('后台写入阶段')
+        assert w.progress.detail == '已完成 6 / 12' and w.progress.value() == 5000
         app.processEvents()
         for style in ('Fusion', 'Windows'):
             if style in W.QStyleFactory.keys():
