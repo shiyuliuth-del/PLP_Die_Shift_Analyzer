@@ -135,9 +135,10 @@ class V57Tests(unittest.TestCase):
         try:
             w.load_project(str(GD55_1119_PROJECT.resolve()))
             drain()
-            # Requirement 5: 4 columns ['显示','选中','层 / 类型','用途'], only 固定RDL checked by default.
-            self.assertEqual(w.layer_table.columnCount(), 4)
+            # Only 固定RDL is selectable by default. Export compensation has its own column.
+            self.assertEqual(w.layer_table.columnCount(), 5)
             self.assertEqual(w.layer_table.horizontalHeaderItem(1).text(), '选中')
+            self.assertEqual(w.layer_table.horizontalHeaderItem(4).text(), '补偿')
             for key, role in w.roles().items():
                 self.assertEqual(w.selectable_boxes[key].isChecked(), role == '固定RDL', (key, role))
 

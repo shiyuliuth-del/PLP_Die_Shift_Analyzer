@@ -688,6 +688,12 @@ class MainWindow(W.QMainWindow):
     def settings_changed(self,*_):
         if self.loading:return
         values={k:(w.currentData() if isinstance(w,W.QComboBox) else w.isChecked() if isinstance(w,W.QCheckBox) else w.text() if isinstance(w,W.QLineEdit) else w.value()) for k,w in self.setting_fields.items()}
+        if -1 < values['reconstruction_node_snap_um'] < 0:
+            field=self.setting_fields['reconstruction_node_snap_um']
+            blocked=field.blockSignals(True)
+            field.setValue(-1)
+            field.blockSignals(blocked)
+            values['reconstruction_node_snap_um']=-1.
         updated=ViewSettings.from_dict(dict(asdict(self.view_settings),**values))
         if updated.space_export_interval_um!=self.view_settings.space_export_interval_um:
             self.view_settings=updated
@@ -737,6 +743,10 @@ class MainWindow(W.QMainWindow):
                 else:self._layout_pending=True
             return
         presentation=('drc_visible','show_contact_markers','reconstruction_live','width_show_probability','width_display','width_label_font_pt','width_label_decimals','width_yield_decimals','show_low_contact','show_low_width',*ranges)
+        interaction=('reconstruction_node_snap_um','reconstruction_node_snap_strength')
+        if all(getattr(updated,k)==getattr(self.view_settings,k) for k in values if k not in interaction):
+            self.view_settings=updated
+            return
         if all(getattr(updated,k)==getattr(self.view_settings,k) for k in values if k not in (*presentation,'cache_max_entries')):
             display_change=any(getattr(updated,k)!=getattr(self.view_settings,k) for k in presentation)
             self.view_settings=updated;self.show_issues.setChecked(updated.show_contact_markers);self.cache_group.limit(updated.cache_max_entries);self.refresh_cache_status()
