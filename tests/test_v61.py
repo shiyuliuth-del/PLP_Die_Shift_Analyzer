@@ -1,4 +1,5 @@
 """Real SH22 ownership and independently read CAD outline regressions."""
+from collections import defaultdict
 from contextlib import closing
 import json
 import math
@@ -51,6 +52,12 @@ class V61Tests(unittest.TestCase):
             fixed = frame['layers']['3/0']['polygons']
             for actual, original in zip(fixed, data.layers['3/0']):
                 np.testing.assert_array_equal(actual, original)
+            actual_dies = defaultdict(set)
+            for node in engine.contact.nodes:
+                if node['owner'] >= 0:
+                    actual_dies[node['net']].add(node['owner'] + 1)
+            self.assertEqual({r['network']: set(r['dies']) for r in engine.contact.interdie_networks},
+                             {net: dies for net, dies in actual_dies.items() if len(dies) > 1})
 
     def test_partial_coincidence_is_emitted_once_and_blocks_keep_source_identity(self):
         source = box(0, 0, 100, 30).difference(box(40, 10, 60, 20))
