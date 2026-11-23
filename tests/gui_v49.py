@@ -32,7 +32,8 @@ try:
  for layer,rows in data.layers.items():
   l,d=map(int,layer.split('/'));cell.add(*(gdstk.Polygon(xy,layer=l,datatype=d) for xy in rows))
  source=folder/'case.gds';lib.write_gds(source)
- job=folder/'case.dshift.json';job.write_text(json.dumps(dict(schema_version=5,gds_path=str(source),top_cell='TOP',roles=roles,layer_order=['6/0','5/0','4/0','3/0','128/0','127/0'],parameters=asdict(p),settings=dict(animation_enabled=False,reconstruction_boundary_mode='perpendicular'),overlays={})))
+ # This fixture checks exact free-angle contours, independent of the default box mode.
+ job=folder/'case.dshift.json';job.write_text(json.dumps(dict(schema_version=5,gds_path=str(source),top_cell='TOP',roles=roles,layer_order=['6/0','5/0','4/0','3/0','128/0','127/0'],parameters=asdict(p),settings=dict(animation_enabled=False,reconstruction_boundary_mode='perpendicular',reconstruction_box_mode='free'),overlays={})))
  w.load_project(job);wait();w.run_evaluation();wait();w.problem_filter.setCurrentIndex(0);wait();w.canvas.draw()
  assert w.show_issues.text()=='显示DRC问题'
  assert w.extreme_table.columnCount()==4 and not w.extreme_table.verticalHeader().isHidden()
