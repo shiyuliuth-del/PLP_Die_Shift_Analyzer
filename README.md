@@ -1,4 +1,6 @@
-# Die Shift Analyze V67
+# Die Shift Analyze V68
+
+V68 将 RealDataAnalyse 分为「信息读取」和「任务运行」，增加按封装跳过普通 DRC 的阈值，常驻显示 FAIL 封装数，并在恢复时重新绑定原任务的 IPC 入口。详见 [V68 使用说明](docs/V68_使用说明.md)。
 
 V67 支持在 DRC 表格按姿态忽略问题，新增 GDS/OAS、DXF、动静区和实测输出的逐层轮廓补偿。重构边界可按缩放或指定距离轻吸附到铜轮廓节点。RealDataAnalyse 进度条常驻显示开始时间和总耗时。详见 [V67 使用说明](docs/V67_使用说明.md)。
 
@@ -35,7 +37,7 @@ V50：芯片对重点组合、分叉边界修正、当前姿态GDS/OAS与旋转E
 软件分析Die-first封装的DIE平移与旋转，提供三方案初筛、实体覆盖与极端足迹、通道宽度风险、重构动区编辑、规则/联合模型良率、工程结果保存、GDS/OAS导入、实测IPC及批量OAS输出。长度均为μm，GDS/OAS只读，工程节点可编辑。
 
 - [实测IPC接口与注意事项](docs/MEASURED_OUTPUT_API.md) · [GD55-1105独立验证脚本](tools/verify_measured_gd55.py)
-- [用户操作](docs/V67_使用说明.md)
+- [用户操作](docs/V68_使用说明.md)
 - [AI交接：主要功能、代码地图、算法和后续重点](docs/AI_HANDOFF.md)
 - [现行设计合同](docs/DESIGN_REQUIREMENTS.md)
 - [已知边界](docs/KNOWN_ISSUES.md)

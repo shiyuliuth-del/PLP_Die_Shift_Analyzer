@@ -53,9 +53,9 @@ def run_case(root):
         assert imported['die_names'] == ['101', '102']
         print(f'SH22_FULL_IMPORT_PASS: 400 packages / 800 rows in {time.monotonic()-start:.2f}s', flush=True)
 
-        # Two sites fit the bypass. One DIE at the exact X limit in site 0:2
-        # leaves that entire package on the normal reconstruction path.
-        keys = {(0, 0), (0, 2), (0, 3)}
+        # Nominal, reconstructed without ordinary DRC, and fully checked.
+        # The exact bypass limit at site 0:2 still requires reconstruction.
+        keys = {(0, 0), (0, 2), (0, 3), (0, 4)}
         selected = []
         for path in paths:
             dest = path.with_name('validation.csv')
@@ -76,12 +76,12 @@ def run_case(root):
                 writer.writerows(rows)
         sample = database.with_name('sample.sqlite')
         imported = client('--import-data', dict(import_args, database=str(sample), paths=list(map(str, selected))))
-        assert imported['packages'] == 3
+        assert imported['packages'] == 4
         info = call(endpoint, 'info')['result']
         output = Path(config['output'])
         published = client('--run', dict(database=str(sample), project=config['project'], endpoint=str(endpoint),
                                          output=str(output), workers=0, memory_mb=0, retries=0,
-                                         bypass_limits=[2.22209,2,.2]))
+                                         bypass_limits=[2.22209,2,.2], skip_drc_limits=[2.5,2,.2]))
         assert published['state'] == 'completed' and verify_crc(output)
         assert list(output.parent.iterdir()) == [output]
         lib = gdstk.read_oas(output)
@@ -89,7 +89,7 @@ def run_case(root):
         top, = lib.top_level()
         nominal_refs = [ref for ref in top.references if ref.cell_name == 'G_NOMINAL']
         refs = {ref.cell_name: ref for ref in top.references if ref.cell_name != 'G_NOMINAL'}
-        assert len(nominal_refs) == 2 and len(refs) == 1
+        assert len(nominal_refs) == 2 and len(refs) == 2
         assert nominal_refs[0].cell is nominal_refs[1].cell
         source = gdstk.read_gds(folder/'sh22.gds')
         original = source.top_level()[0].get_polygons(layer=128,datatype=0)
@@ -100,9 +100,14 @@ def run_case(root):
             for identity, payload, result in db.execute('select package,payload,result from packages'):
                 package = json.loads(payload)
                 receipt = json.loads(result)
-                should_bypass = identity.split(':')[1] != '2'
+                col = identity.split(':')[1]
+                should_bypass = col in ('0','3')
+                skip_drc = col == '2'
                 assert receipt.get('use_nominal',False) is should_bypass
-                assert receipt['fixed_rdl_drc_checked'] is not should_bypass
+                assert receipt.get('skip_drc',False) is skip_drc
+                assert receipt['fixed_rdl_drc_checked'] is not (should_bypass or skip_drc)
+                if skip_drc:
+                    assert receipt['drc_passed'] is None
                 expected = [p-b for p,b in zip(package['position_um'], info['board_bounds_um'])]
                 candidates = nominal_refs if should_bypass else [refs[package['cell']]]
                 assert sum(all(abs(a-b)<=dbu for a,b in zip(ref.origin,expected)) for ref in candidates)==1

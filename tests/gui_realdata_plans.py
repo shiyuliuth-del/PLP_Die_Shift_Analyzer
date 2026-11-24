@@ -26,11 +26,15 @@ with tempfile.TemporaryDirectory(prefix='rda-plans-gui-') as name:
     try:
         assert w.timeout.value()==0
         assert w.import_button.text()=='创建任务'
+        w.tabs.setCurrentWidget(w.task_tab)
+        app.processEvents()
         assert w.create_plan_button.geometry().left()>w.import_button.geometry().left()
         assert w.plans_button.geometry().left()>w.start_button.geometry().left()
         assert not any(b.text()=='刷新记录' for b in w.findChildren(W.QPushButton))
         tabs=w.findChild(W.QTabWidget);assert [tabs.tabText(i) for i in range(tabs.count())][-2:]==['全部IPC命令调试','实时命令信息']
         w.open_folder(folder,link=False);wait(w)
+        w.mapping_section.click()
+        w.tabs.setCurrentWidget(w.task_tab)
         assert w.sheet.text()=='Measurements','bundled project must open its sole Measurements sheet'
         w.sheet.setText('Diagnostic');w.workers.setValue(2)
         w.create_plan_button.click();wait(w)
@@ -53,12 +57,17 @@ with tempfile.TemporaryDirectory(prefix='rda-plans-gui-') as name:
             runner.return_value.run.assert_called_once()
             assert all(label in w.progress.toolTip() for label in ('开始 ', '结束 ', '耗时 '))
             assert not any(dialog.isVisible() for dialog in w.findChildren(W.QMessageBox))
-        for table in (w.file_view,w.profile,w.table,panel.table):assert not table.verticalHeader().isHidden()
+        for table in (w.file_view,w.profile,w.mark_table,w.table,panel.table):assert not table.verticalHeader().isHidden()
         # Send actual mouse events to each drag handle, including the plan panel.
         left=getattr(QtCore.Qt,'MouseButton',QtCore.Qt).LeftButton
         grips=w.findChildren(HeightGrip)
-        assert len(grips)==4
+        assert len(grips)==5
         for grip in grips:
+            if grip.table is w.table:
+                w.tabs.setCurrentWidget(w.task_tab)
+            elif grip.table is not panel.table:
+                w.tabs.setCurrentIndex(0)
+            app.processEvents()
             old=grip.table.height();position=grip.rect().center()
             QTest.mousePress(grip,left,pos=position)
             delta=QtCore.QPoint(0,31)

@@ -208,7 +208,9 @@ class Transport:
             except (OSError, EOFError, TimeoutError, json.JSONDecodeError) as exc:
                 last = str(exc)
                 if self.process is not None and self.process.poll() is not None:
-                    raise RuntimeError(f'程序启动退出 {self.process.returncode}；见RealDataAnalyse-child.log') from exc
+                    raise ConnectionError(f'程序启动退出 {self.process.returncode}；见RealDataAnalyse-child.log') from exc
+                if self.starting and not self.starting_alive():
+                    raise ConnectionError('预演软件在准备工程时退出；见RealDataAnalyse-child.log') from exc
             stop.wait(.3)
         raise TimeoutError(f'等待工程ready超时：{last}')
 

@@ -27,6 +27,29 @@ class MixedService(FakeService):
   return response
 
 class ErrorContracts(unittest.TestCase):
+ def test_stopped_task_recovers_progress_and_fail_count_before_replay(self):
+  with tempfile.TemporaryDirectory() as name:
+   root=Path(name).resolve();paths=generate_example(root,count=3,die_count=2);db=root/'run.sqlite'
+   import_files(paths,db,2,1,threading.Event());service=MixedService(root)
+   out=root/'out.oas';out.write_bytes(b'old output')
+   stop=threading.Event()
+   def interrupt(value):
+    if isinstance(value,dict) and value['current']==2:
+     self.assertEqual(value['failed_packages'],1)
+     stop.set()
+   args=dict(database=db,endpoint=root/'ipc.json',project=root/'case.json',output=out,transport=service,workers=1,timeout=2)
+   with self.assertRaises(InterruptedError):
+    Runner(**args,stop=stop,progress=interrupt).run()
+   self.assertEqual(out.read_bytes(),b'old output')
+   with closing(Ledger(db)) as ledger:
+    self.assertEqual(ledger.get('state'),'paused')
+    self.assertEqual(ledger.get('display_progress'),[2,1])
+   progress=[]
+   result=Runner(**args,progress=progress.append).run()
+   self.assertEqual(result['failed_packages'],1)
+   self.assertEqual([(v['current'],v['failed_packages'],v['published']) for v in progress if isinstance(v,dict)],
+                    [(2,1,False),(3,1,False),(3,1,True)])
+
  def test_valid_failure_valid_sequence_publishes_all_and_records_warning(self):
   with tempfile.TemporaryDirectory() as name:
    root=Path(name).resolve();paths=generate_example(root,count=3,die_count=2);db=root/'run.sqlite'

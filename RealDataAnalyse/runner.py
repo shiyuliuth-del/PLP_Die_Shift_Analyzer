@@ -42,7 +42,7 @@ class StopToken:
 class Runner:
     def __init__(self, database, endpoint, project, output, workers=0, memory_mb=0,
                  retries=3, timeout=0, stop=None, progress=lambda _: None, transport=None, trace=None, template=None,
-                 expected_template_sha256=None, bypass_limits=(0,0,0)):
+                 expected_template_sha256=None, bypass_limits=(0,0,0), skip_drc_limits=(0,0,0), on_launch=None):
         self.database = Path(database).resolve()
         self.output = Path(output).absolute()
         if self.output.suffix.lower() != '.oas' or self.output.is_symlink():
@@ -68,24 +68,30 @@ class Runner:
         self.workers, self.memory_mb, self.retries, self.timeout = workers, memory_mb, retries, timeout
         limits = nominal_limits(bypass_limits)
         self.bypass_limits = limits if all(limits) else None
+        limits = nominal_limits(skip_drc_limits)
+        self.skip_drc_limits = limits if all(limits) else None
+        self.on_launch = on_launch
         self.stop = stop if stop is not None else threading.Event()
         self.progress = progress
         self.transport = transport or Transport(endpoint, timeout=min(15, timeout) if timeout else 15, trace=trace)
         self.ledger = None
         self.total = 0
         self.completed_count = 0
+        self.failed_count = 0
 
     def note(self, message, level='INFO'):
         self.ledger.event(message, level)
         self.progress(message)
 
-    def report_packages(self, completed, *, published=False):
+    def report_packages(self, completed, failed_packages, *, published=False):
         # A replay replaces the failed temporary OAS. Its work catches up to
         # the previous attempt without adding the same packages twice.
-        self.completed_count = max(self.completed_count, completed)
+        if completed >= self.completed_count:
+            self.completed_count = completed
+            self.failed_count = failed_packages
         self.progress(dict(text=f'已完成 {self.completed_count} / {self.total}',
                            current=self.completed_count, total=self.total,
-                           package_count=True, published=published))
+                           package_count=True, published=published, failed_packages=self.failed_count))
 
     def prepare(self):
         self.note('连接预演软件 · 核对工程与任务身份')
@@ -94,9 +100,17 @@ class Runner:
             info = t.request('info', stop=self.stop, retries=1)['result']
         except (OSError, EOFError, TimeoutError, json.JSONDecodeError):
             if t.alive():
-                raise RuntimeError('服务无响应但进程仍活着；无法安全重启，保留任务等待人工处理')
+                raise TimeoutError('服务仍存活但暂未响应，等待原实例恢复')
             self.note('服务已退出，尝试启动同目录 Die Shift Analyze', 'WARNING')
-            t.launch(self.project)
+            if isinstance(t, Transport):
+                t.endpoint.parent.mkdir(parents=True, exist_ok=True)
+                with Lease(str(t.endpoint) + '.startup'):
+                    if not t.alive() and not t.find_starting(self.project):
+                        t.launch(self.project)
+                        if self.on_launch:
+                            self.on_launch(t)
+            else:
+                t.launch(self.project)
             info = t.wait_ready(self.stop, self.timeout)
         if not info.get('ready'):
             info = t.wait_ready(self.stop, self.timeout)
@@ -154,8 +168,8 @@ class Runner:
         key = uuid.uuid5(uuid.UUID(self.run_id), f'{attempt}:{seq}').hex
         stop = StopToken(self.stop, abort)
         measured_max = payload.pop('measured_max', None)
-        use_nominal = False
-        if self.bypass_limits:
+        use_nominal = skip_drc = False
+        if self.bypass_limits or self.skip_drc_limits:
             if measured_max is None:
                 if self.production:
                     raise ValueError('实测偏移摘要缺失，请重新创建任务')
@@ -164,20 +178,24 @@ class Runner:
             if (not isinstance(measured_max,list) or len(measured_max)!=3
                     or any(type(v) not in (int,float) or v<0 or not math.isfinite(v) for v in measured_max)):
                 raise ValueError('实测偏移摘要无效，请重新创建任务')
-            use_nominal = all(value < limit for value, limit in zip(measured_max, self.bypass_limits))
+            use_nominal = bool(self.bypass_limits) and all(value < limit for value, limit in zip(measured_max, self.bypass_limits))
+            skip_drc = not use_nominal and bool(self.skip_drc_limits) and all(
+                value < limit for value, limit in zip(measured_max, self.skip_drc_limits))
             if use_nominal:
                 payload['use_nominal'] = True
+            elif skip_drc:
+                payload['skip_drc'] = True
         # SQLite belongs to coordinator; worker receives immutable data only.
         response = self.transport.request('batch.submit', dict(payload, batch_id=batch), request_id=key, stop=stop)
         if response.get('status') != 'accepted':
             raise RemoteError(response)
         task = response['task_id']
         result = self.transport.wait_task(task, stop, self.timeout)
-        self.validate_pose(result, payload['cell'], use_nominal)
+        self.validate_pose(result, payload['cell'], use_nominal, skip_drc)
         return task, result
 
     @staticmethod
-    def validate_pose(result, cell, use_nominal=False):
+    def validate_pose(result, cell, use_nominal=False, skip_drc=False):
         if result.get('cell') != cell:
             raise ValueError('封装回执名称不匹配')
         for key in ('connection_failure_count', 'drc_count', 'error_rectangles', 'error2_rectangles', 'omitted_region_count', 'failed_packages'):
@@ -185,6 +203,8 @@ class Runner:
             if type(value) is not int or value<0:raise ValueError('问题回执计数无效：'+key)
         if result.get('use_nominal',False) is not use_nominal:
             raise ValueError('封装原图直出回执与请求不一致')
+        if result.get('skip_drc',False) is not skip_drc:
+            raise ValueError('封装忽略DRC回执与请求不一致')
         if use_nominal:
             if (result.get('fixed_rdl_drc_checked') is not False or result.get('drc_passed') is not None
                     or result.get('partial_output') or any(result.get(key,0) for key in (
@@ -192,7 +212,10 @@ class Runner:
                         'omitted_region_count','failed_packages'))):
                 raise ValueError('原图直出回执不能包含实际铜检查结果')
             return
-        if result.get('fixed_rdl_drc_checked') is not True:
+        if skip_drc:
+            if result.get('fixed_rdl_drc_checked') is not False or result.get('drc_passed') is not None:
+                raise ValueError('忽略DRC回执缺少有效检查状态')
+        elif result.get('fixed_rdl_drc_checked') is not True:
             raise ValueError('服务未完成当前姿态DRC，不能把未知问题数当作零')
         if result.get('connection_failure_count',0) and (result.get('partial_output') is not True or not result.get('omitted_region_count')):
             raise ValueError('连接失败但未确认移除失败位置，保留记录等待正确服务回执')
@@ -223,6 +246,8 @@ class Runner:
         request = dict(filename=stage_name,client_id=run,output_policy='omit_failed_regions',package_count=ledger.get('count'))
         if self.bypass_limits:
             request['nominal_bypass'] = True
+        if self.skip_drc_limits:
+            request['allow_drc_skip'] = True
         if self.template:
             request.update(template_path=self.template,template_sha256=self.template_sha256)
         begin = t.request('batch.begin', request, request_id=uuid.uuid5(uuid.UUID(run), f'begin:{attempt}').hex, stop=self.stop)['result']
@@ -237,10 +262,11 @@ class Runner:
         ledger.set('batch', batch)
         if self.bypass_limits and begin.get('nominal_bypass') is not True:
             raise ValueError('预演软件不支持原图直出，请使用配套新版本')
+        if self.skip_drc_limits and begin.get('allow_drc_skip') is not True:
+            raise ValueError('预演软件不支持忽略DRC，请使用配套新版本')
         if begin.get('output_policy') != 'omit_failed_regions':
             raise ValueError('预演软件不支持局部问题输出与ERROR层，请使用配套新版本')
         counts = dict(issue_packages=0, error_rectangles=0, error2_rectangles=0, failed_packages=0, nominal_packages=0)
-        ledger.store_receipts([], counts)
         # A second client could open another project after prepare() but before
         # batch.begin. Once the batch owns the service, project switching is
         # locked: verify that frozen identity again before submitting any copper.
@@ -250,8 +276,7 @@ class Runner:
                 or Path(locked.get('project') or '').resolve() != Path(self.project)):
             raise ValueError('批次开始时工程身份或归属已变化，未提交任何封装；请确认正确工程后重试')
         ledger.set('state', 'running')
-        with ledger.db:
-            ledger.db.execute("update packages set state='pending',task=null,result=null")
+        ledger.store_receipts([], counts, reset=True)
         self.note(f'批次{attempt}：{ledger.get("count")}封装；请求并发{self.workers or "自动"}，服务实际{begin["threads"]}路（{begin.get("execution","threads")}），内存上限{begin.get("max_memory_mb","未知")} MB')
         abort = threading.Event()
         error = None
@@ -310,9 +335,13 @@ class Runner:
                         if completed == 1 or completed % 20 == 0 or completed == self.total:
                             self.note(f'计算完成 {completed}/{self.total}；等待整批文件提交')
                 if receipts:
-                    ledger.store_receipts(receipts, counts)
-                    if completed > self.completed_count:
-                        self.report_packages(completed)
+                    if completed >= self.completed_count:
+                        failed = counts['failed_packages']
+                        ledger.store_receipts(receipts, dict(counts, display_progress=[completed, failed]))
+                        if (completed, failed) != (self.completed_count, self.failed_count):
+                            self.report_packages(completed, failed)
+                    else:
+                        ledger.store_receipts(receipts, counts)
         if self.stop.is_set():
             raise InterruptedError('用户停止；保留输入与任务回执，继续时补算未提交批次')
         if error:
@@ -425,7 +454,7 @@ class Runner:
         serious = ledger.get('error2_rectangles', 0)
         ordinary = ledger.get('error_rectangles', 0) - serious
         self.note(f'含问题{ledger.get("issue_packages",0)}封装 · ERROR {ordinary} · ERROR2 {serious} · FAIL {ledger.get("failed_packages",0)}封装')
-        self.report_packages(self.total, published=True)
+        self.report_packages(self.total, ledger.get('failed_packages',0), published=True)
         return True
 
     def run(self):
@@ -448,7 +477,8 @@ class Runner:
                 if not self.total:
                     raise ValueError('数据库没有完整导入的封装')
                 self.completed_count = 0
-                self.report_packages(0)
+                self.failed_count = 0
+                self.report_packages(*ledger.get('display_progress',[0,0]))
                 self.production = bool(ledger.get('measurement'))
                 if self.managed_output:
                     protected = [Path(self.project), self.database]
@@ -466,6 +496,10 @@ class Runner:
                     if self.production and not ledger.get('measured_max_available'):
                         raise ValueError('旧实测任务缺少原始偏移摘要，请重新创建任务后使用原图直出')
                     config['bypass_limits'] = self.bypass_limits
+                if self.skip_drc_limits:
+                    if self.production and not ledger.get('measured_max_available'):
+                        raise ValueError('旧实测任务缺少原始偏移摘要，请重新创建任务后使用忽略DRC')
+                    config['skip_drc_limits'] = self.skip_drc_limits
                 if self.template:
                     digest = sha256(self.template,self.stop)
                     if self.template_sha256 is not None and digest!=self.template_sha256:
@@ -473,7 +507,7 @@ class Runner:
                     self.template_sha256 = digest
                     config.update(template=self.template,template_sha256=digest)
                 if ledger.get('config') and ledger.get('config') != config:
-                    raise ValueError('继续任务须使用原入口、工程、输出路径和原图直出阈值')
+                    raise ValueError('继续任务须使用原入口、工程、输出路径和原任务阈值')
                 if not ledger.get('config'):
                     ledger.set('previous_output', sha256(self.output, self.stop) if self.output.is_file() else None)
                     # Config is the initialization commit marker; cancellation
@@ -492,7 +526,7 @@ class Runner:
                         return {'state': 'completed', 'output': str(self.output), 'issue_packages': ledger.get('issue_packages',0), 'error_rectangles': ledger.get('error_rectangles',0), 'error2_rectangles': ledger.get('error2_rectangles',0), 'failed_packages': ledger.get('failed_packages',0)}
                     except InterruptedError:
                         raise
-                    except (OSError, EOFError, TimeoutError, RemoteError) as exc:
+                    except (OSError, EOFError, TimeoutError, json.JSONDecodeError, RemoteError) as exc:
                         self.note(f'第{attempt}批次未提交：{exc}', 'WARNING')
                         if ledger.get('publish'):
                             raise  # never overwrite a pending publication record

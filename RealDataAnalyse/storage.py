@@ -1,5 +1,6 @@
 """Durable, bounded-memory run ledger. No executable serialization."""
 import hashlib
+from contextlib import closing
 import json
 import logging
 from logging.handlers import RotatingFileHandler
@@ -22,6 +23,12 @@ def sha256(path, stop=None):
                 raise InterruptedError('已停止文件校验')
             h.update(chunk)
     return h.hexdigest()
+
+
+def read_task_metadata(path):
+    uri = Path(path).resolve().as_uri() + '?mode=ro'
+    with closing(sqlite3.connect(uri, uri=True)) as db:
+        return {key: json.loads(value) for key, value in db.execute('select key,value from meta')}
 
 
 class Lease:
@@ -98,8 +105,10 @@ class Ledger:
         with self.db:
             self.db.execute('insert or replace into meta values(?,?)', (key, dumps(value)))
 
-    def store_receipts(self, rows, counts):
+    def store_receipts(self, rows, counts, *, reset=False):
         with self.db:
+            if reset:
+                self.db.execute("update packages set state='pending',task=null,result=null")
             self.db.executemany('update packages set state=?,task=?,result=? where seq=?', rows)
             self.db.executemany('insert or replace into meta values(?,?)',
                                 ((key, dumps(value)) for key, value in counts.items()))
