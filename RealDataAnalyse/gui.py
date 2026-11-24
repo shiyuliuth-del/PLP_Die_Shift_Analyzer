@@ -10,7 +10,7 @@ from die_shift_studio.jobs import REALDATA_DIRECTORY
 from die_shift_studio.qt_compat import QtCore, QtGui, QtWidgets as W, Signal
 from . import __version__
 from .excel import DEFAULT_PROFILE, HEADERS, import_files
-from .measurements import HEADINGS, SUFFIXES, folders, nominal_geometry
+from .measurements import HEADINGS, SUFFIXES, folders, nominal_geometry, skips_failed_measurements
 from .projects import load_folder, save_folder, inside, copy_excel, copy_inputs, template_file
 from .runner import Runner, nominal_limits
 from .storage import Ledger, configure_logging, read_task_metadata
@@ -270,7 +270,7 @@ class Window(W.QMainWindow):
         task_layout = W.QVBoxLayout(self.task_tab)
         self.ignore_measurement_failure = W.QCheckBox('忽略测量失败')
         self.ignore_measurement_failure.setEnabled(False)
-        self.ignore_measurement_failure.setToolTip('对机台标记失败的芯片，采用该行的 X/Y 偏移与旋转角。适用于机台生产格式。')
+        self.ignore_measurement_failure.setToolTip('勾选时跳过有芯片测量失败的封装。不勾选时采用失败行填写的 X/Y 偏移与旋转角。')
         task_layout.addWidget(self.ignore_measurement_failure)
         controls = W.QHBoxLayout()
         self.import_button = W.QPushButton('创建任务')
@@ -604,6 +604,8 @@ class Window(W.QMainWindow):
                     meta = read_task_metadata(config['database'])
                     frozen = meta.get('config') or {}
                     config['failed_packages'] = meta.get('display_progress',[0,meta.get('failed_packages',0)])[1]
+                    if meta.get('measurement') and meta.get('state') != 'completed':
+                        config['resume_skip_failed'] = skips_failed_measurements(meta)
                     if meta.get('state') != 'completed' and frozen.get('project') == config['project']:
                         config['resume_endpoint'] = frozen.get('endpoint')
                 except (OSError, ValueError, sqlite3.Error) as exc:
@@ -645,7 +647,8 @@ class Window(W.QMainWindow):
             for field, value in zip(self.skip_drc_limits, nominal_limits(config['controls'].get('skip_drc_limits',(0,0,0)))):
                 field.setValue(value)
             self.skip_drc_enabled.setChecked(config['controls'].get('skip_drc_enabled') is True)
-            self.ignore_measurement_failure.setChecked(config['controls'].get('ignore_measurement_failure') is True)
+            self.ignore_measurement_failure.setChecked(config.get('resume_skip_failed',
+                                                                 config['controls'].get('skip_failed_measurements') is True))
             self.logger = configure_logging(config['workspace'])
             self.page = 0
             self.table.setRowCount(0)
@@ -756,7 +759,7 @@ class Window(W.QMainWindow):
                 'bypass_enabled':self.bypass_enabled.isChecked(),
                 'skip_drc_limits':[field.value() for field in self.skip_drc_limits],
                 'skip_drc_enabled':self.skip_drc_enabled.isChecked(),
-                'ignore_measurement_failure':self.ignore_measurement_failure.isChecked()}
+                'skip_failed_measurements':self.ignore_measurement_failure.isChecked()}
 
     def persist(self):
         if self.project_root is None:
@@ -843,7 +846,7 @@ class Window(W.QMainWindow):
                 self.log_view.appendPlainText('导入警告 · ' + warning)
             self.persist()
         project, measurement = self.project.text(), self.measurement
-        ignore_failure = bool(measurement) and self.ignore_measurement_failure.isChecked()
+        skip_failed = self.ignore_measurement_failure.isChecked()
         endpoint, timeout = self.endpoint.text(), self.timeout.value()
         def prepare(stop, progress):
             geometry = None
@@ -851,7 +854,7 @@ class Window(W.QMainWindow):
                 info = self.linked_project(endpoint, project, stop, progress, timeout, str(output))
                 geometry = nominal_geometry(info)
             result = import_files(files, target, dies, workers, stop, progress, profile, profiles,
-                                  measurement=measurement, geometry=geometry, ignore_measurement_failure=ignore_failure)
+                                  measurement=measurement, geometry=geometry, skip_failed_measurements=skip_failed)
             if measurement:
                 result['info'] = info
             return result
@@ -880,7 +883,7 @@ class Window(W.QMainWindow):
             if (selected != sorted(p['path'] for p in meta.get('sources', [])) or profile != meta.get('profile')
                     or profiles != meta.get('profiles', {}) or self_die != meta.get('die_count')
                     or measurement != meta.get('measurement')
-                    or ignore_failure != meta.get('ignore_measurement_failure',False)):
+                    or (measurement and skip_failed != skips_failed_measurements(meta))):
                 raise ValueError('Excel勾选、列映射、DIE数量或测量失败选项与任务记录不符，请先创建新任务')
             from .storage import sha256
             for index, source in enumerate(meta.get('sources', []), 1):
@@ -893,7 +896,7 @@ class Window(W.QMainWindow):
             return Runner(**kwargs, stop=stop, progress=progress, trace=self.conversation).run()
         self_die = self.dies.value()
         measurement = self.measurement
-        ignore_failure = bool(measurement) and self.ignore_measurement_failure.isChecked()
+        skip_failed = self.ignore_measurement_failure.isChecked()
         def done(value):
             if value['state'] != 'completed' or self.pending_close:
                 return

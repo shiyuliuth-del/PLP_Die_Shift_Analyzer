@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ProductionMeasurements(unittest.TestCase):
-    def test_opt_in_uses_failed_rows_offsets_and_preserves_successful_repeats(self):
+    def test_default_adopts_failed_row_offsets_and_checked_option_skips_the_package(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()
             excel = root/'Excel'
@@ -41,11 +41,11 @@ class ProductionMeasurements(unittest.TestCase):
             digests = [sha256(p) for p in paths]
             arguments = dict(measurement=dict(root=str(excel)),geometry=geometry)
             default = import_files(paths, root/'default.sqlite', 2, 0, threading.Event(), **arguments)
-            self.assertEqual((default['packages'],default['skipped_packages']),(1,2))
+            self.assertEqual((default['packages'],default['skipped_packages']),(2,1))
             enabled = import_files(paths, root/'enabled.sqlite', 2, 0, threading.Event(),
-                                   ignore_measurement_failure=True, **arguments)
-            self.assertEqual((enabled['packages'],enabled['skipped_packages']),(2,1))
-            with closing(sqlite3.connect(enabled['database'])) as db:
+                                   skip_failed_measurements=True, **arguments)
+            self.assertEqual((enabled['packages'],enabled['skipped_packages']),(1,2))
+            with closing(sqlite3.connect(default['database'])) as db:
                 records = {site:json.loads(payload) for site, payload in db.execute('select package,payload from packages')}
                 self.assertEqual(records['0:0:1']['measured_max'],[7.,4.,1.25])
                 accepted = records['0:0:1']['dies'][0]
@@ -55,7 +55,10 @@ class ProductionMeasurements(unittest.TestCase):
                 self.assertAlmostEqual(records['1:0:1']['dies'][0]['dx_um'],2)
                 audits = db.execute('select payload from measurements order by package,die').fetchall()
                 self.assertEqual(sum(json.loads(audit).get('measurement_failure_ignored',False) for audit, in audits),1)
-            self.assertTrue(any('忽略测量失败' in message for message in enabled['warnings']))
+            self.assertTrue(any('已采用本行偏移和旋转角' in message for message in default['warnings']))
+            legacy = import_files(paths, root/'legacy.sqlite', 2, 0, threading.Event(),
+                                  ignore_measurement_failure=False, **arguments)
+            self.assertEqual(legacy['packages'],enabled['packages'])
             self.assertEqual([sha256(p) for p in paths],digests)
 
     def test_attachment_format_multiple_files_actual_centers_and_repeated_indices(self):
@@ -87,7 +90,8 @@ class ProductionMeasurements(unittest.TestCase):
             stop = threading.Event()
             digest = [sha256(p) for p in paths]
             database = root/'tasks.sqlite'
-            result = import_files(paths[::-1], database, 2, 0, stop, measurement=dict(root=str(excel)), geometry=geometry)
+            result = import_files(paths[::-1], database, 2, 0, stop, measurement=dict(root=str(excel)), geometry=geometry,
+                                  skip_failed_measurements=True)
             self.assertEqual(result['packages'], 2)
             self.assertEqual(result['skipped_packages'], 1)
             self.assertEqual(result['die_names'], ['ASIC', '101'])
@@ -105,7 +109,8 @@ class ProductionMeasurements(unittest.TestCase):
             duplicate = excel/'101'/'duplicate.csv'
             duplicate.write_bytes(paths[0].read_bytes())
             recovered = root/'deduplicated.sqlite'
-            result = import_files(paths+[duplicate], recovered, 2, 0, stop, measurement=dict(root=str(excel)), geometry=geometry)
+            result = import_files(paths+[duplicate], recovered, 2, 0, stop, measurement=dict(root=str(excel)), geometry=geometry,
+                                  skip_failed_measurements=True)
             self.assertEqual(result['packages'], 2)
             self.assertTrue(any('重复' in message for message in result['warnings']))
 

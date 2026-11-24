@@ -13,6 +13,7 @@ import uuid
 
 from die_shift_studio.jobs import REALDATA_DIRECTORY, atomic_save, provision_project
 from .excel import import_files
+from .measurements import skips_failed_measurements
 from .instances import connect
 from .projects import inside, template_file
 from .runner import Runner, nominal_limits
@@ -27,6 +28,9 @@ def capture(config, stop):
     snapshot = copy.deepcopy(config)
     snapshot['inputs'] = []
     try:
+        controls = snapshot.get('controls')
+        if isinstance(controls, dict):
+            controls['skip_failed_measurements'] = skips_failed_measurements(controls, legacy_default=False)
         root = Path(config['folder']).resolve()
         project = inside(root, config['project'])
         snapshot['engineering'] = json.loads(project.read_text(encoding='utf8'))
@@ -66,8 +70,7 @@ def validate(snapshot, output, check_hash=False, stop=None):
         raise ValueError('启用忽略阈值须为布尔值')
     if type(controls.get('skip_drc_enabled',False)) is not bool:
         raise ValueError('启用忽略DRC须为布尔值')
-    if type(controls.get('ignore_measurement_failure',False)) is not bool:
-        raise ValueError('忽略测量失败须为布尔值')
+    skips_failed_measurements(controls)
     if (not 1 <= controls['dies'] <= 10000 or not 0 <= controls['workers'] <= 64
             or (controls['memory'] != 0 and not 128 <= controls['memory'] <= 1048576)
             or not 0 <= controls['retries'] <= 10 or not 0 <= controls['timeout'] <= 86400):
@@ -345,7 +348,7 @@ class PlanRunner:
                 import_files([item['path'] for item in selected], database, controls['dies'], controls['workers'], self.stop,
                              lambda message: report(message,0,15), snapshot['profile'], profiles,
                              measurement=measurement, geometry=geometry,
-                             ignore_measurement_failure=bool(measurement) and controls.get('ignore_measurement_failure',False))
+                             skip_failed_measurements=skips_failed_measurements(controls))
             with closing(sqlite3.connect(database.as_uri()+'?mode=ro', uri=True)) as db:
                 batch_owner = json.loads(db.execute("select value from meta where key='run_id'").fetchone()[0])
                 sources = json.loads(db.execute("select value from meta where key='sources'").fetchone()[0])
