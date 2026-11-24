@@ -7,9 +7,11 @@ import numpy as np
 from .area_filter import remap_project
 
 
-EDIT_FIELDS=tuple('reconstruction_'+name for name in (
+DRC_FIELDS=('drc_waived_refs','drc_retained_refs')
+RECONSTRUCTION_FIELDS=tuple('reconstruction_'+name for name in (
     'regions','boxes','angle_boxes','box_excluded','fixed_via_follows','cuts','extra_cuts',
     'second_cuts','dropped_cuts','ignored','following','forced','angles','deleted','added','intervals'))
+EDIT_FIELDS=RECONSTRUCTION_FIELDS+DRC_FIELDS
 
 
 def mapped_edits(data,settings,width,*,to_source):
@@ -105,6 +107,8 @@ class EditHistory:
         w.cut_drag.cancel(redraw=False);w.mouse_die.cancel_pending()
         before=self.capture()
         state=source[-1]
+        recon_changed=any(before['edits'][name]!=state['edits'][name] for name in RECONSTRUCTION_FIELDS)
+        waiver_changed=before['drc']!=state['drc'] or any(before['edits'][name]!=state['edits'][name] for name in DRC_FIELDS)
         def committed():
             source.pop();target.append(before);self.trim()
         if (state['nodes'],state['deletions'])!=(before['nodes'],before['deletions']):
@@ -149,7 +153,7 @@ class EditHistory:
                     w.statusBar().showMessage(f'已暂存：{action}（保持特殊标记，点击“重构计算”按顺序应用）')
                 else:
                     w.statusBar().showMessage(f'已撤销未计算的{action}，无需重新计算')
-                if before['drc']!=state['drc']:w.replace_drc_waivers(state['drc'])
+                if waiver_changed:w.replace_drc_waivers(state['drc'],refresh_evidence=True)
                 committed()
                 return
             from .area_filter import canonical_project
@@ -171,7 +175,7 @@ class EditHistory:
         blocked=w.extreme_table.blockSignals(True)
         w.extreme_table.setCurrentCell(row,0);w.extreme_table.blockSignals(blocked)
         w._selected_grid_pose=w.extremes[w.active_preview]['states'] if w.extremes is not None and w.active_preview is not None else None
-        if state['edits']!=before['edits']:
+        if recon_changed:
             applied=w._applied_preview_settings
             if (w._can_defer_deletion_edit() and applied is not None and not (w.pending_layout_ops or w.pending_node_shapes)
                     and w.view_settings.reconstruction_key()==applied.reconstruction_key()):
@@ -180,8 +184,8 @@ class EditHistory:
                 w.reconstruction_yield.refresh()
             else:w.invalidate_reconstruction_edit()
         if state['width']!=before['width']:w.width_yield.refresh()
-        if before['drc']!=state['drc']:w.replace_drc_waivers(state['drc'])
+        if waiver_changed:w.replace_drc_waivers(state['drc'],refresh_evidence=True)
         w.plot_layout(preserve=True)
-        if any(state[key]!=before[key] for key in ('edits','width','pose','extreme')):
+        if recon_changed or any(state[key]!=before[key] for key in ('width','pose','extreme')):
             w.request_preview(quiet=True,pose_change=state['pose']!=before['pose'] or state['extreme']!=before['extreme'])
         committed()

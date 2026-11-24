@@ -130,7 +130,7 @@ class V56Tests(unittest.TestCase):
                     if w.worker is None and not w.preview_workers and w.cut_drag.worker is None:
                         return
                 QtCore.QThread.msleep(20)
-            self.fail(w.runtime_view.toPlainText()[-3000:])
+            self.fail(w.log_bus.text()[-3000:])
 
         def send(name, x, y, button=1):
             px, py = w.ax.transData.transform((x, y))

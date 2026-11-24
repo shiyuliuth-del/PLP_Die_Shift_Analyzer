@@ -91,11 +91,11 @@ class MeasuredOutput(QtCore.QObject):
             if timer is not None:timer.stop()
         if hasattr(w,'reconstruction_overlay'):w.reconstruction_overlay.pulse_timer.stop()
         self.endpoint.setText(str(self.server.endpoint));w.remote_locked=True;w.progress.hide();self.ready=False;self.last_error=None;self.current=None
+        w.set_runtime_recording(False)
         profile=resource_profile();cpu=profile['cpu']
         cpu_target=min(cpu,self.options.max_threads) if self.options.max_threads else max(1,cpu-1 if cpu>=4 else cpu)
         self.pool=ThreadPoolExecutor(max_workers=max(2,min(32,cpu_target)),thread_name_prefix='dsa-measured')
         self.transition={'job':self.new_job('session.freeze'),'phase':'freeze'} if w.data is not None else None;self.apply_lock(force=True)
-        w.log_bus.emit('实测输出已开启；等待指令，不进行方案评估或良率计算。IPC：'+str(self.server.endpoint))
     def new_job(self,command):
         key=uuid.uuid4().hex;self.jobs[key]=dict(task_id=key,command=command,status='queued',progress=0,created=time.time())
         while len(self.jobs)>10000:
@@ -227,6 +227,7 @@ class MeasuredOutput(QtCore.QObject):
             if not self.active():
                 if self.render_engine:self.render_engine.close();self.render_engine=None
                 w.remote_locked=False
+                if not w._closing:w.set_runtime_recording(True)
                 w.current_frame=None;w.shown_states=None;w.manual_states=None;w.active_preview=None;w.engine=None
                 for name,enabled in getattr(self,'saved_overlays',{}).items():
                     widget=w.overlay_widget(name);widget.blockSignals(True);widget.setChecked(enabled);widget.blockSignals(False)

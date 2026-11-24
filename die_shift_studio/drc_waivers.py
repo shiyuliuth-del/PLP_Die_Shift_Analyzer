@@ -88,6 +88,24 @@ def refs(row):
     return tuple(sorted({(str(key),int(index)) for key,index in raw}))
 
 
+def needs_events(settings):
+    return bool(settings.reconstruction_auto_waive_drc or settings.drc_waived_refs or settings.drc_retained_refs)
+
+
+def figure_decision(sources,ignored,retained):
+    if not sources:return None
+    if not retained.isdisjoint(sources):return False
+    if not ignored.isdisjoint(sources):return True
+    return None
+
+
+def figure_refs(row):
+    """Connection failures and physical shorts remain explicit diagnostics."""
+    if row.get('connection_failure') or row.get('connection') or row.get('short_circuit'):return ()
+    pair=row.get('_measurement_pair')
+    return () if pair is not None and pair[0].intersects(pair[1]) else refs(row)
+
+
 def event_id(row):
     """One rule on the same source objects, across different poses."""
     sources=refs(row)
@@ -148,7 +166,11 @@ def scene_events(solver,states,reconstruction):
     hard=bool(reconstruction.get('hard_failures'))
     protected={key for row,key in zip(rows,keys) if not waivable(row)}
     source=source_requirements(reconstruction,rows,keys)
-    return tuple(sorted(set(keys))),tuple(sorted(protected)),source,hard
+    sources={}
+    for key,row in zip(keys,rows):
+        related=figure_refs(row)
+        if key not in sources or not related:sources[key]=related
+    return tuple(sorted(set(keys))),tuple(sorted(protected)),source,hard,sources
 
 
 def automatic_ignores(settings,bank):
@@ -163,17 +185,24 @@ def summary(settings,bank,waivers,context,grid,states_at):
     from collections import defaultdict
 
     auto=automatic_ignores(settings,bank)
+    ignored_refs=set(settings.drc_waived_refs);retained_refs=set(settings.drc_retained_refs)
+    event_refs=(bank or {}).get('drc_event_refs',{})
+    forced={event for event,sources in event_refs.items() if figure_decision(sources,ignored_refs,retained_refs) is True}
+    restored={event for event,sources in event_refs.items() if figure_decision(sources,ignored_refs,retained_refs) is False}
+    global_ignored=(auto|forced)-restored
     allowed=set()
     cleared=defaultdict(set)
-    if auto:
+    if global_ignored:
         for index,keys in bank['drc_event_poses'].items():
-            if auto.issuperset(keys):allowed.add(index)
+            if global_ignored.issuperset(keys):allowed.add(index)
         for ref,rows in bank['drc_event_sources'].items():
-            cleared[ref].update(index for index,keys in rows.items() if auto.issuperset(keys))
+            cleared[ref].update(index for index,keys in rows.items() if global_ignored.issuperset(keys))
     for index,row in accepted_records(waivers,context,grid,states_at):
         ignored=set(row['ignored'])
-        ignored.update(key for key,event in row.get('events',{}).items() if event in auto)
-        ignored.difference_update(row.get('retained',()))
+        events=row.get('events',{})
+        ignored.update(key for key,event in events.items() if event in global_ignored)
+        ignored.difference_update(key for key in row.get('retained',()) if events.get(key) not in forced)
+        ignored.difference_update(key for key,event in events.items() if event in restored)
         if not row['hard_failure'] and ignored.issuperset(row['witnesses']):allowed.add(index)
         else:allowed.discard(index)
         for layer,number,keys in row.get('source_requirements',()):

@@ -297,7 +297,7 @@ def contours(snapshot,reconstruction,roles,options,progress=lambda *_:None,*,com
     return [(q.layer,xy) for q in groups for xy in q.paths],inputs,merged
 
 
-def write_regions(snapshot,reconstruction,roles,path,progress=lambda *_:None,*,settings=None,compensation=None,dbu=.001):
+def write_regions(snapshot,reconstruction,roles,path,progress=lambda *_:None,*,settings=None,compensation=None,dbu=.001,edit_metadata=None):
     from .dxf_settings import DxfSettings
     options=settings or DxfSettings();path=Path(path)
     groups,shared,inputs,merged=_prepare(snapshot,reconstruction,roles,options,progress,compensation,dbu)
@@ -331,7 +331,11 @@ def write_regions(snapshot,reconstruction,roles,path,progress=lambda *_:None,*,s
     fd,temp=tempfile.mkstemp(prefix='.die-shift-regions-',suffix='.dxf',dir=path.parent)
     try:
         with os.fdopen(fd,'w',encoding='ascii',newline='') as stream:
-            w=PairWriter(stream);doc._write_header(w,handles,extent,int(bool(extra) and options.show_fill));doc._write_classes(w)
+            w=PairWriter(stream);doc._write_header(w,handles,extent,int(bool(extra) and options.show_fill))
+            if edit_metadata is not None:
+                from .region_import import write_metadata
+                write_metadata(w,groups,edit_metadata)
+            doc._write_classes(w)
             doc._write_tables(w,handles,layers,extent,blocks);doc._write_blocks(w,handles,blocks)
             w.extend(((0,'SECTION'),(2,'ENTITIES')))
             for (layer,xy),handle in zip(references,entities):

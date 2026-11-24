@@ -1,6 +1,11 @@
 """Row dragging without a row-number column and per-layer display editor."""
 from .qt_compat import QtCore,QtGui,QtWidgets as W,Signal,Qt,ACCEPTED,run_dialog
 
+class LayerCheckBox(W.QCheckBox):
+    def hitButton(self,point):
+        return self.rect().contains(point)
+
+
 class LayerDrag(QtCore.QObject):
     moved=Signal();finished=Signal();styleRequested=Signal(int)
     def __init__(self,table):
@@ -31,7 +36,7 @@ class LayerDrag(QtCore.QObject):
         local=self.table.viewport().mapFromGlobal(pos)
         if event.type()==types.MouseButtonPress and event.button()==left:
             row=self.table.rowAt(local.y());col=self.table.columnAt(local.x())
-            if row<0 or col not in (0,1,2):return False
+            if row<0 or col!=2:return False
             self.end_drag()
             self.press=(pos,row,col);W.QApplication.instance().installEventFilter(self)
             self.table.setCurrentCell(row,col);return True
@@ -50,9 +55,7 @@ class LayerDrag(QtCore.QObject):
             _,row,col=self.press;dragged=self.dragging
             self.end_drag()
             if not dragged and self.table.rowAt(local.y())==row:
-                widget=self.table.cellWidget(row,col)
-                if isinstance(widget,W.QCheckBox):widget.click()
-                elif col==2:self.styleRequested.emit(row)
+                self.styleRequested.emit(row)
             return True
         return False
 

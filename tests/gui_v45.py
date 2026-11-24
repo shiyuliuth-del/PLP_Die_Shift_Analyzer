@@ -20,9 +20,9 @@ def wait(timeout=180):
   busy=(w._tasks,w.worker,w.preview_workers,w.preview_pending,w.motion_worker,w.motion_pending,w.coverage_timer.isActive(),w.transition.timer.isActive(),w.viewport_timer.isActive(),w.reconstruction_yield.worker,w.reconstruction_yield.pending,w.reconstruction_yield.timer.isActive(),w.width_yield.worker,w.width_yield.timer.isActive(),w.constraint_feedback.worker,w.constraint_feedback.pending,w.constraint_feedback.timer.isActive(),w.filter_job,w.analysis.worker)
   if not any(busy):break
   time.sleep(.005)
- else:raise AssertionError(('timeout',w.runtime_view.toPlainText()[-6000:]))
+ else:raise AssertionError(('timeout',w.log_bus.text()[-6000:]))
  assert not errors,errors
- assert '[ERROR]' not in w.runtime_view.toPlainText(),w.runtime_view.toPlainText()[-6000:]
+ assert '[ERROR]' not in w.log_bus.text(),w.log_bus.text()[-6000:]
 try:
  assert [w.tabs.tabText(i) for i in range(w.tabs.count())]==['结果图形','结果分析']
  assert [w.preview_tabs.tabText(i) for i in range(w.preview_tabs.count())]==['极端情况','信息']

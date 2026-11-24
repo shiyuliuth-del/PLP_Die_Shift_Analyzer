@@ -729,8 +729,6 @@ class CutDrag:
                 radius=options.reconstruction_node_snap_um
                 if radius==0:
                     radius=5*pixel_um
-                corner_snap=options.reconstruction_corner_guard_um
-                if corner_snap==0:corner_snap=5*pixel_um
                 if radius>0 and options.reconstruction_node_snap_strength:
                     from .reconstruction_snap import node_snap
                     angle=piece.get('boundary_angles',(0.,0.))[which]
@@ -744,7 +742,7 @@ class CutDrag:
                 else:
                     if which==1 and state.get('peer_limit') is not None:target_s=min(target_s,state['peer_limit'])
                     part,clamped=plan.edit_pose(*piece['interval'],which,target_s,*relative_pose(piece,frame),
-                                                options.reconstruction_style,cursor=route_cursor,corner_snap=corner_snap)
+                                                options.reconstruction_style,cursor=route_cursor,corner_snap=radius)
                     if part is not None:
                         from .reconstruction_edits import apply_angles
                         part=apply_angles(state['updated'],plan,part)
@@ -758,7 +756,7 @@ class CutDrag:
                         companion.update(projection=mark,cursor=companion_cursor.copy())
                         target=member['interval'][which]+mark-companion['press']
                         extra,_=other.edit_pose(*member['interval'],which,target,frame['rotation_centers'][owner],frame['states'][owner],
-                                                options.reconstruction_style,cursor=companion_cursor,corner_snap=corner_snap)
+                                                options.reconstruction_style,cursor=companion_cursor,corner_snap=radius)
                         if extra is not None:
                             rows=[row for row in rows if row[:5]!=(*other.key,other.identity)]
                             rows.append((*other.key,other.identity,extra['a'],extra['b']))

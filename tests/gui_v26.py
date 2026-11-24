@@ -21,7 +21,7 @@ def wait():
         time.sleep(.005)
     else:raise AssertionError('Qt task timeout')
     assert not errors,errors
-    assert '未处理异常' not in w.runtime_view.toPlainText(),w.runtime_view.toPlainText()[-2500:]
+    assert '未处理异常' not in w.log_bus.text(),w.log_bus.text()[-2500:]
 def row_info(row):
     w.refresh_extreme_colors(w.current_frame)
     w._cache_colors_changed()

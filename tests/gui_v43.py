@@ -30,7 +30,7 @@ def until(predicate,limit=120):
   app.processEvents()
   if predicate():return
   time.sleep(.005)
- raise AssertionError('TIMEOUT '+w.runtime_view.toPlainText()[-2500:])
+ raise AssertionError('TIMEOUT '+w.log_bus.text()[-2500:])
 def rpc(command,params=None):
  future=pool.submit(call,folder/'endpoint.json',command,params or {})
  until(future.done);response=future.result();assert response['status']!='error',response
@@ -142,7 +142,7 @@ try:
  w.measured_output.toggle.setChecked(False);until(lambda:not w.measured_output.stopping)
  assert not w.remote_locked and w.run_button.isEnabled() and not (folder/'endpoint.json').exists()
  assert not errors,errors
- assert '未处理异常' not in w.runtime_view.toPlainText(),w.runtime_view.toPlainText()[-3000:]
+ assert '未处理异常' not in w.log_bus.text(),w.log_bus.text()[-3000:]
  print('GUI_V43_PASS: authenticated local IPC, lazy engineering freeze, locks, pivots, GDS, concurrent OAS cells, cancel, project switching and release')
 finally:
  if w.measured_output.active():w.measured_output.toggle.setChecked(False)

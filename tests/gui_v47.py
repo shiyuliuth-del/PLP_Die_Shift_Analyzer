@@ -17,7 +17,7 @@ def until(predicate,seconds=120):
  while time.monotonic()<end:
   app.processEvents();time.sleep(.005)
   if predicate():return
- raise AssertionError(w.runtime_view.toPlainText()[-4000:])
+ raise AssertionError(w.log_bus.text()[-4000:])
 def idle():until(lambda:not (w._tasks or w.worker or w.preview_workers or w.measured_output.running or w.measured_output.transition or w.measured_output.stopping))
 def done(reply):
  key=reply['task_id'];until(lambda:w.measured_output.jobs[key]['status'] in ('completed','error','cancelled'))
@@ -69,7 +69,7 @@ try:
  w.load_project(project);idle();assert w.measured_output.settings_header.isChecked()
  assert abs(w.layer_split.sizes()[0]-height)<12,(w.layer_split.sizes(),height)
  assert not errors,errors
- assert '未处理异常' not in w.runtime_view.toPlainText()
+ assert '未处理异常' not in w.log_bus.text()
  print('GUI_V47_PASS: pending/empty IPC, lazy commands, no assessment/yield, saved overlays, splitter and collapse')
 finally:
  close_window(app,w);tmp.cleanup()

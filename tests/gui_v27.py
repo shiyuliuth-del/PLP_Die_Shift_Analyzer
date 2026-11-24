@@ -27,7 +27,7 @@ def wait():
         time.sleep(.005)
     else:raise AssertionError('preview timeout')
     assert not errors,errors
-    assert '未处理异常' not in w.runtime_view.toPlainText(),w.runtime_view.toPlainText()[-1600:]
+    assert '未处理异常' not in w.log_bus.text(),w.log_bus.text()[-1600:]
 
 def load(name,source,overrides):
     record=json.loads((ROOT/'Jobs'/(source+'.dshift.json')).read_text())

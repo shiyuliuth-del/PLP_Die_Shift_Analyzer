@@ -17,9 +17,9 @@ def wait():
   app.processEvents()
   if not w._tasks and not w.coverage_timer.isActive() and not w._coverage_pending and not w.preview_pending and not w.motion_pending and not w.width_yield.timer.isActive() and not w.reconstruction_yield.timer.isActive() and not w.viewport_timer.isActive():break
   time.sleep(.005)
- else:raise AssertionError(w.runtime_view.toPlainText()[-3000:])
+ else:raise AssertionError(w.log_bus.text()[-3000:])
  assert not errors,errors
- assert '未处理异常' not in w.runtime_view.toPlainText(),w.runtime_view.toPlainText()[-3000:]
+ assert '未处理异常' not in w.log_bus.text(),w.log_bus.text()[-3000:]
 try:
  e,d,c=fixture();p=e.p;roles=e.roles;e.close();lib=gdstk.Library(unit=1e-6,precision=1e-9);cell=lib.new_cell('TOP')
  for name,rows in d.layers.items():
@@ -49,7 +49,7 @@ try:
  w.write_project(queued);assert not json.loads(queued.read_text()).get('saved_results')
  assert all((queued.parent/name).is_dir() for name in PROJECT_DIRECTORIES)
  w.reconstruction_yield.timer.stop()
- saved=folder/'restore.dshift.json';w.write_project(saved);doc=json.loads(saved.read_text());assert doc['saved_results'],w.runtime_view.toPlainText()[-3000:]
+ saved=folder/'restore.dshift.json';w.write_project(saved);doc=json.loads(saved.read_text());assert doc['saved_results'],w.log_bus.text()[-3000:]
  assert (saved.parent/doc['saved_results']['path']).is_file()
  expected=w.current_frame['reconstruction']['replacements']['5/0'][0]['geometry'].wkb
  w.close();wait();app.processEvents()
@@ -70,7 +70,7 @@ try:
  broken_job=folder/'incomplete.dshift.json';broken_job.write_text(json.dumps(bad));w.load_project(broken_job);wait()
  assert w.result is not None and w.current_frame is not None
  assert w.params().package_clearance_um==10
- assert '未恢复结果缓存' in w.runtime_view.toPlainText()
+ assert '未恢复结果缓存' in w.log_bus.text()
  # Older empty snapshots must not bypass assessment-first gating.
  payload=decode(envelope['payload']);payload['result']=None;payload['frame']=None
  envelope['payload']=encode(payload);raw=zlib.compress(json.dumps(envelope).encode());broken.write_bytes(raw)

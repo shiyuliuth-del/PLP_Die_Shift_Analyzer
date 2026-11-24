@@ -23,7 +23,7 @@ def main():
             time.sleep(.003)
         else:raise AssertionError('V36 timeout')
         app.processEvents();assert not errors,errors
-        assert '未处理异常' not in w.runtime_view.toPlainText(),w.runtime_view.toPlainText()[-2000:]
+        assert '未处理异常' not in w.log_bus.text(),w.log_bus.text()[-2000:]
     try:
         assert '宽度分析' in w.setting_sections
         assert not any(k.startswith('宽度分析 ·') for k in w.setting_sections)

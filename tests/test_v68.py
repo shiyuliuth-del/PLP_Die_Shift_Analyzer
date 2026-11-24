@@ -48,7 +48,7 @@ class V68Tests(TestCase):
         from die_shift_studio.reconstruction_route import RoutePlan
         route=LineString([(0,0),(80,0),(80,100)])
         plan=RoutePlan('5/0',0,0,(),route.buffer(8),route,box(-2,-3,2,3),(box(76,97,84,101),),.001,0)
-        self.assertEqual(ViewSettings().reconstruction_corner_guard_um,0)
+        self.assertEqual(ViewSettings().reconstruction_node_snap_um,0)
         self.assertEqual(plan.snap(79,0,150,corner_snap=-1),79)
         self.assertEqual(plan.snap(79,0,150,corner_snap=5),75)
         self.assertEqual(plan.snap(79,0,150,corner_snap=.5),79)
@@ -64,7 +64,7 @@ class V68Tests(TestCase):
             common='common';rare_rule='rare'
             def events(_solver,states,_frame):
                 hits=(rare_rule,) if np.array_equal(states,grid[rare]['states']) else ()
-                return (common,*hits),(),{('5/0',0):hits} if hits else {},False
+                return (common,*hits),(),{('5/0',0):hits} if hits else {},False,{}
             with serial_scope(),patch('die_shift_studio.drc_waivers.scene_events',side_effect=events):
                 bank=scan(solver,grid,None)
             probability=bank['drc_event_probability']

@@ -24,9 +24,9 @@ def wait(timeout=100):
   app.processEvents()
   if not any((w.worker,w.preview_workers,w.preview_pending,w.motion_worker,w.motion_pending,w.coverage_timer.isActive(),w._coverage_pending,w.viewport_timer.isActive(),w.transition.timer.isActive(),w.constraint_feedback.worker,w.constraint_feedback.pending)):break
   time.sleep(.003)
- else:raise AssertionError(('timeout',w.runtime_view.toPlainText()[-5000:]))
+ else:raise AssertionError(('timeout',w.log_bus.text()[-5000:]))
  assert not errors,errors
- assert '[ERROR]' not in w.runtime_view.toPlainText(),w.runtime_view.toPlainText()[-5000:]
+ assert '[ERROR]' not in w.log_bus.text(),w.log_bus.text()[-5000:]
 
 def event(name,point,button=1,step=0):
  x,y=w.ax.transData.transform(point);e=MouseEvent(name,w.canvas,x,y,button=button,step=step)
