@@ -21,7 +21,9 @@ def wait(timeout=100):
  end=time.monotonic()+timeout
  while time.monotonic()<end:
   app.processEvents()
-  if not any((w.worker,w.preview_workers,w.preview_pending,w.motion_worker,w.motion_pending,w.coverage_timer.isActive(),w._coverage_pending,w.viewport_timer.isActive(),w.transition.timer.isActive(),w.constraint_feedback.worker,w.constraint_feedback.pending)):break
+  if not any((w._tasks,w.worker,w.preview_workers,w.preview_pending,w.motion_worker,w.motion_pending,
+              w.coverage_timer.isActive(),w._coverage_pending,w.viewport_timer.isActive(),w.transition.timer.isActive(),
+              w.constraint_feedback.worker,w.constraint_feedback.pending,w.cut_drag.worker,w.reconstruction_overlay._stage_worker)):break
   time.sleep(.003)
  else:raise AssertionError(('timeout',w.log_bus.text()[-5000:]))
  assert not errors,errors
