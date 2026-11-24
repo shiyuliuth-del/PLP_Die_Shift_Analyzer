@@ -52,10 +52,18 @@ def associate(pieces,violations,tol):
         if not net:unscoped.append(row)
         else:
             for key in ((net,) if isinstance(net[0],str) else set(net)):by_net[key].append(row)
+    trees=None
+    if len(unscoped)>=32 and len(pieces)>=32:
+        groups=tuple(tuple(row for row in unscoped if (row.get('phase')=='original')==original) for original in (False,True))
+        trees=[(rows,shapely.STRtree([row['geometry'] for row in rows])) for rows in groups]
     for q in pieces:
         shape=support(q,tol);original=None
         own=(q['layer'].split('/')[0],q.get('net'))
-        for row in (*by_net.get(own,()),*unscoped):
+        nearby=unscoped
+        if trees:
+            original=support(q,tol,original=True)
+            nearby=[rows[i] for (rows,tree),g in zip(trees,(shape,original)) for i in sorted(tree.query(g))]
+        for row in (*by_net.get(own,()),*nearby):
             layers=row.get('layers',(q['layer'],))
             if q['layer'] not in layers:continue
             subject=shape
@@ -194,7 +202,8 @@ def scan(r,grid,progress=lambda *_:None,source_cache=None):
     bundles=dict(parallel_map(build,refs,progress=lambda n,total:progress(12+round(28*n/max(1,total)),f'重构逐图形几何 {n}/{total}')))
     from . import reconstruction_joint
     r._joint_catalog=((tuple(v.tobytes() for v in grid.locals),None),bundles)
-    if reconstruction_joint.needed(r,bundles,grid):return reconstruction_joint.scan(r,grid,bundles,lambda n,t:progress(40+round(n*.6),t))
+    if r.settings.reconstruction_auto_waive_drc or reconstruction_joint.needed(r,bundles,grid):
+        return reconstruction_joint.scan(r,grid,bundles,lambda n,t:progress(40+round(n*.6),t))
     from .width_keepout import routing_violations
     from .width_witness import edge_witness
     from .width_analysis import BLOCKED

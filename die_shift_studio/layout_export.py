@@ -26,14 +26,12 @@ def build_controls(w,layout):
     w.layout_output_button=W.QPushButton('输出GDS/OAS');layout.addWidget(w.layout_output_button)
     _,_,form=w.collapsible(layout,'GDS/OAS输出参数',w.setting_sections)
     fields={};w.layout_output_fields=fields;w.layout_output_directory=''
-    form.addRow(W.QLabel('导出当前完成姿态，包含重构铜；Flatten顶层。'))
     box=W.QComboBox()
     for title,value in [('全部已导入图层','all'),('当前显示图层','visible'),('参与分析图层','participating')]:box.addItem(title,value)
     fields['layer_scope']=box;form.addRow('导出图层',box)
     box=W.QCheckBox('Merge 导出层图案');fields['merge_layers']=box;form.addRow(box)
     box=W.QDoubleSpinBox();box.setDecimals(6);box.setRange(0,1000);box.setSpecialValueText('沿用输入格点');box.setKeyboardTracking(False);fields['dbu_um']=box;form.addRow('输出格点 / μm',box)
     box=W.QSpinBox();box.setRange(4,8190);box.setKeyboardTracking(False);fields['max_points']=box;form.addRow('GDS最大节点',box)
-    form.addRow(W.QLabel('开启“显示DRC问题”时附带ERROR；不修改源文件。'))
     restore_controls(w);w.layout_output_button.clicked.connect(lambda:export_layout(w))
 
 def configuration(w):

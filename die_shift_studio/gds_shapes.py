@@ -58,7 +58,7 @@ def import_shapes(cell,dbu):
         return memo[definition.name]
     warnings.update(expanded(cell))
     by_id=defaultdict(deque)
-    for path in cell.get_paths(apply_repetitions=True,depth=None):
+    for path in cell.get_paths(apply_repetitions=True,depth=None) if tracks else ():
         key=f'{path.layers[0]}/{path.datatypes[0]}'
         width=abs(float(path.widths()[0,0]))
         if width==0:
@@ -82,9 +82,12 @@ def import_shapes(cell,dbu):
             # no area. This temporary segment is only an ordering token;
             # its polygon is always replaced by the saved transformed disk.
             path.segment(xy[0]+[max(dbu,width),0.])
-    for g in cell.get_polygons(apply_repetitions=True,include_paths=True,depth=None):
-        key=f'{g.layer}/{g.datatype}'
-        tag_value=g.get_property(tag)
+    keys={}
+    for g in cell.get_polygons(apply_repetitions=True,include_paths=bool(tracks),depth=None):
+        pair=g.layer,g.datatype
+        key=keys.get(pair)
+        if key is None:key=keys[pair]=f'{pair[0]}/{pair[1]}'
+        tag_value=g.get_property(tag) if tracks else None
         if tag_value and by_id[tag_value[0]]:
             _,meta,corrected=by_id[tag_value[0]].popleft()
             add(key,g.points if corrected is None else corrected,meta)

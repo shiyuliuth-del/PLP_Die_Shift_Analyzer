@@ -25,7 +25,7 @@ class ReconstructionYieldDisplay:
         try:p=replace(w.params(),target_nsigma=0)
         except ValueError:self.reset();return
         cfg=settings or w.view_settings
-        token=('reconstruction-analysis-continuity',logical_fingerprint((w.data.geometry_id,w.data.top_name,w.roles(),w.ordered_layers(),asdict(p),cfg.reconstruction_key(),cfg.reconstruction_grid_nodes if cfg.evaluation_scope=='all' else 0)))
+        token=('reconstruction-analysis-continuity',logical_fingerprint((w.data.geometry_id,w.data.top_name,w.roles(),w.ordered_layers(),asdict(p),cfg.reconstruction_key(),cfg.reconstruction_auto_waive_drc,cfg.reconstruction_grid_nodes if cfg.evaluation_scope=='all' else 0)))
         key=(id(w.cache_group),token)
         if key==self.key:self.render();return
         self.reset();self.key=key
@@ -63,7 +63,7 @@ class ReconstructionYieldDisplay:
                     from .statistics import ExtremeCatalog
                     from .reconstruction_events import scan
                     from .reconstruction_probability import attach
-                    evidence_key=('reconstruction-extreme-events-continuity',logical_fingerprint((data.geometry_id,data.top_name,roles,order,asdict(p),cfg.reconstruction_key())))
+                    evidence_key=('reconstruction-extreme-events-continuity',logical_fingerprint((data.geometry_id,data.top_name,roles,order,asdict(p),cfg.reconstruction_key(),cfg.reconstruction_auto_waive_drc)))
                     if cfg.evaluation_scope!='all':
                         from .evaluation_scope import focused_catalog,focused_reconstruction
                         grid,indices=focused_catalog(model,p,scope=cfg.evaluation_scope)
@@ -82,9 +82,10 @@ class ReconstructionYieldDisplay:
             if isinstance(value,tuple):kind,bank=value;value={kind:bank}
             if 'evidence' in value and self.evidence is not value['evidence']:
                 self.evidence=value['evidence'];self.w._problem_tag=None
+                self.w.fill_issues()
                 self.w.filter_changed(pending_ok=True)
                 if self.w.cut_drag.state is None:
-                    self.w.reconstruction_overlay.draw();self.w.render_scene()
+                    self.w.reconstruction_overlay.draw();self.w.drc_overlay.draw();self.w.render_scene()
             if 'yield' in value:self.bank=value['yield'];self.render()
         def failed(text):
             if self.key==key and not worker.cancelled.is_set():self.w.width_yield.label.set_extra('重构良率 · 无法计算',text.split('Traceback')[0])

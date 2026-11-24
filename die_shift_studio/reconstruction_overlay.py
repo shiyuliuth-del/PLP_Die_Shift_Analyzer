@@ -315,7 +315,12 @@ class ReconstructionOverlay:
         deleted=getattr(w,'pending_deleted_shapes',None) if self.active() and getattr(w,'reconstruction_pending',False) else None
         restored=getattr(w,'pending_restored_shapes',None) if self.active() and getattr(w,'reconstruction_pending',False) else None
         nodes=getattr(w,'pending_node_shapes',None) if self.active() and getattr(w,'reconstruction_pending',False) else None
-        stamp=(id(data),id(bank),vis,w.view_bounds,order,nominal,pose_low,threshold,edit_stamp,repr(w.layer_styles),id(staged_info),allow_pad,tuple(sorted(deleted)) if deleted else (),tuple(sorted(restored)) if restored else (),id(nodes))
+        cleared=getattr(w,'_drc_cleared_figures',())
+        catalogue_waivers=w.drc_waiver_summary()[2] if nominal and hasattr(w,'drc_waiver_summary') else {}
+        waiver_stamp=(id(bank),cleared,tuple(sorted(catalogue_waivers.items())))
+        if getattr(self,'waiver_stamp',None)!=waiver_stamp:
+            self.waiver_stamp=waiver_stamp;self._nominal_waiver_cache={}
+        stamp=(id(data),id(bank),vis,w.view_bounds,order,nominal,pose_low,threshold,edit_stamp,repr(w.layer_styles),id(staged_info),allow_pad,tuple(sorted(deleted)) if deleted else (),tuple(sorted(restored)) if restored else (),id(nodes),waiver_stamp)
         if stamp==self.stamp:self.draw_labels();return
         if self.stamp is not None and self.stamp[0]!=id(data) and edit is None:
             if self.hover is not None:self.hover.set_visible(False)
@@ -343,6 +348,18 @@ class ReconstructionOverlay:
             ref=(q['layer'],q['index'])
             edited=bool(edit and ref==(edit['piece']['layer'],edit['piece']['index']))
             status=color_for(q,bank,nominal,checked=verified or bool(unchecked and ref not in unchecked))
+            waived=False
+            if status=='yellow':
+                if nominal and bank and ref in catalogue_waivers:
+                    from .extreme_filter import ProblemIndex
+                    zk=zone_key(q)
+                    if zk not in self._nominal_waiver_cache:
+                        risk=bank['zones'][zk]
+                        index=ProblemIndex(bank['grid'],risk['clauses'],catalogue_waivers[ref])
+                        self._nominal_waiver_cache[zk]=not (index.total or index.zero)
+                    waived=self._nominal_waiver_cache[zk]
+                elif not nominal and ref in cleared:waived=True
+                if waived:status='green'
             if ref in unchecked or (edited and (dragging or not verified)):status='pending'
             is_low=False
             if status in ('red','yellow'):
@@ -363,7 +380,7 @@ class ReconstructionOverlay:
             if not gactive.is_empty and _in_view(gactive.bounds,w.view_bounds):
                 region_groups.setdefault((*ref,'A',paint_status),{})[id(gactive)]=gactive
                 if status=='red':(low_red if is_low else red).append(patch(gactive))
-                if q.get('routing_recovered'):warnings.append(patch(gactive))
+                if q.get('routing_recovered') and not waived:warnings.append(patch(gactive))
             if q.get('box_invalid'):continue
             for kind,target,dot_list,line_list in (('moved','moved_cut',dots,first),('extra','extra_cut',far_dots,second)):
                 face=self.handles.get((self._key(q),kind),q.get(target))
@@ -547,7 +564,7 @@ class ReconstructionOverlay:
             if best and best[0]<=tolerance:return best[1:]
         if handles_only:return None
         for q in self.pieces():
-            pr=q.get('problem_region')
+            pr=q.get('problem_region') if self.zone_views.get(zone_key(q),(None,'pending'))[1]!='green' else None
             if pr is not None and not pr.is_empty:
                 b=pr.bounds
                 if b[0]<=x<=b[2] and b[1]<=y<=b[3] and pr.covers(point):return q,None,'problem'
@@ -706,9 +723,12 @@ class CutDrag:
                 state['projection']=projection;state['projection_cursor']=route_cursor.copy()
                 target_s=state['press_interval']+projection-state['press_projection']
                 options=self.w.view_settings
+                pixel_um=abs(self.w.ax.get_xlim()[1]-self.w.ax.get_xlim()[0])/max(1.,self.w.ax.bbox.width)
                 radius=options.reconstruction_node_snap_um
                 if radius==0:
-                    radius=5*abs(self.w.ax.get_xlim()[1]-self.w.ax.get_xlim()[0])/max(1.,self.w.ax.bbox.width)
+                    radius=5*pixel_um
+                corner_snap=options.reconstruction_corner_guard_um
+                if corner_snap==0:corner_snap=5*pixel_um
                 if radius>0 and options.reconstruction_node_snap_strength:
                     from .reconstruction_snap import node_snap
                     angle=piece.get('boundary_angles',(0.,0.))[which]
@@ -721,7 +741,8 @@ class CutDrag:
                 if edit:state['updated'],part=edit
                 else:
                     if which==1 and state.get('peer_limit') is not None:target_s=min(target_s,state['peer_limit'])
-                    part,clamped=plan.edit_pose(*piece['interval'],which,target_s,*relative_pose(piece,frame),self.w.view_settings.reconstruction_style,cursor=route_cursor)
+                    part,clamped=plan.edit_pose(*piece['interval'],which,target_s,*relative_pose(piece,frame),
+                                                options.reconstruction_style,cursor=route_cursor,corner_snap=corner_snap)
                     if part is not None:
                         from .reconstruction_edits import apply_angles
                         part=apply_angles(state['updated'],plan,part)
@@ -734,7 +755,8 @@ class CutDrag:
                         mark=other.drag_projection(companion_cursor,companion['projection'],companion['cursor'])
                         companion.update(projection=mark,cursor=companion_cursor.copy())
                         target=member['interval'][which]+mark-companion['press']
-                        extra,_=other.edit_pose(*member['interval'],which,target,frame['rotation_centers'][owner],frame['states'][owner],self.w.view_settings.reconstruction_style,cursor=companion_cursor)
+                        extra,_=other.edit_pose(*member['interval'],which,target,frame['rotation_centers'][owner],frame['states'][owner],
+                                                options.reconstruction_style,cursor=companion_cursor,corner_snap=corner_snap)
                         if extra is not None:
                             rows=[row for row in rows if row[:5]!=(*other.key,other.identity)]
                             rows.append((*other.key,other.identity,extra['a'],extra['b']))

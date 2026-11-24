@@ -16,8 +16,8 @@ class PlaneRoute(RoutePlan):
         co,si=np.cos(angle),np.sin(angle);n=np.array([co*n[0]-si*n[1],si*n[0]+co*n[1]])
         u=np.array([-n[1],n[0]]);size=self.source.length+self.length+1
         return self.source.intersection(shapely.Polygon([point-u*size,point+u*size,point+u*size-n*size*2,point-u*size-n*size*2]))
-    def edit_pose(self,a,b,which,position,center,state,style,cursor=None):
-        part,clamped=self.edit(a,b,which,position,self.pad_hit(cursor,which))
+    def edit_pose(self,a,b,which,position,center,state,style,cursor=None,corner_snap=None):
+        part,clamped=self.edit(a,b,which,position,self.pad_hit(cursor,which),corner_snap)
         if part is not None and style=='linear':
             from .reconstruction import transform
             direction=np.asarray(part['far'].centroid.coords[0])-np.asarray(transform(part['near'],center,state).centroid.coords[0])
@@ -50,7 +50,7 @@ def candidate(base,lines,r):
     """A bounded plane cut candidate; actual final copper is still native-checked."""
     from .reconstruction_route import terminal_marks
     for route in lines:
-        plan=PlaneRoute(base['layer'],base['index'],base['owner'],base['refs'],base['routing_source'],route,base['land'],tuple(base['anchors']),r.tol,r.settings.reconstruction_corner_guard_um)
+        plan=PlaneRoute(base['layer'],base['index'],base['owner'],base['refs'],base['routing_source'],route,base['land'],tuple(base['anchors']),r.tol,max(0.,r.settings.reconstruction_corner_guard_um))
         plan.pad_trigger=r.settings.reconstruction_pad_trigger_um
         fixed=tuple(v['poly'] for v in r.stays if v['net']==base['net'] and plan.source.intersects(v['poly']))
         plan.terminal_vias=(tuple(v['poly'] for v in base['mine']),fixed)

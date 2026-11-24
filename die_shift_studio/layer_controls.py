@@ -5,17 +5,36 @@ class LayerDrag(QtCore.QObject):
     moved=Signal();finished=Signal();styleRequested=Signal(int)
     def __init__(self,table):
         super().__init__(table);self.table=table;self.press=None;self.dragging=False
-        table.viewport().installEventFilter(self);table.viewport().setMouseTracking(True)
-    def watch(self,widget):widget.installEventFilter(self);widget.setMouseTracking(True)
+        self.watch(table.viewport())
+    def watch(self,widget):
+        widget.setProperty('dsa_layer_drag_owner',id(self));widget.installEventFilter(self);widget.setMouseTracking(True)
+    def end_drag(self):
+        started=self.dragging
+        if self.press is not None:W.QApplication.instance().removeEventFilter(self)
+        self.press=None;self.dragging=False
+        if started:self.finished.emit()
     def eventFilter(self,obj,event):
         types=getattr(QtCore.QEvent,'Type',QtCore.QEvent);left=getattr(Qt,'MouseButton',Qt).LeftButton
-        if event.type() not in (types.MouseButtonPress,types.MouseMove,types.MouseButtonRelease):return False
+        event_type=event.type()
+        if self.press is not None and event_type in (types.WindowDeactivate,types.UngrabMouse):
+            self.end_drag()
+        if event_type not in (types.MouseButtonPress,types.MouseMove,types.MouseButtonRelease):return False
+        if obj.property('dsa_layer_drag_owner')!=id(self):
+            if self.press is not None and (event_type in (types.MouseButtonPress,types.MouseButtonRelease)
+                                            or not event.buttons()&left):
+                self.end_drag()
+            return False
+        if event_type==types.MouseMove and not event.buttons()&left:
+            self.end_drag()
+            return False
         pos=event.globalPosition().toPoint() if hasattr(event,'globalPosition') else event.globalPos()
         local=self.table.viewport().mapFromGlobal(pos)
         if event.type()==types.MouseButtonPress and event.button()==left:
             row=self.table.rowAt(local.y());col=self.table.columnAt(local.x())
             if row<0:return False
-            self.press=(pos,row,col);self.dragging=False;self.table.setCurrentCell(row,col);return True
+            self.end_drag()
+            self.press=(pos,row,col);W.QApplication.instance().installEventFilter(self)
+            self.table.setCurrentCell(row,col);return True
         if self.press is None:return False
         if event.type()==types.MouseMove:
             if (pos-self.press[0]).manhattanLength()>=W.QApplication.startDragDistance():self.dragging=True
@@ -28,9 +47,9 @@ class LayerDrag(QtCore.QObject):
                 if local.y()>self.table.viewport().height()-18:self.table.verticalScrollBar().setValue(self.table.verticalScrollBar().value()+1)
             return True
         if event.type()==types.MouseButtonRelease and event.button()==left:
-            _,row,col=self.press;dragged=self.dragging;self.press=None;self.dragging=False
-            if dragged:self.finished.emit()
-            elif self.table.rowAt(local.y())==row:
+            _,row,col=self.press;dragged=self.dragging
+            self.end_drag()
+            if not dragged and self.table.rowAt(local.y())==row:
                 widget=self.table.cellWidget(row,col)
                 if isinstance(widget,W.QCheckBox):widget.click()
                 elif isinstance(widget,W.QComboBox):widget.showPopup()
