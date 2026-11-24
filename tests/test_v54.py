@@ -72,7 +72,7 @@ class V54Tests(unittest.TestCase):
         for name, interval in [('first', (35., 85.)), ('second', (118., 176.))]:
             section = plan.partition(*interval)
             self.assertIsNotNone(section)
-            rows.append(dict(die=0, route_plan=plan, route_identity=name, warning='',
+            rows.append(dict(layer=plan.layer, index=plan.index, die=0, route_plan=plan, route_identity=name, warning='',
                              via_refs=(('4/0', 0),), ownership_seam=seam,
                              interval=interval, moving_nominal=moving, fixed_nominal=anchor,
                              nominal_regions={k: section[k] for k in 'ABC'},
