@@ -45,16 +45,34 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         w.log_check.click(); assert w.log_view.isHidden()
         assert not any('生成GD55' in x.text() for x in w.findChildren(W.QPushButton))
         assert w.connect_button.text() == '连接状态' and w.start_button.text() == '启动预演软件'
-        w.open_folder(folder)
+        assert not w.folder.isReadOnly()
+        invalid = root/'no-project'
+        invalid.mkdir()
+        w.folder.setFocus()
+        w.folder.setText(str(invalid))
+        enter = getattr(QtCore.Qt,'Key',QtCore.Qt).Key_Return
+        QTest.keyClick(w.folder,enter)
+        QTest.qWait(50)
+        until = time.monotonic()+10
+        while w.worker and time.monotonic()<until:
+            app.processEvents(); time.sleep(.015)
+        assert w.worker is None and '#f8dddd' in w.folder.styleSheet()
+        w.folder.setFocus()
+        w.folder.setText(str(folder))
+        QTest.keyClick(w.folder,enter)
+        QTest.qWait(50)
         wait(w)
+        assert w.project_root == folder and '#dff3e3' in w.folder.styleSheet()
         assert w.workers.value() == w.memory.value() == 0
         assert [field.value() for field in w.bypass_limits] == [0,0,0]
+        assert w.bypass_enabled.accessibleName() == '启用忽略重构'
         assert not w.bypass_enabled.text() and not w.bypass_enabled.isChecked()
         assert all(field.decimals() == 3 and not field.isEnabled() for field in w.bypass_limits)
         assert all(field.decimals() == 3 and not field.isEnabled() for field in w.skip_drc_limits)
         assert not w.skip_drc_enabled.isChecked()
         assert [w.tabs.tabText(i) for i in range(2)] == ['信息读取','任务运行']
         assert w.ignore_measurement_failure.parentWidget() is w.task_tab
+        assert not w.create_cells.isChecked()
         assert w.excel_section.isChecked() and w.mark_section.isChecked()
         assert w.mark_table.isVisible() and w.template.isVisible() and w.mark_table.rowCount() == 0
         w.mark_section.click()
@@ -67,6 +85,7 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         assert not w.profile.isVisible()
         w.mapping_section.click()
         assert w.profile.isVisible()
+        assert w.mapping_shared.geometry().left() < w.sheet.geometry().left()
         assert not w.conversation_timer.isActive()
         w.conversation.record('send',endpoint,{'id':'hidden-tab'})
         assert not w.conversation.drain() and not w.conversation_view.toPlainText()
@@ -186,17 +205,22 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         w.endpoint.setText(str(root/'changed-endpoint.json'))
         with patch('RealDataAnalyse.gui.Runner') as runner:
             runner.return_value.run.return_value = dict(state='completed', output=w.output.text())
+            assert w.create_cells.isChecked(), 'Existing hierarchical journal defaults to its saved mode'
+            w.create_cells.setChecked(False)
             w.bypass_enabled.click()
             assert all(not field.isEnabled() for field in w.bypass_limits)
             w.run_button.click(); wait(w)
             assert list(runner.call_args.kwargs['bypass_limits']) == [0,0,0]
+            assert runner.call_args.kwargs['create_cells'] is False
             w.completion_dialog.accept()
             runner.reset_mock()
             w.bypass_enabled.click()
+            w.create_cells.setChecked(True)
             w.run_button.click(); wait(w)
             runner.return_value.run.assert_called_once()
             assert runner.call_args.kwargs['bypass_limits'] == [2.5,3,.125]
             assert runner.call_args.kwargs['skip_drc_limits'] == [3,4,.5]
+            assert runner.call_args.kwargs['create_cells'] is True
             assert runner.call_args.kwargs['endpoint'] == str(endpoint)
             assert 'FAIL 1' in w.progress.label(.5)
             assert all(label in w.progress.toolTip() for label in ('开始 ', '结束 ', '耗时 '))
@@ -250,10 +274,10 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         assert w.dies.value()==2 and not w.dies.isEnabled()
         assert w.file_view.rowCount()==4 and w.profile.rowCount()==10
         assert w.ignore_measurement_failure.text() == '忽略测量失败'
-        assert w.ignore_measurement_failure.isEnabled() and not w.ignore_measurement_failure.isChecked()
+        assert w.ignore_measurement_failure.isEnabled() and w.ignore_measurement_failure.isChecked()
         w.ignore_measurement_failure.click()
         w.open_folder(production,link=False);wait(w)
-        assert w.ignore_measurement_failure.isChecked()
+        assert not w.ignore_measurement_failure.isChecked()
         w.accept_info(dict(project=w.project.text(), die_count=9))
         assert w.dies.value()==2, 'Production DIE count must come from its directories'
         print('REALDATA_PROJECT_GUI_PASS: folder -> linked server -> exact 36 XLSX records and template, selections/settings, green/red status, continuous overlay, hidden log', flush=True)

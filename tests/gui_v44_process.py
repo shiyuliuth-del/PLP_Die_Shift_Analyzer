@@ -73,7 +73,8 @@ def main():
             database = folder / 'run.sqlite'
             import_files(files, database, 1, 2, threading.Event())
             out = folder / 'lot.oas'
-            kwargs = dict(database=str(database), endpoint=str(endpoint), project=str(project), output=str(out), workers=2, retries=2, timeout=120)
+            kwargs = dict(database=str(database), endpoint=str(endpoint), project=str(project), output=str(out),
+                          workers=2, retries=2, timeout=120, create_cells=False)
             if os.environ.get('REALDATA_TEST_EXE'):
                 config = folder / 'run.json'
                 config.write_text(json.dumps(kwargs), encoding='utf8')
@@ -82,7 +83,11 @@ def main():
                 assert json.loads(result.read_text(encoding='utf8'))['state'] == 'completed'
             else:
                 Runner(**kwargs, transport=t).run()
-            assert len(gdstk.read_oas(out).top_level()[0].references) == 5
+            layout = gdstk.read_oas(out)
+            assert {cell.name for cell in layout.cells} == {'TopCell'}
+            assert not layout.top_level()[0].references
+            assert len({tuple(p.bounding_box()[0]) for p in layout.top_level()[0].polygons}) >= 5
+            kwargs['create_cells'] = True
             identity = t.request('info')['result']['session_identity']
             if not os.environ.get('REALDATA_TEST_EXE'):
                 # Abruptly exit the isolated client after a durable receipt,

@@ -42,7 +42,8 @@ class StopToken:
 class Runner:
     def __init__(self, database, endpoint, project, output, workers=0, memory_mb=0,
                  retries=3, timeout=0, stop=None, progress=lambda _: None, transport=None, trace=None, template=None,
-                 expected_template_sha256=None, bypass_limits=(0,0,0), skip_drc_limits=(0,0,0), on_launch=None):
+                 expected_template_sha256=None, bypass_limits=(0,0,0), skip_drc_limits=(0,0,0), on_launch=None,
+                 create_cells=True):
         self.database = Path(database).resolve()
         self.output = Path(output).absolute()
         if self.output.suffix.lower() != '.oas' or self.output.is_symlink():
@@ -70,6 +71,9 @@ class Runner:
         self.bypass_limits = limits if all(limits) else None
         limits = nominal_limits(skip_drc_limits)
         self.skip_drc_limits = limits if all(limits) else None
+        if type(create_cells) is not bool:
+            raise ValueError('结果自动建Cell须为布尔值')
+        self.create_cells = create_cells
         self.on_launch = on_launch
         self.stop = stop if stop is not None else threading.Event()
         self.progress = progress
@@ -244,6 +248,8 @@ class Runner:
         ledger.set('stage', str(stage))
         t.request('output.configure', {'output_directory': str(directory), 'max_threads': self.workers, 'max_memory_mb': self.memory_mb}, stop=self.stop)
         request = dict(filename=stage_name,client_id=run,output_policy='omit_failed_regions',package_count=ledger.get('count'))
+        if not self.create_cells:
+            request['create_cells'] = False
         if self.bypass_limits:
             request['nominal_bypass'] = True
         if self.skip_drc_limits:
@@ -260,6 +266,8 @@ class Runner:
         if self.template and begin.get('template_sha256') != self.template_sha256:
             raise ValueError('配套预演软件未确认模板图纸')
         ledger.set('batch', batch)
+        if begin.get('create_cells',True) is not self.create_cells:
+            raise ValueError('配套预演软件未确认所选的结果Cell输出方式')
         if self.bypass_limits and begin.get('nominal_bypass') is not True:
             raise ValueError('预演软件不支持原图直出，请使用配套新版本')
         if self.skip_drc_limits and begin.get('allow_drc_skip') is not True:
@@ -387,6 +395,8 @@ class Runner:
             failed=0
         if type(failed) is not int or failed<0 or not isinstance(receipt,dict):
             raise ValueError('FAIL任务记录无效；原文件已保留')
+        if receipt.get('create_cells',True) is not self.create_cells:
+            raise ValueError('OAS的结果Cell输出方式与任务不一致')
         if type(receipt.get('failed_packages',0)) is not int or receipt.get('failed_packages',0)!=failed:
             raise ValueError('OAS的FAIL封装数量与逐封装回执不一致')
         nominal=receipt.get('nominal_packages',0)
@@ -492,6 +502,8 @@ class Runner:
                     if any(path.resolve().is_relative_to(self.output.parent) for path in protected):
                         raise ValueError('输入或任务记录位于Output内；请移至项目输入目录后创建任务')
                 config = dict(endpoint=self.endpoint, project=self.project, output=str(self.output))
+                if not self.create_cells:
+                    config['create_cells'] = False
                 if self.bypass_limits:
                     if self.production and not ledger.get('measured_max_available'):
                         raise ValueError('旧实测任务缺少原始偏移摘要，请重新创建任务后使用原图直出')
@@ -507,7 +519,7 @@ class Runner:
                     self.template_sha256 = digest
                     config.update(template=self.template,template_sha256=digest)
                 if ledger.get('config') and ledger.get('config') != config:
-                    raise ValueError('继续任务须使用原入口、工程、输出路径和原任务阈值')
+                    raise ValueError('继续任务须使用原入口、工程、输出路径、阈值和结果Cell输出方式')
                 if not ledger.get('config'):
                     ledger.set('previous_output', sha256(self.output, self.stop) if self.output.is_file() else None)
                     # Config is the initialization commit marker; cancellation

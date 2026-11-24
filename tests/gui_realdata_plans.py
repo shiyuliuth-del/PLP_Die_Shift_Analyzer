@@ -39,12 +39,15 @@ with tempfile.TemporaryDirectory(prefix='rda-plans-gui-') as name:
         w.sheet.setText('Diagnostic');w.workers.setValue(2)
         w.create_plan_button.click();wait(w)
         w.sheet.setText('Measurements');w.workers.setValue(3)
+        w.create_cells.setChecked(True)
         w.create_plan_button.click();wait(w)
         panel=w.plan_panel;panel.refresh();assert panel.table.rowCount()==2
         assert panel.table.verticalHeaderItem(0).text()=='1'
         ids=[r['id'] for r in w.plan_store.rows()[1]]
         assert w.plan_store.get(ids[0])['snapshot']['profile']['sheet']=='Diagnostic'
         assert w.plan_store.get(ids[1])['snapshot']['profile']['sheet']=='Measurements'
+        assert w.plan_store.get(ids[0])['snapshot']['controls']['create_cells'] is False
+        assert w.plan_store.get(ids[1])['snapshot']['controls']['create_cells'] is True
         assert panel.table.item(0,0).background().color().name()=='#fff1c7'
         w.plan_store.update(ids[0],status='completed',progress=100,started=time.time()-2,ended=time.time())
         w.plan_store.update(ids[1],status='error',severity='error',message='missing file')
@@ -58,16 +61,20 @@ with tempfile.TemporaryDirectory(prefix='rda-plans-gui-') as name:
             assert all(label in w.progress.toolTip() for label in ('开始 ', '结束 ', '耗时 '))
             assert not any(dialog.isVisible() for dialog in w.findChildren(W.QMessageBox))
         for table in (w.file_view,w.profile,w.mark_table,w.table,panel.table):assert not table.verticalHeader().isHidden()
-        # Send actual mouse events to each drag handle, including the plan panel.
+        w.tabs.setCurrentWidget(w.task_tab)
+        app.processEvents()
+        heights = (w.table.height(), panel.table.height())
+        w.resize(w.width(),w.height()+90)
+        panel.resize(panel.width(),panel.height()+90)
+        app.processEvents()
+        assert w.table.height() >= heights[0]+80 and panel.table.height() >= heights[1]+80
+        # Send actual mouse events to the three input table grips.
         left=getattr(QtCore.Qt,'MouseButton',QtCore.Qt).LeftButton
         grips=w.findChildren(HeightGrip)
-        assert len(grips)==5
+        assert len(grips)==3
+        w.tabs.setCurrentIndex(0)
+        app.processEvents()
         for grip in grips:
-            if grip.table is w.table:
-                w.tabs.setCurrentWidget(w.task_tab)
-            elif grip.table is not panel.table:
-                w.tabs.setCurrentIndex(0)
-            app.processEvents()
             old=grip.table.height();position=grip.rect().center()
             QTest.mousePress(grip,left,pos=position)
             delta=QtCore.QPoint(0,31)

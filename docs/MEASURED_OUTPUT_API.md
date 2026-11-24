@@ -113,6 +113,7 @@ result = wait(endpoint, end["task_id"])
 - `batch.begin` 默认 `output_policy="strict"`；连接失败拒绝制造输出。显式 `output_policy="omit_failed_regions"` 时删除失败局部、保留正常铜并继续批次，返回 `partial_output`、`omitted_region_count`及位置明细。再次检查实际输出格点异网隔离。`allow_failed` 不能绕过连接门禁。低于输出格点的退化碎片直接删除，不修改源文件。
 - V63 客户端可在 `batch.begin` 显式发送 `nominal_bypass: true` 并检查回执。客户端依据全 DIE 阈值判断，符合条件的封装在 `batch.submit` 中发送 `use_nominal: true`，仍须提交完整的 `dies` 和 `position_um`。服务直接在指定位置放置共享 `G_NOMINAL`，回执包含 `use_nominal: true`、`fixed_rdl_drc_checked: false` 和 `drc_passed: null`。未指定的提交继续检查实际铜。`batch.end` 的 `nominal_packages` 包含直出数量，`cells` 仍为全部封装放置次数。
 - V68 客户端可在 `batch.begin` 协商 `allow_drc_skip: true`，并对符合阈值且仍须重构的封装发送 `skip_drc: true`。实测重构、连通、异网接触和禁布区检查继续执行。回执包含 `skip_drc: true`、`fixed_rdl_drc_checked: false` 和 `drc_passed: null`。已检测的问题仍进入诊断目录和相应 OAS 层。
+- V70 调用方可在 `batch.begin` 指定 `create_cells: false` 以直接写入 TopCell。封装名继续用于逐包回执和重复检测，`batch.end.cells` 继续统计封装次数。阶段文件与最终文件使用同样结构。模板独立保留。begin/end 回执都返回 `create_cells`。旧调用缺省保留层级。
 - batch.end 停止接收新任务，等已接收任务结束。若任何项失败/取消，最终文件不替换；先查错误，修正后新开批次。不要重复使用已经占用的 Cell 名试图覆盖失败项。
 - 内存MB按2²⁰字节计。最大内存是**批量计算的增量预算**，不含程序/原工程的基础占用。估算控制并发；进度安全点检查 RSS，超预算先暂存并报错。原生函数单次调用可能短暂超过预算，Python 不能安全强杀它；不是操作系统硬内存隔离。
 - 几何结果按块流式写入同一个临时 OAS，达到预算时刷盘；私有 SQLite 仅保存去重索引与封装位置。结束时补齐 TopCell 和校验尾记录，而非逐姿态重复写整个图纸。相同的量化图形（含平移等价图形）复用内容寻址 Cell，避免重复不动铜/孔盘。这里复用的是物理几何，不保留原设计的 Cell 名称、文本、属性或历史层级。

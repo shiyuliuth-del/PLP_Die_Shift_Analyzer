@@ -6,6 +6,52 @@ from die_shift_studio.oas_stream import Store,verify_crc
 from die_shift_studio.oas_errors import choose_error_layer,rectangles
 
 class ErrorOutputTests(unittest.TestCase):
+ def test_flat_checkpoint_matches_expanded_hierarchy_without_package_cells(self):
+  import klayout.db as k
+  from shapely.affinity import rotate
+  from die_shift_studio.oas_stream import polygons
+  with tempfile.TemporaryDirectory() as tmp:
+   root=Path(tmp)
+   board=shapely.box(10.0005,20,30.0005,40)
+   hole=shapely.box(15,25,18,30)
+   copper=board.difference(hole)
+   layers={'1/0':[copper.wkb],'128/0':[board.wkb]}
+   witness=rotate(shapely.box(15,22,17,24),33)
+   issues=[dict(bounds_um=[13,22,14,23],die_ids=[1]),
+           dict(bounds_um=witness.bounds,marker_corners_um=list(witness.exterior.coords)[:4],
+                die_ids=[1],severity='serious')]
+   template=(polygons({'7/3':[shapely.box(0,0,1,1).wkb]},.001),{'7/3':'Template'})
+   outputs={}
+   for hierarchical in (True,False):
+    final=root/f'{hierarchical}.oas'
+    checkpoint=root/f'{hierarchical}.partial.oas'
+    store=Store(root,.001,error_layer=(65535,0),error2_layer=(65534,0),failure_layer=(65533,0),
+                checkpoint_destination=checkpoint,template=template,create_cells=hierarchical)
+    try:
+     store.add('Measured',layers,(-100.0005,130),board.bounds[:2],errors=issues,die_count=1,
+               failure_outline=board.wkb)
+     store.add_nominal('NominalA',(400,600),board.bounds[:2],lambda:layers)
+     store.add_nominal('NominalB',(700,-930),board.bounds[:2],lambda:layers)
+     receipt=store.write(final)
+    finally:store.close()
+    self.assertIs(receipt['create_cells'],hierarchical)
+    self.assertEqual((receipt['cells'],receipt['nominal_packages'],receipt['failed_packages']),(3,2,1))
+    self.assertEqual((receipt['error_rectangles'],receipt['error2_rectangles']),(2,1))
+    outputs[hierarchical]=[]
+    for filename in (final,checkpoint):
+     self.assertTrue(verify_crc(filename))
+     layout=k.Layout();layout.read(str(filename));top=layout.top_cell()
+     names={cell.name for cell in layout.each_cell()}
+     if not hierarchical:
+      self.assertEqual(names,{'TopCell','G_TEMPLATE'})
+      self.assertEqual([instance.cell.name for instance in top.each_inst()],['G_TEMPLATE'])
+     outputs[hierarchical].append({(info.layer,info.datatype):k.Region(top.begin_shapes_rec(layer)).flatten()
+                                  for layer in layout.layer_indexes() for info in [layout.get_info(layer)]})
+   for baseline,flat in zip(outputs[True],outputs[False]):
+    self.assertEqual(baseline.keys(),flat.keys())
+    for key in baseline:
+     self.assertTrue((baseline[key]^flat[key]).is_empty(),key)
+
  def test_named_layer_die_rectangles_and_package_placement(self):
   import klayout.db as k
   with tempfile.TemporaryDirectory() as tmp:

@@ -2,7 +2,6 @@
 import time
 from pathlib import Path
 from die_shift_studio.qt_compat import QtCore, QtGui, QtWidgets as W
-from .widgets import table_frame
 
 STATES = {'pending':'等待执行','blocked':'需处理','running':'运行中','paused':'已暂停','completed':'已完成','error':'失败'}
 
@@ -27,9 +26,7 @@ class PlanPanel(W.QDialog):
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setColumnWidth(0,180); self.table.setColumnWidth(1,250)
         self.table.setSelectionBehavior(getattr(W.QAbstractItemView,'SelectionBehavior',W.QAbstractItemView).SelectRows)
-        self.frame = table_frame(self.table,370,owner.settings,'plans')
-        scroll = W.QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(self.frame)
-        layout.addWidget(scroll,1)
+        layout.addWidget(self.table,1)
         footer = W.QHBoxLayout(); self.label = W.QLabel()
         previous=W.QPushButton('上一页'); following=W.QPushButton('下一页')
         footer.addWidget(previous); footer.addWidget(following); footer.addWidget(self.label,1); layout.addLayout(footer)
