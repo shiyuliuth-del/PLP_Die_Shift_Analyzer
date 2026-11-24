@@ -152,6 +152,8 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         select(1)
         assert w.sheet.text() == 'SeparateSheet' and w.header_row.value() == 2
         select(0)
+        w.mapping_section.setChecked(False)
+        assert not w.profile.isVisible()
         w.import_button.click(); wait(w)
         assert w.table.rowCount() == 36
         previous_database = w.database.text()
