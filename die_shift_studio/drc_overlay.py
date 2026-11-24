@@ -28,7 +28,7 @@ class DRCOverlay:
         self.area.set_paths([w.geometry_patch(r['geometry']) for r in areas])
         fill=.10 if low_prob else min(.35,w.view_settings.intrusion_alpha*.45)
         self.area.set_facecolors([ink(r,fill) for r in areas])
-        self.area.set_edgecolors([ink(r,.32 if low_prob else .65) for r in areas])
+        self.area.set_edgecolors([ink(r,0. if r.get('connection_failure') else .32 if low_prob else .65) for r in areas])
         self.points.set_offsets(np.asarray([r['point'] for r in rows]).reshape(-1,2));self.points.set_sizes([w.marker_size('contact')])
         self.points.set_edgecolors([ink(r,.38 if low_prob else .85) for r in rows])
         self.points.set_linewidths(.65 if low_prob else .9)
