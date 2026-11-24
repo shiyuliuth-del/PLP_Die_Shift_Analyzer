@@ -93,6 +93,8 @@ class ViewSettings:
     reconstruction_regions:tuple=()
     reconstruction_boxes:tuple=()
     reconstruction_angle_boxes:tuple=()
+    reconstruction_box_order:tuple=()
+    reconstruction_box_starts:tuple=()
     reconstruction_box_mode:str="aligned"
     reconstruction_fixed_via_mode:str="off"
     reconstruction_fixed_via_follows:tuple=()
@@ -220,6 +222,20 @@ class ViewSettings:
         from .manual_regions import normalize as normalize_boxes
         for name in ('reconstruction_boxes','reconstruction_angle_boxes'):
             values[name]=normalize_boxes(values.get(name,()))
+        order=values.get('reconstruction_box_order',())
+        if not isinstance(order,(tuple,list)) or any(mode not in ('free','aligned') for mode in order):
+            raise ValueError('框选动区顺序无效')
+        if order and (order.count('free')!=len(values['reconstruction_boxes']) or order.count('aligned')!=len(values['reconstruction_angle_boxes'])):
+            raise ValueError('框选动区顺序和选框数量不一致')
+        values['reconstruction_box_order']=tuple(order)
+        starts=values.get('reconstruction_box_starts',())
+        if not isinstance(starts,(list,tuple)) or any(
+            not isinstance(row,(list,tuple)) or len(row)!=3 or not isinstance(row[0],str)
+            or type(row[1]) is not int or row[1]<0 or type(row[2]) is not int
+            or not 0<=row[2]<=len(values['reconstruction_boxes'])+len(values['reconstruction_angle_boxes'])
+            for row in starts):
+            raise ValueError('框选动区起点无效')
+        values['reconstruction_box_starts']=tuple((*ref,start) for ref,start in sorted({(k,i):s for k,i,s in starts}.items()))
         from .between_motion import normalize_overrides
         values['reconstruction_between_overrides']=normalize_overrides(values.get('reconstruction_between_overrides',()))
         values['reconstruction_regions']=cls._normalize_regions(values.get('reconstruction_regions',()))
@@ -286,10 +302,10 @@ class ViewSettings:
 
     def reconstruction_key(self):
         """Everything the reconstruction result depends on besides the pose."""
-        return (True,'nominal-route-continuity-v59',self.reconstruction_die_mode,self.reconstruction_fixed_via_mode,self.reconstruction_fixed_via_follows,self.reconstruction_between_motion,self.reconstruction_between_overrides,self.reconstruction_box_excluded,self.drc_checks,self.evaluation_scope,self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_allow_moving_pad,self.reconstruction_pad_trigger_um,self.reconstruction_ignored,self.reconstruction_following,self.drc_tolerance_um,self.drc_min_angle_deg,
+        return (True,'nominal-route-continuity-v72',self.reconstruction_die_mode,self.reconstruction_fixed_via_mode,self.reconstruction_fixed_via_follows,self.reconstruction_between_motion,self.reconstruction_between_overrides,self.reconstruction_box_excluded,self.drc_checks,self.evaluation_scope,self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_allow_moving_pad,self.reconstruction_pad_trigger_um,self.reconstruction_ignored,self.reconstruction_following,self.drc_tolerance_um,self.drc_min_angle_deg,
                 tuple(self.reconstruction_intervals),
                 self.reconstruction_forced,self.reconstruction_angles,self.reconstruction_deleted,self.reconstruction_added,
-                tuple(self.reconstruction_regions),tuple(self.reconstruction_boxes),tuple(self.reconstruction_angle_boxes),tuple(self.reconstruction_cuts),
+                tuple(self.reconstruction_regions),tuple(self.reconstruction_boxes),tuple(self.reconstruction_angle_boxes),self.reconstruction_box_order,self.reconstruction_box_starts,tuple(self.reconstruction_cuts),
                 tuple(self.reconstruction_extra_cuts),tuple(self.reconstruction_second_cuts),
                 tuple(self.reconstruction_dropped_cuts))
     def deformation_key(self):

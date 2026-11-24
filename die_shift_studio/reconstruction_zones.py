@@ -27,8 +27,56 @@ def expand(r,entries):
     box_excluded=set(r.settings.reconstruction_box_excluded)
     ignored_set=set(r.settings.reconstruction_ignored)
     deleted_set=set(r.settings.reconstruction_deleted)
-    source_box_lists=getattr(r,'source_box_lists',{})
-    angle_box_lists=getattr(r,'angle_box_lists',{})
+    boxes=r.ordered_source_boxes
+    by_source=defaultdict(list)
+    for entry in entries:
+        ref=(entry['layer'],entry['index'])
+        if ref in r.box_refs and entry['plan'] is not None:
+            by_source[ref].append(entry)
+    # A two-ended trace can have two equivalent paths with opposite directions.
+    # A box crossing their ownership seam still defines just one physical cut.
+    mirrored={}
+    for ref,peers in by_source.items():
+        if len(peers)!=2 or not all(e.get('paired_vias') for e in peers):continue
+        a,b=(e['plan'] for e in peers)
+        if abs(a.length-b.length)<=r.tol and a.route.equals_exact(b.route.reverse(),r.tol):
+            mirrored[ref]=peers
+    box_parts={}
+    crossed_routes={}
+
+    def part_for(plan,is_free,polygon):
+        apply=usable_partition if is_free else aligned_partition
+        return apply(plan,polygon)
+
+    def assigned_boxes(entry,plan,ref):
+        peers=mirrored.get(ref)
+        for box_idx,(is_free,polygon) in enumerate(boxes.get(ref,())):
+            if not peers:
+                if not r._box_applies(plan,polygon):continue
+                if entry.get('graph_branch'):
+                    cache_key=(ref,box_idx)
+                    if cache_key not in crossed_routes:
+                        crossed_routes[cache_key]={id(peer) for peer in by_source[ref]
+                                                   if peer['plan'].route.intersection(polygon).length>r.tol}
+                    crossed=crossed_routes[cache_key]
+                    if crossed and id(entry) not in crossed:continue
+                part=part_for(plan,is_free,polygon)
+                if part is not None:yield is_free,polygon,part
+                continue
+            cache_key=(ref,box_idx)
+            if cache_key not in box_parts:
+                candidates=[]
+                for peer in peers:
+                    route=peer['plan']
+                    part=part_for(route,is_free,polygon)
+                    if part is None:continue
+                    domain=getattr(route,'ownership_domain',route.source)
+                    area=domain.intersection(part['A']).area
+                    candidates.append(((not part.get('box_invalid',False),area,key(route)),peer,part))
+                box_parts[cache_key]=max(candidates,key=lambda c:c[0])[1:] if candidates else (None,None)
+            peer,part=box_parts[cache_key]
+            if peer is entry:
+                yield is_free,polygon,part
 
     def _clone_child(plan,identity,a,b):
         child=copy.copy(plan);child.cache={};child.pose_memo=OrderedDict();child.memo_bytes=0
@@ -82,6 +130,7 @@ def expand(r,entries):
         return invalid+usable
 
     for entry in entries:
+        original_entry=entry
         plan=entry['plan']
         ref=(entry['layer'],entry['index'])
         extras=attached.get(id(entry),());seed=seeded.get(id(entry))
@@ -93,16 +142,7 @@ def expand(r,entries):
             if changed is not None:child.nominal_first,child.nominal_second=changed['a'],changed['b']
             entry=dict(entry,plan=child,seeded=True);plan=child
 
-        free_boxes=() if ref in box_excluded else source_box_lists.get(ref,())
-        aligned_boxes=() if ref in box_excluded else angle_box_lists.get(ref,())
-        applicable_boxes=[]
-        if plan is not None and (free_boxes or aligned_boxes):
-            for is_free,box_list in ((True,free_boxes),(False,aligned_boxes)):
-                for bp in box_list:
-                    if not r._box_applies(plan,bp):continue
-                    bpart=usable_partition(plan,bp) if is_free else aligned_partition(plan,bp)
-                    if bpart is None:continue
-                    applicable_boxes.append((is_free,bp,bpart))
+        applicable_boxes=tuple(assigned_boxes(original_entry,plan,ref)) if plan is not None and ref in r.box_refs and ref not in box_excluded else ()
 
         if plan is None:
             result.append(entry);continue
@@ -113,9 +153,9 @@ def expand(r,entries):
         if not had_only_boxes:
             if not extras:
                 if key(plan) not in deleted_set:
-                    part,_=r._interval_without_boxes(entry)
+                    part,manual=r._interval_without_boxes(entry)
                     if part is not None:
-                        local=dict(entry,serial_part=part,merged_part=part)
+                        local=dict(entry,serial_part=part,merged_part=part,serial_explicit=manual)
                         rows.append(local)
                     else:
                         rows.append(entry)
@@ -135,7 +175,7 @@ def expand(r,entries):
                     for j,identity in enumerate(identities):
                         cid=plan.identity if identity is None else plan.identity.split('~')[0]+'~'+identity
                         child=_clone_child(plan,cid,boundaries[j]+(spacing if j else 0),boundaries[j+1]-(spacing if j<len(identities)-1 else 0))
-                        local=dict(entry,plan=child,serial_base=plan.identity)
+                        local=dict(entry,plan=child,serial_base=plan.identity,serial_explicit=True,boxed=identity is not None)
                         if key(child) in deleted_set:continue
                         part,_=r._interval_without_boxes(local)
                         if part is None:
@@ -151,6 +191,13 @@ def expand(r,entries):
             overlapping=[idx for idx,row in enumerate(rows)
                          if row.get('serial_part') is not None
                          and (row['serial_part']['a']<=bb+r.tol and ba<=row['serial_part']['b']+r.tol)]
+            # A user's first box takes over an overlapping automatic section.
+            # Otherwise the old automatic corridor absorbs every box put on it.
+            automatic=[i for i in overlapping if not rows[i].get('serial_explicit')]
+            if automatic:
+                rows=[row for i,row in enumerate(rows) if i not in automatic]
+                overlapping=[idx for idx,row in enumerate(rows) if row.get('serial_part') is not None
+                             and row['serial_part']['a']<=bb+r.tol and ba<=row['serial_part']['b']+r.tol]
             if overlapping:
                 # Expand existing overlapping zone(s) to cover union with this box.
                 lead=rows[overlapping[0]]
@@ -169,6 +216,7 @@ def expand(r,entries):
                         expanded=apply_angles(r.settings,lead['plan'],expanded) or expanded
                 if expanded is not None:
                     lead['serial_part']=expanded;lead['merged_part']=expanded
+                    lead['boxed']=True
                     for i in reversed(overlapping[1:]):
                         lead['plan'].merged_keys=(*getattr(lead['plan'],'merged_keys',()),key(rows[i]['plan']))
                         rows.pop(i)
@@ -178,7 +226,7 @@ def expand(r,entries):
                 cid=plan.identity if not rows and key(plan) not in deleted_set else plan.identity.split('~')[0]+'~box'+tag
                 child=_clone_child(plan,cid,ba,bb)
                 if key(child) in deleted_set:continue
-                local=dict(entry,plan=child,serial_base=plan.identity)
+                local=dict(entry,plan=child,serial_base=plan.identity,serial_explicit=True,boxed=True)
                 # Respect any subsequent drag/rotation edit saved on this boxed zone's identity.
                 saved_part,saved_manual=r._interval_without_boxes(local)
                 use_part=saved_part if (saved_manual and saved_part is not None) else bpart

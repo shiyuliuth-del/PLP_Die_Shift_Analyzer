@@ -130,7 +130,7 @@ class ContourGroup(NamedTuple):
 
 
 def layer_contours(task):
-    key,raw,rows,role,options,amount,dbu,minimum_edge=task;cancel_check()
+    key,raw,rows,between,role,options,amount,dbu,minimum_edge=task;cancel_check()
     polygons=[p for blob in raw for p in shapely.get_parts(shapely.from_wkb(blob)) if not p.is_empty]
     if any(p.geom_type!='Polygon' or not p.is_valid for p in polygons):raise ValueError(f'图层 {key} 的输出几何无效')
     inputs=len(polygons)
@@ -149,6 +149,11 @@ def layer_contours(task):
     polygons=list(shapely.get_parts(shapely.union_all(polygons)))
     base='L'+key.replace('/','_D');groups=[]
     masks={k:shapely.union_all([q['regions'][k] for q in rows]) for k in 'AC'}
+    if between:
+        middle=shapely.union_all([block['nominal'] for block in between])
+        moving=shapely.union_all([block['nominal'] for block in between if block['mode']=='max' or block['moves']])
+        # Internal C is the moving side, written to public DXF layer _A.
+        masks['C']=shapely.union_all([masks['C'].difference(middle),moving])
     if amount>0 and polygons:
         from .output_compensation import extended_masks
         masks=extended_masks(nominal,shapely.union_all(polygons),masks,amount,dbu)
@@ -273,13 +278,16 @@ def _join_block_paths(paths):
 def _prepare(snapshot,reconstruction,roles,options,progress,compensation=None,dbu=.001):
     tasks=[]
     compensation=compensation or {}
+    pieces=defaultdict(list);between=defaultdict(list)
+    for piece in reconstruction.get('pieces',()):pieces[piece['layer']].append(piece)
+    for block in reconstruction.get('between_blocks',()):between[block['ref'][0]].append(block)
     for key,raw in sorted(snapshot.layers.items()):
         if roles.get(key) in EXPORT_ROLES:
             amount=round(compensation.get(key,0.)/dbu)*dbu
-            tasks.append((key,raw,[p for p in reconstruction.get('pieces',()) if p['layer']==key],roles[key],
+            tasks.append((key,raw,pieces[key],between[key],roles[key],
                           options,amount,dbu,snapshot.minimum_edge_um))
     profile=resource_profile()
-    largest=max((sum(map(len,raw)) for _,raw,*_ in tasks),default=1)
+    largest=max((sum(map(len,task[1])) for task in tasks),default=1)
     profile=dict(profile,workers=min(len(tasks) or 1,geometry_budget(profile,largest)))
     groups=[];inputs=merged=0
     for n,(rows,i,m) in enumerate(parallel_iter(layer_contours,tasks,profile)):

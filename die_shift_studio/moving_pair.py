@@ -65,11 +65,10 @@ def frames(entries, centers, states, *, settings=None, interval_fn=None):
                     if part is not None:
                         occupied.extend((part['A'], part['C']))
             core = source.difference(shapely.union_all(occupied)) if occupied else source
-            if core.is_empty:
-                core = source
             mode, custom = lookup_mode(settings, ref, core) if settings is not None else ('max', False)
             owner_a, owner_b = sorted(owners)[:2]
-            mid_center, mid_state = pair_middle_pose(core, centers[owner_a], states[owner_a], centers[owner_b], states[owner_b], mode)
+            center_shape=source if core.is_empty else core
+            mid_center, mid_state = pair_middle_pose(center_shape, centers[owner_a], states[owner_a], centers[owner_b], states[owner_b], mode)
             per_owner = {
                 owner: PairFrame.from_endpoints(centers[owner], states[owner], mid_center, mid_state)
                 for owner in owners

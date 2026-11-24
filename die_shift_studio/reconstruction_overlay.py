@@ -1,4 +1,5 @@
 """Nominal shared A/B/C regions and independently draggable source endpoints."""
+from collections import Counter,defaultdict
 from dataclasses import replace
 import time
 import math
@@ -60,9 +61,16 @@ def display_material(data,visible_layers):
     return copper,following
 
 
+def between_color(rgb,mode):
+    if mode=='min':return tuple(c*.87 for c in rgb)
+    if mode=='max':return tuple(c+(1-c)*.25 for c in rgb)
+    return rgb
+
+
 class ReconstructionOverlay:
     def __init__(self,window):
         self.draft_frame=self.draft_data=self.draft_key=None;self.staged_overlay=None;self._stage_worker=None;self._stage_pending=None;self._stage_ref_keys={}
+        self._stage_frame=None;self.between_views={}
         self.w=window;self.artists={};self.cuts=None;self.stamp=self.table_stamp=None
         self.selected=self.selected_kind=None;self.hover=None;self.hover_key=None
         self.end_artists=[];self.region_artists=[];self.arrow_artists=[];self.path_cache={};self.handles={};self.union_cache={};self.labels=[];self.staged_tags=[];self.text_sizes={};self.zone_views={};self.zone_low={};self.zone_clips={}
@@ -76,15 +84,23 @@ class ReconstructionOverlay:
             if self.draft_frame is frame:return self.draft_data
             self.draft_frame=self.draft_data=None
         return (frame or {}).get('reconstruction')
-    def stage(self):
+    def stage(self,*,after_failed_drag=False):
         w=self.w;frame=w.current_frame
-        cfg=w.view_settings;previous=w.preview_settings()
-        if cfg.reconstruction_key()==previous.reconstruction_key():
+        cfg=w.view_settings;previous=w._applied_preview_settings
+        if previous is None:
+            # The first frame may still be running when the editor opens.
+            # Preserve pending geometry until an applied baseline is available.
+            from .settings import ViewSettings
+            previous=ViewSettings()
+        key=cfg.reconstruction_key()
+        if not after_failed_drag and self._stage_frame is frame and self.staged_overlay and self.staged_overlay['key']==key:return
+        self._stage_frame=frame
+        if key==previous.reconstruction_key():
+            self._cancel_stage_worker()
             self.draft_frame=self.draft_data=self.draft_key=None;self.staged_overlay=None;self.stamp=None;return
-        if self.draft_frame is frame and self.draft_key==cfg.reconstruction_key() and self.staged_overlay and self.staged_overlay.get('key')==cfg.reconstruction_key():return
         solver=getattr(getattr(w,'engine',None),'reconstructor',None)
         geo=solver.model.cache.layers if solver is not None else (w.geometry_cache.layers if getattr(w,'geometry_cache',None) is not None else {})
-        rdl_refs=set();via_refs=set();staged_boxes=[];actions={}
+        rdl_refs=set();via_refs=set();between_refs=set();staged_boxes=[];actions={}
         def tag(ref,label):
             items=actions.setdefault(ref,[])
             if label not in items:items.append(label)
@@ -97,12 +113,17 @@ class ReconstructionOverlay:
         for ref in sorted(cur_follow^prev_follow):
             rdl_refs.add(ref)
             if ref in cur_ignored:tag(ref,'忽略·随动' if ref in cur_follow else '忽略·静止')
-        for name in ('ignored','following','forced','angles','intervals','added','deleted','regions','boxes','angle_boxes','box_excluded','cuts','extra_cuts','second_cuts','dropped_cuts','fixed_via_follows','between_overrides'):
+        from .manual_regions import ordered_boxes
+        old_boxes=Counter(ordered_boxes(previous))
+        for row in ordered_boxes(cfg):
+            if old_boxes[row]:
+                old_boxes[row]-=1
+            else:
+                _,layer,vertices=row
+                staged_boxes.append((layer,shapely.Polygon(vertices)))
+        for name in ('ignored','following','forced','angles','intervals','added','deleted','regions','boxes','angle_boxes','box_starts','box_excluded','cuts','extra_cuts','second_cuts','dropped_cuts','fixed_via_follows','between_overrides'):
             field='reconstruction_'+name
             cur=set(getattr(cfg,field));prev=set(getattr(previous,field))
-            if name in ('boxes','angle_boxes'):
-                for row in cur-prev:
-                    staged_boxes.append((row[0],shapely.Polygon(row[1])))
             for row in cur^prev:
                 if name in ('boxes','angle_boxes','regions'):
                     g=shapely.Polygon(row[1]) if name!='regions' else shapely.box(*row[1]);layer=row[0]
@@ -113,7 +134,7 @@ class ReconstructionOverlay:
                     ref=(str(row[0]),int(row[1]));via_refs.add(ref)
                     tag(ref,'固定过孔随动' if row in cur else '固定过孔静止')
                 elif name=='between_overrides':
-                    ref=(str(row[0]),int(row[1]));rdl_refs.add(ref)
+                    ref=(str(row[0]),int(row[1]));between_refs.add(ref)
                     tag(ref,'动区间随动')
                 else:
                     ref=(str(row[0]),int(row[1]));rdl_refs.add(ref)
@@ -123,11 +144,10 @@ class ReconstructionOverlay:
                     elif name in ('intervals','cuts','extra_cuts','second_cuts'):tag(ref,'调整动区')
                     elif name=='box_excluded' and row in cur:tag(ref,'删除动区')
         all_refs=rdl_refs|via_refs
-        key=cfg.reconstruction_key()
-        self.staged_overlay=dict(refs=all_refs,boxes=tuple(staged_boxes),actions={k:tuple(v) for k,v in actions.items()},key=key)
-        if frame and frame.get('reconstruction') and solver is not None and rdl_refs:
+        self.staged_overlay=dict(refs=all_refs,between_refs=between_refs,boxes=tuple(staged_boxes),actions={k:tuple(v) for k,v in actions.items()},key=key,previous=previous)
+        if frame and frame.get('reconstruction') and solver is not None and rdl_refs and not getattr(w,'_in_animation',False):
             data=frame['reconstruction']
-            draft_refs=all_refs or {(q['layer'],q['index']) for q in data['pieces']}
+            draft_refs=all_refs
             # Only recompute refs whose per-ref settings changed since the last draft
             # on this same frame, instead of rebuilding every previously staged shape.
             def ref_sig(target):
@@ -141,20 +161,36 @@ class ReconstructionOverlay:
                         tuple(r for r in cfg.reconstruction_second_cuts if (r[0],r[1])==target),
                         tuple(r for r in cfg.reconstruction_dropped_cuts if (r[0],r[1])==target),
                         tuple(r for r in cfg.reconstruction_between_overrides if (r[0],r[1])==target),
+                        tuple(r for r in cfg.reconstruction_box_starts if (r[0],r[1])==target),
                         cfg.reconstruction_between_motion,
-                        cfg.reconstruction_boxes,cfg.reconstruction_angle_boxes,cfg.reconstruction_regions,
+                        cfg.reconstruction_boxes,cfg.reconstruction_angle_boxes,cfg.reconstruction_box_order,cfg.reconstruction_regions,
                         cfg.reconstruction_style,cfg.reconstruction_boundary_mode,cfg.reconstruction_allow_moving_pad)
-            reuse_draft=(self.draft_frame is frame and self.draft_data is not None)
+            reuse_draft=(self.draft_frame is frame and self.draft_data is not None and self._stage_ref_keys.keys()<=rdl_refs)
             base_frame=dict(frame,reconstruction=self.draft_data) if reuse_draft else frame
             prev_sigs=self._stage_ref_keys if reuse_draft else {}
             new_sigs={ref:ref_sig(ref) for ref in rdl_refs}
             dirty_refs=sorted(ref for ref in rdl_refs if prev_sigs.get(ref)!=new_sigs[ref])
+            drag=w.cut_drag
+            retained=drag.retained
+            if retained is not None and retained['frame'] is frame and retained.get('live_key', (None,))[0]==key:
+                piece=retained['piece']
+                if dirty_refs==[(piece['layer'],piece['index'])] and self.draft_frame is frame and self.draft_key==key:
+                    self._stage_ref_keys=new_sigs
+                    self.draft_data=dict(self.draft_data,draft_refs=draft_refs)
+                    dirty_refs=[]
+                    reuse_draft=True
+                if dirty_refs==[(piece['layer'],piece['index'])] and (drag.worker is not None or drag.pending is not None):
+                    # Pointer release and its already running local preview
+                    # share the same inputs. Paint tags now and let it publish
+                    # the draft, without a second synchronous solver call.
+                    self._cancel_stage_worker();self.stamp=None
+                    return
             if not dirty_refs and reuse_draft:
                 self.draft_key=key
                 self.draft_data=dict(self.draft_data,draft_refs=draft_refs)
             else:
                 piece_count=sum(1 for q in data['pieces'] if (q['layer'],q['index']) in dirty_refs)
-                if piece_count>8 and not getattr(w,'_closing',False):
+                if (piece_count>8 or drag.worker is not None or after_failed_drag) and not getattr(w,'_closing',False):
                     # Heavy multi-zone polygon: paint staged markers immediately on the main
                     # thread and compute the local draft asynchronously so the UI never hangs.
                     self._stage_pending=(frame,base_frame,solver,cfg,dirty_refs,new_sigs,draft_refs,key)
@@ -165,14 +201,15 @@ class ReconstructionOverlay:
                     local=base_frame
                     for ref in dirty_refs:
                         try:local=live_serial(solver,cfg,local,ref,draft=True)
-                        except Exception:pass
+                        except (ValueError,shapely.errors.GEOSException) as exc:w.log_bus.emit(f'待算局部预览 {ref[0]} #{ref[1]+1}：{exc}')
                     self.draft_frame=frame;self.draft_key=key;self._stage_ref_keys=new_sigs
                     self.draft_data=dict(local['reconstruction'],draft_refs=draft_refs)
         elif frame and frame.get('reconstruction') and solver is not None:
             self._cancel_stage_worker()
             data=frame['reconstruction']
             self.draft_frame=frame;self.draft_key=key;self._stage_ref_keys={}
-            draft_refs=all_refs or {(q['layer'],q['index']) for q in data['pieces']}
+            general=('reconstruction_style','reconstruction_boundary_mode','reconstruction_die_mode')
+            draft_refs={ (q['layer'],q['index']) for q in data['pieces']} if any(getattr(cfg,name)!=getattr(previous,name) for name in general) else all_refs
             self.draft_data=dict(data,draft_refs=draft_refs)
         self.stamp=None
 
@@ -203,7 +240,7 @@ class ReconstructionOverlay:
             if self.w.view_settings.reconstruction_key()!=key:return
             self.draft_frame=frame;self.draft_key=key;self._stage_ref_keys=new_sigs
             self.draft_data=dict(local['reconstruction'],draft_refs=draft_refs)
-            self.stamp=None;self.draw();self.w.render_scene()
+            self.stamp=None;self.draw();self.w.selection.draw(redraw=False);self.w.render_scene()
         def finished():
             if self._stage_worker is worker:self._stage_worker=None
             worker.deleteLater()
@@ -306,6 +343,8 @@ class ReconstructionOverlay:
             self.points=Line2D([],[],ls='none',marker='o',markersize=8,color=CUT_COLOR,markeredgecolor='white',markeredgewidth=.8,zorder=12);w.ax.add_line(self.points)
             self.second_points=Line2D([],[],ls='none',marker='o',markersize=8,color=SECOND_CUT_COLOR,markeredgecolor='white',markeredgewidth=.8,zorder=12);w.ax.add_line(self.second_points)
             self.stamp=None
+        if self.active() and getattr(w,'reconstruction_pending',False) and self._stage_frame is not w.current_frame:
+            self.stage()
         data=self.data() if self.active() else None;bank=self.risk_bank() if self.active() else None
         vis=tuple(k for k,v in w.visible_boxes.items() if v.isChecked());order=tuple(w.ordered_layers())
         nominal=bool((w.current_frame or {}).get('nominal_global'))
@@ -333,6 +372,7 @@ class ReconstructionOverlay:
             self.pulse_timer.stop();self.hover_key=None
         w.scene_renderer.feedback_background=None
         self.stamp=stamp;paths={};colors={};first=[];second=[];dots=[];far_dots=[];warnings=[];region_groups={};red=[];low_red=[]
+        self.between_views={};active_by_ref=defaultdict(list)
         old_unions=self.union_cache;self.union_cache={};old_cache=self.path_cache;self.path_cache={};self.zone_views={};self.zone_low={}
         old_clips=self.zone_clips;self.zone_clips={}
         def patch(g):
@@ -344,9 +384,6 @@ class ReconstructionOverlay:
         # Draw the exact final replacement once. Independently filling A/B/C
         # creates seams and omits copper added by continuity compensation.
         copper,following=display_material(data,vis)
-        for (layer,index),g in copper.items():
-            if _in_view(g.bounds,w.view_bounds):
-                region_groups[layer,index,'B','following' if (layer,index) in following else '']={id(g):g}
         verified=bool((data or {}).get('constraints_complete'))
         unchecked=set((data or {}).get('draft_refs',()))
         if bank and bank.get('configuration')!= (data or {}).get('configuration'):bank=None
@@ -383,6 +420,7 @@ class ReconstructionOverlay:
             zk=zone_key(q)
             self.zone_views[zk]=(q,status,gactive);self.zone_low[zk]=is_low
             paint_status=('low_'+status) if is_low else status
+            if not q.get('connection_failed') and not gactive.is_empty:active_by_ref[ref].append(gactive)
             if not gactive.is_empty and _in_view(gactive.bounds,w.view_bounds):
                 region_groups.setdefault((*ref,'A',paint_status),{})[id(gactive)]=gactive
                 if status=='red':
@@ -415,6 +453,32 @@ class ReconstructionOverlay:
             if face.geom_type=='Point':(far_dots if kind=='extra' else dots).append(face.coords[0])
             else:(second if kind=='extra' else first).extend(_lines(face))
         self.hit_geometry=shapely.STRtree([g for _,_,g in self.hit_items])
+        from .between_motion import LABELS,lookup_mode
+        paint_by_ref=defaultdict(list);staged_between=[]
+        previous=(staged_info or {}).get('previous')
+        for block in (data or {}).get('between_blocks',()):
+            ref=block['ref']
+            base=copper.get(ref);g=block['geometry']
+            if base is None or g.is_empty or not _in_view(g.bounds,w.view_bounds):continue
+            if not base.covers(g):g=base.intersection(g)
+            active=active_by_ref.get(ref,())
+            if active:g=g.difference(shapely.union_all(active))
+            if g.area<=(data or {}).get('dbu_um',.001)**2:continue
+            self.between_views[block['id']]=dict(block,geometry=g)
+            if block['mode']!='average':
+                paint_by_ref[ref].append(g)
+                region_groups.setdefault((*ref,'C',block['mode']),{})[id(g)]=g
+            if previous is not None:
+                before=lookup_mode(previous,ref,block['nominal'])
+                after=lookup_mode(w.view_settings,ref,block['nominal'])
+                if before!=after:
+                    staged_between.append((ref,g,LABELS[after[0]]))
+        for (layer,index),g in copper.items():
+            if not _in_view(g.bounds,w.view_bounds):continue
+            middle=paint_by_ref.get((layer,index))
+            if middle:g=g.difference(shapely.union_all(middle))
+            if not g.is_empty:
+                region_groups[layer,index,'B','following' if (layer,index) in following else '']={id(g):g}
         for (layer,index,kind,status),values in sorted(region_groups.items(),key=lambda item:RANK.get(item[0][3].removeprefix('low_'),-1)):
             geos=tuple(values.values());cache_key=(layer,index,kind,status,tuple(values));previous=old_unions.get(cache_key)
             g=previous[1] if previous is not None and all(a is b for a,b in zip(previous[0],geos)) else (geos[0] if len(geos)==1 else shapely.union_all(geos))
@@ -426,6 +490,7 @@ class ReconstructionOverlay:
             else:
                 color=FOLLOW_COLOR if status=='following' else w.style_for(layer)['color']
                 alpha=FOLLOW_ALPHA if status=='following' else w.style_for(layer)['alpha']
+                if kind=='C':color=between_color(to_rgba(color)[:3],status)
             self.union_cache[cache_key]=(geos,g);paths.setdefault((layer,kind),[]).append(patch(g));colors.setdefault((layer,kind),[]).append(to_rgba(color,alpha))
         for key in paths:
             if key not in self.artists:
@@ -439,11 +504,20 @@ class ReconstructionOverlay:
         staged_refs=set((data or {}).get('draft_refs',()))
         staged_actions=(staged_info or {}).get('actions',{})
         if staged_info:staged_refs.update(staged_info.get('refs',()))
+        placed_between=set()
+        for ref,g,mode_label in staged_between:
+            face,edge=STAGED_STYLE['动区间随动'];placed_between.add(ref)
+            staged.append(patch(g));staged_faces.append(to_rgba(face));staged_edges.append(to_rgba(edge))
+            if len(tag_items)<12:
+                anchor=g.representative_point()
+                tag_items.append((anchor.x,anchor.y,'待算：'+mode_label,edge))
         solver=getattr(getattr(w,'engine',None),'reconstructor',None)
         geo_layers=solver.model.cache.layers if solver is not None else (w.geometry_cache.layers if getattr(w,'geometry_cache',None) is not None else {})
-        for layer,index in sorted(staged_refs):
+        marked_refs=staged_refs|((staged_info or {}).get('between_refs',set())-placed_between)
+        for layer,index in sorted(marked_refs):
             if layer in vis:
-                ref=(layer,index);ops=staged_actions.get(ref,())
+                ref=(layer,index);ops=tuple(op for op in staged_actions.get(ref,()) if op!='动区间随动' or ref not in placed_between)
+                if ref in placed_between and not ops:continue
                 face,edge=STAGED_STYLE.get(ops[-1],('#5992b633','#2b6ea3')) if ops else ('#5992b62a','#44698c')
                 gs=[g for (l,i,kind,status),parts in region_groups.items() if (l,i)==ref and kind=='A' for g in parts.values()]
                 if not gs and layer in geo_layers and index<len(geo_layers[layer]['geometry']):
@@ -609,7 +683,7 @@ class ReconstructionOverlay:
     def hide(self):
         self._cancel_stage_worker();self._stage_ref_keys={}
         self.w.cut_drag.retained=None
-        self.staged_overlay=None
+        self.staged_overlay=None;self._stage_frame=None;self.between_views={}
         self.clear_hover();self.stamp=None;self.handles={};self.zone_views={};self.zone_clips={};self.hit_items=[];self.hit_geometry=None
         for artist in [*self.artists.values(),*self.labels,*self.staged_tags,*self.end_artists,*self.region_artists,*self.arrow_artists,*[getattr(self,n,None) for n in ('staged','warning','problems','low_problems','cuts','second_cuts','points','second_points')]]:
             if artist is not None:artist.set_visible(False)
@@ -839,15 +913,17 @@ class CutDrag:
 
         worker=Worker(work,self.w)
         self.worker=worker
+        failed=False
 
         def accepted(frame):
             active=self.state is state
             if worker.cancelled.is_set() or self.w._closing or not (active or self.retained is state):return
             if key!=state.get('live_key'):return
+            if not active and key[0]!=self.w.view_settings.reconstruction_key():return
             current=self.w.current_frame
             if current is not original and current is not state.get('live_frame'):return
             state['painted_marker']=marker
-            frame['reconstruction']['draft_refs']=(ref,)
+            frame['reconstruction']['draft_refs']=tuple(sorted({ref,*base['reconstruction'].get('draft_refs',())}))
             if self.w.view_settings.reconstruction_auto:
                 if not active:return
                 frame=dict(frame,drc=[],drc_locations=[],drc_pending=True)
@@ -858,11 +934,12 @@ class CutDrag:
                 overlay=self.w.reconstruction_overlay
                 overlay.draft_frame=current
                 overlay.draft_key=settings.reconstruction_key()
-                overlay.draft_data=dict(frame['reconstruction'],draft_refs=(ref,))
+                overlay.draft_data=frame['reconstruction']
             state['live_result_key']=key
             state['live_result']=frame['reconstruction']
             overlay=self.w.reconstruction_overlay
             overlay.draw()
+            self.w.selection.draw(redraw=False)
             self.w.render_scene()
 
         def finished():
@@ -872,9 +949,16 @@ class CutDrag:
                 QtCore.QTimer.singleShot(0,self.w.close)
             else:
                 self._start_live()
+                if failed and self.worker is None and self.retained is state and self.w.reconstruction_pending:
+                    self.w.reconstruction_overlay.stage(after_failed_drag=True)
+
+        def report(message):
+            nonlocal failed
+            failed=True
+            self.w.log_bus.emit('拖动预演：'+message,'ERROR')
 
         worker.done.connect(accepted)
-        worker.failed.connect(lambda message:self.w.log_bus.emit('拖动预演：'+message,'ERROR'))
+        worker.failed.connect(report)
         worker.finished.connect(finished)
         worker.start()
 
@@ -906,11 +990,7 @@ class CutDrag:
             w.invalidate_reconstruction_edit()
             w.request_preview(quiet=True)
         else:
-            # The latest local preview can finish after mouse-up. If no live
-            # result matches the final position yet, stage immediately so the
-            # edited shape is visibly marked even with auto-calculation off.
-            need_stage=(not updated.reconstruction_live) or (state.get('live_result_key')!=state.get('live_key'))
-            w.defer_reconstruction(stage=need_stage)
+            w.defer_reconstruction()
         overlay.clear_hover();overlay.draw();w.render_scene()
 
     def cancel(self,redraw=True):
@@ -1056,20 +1136,31 @@ class RegionSelect:
         self.state['current']=point
         vertices=self.vertices();layers=self._layers();self._drop(clear_cursor=False)
         if abs(shapely.Polygon(vertices).area)<1e-12 or not layers:return
-        field='reconstruction_angle_boxes' if self.w.view_settings.reconstruction_box_mode=='aligned' else 'reconstruction_boxes'
-        rows=(*getattr(self.w.view_settings,field),*((layer,tuple(tuple(map(float,v)) for v in vertices)) for layer in layers))
         settings=self.w.view_settings
+        from .manual_regions import box_order
+        mode=settings.reconstruction_box_mode
+        field='reconstruction_angle_boxes' if mode=='aligned' else 'reconstruction_boxes'
+        rows=(*getattr(settings,field),*((layer,tuple(tuple(map(float,v)) for v in vertices)) for layer in layers))
         geometry=self.w.geometry_cache.layers
         polygon=shapely.Polygon(vertices)
         def selected(ref):
             key,index=ref
             return key in layers and index<len(geometry[key]['geometry']) and geometry[key]['geometry'][index].intersects(polygon)
-        removed=tuple(ref for ref in settings.reconstruction_box_excluded if not selected(ref))
+        reboxed={ref for ref in settings.reconstruction_box_excluded if selected(ref)}
+        removed=tuple(ref for ref in settings.reconstruction_box_excluded if ref not in reboxed)
         unfollowed=tuple(ref for ref in settings.reconstruction_following if not selected(ref))
+        order=box_order(settings)
+        starts={(layer,index):start for layer,index,start in settings.reconstruction_box_starts}
+        # Previously deleted boxes still apply to other conductors hit by the
+        # same rectangle. Only these specific conductors start a new sequence.
+        for ref in reboxed:
+            if order:starts[ref]=len(order)
         # Additive & expanding box selection (V71): never wipe existing intervals,
         # angles or unrelated zones on the selected shape. Keep ignored shapes
         # marked in reconstruction_ignored so expand() seeds only the boxed zone(s).
-        changes={field:rows,'reconstruction_box_excluded':removed,'reconstruction_following':unfollowed}
+        changes={field:rows,'reconstruction_box_order':(*order,*(mode for _ in layers)),
+                 'reconstruction_box_starts':tuple((*ref,start) for ref,start in sorted(starts.items())),
+                 'reconstruction_box_excluded':removed,'reconstruction_following':unfollowed}
         updated=replace(settings,**changes)
         if updated==settings:return
         record(self.w);self.w.view_settings=updated

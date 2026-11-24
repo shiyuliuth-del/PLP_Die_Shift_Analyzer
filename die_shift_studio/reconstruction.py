@@ -186,6 +186,10 @@ class Reconstructor:
         from .drc_rules import construction_rules
         self._rule_width,self.rule_space=construction_rules(parameters,settings,self.tol)
         self.overlap_um=parameters.annulus_um;self.length_um=self.width_um=self.extra_um=0.
+        from .statistics import mean_and_bounds
+        die_count=len(model.bound.centers)
+        self.active_dies=frozenset(owner for owner in range(die_count)
+                                   if np.any(mean_and_bounds(parameters.for_die(owner),die_count)[1]>0.))
         self.auto_ignored={};self.auto_following=set();self.safe_vias={};self.die_internal={}
         self.vias=[];self.stays=[];self.vias_by_target={};self._plans=None;self.manual_quality={};self.manual_masses={}
         self.plan_pool=plan_pool if plan_pool is not None else {}
@@ -195,17 +199,13 @@ class Reconstructor:
         geometry_mb=max(4,min(512,resource_profile()['memory_budget_mb']//24))
         self.geometry_pool=geometry_pool if geometry_pool is not None else EphemeralCache(
             budget=geometry_mb*1024**2,max_entries=max(4096,128*geometry_mb))
-        from .manual_regions import box_list_by_source
-        def box_lists(field,previous):
-            values=getattr(settings,field)
-            return getattr(reference,previous) if reference is not None and getattr(reference.settings,field)==values else box_list_by_source(model,values)
-        self.source_box_lists=box_lists('reconstruction_boxes','source_box_lists')
-        self.angle_box_lists=box_lists('reconstruction_angle_boxes','angle_box_lists')
-        self.source_boxes={ref:shapely.union_all(areas) for ref,areas in self.source_box_lists.items()}
-        self.angle_boxes={ref:shapely.union_all(areas) for ref,areas in self.angle_box_lists.items()}
+        from .manual_regions import ordered_boxes_by_source
+        box_fields=('reconstruction_boxes','reconstruction_angle_boxes','reconstruction_box_order','reconstruction_box_starts')
+        use_reference=reference is not None and all(getattr(settings,k)==getattr(reference.settings,k) for k in box_fields)
+        self.ordered_source_boxes=reference.ordered_source_boxes if use_reference else ordered_boxes_by_source(model,settings)
         excluded=set(settings.reconstruction_box_excluded)
         excluded.update(set(settings.reconstruction_ignored)&set(settings.reconstruction_following))
-        self.box_refs=(self.source_boxes.keys() | self.angle_boxes.keys())-excluded
+        self.box_refs=self.ordered_source_boxes.keys()-excluded
         self.box_partitions={};self._entry_catalogue=None;self._entries_by_ref={}
 
         self.cuts={(str(l),int(i),normalize_via_refs(v)):(nx,ny,x,y) for l,i,v,nx,ny,x,y in settings.reconstruction_cuts}
@@ -658,7 +658,7 @@ class Reconstructor:
     def interval(self,entry):
         plan=entry['plan']
         if plan is None:return None,False
-        if 'merged_part' in entry:return entry['merged_part'],True
+        if 'merged_part' in entry:return entry['merged_part'],entry.get('serial_explicit',True)
         return self._interval_without_boxes(entry)
 
     def _manual_warning(self,entry,part):
@@ -735,6 +735,7 @@ class Reconstructor:
         if targets is not None:
             include=set(map(tuple,targets))|set(changed)
             result['pieces']=[q for q in pieces if (q['layer'],q['index']) in include]
+            result['between_blocks']=tuple(b for b in result.get('between_blocks',()) if b['ref'] in include)
             result['replacements']={layer:[q for q in rows if any((layer,i) in include for i in q['indices'])] for layer,rows in out.items()}
             result['replacements']={layer:rows for layer,rows in result['replacements'].items() if rows}
         if diagnostics:
@@ -760,7 +761,7 @@ class Reconstructor:
         entries=catalogue if selected is None else [q for ref in sorted(selected) for q in self._entries_by_ref.get(ref,())]
         nominal_intervals=self._nominal_intervals
         from .reconstruction_incremental import reusable
-        retained,retained_pieces=reusable(self,states,selected)
+        retained,retained_pieces,retained_between=reusable(self,states,selected)
         retained_refs={(layer,i) for layer,rows in retained.items() for row in rows for i in row['indices']}
         entries=[q for q in entries if (selected is None or (q['layer'],q['index']) in selected) and (q['layer'],q['index']) not in retained_refs]
         from .moving_pair import MultiPairFrame,frames as paired_frames,repose
@@ -857,6 +858,7 @@ class Reconstructor:
             shift=float(np.linalg.norm(self.model.moved(shapely.Point(entry['mine'][0]['center']),owner,states).coords[0]-entry['mine'][0]['center']))
             feature=features.setdefault((layer,index),dict(source=source,pieces=[],net=entry['net']))
             piece=dict(ownership_seam=entry.get('ownership_seam',EMPTY),strict_box=part.get('strict_box'),box_invalid=part.get('box_invalid',False),graph_branch=entry.get('graph_branch',False) or part.get('box_complex',False),moving_nominal=entry.get('moving_nominal') if not part.get('box_complex') else plan.land,fixed_nominal=entry.get('fixed_nominal') if not part.get('box_complex') else shapely.union_all(plan.anchors),ignored=entry.get('ignored',False),ignored_following=entry.get('following',False),follow_owners=entry.get('follow_owners',(owner,)),die=owner,layer=layer,index=index,net=entry['net'],via_refs=entry['refs'],vias=[v[1] for v in entry['refs']],
+                       boxed=entry.get('boxed',False),
                        fallback_regions=fallback if part.get('near') is not None else None,connection_failed=bool(error) or not valid,
                        missing_region=part['A'] if part.get('strict_box') is not None or getattr(plan,'plane_domain',False) else missing_area(part,plan,self.model.bound.centers[owner],pose) if plan is not None and part.get('near') is not None else (regions['C'] if entry.get('ignored') and entry.get('following') and not regions['C'].is_empty else source),
                        moving_handle_endpoint=(transform(shapely.Point(plan.route.coords[0]),self.model.bound.centers[owner],pose) if plan is not None else None),
@@ -883,7 +885,7 @@ class Reconstructor:
         features={}
         for q in pieces:
             features.setdefault((q['layer'],q['index']),dict(source=q['source'],pieces=[],net=q['net']))['pieces'].append(q)
-        out={};conflicts=0;between_blocks=[]
+        out={};conflicts=0;between_blocks=list(retained_between)
         from .between_motion import anchor_of
         for (layer,index),feature in features.items():
             ps=feature['pieces'];source=feature['source']
@@ -903,31 +905,33 @@ class Reconstructor:
             else:
                 geometry,occupied,updates=saved
                 for q,update in zip(ps,updates):q.update(update);q['regions']=dict(q['regions'])
-            if (layer,index) in references:
-                ref_pose=references[layer,index]
+            ref_pose=references.get((layer,index))
+            middle_moves=False
+            paired_owners={v['owner'] for v in self.vias_by_target.get((layer,index),()) if v['owner']>=0} if ref_pose is not None else set()
+            if ref_pose is not None:
                 geometry=repose(ps,geometry,ref_pose)
-                if isinstance(ref_pose,MultiPairFrame) and ref_pose.nominal_core is not None and not ref_pose.nominal_core.is_empty:
+                if isinstance(ref_pose,MultiPairFrame):
+                    active=paired_owners & self.active_dies
+                    middle_moves=(active==paired_owners) if ref_pose.mode=='min' else bool(active)
+                if isinstance(ref_pose,MultiPairFrame) and ref_pose.nominal_core.area>self.tol**2:
                     ax,ay=anchor_of(ref_pose.nominal_core)
                     posed_core=transform(ref_pose.nominal_core,ref_pose.center,ref_pose.base) if np.any(ref_pose.base) else ref_pose.nominal_core
-                    between_blocks.append(dict(ref=(layer,index),id=(layer,index,ax,ay),nominal=ref_pose.nominal_core,geometry=posed_core,mode=ref_pose.mode,custom=ref_pose.custom))
+                    between_blocks.append(dict(ref=(layer,index),id=(layer,index,ax,ay),nominal=ref_pose.nominal_core,geometry=posed_core,mode=ref_pose.mode,custom=ref_pose.custom,moves=middle_moves))
             for q in ps:
-                if 'serial_between_block' in q:
-                    blk_item=dict(q['serial_between_block'])
-                    if (layer,index) in references and np.any(references[layer,index].base):
-                        blk_item['geometry']=transform(blk_item['geometry'],references[layer,index].center,references[layer,index].base)
-                    between_blocks.append(blk_item)
-                if 'between_blocks' in q:
-                    for blk_item in q['between_blocks']:
-                        item=dict(blk_item)
-                        if (layer,index) in references and np.any(references[layer,index].base):
-                            item['geometry']=transform(item['geometry'],references[layer,index].center,references[layer,index].base)
-                        between_blocks.append(item)
+                blocks=q.get('between_blocks',())
+                if 'serial_between_block' in q:blocks=(*blocks,q['serial_between_block'])
+                base_owners=paired_owners-{q['die']} if len(paired_owners)>1 else paired_owners
+                base_moves=middle_moves if isinstance(ref_pose,MultiPairFrame) else bool(base_owners & self.active_dies)
+                for block in blocks:
+                    if block['nominal'].area<=self.tol**2:continue
+                    item=dict(block)
+                    if ref_pose is not None and np.any(ref_pose.base):item['geometry']=transform(item['geometry'],ref_pose.center,ref_pose.base)
+                    weight=block['weight']
+                    item['moves']=bool((q['die'] in self.active_dies and weight>1e-10) or (base_moves and weight<1.-1e-10))
+                    between_blocks.append(item)
             out.setdefault(layer,[]).append(dict(indices=(index,),geometry=geometry,net=feature['net'],movable=occupied,moved=shapely.union_all([q['moved'] for q in ps])))
         for layer,rows in retained.items():out.setdefault(layer,[]).extend(rows)
         pieces.extend(retained_pieces)
-        for q in retained_pieces:
-            if 'serial_between_block' in q:between_blocks.append(q['serial_between_block'])
-            if 'between_blocks' in q:between_blocks.extend(q['between_blocks'])
         # Measure against final neighbouring copper, not source poses.
         for layer in (out if diagnostics else ()):
             replaced={q['indices'][0]:q['geometry'] for q in out[layer]}

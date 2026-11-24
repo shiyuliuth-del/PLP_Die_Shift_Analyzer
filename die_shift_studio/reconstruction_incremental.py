@@ -5,22 +5,23 @@ def source_settings(settings,ref):
     values=vars(settings)
     names=('reconstruction_die_mode','evaluation_scope','reconstruction_style','reconstruction_boundary_mode','reconstruction_allow_moving_pad','reconstruction_pad_trigger_um','drc_tolerance_um','reconstruction_between_motion')
     out={k:values[k] for k in names}
-    for key in ('reconstruction_box_excluded','reconstruction_forced','reconstruction_ignored','reconstruction_following','reconstruction_angles','reconstruction_deleted','reconstruction_added','reconstruction_intervals','reconstruction_cuts','reconstruction_extra_cuts','reconstruction_second_cuts','reconstruction_dropped_cuts','reconstruction_between_overrides'):
+    for key in ('reconstruction_box_excluded','reconstruction_box_starts','reconstruction_forced','reconstruction_ignored','reconstruction_following','reconstruction_angles','reconstruction_deleted','reconstruction_added','reconstruction_intervals','reconstruction_cuts','reconstruction_extra_cuts','reconstruction_second_cuts','reconstruction_dropped_cuts','reconstruction_between_overrides'):
         out[key]=tuple(row for row in values[key] if tuple(row[:2])==ref)
     out['regions']=tuple(row for row in values['reconstruction_regions'] if row[0]==ref[0])
-    for name in ('reconstruction_boxes','reconstruction_angle_boxes'):
-        out[name]=tuple(row for row in values[name] if row[0]==ref[0])
+    from .manual_regions import ordered_boxes
+    out['boxes']=tuple(row for row in ordered_boxes(settings) if row[1]==ref[0])
     return out
 
 
 def reusable(r,states,selected):
     previous=getattr(r,'predecessor',None)
-    if previous is None or previous is r or previous.rules.identity!=r.rules.identity or any(getattr(previous.settings,k)!=getattr(r.settings,k) for k in ('reconstruction_fixed_via_mode','reconstruction_fixed_via_follows')):return {},[]
+    if previous is None or previous is r or previous.rules.identity!=r.rules.identity or any(getattr(previous.settings,k)!=getattr(r.settings,k) for k in ('reconstruction_fixed_via_mode','reconstruction_fixed_via_follows')):return {},[],()
     frame=getattr(previous,'_last_raw_frames',{}).get(states.tobytes())
-    if frame is None:return {},[]
+    if frame is None:return {},[],()
     refs={(layer,i) for layer,rows in frame['replacements'].items() for row in rows for i in row['indices']}
     refs={ref for ref in refs if (selected is None or ref in selected) and source_settings(r.settings,ref)==source_settings(previous.settings,ref)}
     replacements={layer:[dict(row) for row in rows if all((layer,i) in refs for i in row['indices'])] for layer,rows in frame['replacements'].items()}
     replacements={k:v for k,v in replacements.items() if v}
     pieces=[dict(q,regions=dict(q['regions']),nominal_regions=dict(q['nominal_regions'])) for q in frame['pieces'] if (q['layer'],q['index']) in refs]
-    return replacements,pieces
+    between=tuple(b for b in frame.get('between_blocks',()) if b['ref'] in refs)
+    return replacements,pieces,between

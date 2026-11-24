@@ -1,3 +1,9 @@
+# V72 动区草稿、姿态选择与 DXF 随动分层
+
+`manual_regions.ordered_boxes_by_source` 按工程记录的框选顺序索引两类选框，`reconstruction_box_starts` 表示单个源图形重新框选后忽略旧框的起点。字段进入源索引映射、撤销、缓存和 DXF 记录。相向追溯同一条路径只给一个入口分配同一个框，分叉保留真正穿过选框的路线。斜线若穿过框角，先扩展至真实接口可由两个直线截面表达。首个手动范围可接管重叠的自动范围。
+
+`ReconstructionOverlay` 以已应用设置为比较基线，草稿与已核验铜分离，异步写入同时匹配画面与设置。动区间高亮使用名义锚点，每次按当前显示铜定位；无选择的渲染缓存不得烘焙选中效果。分区元数据随增量复用，零位 DXF 根据各 DIE 配置幅度判定 `_A` 与 `_B`，继续以 `_C` 表示实际动区。回归入口为 `tests/test_v72.py`。
+
 # V71 框选叠加扩展、动区间随动、层叠自动同步与右键样式
 
 `manual_regions.box_list_by_source` 按源保留不相交的选框连通分量；`reconstruction_zones.expand` 与 `RegionSelect._finish` 将框选改为叠加与重叠扩展，不再清除同图形已有的 `reconstruction_intervals`、`reconstruction_angles` 或其他动区（单图形支持任意数量手动动区，自动规划在单线段区间仍最多 2 个）。

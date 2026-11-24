@@ -3,6 +3,8 @@ import math
 import numpy as np
 import shapely
 
+BOX_HISTORY_FIELDS=('reconstruction_boxes','reconstruction_angle_boxes','reconstruction_box_order')
+
 
 def normalize(rows):
     out=[]
@@ -14,6 +16,16 @@ def normalize(rows):
         if not polygon.is_valid or polygon.area<=0:raise ValueError('框选动区必须为有效四边形')
         out.append((str(layer),tuple(tuple(map(float,p)) for p in points)))
     return tuple(out)
+
+def box_order(settings):
+    free,aligned=len(settings.reconstruction_boxes),len(settings.reconstruction_angle_boxes)
+    order=settings.reconstruction_box_order
+    return order or ('free',)*free+('aligned',)*aligned
+
+
+def ordered_boxes(settings):
+    rows={'free':iter(settings.reconstruction_boxes),'aligned':iter(settings.reconstruction_angle_boxes)}
+    return tuple((mode,*next(rows[mode])) for mode in box_order(settings))
 
 
 def partition(plan,polygon):
@@ -124,6 +136,28 @@ def box_list_by_source(model, rows):
             result.setdefault((layer,int(ref)),[]).append(boxes[int(box)])
     return {ref:tuple(parts(shapely.union_all(areas))) for ref,areas in result.items()}
 
+def ordered_boxes_by_source(model,settings):
+    # Preserve the legacy pre-merge for jobs that never recorded mixed ordering.
+    if not settings.reconstruction_box_order and not settings.reconstruction_box_starts:
+        found={}
+        for is_free,rows in ((True,settings.reconstruction_boxes),(False,settings.reconstruction_angle_boxes)):
+            for ref,boxes in box_list_by_source(model,rows).items():
+                found.setdefault(ref,[]).extend((is_free,b) for b in boxes)
+        return found
+    from collections import defaultdict
+    by_layer=defaultdict(list);found=defaultdict(list)
+    starts={(layer,i):start for layer,i,start in settings.reconstruction_box_starts}
+    for sequence,(mode,layer,vertices) in enumerate(ordered_boxes(settings)):
+        if layer in model.cache.layers:
+            by_layer[layer].append((sequence,mode=='free',shapely.Polygon(vertices)))
+    for layer,rows in by_layer.items():
+        tree=shapely.STRtree(model.cache.layers[layer]['geometry'])
+        i,j=tree.query([p for _,_,p in rows],predicate='intersects')
+        for box_idx,source_idx in zip(i,j):
+            ref=(layer,int(source_idx));sequence,is_free,polygon=rows[box_idx]
+            if sequence>=starts.get(ref,0):found[ref].append((is_free,polygon))
+    return found
+
 
 def boxes_by_source(model, rows):
     return {ref:shapely.union_all(areas) for ref,areas in box_list_by_source(model, rows).items()}
@@ -140,6 +174,15 @@ def usable_partition(plan, polygon):
         for name, ports in zip(('near', 'far'), terminals):
             if part[name].geom_type == 'Point' and not any(part['A'].intersects(g) for g in ports):
                 return False
+        # A diagonal trace can enter through a corner of the rectangle. Each
+        # real interface must be one straight cut, not just the longest leg
+        # of an L-shaped contact left behind by the unexpanded rectangle.
+        eps=plan.tolerance
+        active=part['A'].boundary
+        for side,face in (('C',part['near']),('B',part['far'])):
+            if face.geom_type!='LineString' or part[side].is_empty:continue
+            interface=active.intersection(part[side].boundary.buffer(eps))
+            if interface.difference(face.buffer(eps*4)).length>eps*8:return False
         return not part['A'].is_empty
     if good(initial) or not plan.source.intersects(polygon):
         return initial

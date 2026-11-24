@@ -250,6 +250,9 @@ class V41Tests(unittest.TestCase):
             old=entries[0]['plan']
             plan=RoutePlan(old.layer,old.index,old.owner,old.refs,old.source,shapely.LineString([(-80,-80),(80,80)]),Point(-80,-80).buffer(7),(Point(80,80).buffer(7),),old.tolerance,old.guard)
             plan.nominal_first=10.;plan.nominal_second=plan.length-10.;entries[0]['plan']=plan
+            # A replacement path needs its own partition; V71 caches the
+            # original automatic cuts in the expanded entry.
+            entries[0].pop('merged_part',None)
             part,_=r.interval(entries[0])
             hull=shapely.MultiPoint(np.vstack([shapely.get_coordinates(part['near']),shapely.get_coordinates(part['far'])])).convex_hull
             self.assertGreater(hull.symmetric_difference(part['A']).area,10000)
