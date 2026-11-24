@@ -108,6 +108,15 @@ def show_shape_menu(window,event,point):
             menu.addAction('取消忽略选中图形的重构',lambda:change_reconstruction(remove,False))
             menu.addAction('忽略图形：整块静止',lambda:window.change_reconstruction_mode(remove,False))
             menu.addAction('忽略图形：整块随动',lambda:window.change_reconstruction_mode(remove,True))
+        waived=set(window.view_settings.drc_waived_refs)
+        def change_figure_drc(items,enabled):
+            if window.data is source_data and window.cache_group is source_group:
+                window.change_drc_figure_waivers(items,enabled)
+        menu.addSeparator()
+        if set(refs)-waived:
+            menu.addAction('忽略选中图形的DRC',lambda:change_figure_drc(set(refs)-waived,True))
+        if waived.intersection(refs):
+            menu.addAction('取消忽略DRC',lambda:change_figure_drc(waived.intersection(refs),False))
     ratio=window.canvas.devicePixelRatioF()
     pos=QtCore.QPoint(round(event.x/ratio),round(window.canvas.height()-event.y/ratio))
     menu.aboutToHide.connect(menu.deleteLater)

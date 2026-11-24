@@ -21,9 +21,9 @@ def wait(timeout=180):
   busy=(w.worker,w.preview_workers,w.preview_pending,w.motion_worker,w.motion_pending,w.coverage_timer.isActive(),w.viewport_timer.isActive(),w.transition.timer.isActive(),w.reconstruction_yield.worker,w.reconstruction_yield.pending,w.reconstruction_yield.timer.isActive(),w.constraint_feedback.worker,w.constraint_feedback.pending,w.filter_job)
   if not any(busy):break
   time.sleep(.005)
- else:raise AssertionError(('timeout',w.runtime_view.toPlainText()[-8000:],busy))
+ else:raise AssertionError(('timeout',w.log_bus.text()[-8000:],busy))
  assert not errors,errors
- assert '[ERROR]' not in w.runtime_view.toPlainText(),w.runtime_view.toPlainText()[-8000:]
+ assert '[ERROR]' not in w.log_bus.text(),w.log_bus.text()[-8000:]
 def event(name,point,button=1):
  x,y=w.ax.transData.transform(point);e=MouseEvent(name,w.canvas,x,y,button=button)
  w.canvas.callbacks.process(name,e);app.processEvents()
@@ -57,6 +57,19 @@ try:
  assert labels[0].arrow_patch is not None
  if os.environ.get('DSA_QA_SCREENSHOT'):w.grab().save(os.environ['DSA_QA_SCREENSHOT'].replace('.png','_red.png'))
  w.escape_action();assert not any(a.get_visible() for a in w.reconstruction_overlay.labels)
+ click(point);menu_action('忽略选中图形的DRC',point)
+ assert w.view_settings.drc_waived_refs==( ('5/0',0), )
+ w.problem_filter.setCurrentIndex(0);wait()
+ first=next(i for i,e in w.page_items if np.any(e['states']))
+ row=next(n for n,(i,_) in enumerate(w.page_items,1) if i==first)
+ w.select_preview(row,0);wait()
+ decided=[q for q in w.display_issues if 'figure_policy' in q]
+ assert decided and all(q.get('ignored') for q in decided)
+ w.restore_preview();wait()
+ menu_action('取消忽略DRC',point)
+ assert not w.view_settings.drc_waived_refs
+ assert w.view_settings.drc_retained_refs==( ('5/0',0), )
+ w.problem_filter.setCurrentIndex(1);wait()
  click(point);menu_action('忽略选中图形的重构',point)
  assert w.view_settings.reconstruction_ignored==( ('5/0',0), )
  assert w.current_frame['reconstruction']['pieces']
@@ -76,7 +89,7 @@ try:
   combo.setCurrentIndex(combo.findData(style));app.processEvents();time.sleep(.015)
  wait()
  assert w.current_frame['reconstruction']['parameters']['connection_style']=='c2'
- assert not w._tasks and not w.progress.isVisible(),(w._tasks,w.runtime_view.toPlainText()[-5000:])
+ assert not w._tasks and not w.progress.isVisible(),(w._tasks,w.log_bus.text()[-5000:])
  assert (w.problem_filter.currentIndex()!=0) and w.extreme_table.rowCount()>1
  angles=w.setting_fields['reconstruction_boundary_mode'];assert [angles.itemText(i) for i in range(angles.count())]==['垂直','重构区优先','两侧平均']
  angles.setCurrentIndex(angles.findData('wide'));wait()
@@ -92,6 +105,18 @@ try:
  with patch('die_shift_studio.export_ui.run_dialog',side_effect=accept),patch('die_shift_studio.reconstruction.Reconstructor.frame',side_effect=AssertionError('export recomputed a completed frame')):
   export_dxf(w,regions=True);wait()
  assert target.is_file() and target.stat().st_size>1000
+ expected=shapely.union_all([q['nominal_regions']['A'] for q in w.current_frame['reconstruction']['pieces']])
+ from die_shift_studio.reconstruction_edits import key
+ piece=w.current_frame['reconstruction']['pieces'][0]
+ a,b=piece['interval']
+ w.view_settings=replace(w.view_settings,reconstruction_intervals=((*key(piece['route_plan']),a+25.,b),))
+ w.compute_reconstruction();wait()
+ assert w.regions_import_button.text()=='动静区输入'
+ with patch.object(W.QFileDialog,'getOpenFileName',return_value=(str(target),'DXF (*.dxf)')) as picker:
+  w.regions_import_button.click();wait()
+ picker.assert_called_once()
+ observed=shapely.union_all([q['nominal_regions']['A'] for q in w.current_frame['reconstruction']['pieces']])
+ assert expected.equals(observed) and not w.view_settings.reconstruction_intervals
  w.write_project(saved);w.load_project(saved);wait();assert w.view_settings.reconstruction_boundary_mode=='wide'
  if os.environ.get('DSA_QA_SCREENSHOT'):w.grab().save(os.environ['DSA_QA_SCREENSHOT'])
  print('GUI_V40_PASS: rule colours/filter, shared canvas callouts, ignored source Jobs, cancelled rapid styles, boundary modes and no-reroute streaming export')

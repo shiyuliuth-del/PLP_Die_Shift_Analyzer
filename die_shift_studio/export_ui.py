@@ -4,6 +4,73 @@ from .qt_compat import QtWidgets as W,run_dialog,ACCEPTED
 from .layer_roles import EXPORT_ONLY,NON_PARTICIPATING
 
 
+def import_regions(window):
+    if window.remote_locked:return
+    if window.data is None:
+        window.error('请先打开原始 GDS/OAS 并设置图层用途');return
+    if window.worker is not None or window.cut_drag.state is not None or window.pending_layout_ops or window.pending_node_shapes:
+        window.error('请先完成当前任务及待应用的图纸编辑');return
+    data=window.data
+    root=window.dxf_directory or str(Path(data.path).parent)
+    name,_=W.QFileDialog.getOpenFileName(window,'动静区输入',root,'DXF (*.dxf)')
+    if not name:return
+    roles,order,motions=window.roles(),window.ordered_layers(),window.motions()
+    params,settings=window.params(),window.view_settings
+    geometry=window.geometry_cache;case=window.case
+    compensation=window.output_compensation();window_options=window.dxf_settings
+
+    def work(progress):
+        from .contact import ContactModel
+        from .core import build_case
+        from .fast_preview import GeometryCache
+        from .region_import import configure,read,read_domains,recover_metadata,validate_rebuild
+        from .resources import progress_slice
+        if progress:progress(0,'读取动静区 DXF 并匹配源图形')
+        contours,record=read(name,with_metadata=True)
+        cache=geometry or GeometryCache(data)
+        current=case or build_case(data,roles,geometry=cache.geometries,layer_order=order)
+        model=ContactModel(data,current,roles,current['connections'],cache,motions,params)
+        verification=progress_slice(progress,18,.82)
+        try:
+            restored=recover_metadata(record,contours,data,roles,order,params,settings)
+            if restored is not None:
+                from .dxf_settings import DxfSettings
+                from .output_compensation import normalize
+                options=DxfSettings.from_dict(record.get('dxf'))
+                offsets=normalize(record.get('compensation'))
+                if validate_rebuild(model,params,restored,contours,options,offsets,verification,references=record.get('references')):
+                    return restored,len(contours),'已核对原生动区及输出轮廓'
+        except (TypeError,ValueError,OverflowError):
+            if progress:progress(18,'原生记录无法复核，依据 DXF 轮廓导入')
+        try:
+            domains=read_domains(contours,cache,roles,compensation,window_options.scale,data.dbu_um)
+            return configure(model,params,settings,domains,verification),len(contours),'已核对源铜、切口及实际动区'
+        except ValueError:
+            # Legacy files only carry exterior outlines. If they match the
+            # current generated layout, the existing settings resolve them.
+            if validate_rebuild(model,params,settings,contours,window_options,compensation,verification):
+                return settings,len(contours),'与当前名义动静区一致'
+            raise
+
+    def complete(out):
+        if window.data is not data or window.view_settings!=settings or window.remote_locked:return
+        updated,count,reason=out
+        window.edit_history.record()
+        window.view_settings=updated
+        window.dxf_directory=str(Path(name).parent)
+        window.reconstruction_pending=False
+        window._reconstruction_apply_once=True
+        overlay=window.reconstruction_overlay
+        overlay.staged_overlay=None;overlay.draft_frame=overlay.draft_data=overlay.draft_key=None;overlay.clear_hover()
+        toggle=window.reconstruction_toggle
+        blocked=toggle.blockSignals(True);toggle.setChecked(True);toggle.blockSignals(blocked)
+        window.invalidate_reconstruction_edit()
+        window.request_preview(quiet=True)
+        window.log_bus.emit(f'已按 DXF 名义坐标应用 {count} 层动静区定义。{reason}。')
+
+    window.start_worker(work,complete)
+
+
 def export_dxf(window,regions=False):
     if window.data is None:
         window.error('请先打开GDS');return
@@ -36,6 +103,7 @@ def export_dxf(window,regions=False):
         selected.update(k for k,v in roles.items() if v==EXPORT_ONLY)
     if not selected:window.error('所选导出范围没有图层');return
     process=window.params();view=window.view_settings;model=window.engine.contact if regions else None
+    order=window.ordered_layers() if regions else ()
     compensation=window.output_compensation()
     export_plans={}
     if regions and getattr(window.engine,'reconstructor',None) is not None:
@@ -69,8 +137,10 @@ def export_dxf(window,regions=False):
         current=replace(current,layers={k:v for k,v in current.layers.items() if k in selected})
         if regions:
             from .region_export import write_regions
+            from .region_import import metadata_for
             result=write_regions(current,split,roles,destination,progress_slice(progress,20,.8),settings=options,
-                                 compensation=compensation,dbu=data.dbu_um)
+                                 compensation=compensation,dbu=data.dbu_um,
+                                 edit_metadata=metadata_for(data,roles,order,process,view,selected,options,compensation))
         else:
             from .output_compensation import compensate_snapshot
             current=compensate_snapshot(current,compensation,data.dbu_um)

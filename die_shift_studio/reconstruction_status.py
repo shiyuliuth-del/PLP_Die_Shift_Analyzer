@@ -25,7 +25,8 @@ class ReconstructionYieldDisplay:
         try:p=replace(w.params(),target_nsigma=0)
         except ValueError:self.reset();return
         cfg=settings or w.view_settings
-        token=('reconstruction-analysis-continuity',logical_fingerprint((w.data.geometry_id,w.data.top_name,w.roles(),w.ordered_layers(),asdict(p),cfg.reconstruction_key(),cfg.reconstruction_auto_waive_drc,cfg.reconstruction_grid_nodes if cfg.evaluation_scope=='all' else 0)))
+        from .drc_waivers import needs_events
+        token=('reconstruction-analysis-continuity',logical_fingerprint((w.data.geometry_id,w.data.top_name,w.roles(),w.ordered_layers(),asdict(p),cfg.reconstruction_key(),needs_events(cfg),cfg.reconstruction_auto_waive_drc,cfg.reconstruction_grid_nodes if cfg.evaluation_scope=='all' else 0)))
         key=(id(w.cache_group),token)
         if key==self.key:self.render();return
         self.reset();self.key=key
@@ -63,7 +64,8 @@ class ReconstructionYieldDisplay:
                     from .statistics import ExtremeCatalog
                     from .reconstruction_events import scan
                     from .reconstruction_probability import attach
-                    evidence_key=('reconstruction-extreme-events-continuity',logical_fingerprint((data.geometry_id,data.top_name,roles,order,asdict(p),cfg.reconstruction_key(),cfg.reconstruction_auto_waive_drc)))
+                    from .drc_waivers import needs_events
+                    evidence_key=('reconstruction-extreme-events-continuity',logical_fingerprint((data.geometry_id,data.top_name,roles,order,asdict(p),cfg.reconstruction_key(),needs_events(cfg),cfg.reconstruction_auto_waive_drc)))
                     if cfg.evaluation_scope!='all':
                         from .evaluation_scope import focused_catalog,focused_reconstruction
                         grid,indices=focused_catalog(model,p,scope=cfg.evaluation_scope)

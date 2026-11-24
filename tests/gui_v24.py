@@ -36,7 +36,7 @@ def wait():
 
 name='示例P_单点PATH与相邻孔盘'
 w.load_project(ROOT/'Jobs'/(name+'.dshift.json'));wait()
-assert any('77/0' in s and '零宽 PATH' in s for s in w.runtime_view.toPlainText().splitlines())
+assert any('77/0' in s and '零宽 PATH' in s for s in w.log_bus.text().splitlines())
 assert '77/0' not in w.visible_boxes
 w.run_evaluation();wait()
 before=w.current_frame['width_analysis'];numeric=w.result['schemes']

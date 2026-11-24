@@ -20,9 +20,9 @@ def wait(limit=180):
   app.processEvents()
   if not any((w._tasks,w.worker,w.preview_workers,w.preview_pending,w.constraint_feedback.worker,w.constraint_feedback.pending,w.transition.timer.isActive(),w.filter_job,w.coverage_timer.isActive(),w.motion_worker,w.motion_pending)):break
   time.sleep(.005)
- else:raise AssertionError(w.runtime_view.toPlainText()[-6000:])
+ else:raise AssertionError(w.log_bus.text()[-6000:])
  assert not errors,errors
- assert 'Traceback' not in w.runtime_view.toPlainText(),w.runtime_view.toPlainText()[-6000:]
+ assert 'Traceback' not in w.log_bus.text(),w.log_bus.text()[-6000:]
 def event(name,p,step=0):
  x,y=w.ax.transData.transform(p);w.canvas.callbacks.process(name,MouseEvent(name,w.canvas,x,y,button='up' if step else 1,step=step));app.processEvents()
 try:

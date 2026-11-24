@@ -16,7 +16,7 @@ def wait():
  while time.monotonic()<end:
   app.processEvents();time.sleep(.005)
   if not (w._tasks or w.preview_pending or w._coverage_pending or w.reconstruction_yield.timer.isActive() or w.width_yield.timer.isActive() or w.viewport_timer.isActive()):break
- else:raise AssertionError(w.runtime_view.toPlainText()[-4000:])
+ else:raise AssertionError(w.log_bus.text()[-4000:])
  assert not errors,errors
 try:
  lib=gdstk.Library(unit=1e-6,precision=1e-9);cell=lib.new_cell('TOP')

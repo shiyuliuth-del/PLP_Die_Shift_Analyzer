@@ -89,9 +89,10 @@ def native_phase_profile():
 
 def geometry_budget(profile,packed_bytes):
     """Limit simultaneous GEOS copies (decoded coordinates, rings and trees)."""
-    available=profile.get('memory_budget_mb',.35*profile['available_memory_mb'])*1024**2
-    per_lane=max(16*1024**2,8*packed_bytes)
-    return max(1,min(profile['workers'],int(available//per_lane)))
+    available=(int(profile['memory_budget_mb']) if 'memory_budget_mb' in profile
+               else int(.35*profile['available_memory_mb']))*1024**2
+    per_lane=max(16*1024**2,8*int(packed_bytes))
+    return max(1,min(profile['workers'],available//per_lane))
 
 
 def parallel_map(fn,items,profile=None,progress=None,process=False):

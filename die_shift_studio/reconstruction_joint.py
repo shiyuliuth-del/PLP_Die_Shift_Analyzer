@@ -5,11 +5,11 @@ them, apply the same electrical guard as the canvas, and check final copper.
 No marginal probabilities are multiplied across shared DIE events.
 """
 from collections import defaultdict
-from itertools import product
+from itertools import islice,product
 import math
 import numpy as np
 import shapely
-from .resources import cancel_check,parallel_map
+from .resources import cancel_check
 from .extreme_filter import PoseClause,ProblemIndex
 
 
@@ -24,42 +24,76 @@ def entry_owners(entries,grid):
 
 def prepare(r,grid,progress=lambda *_:None,*,indices=None):
     from .evaluation_scope import digits_for
+    from .reconstruction import Reconstructor
+    from .reconstruction_events import _compact
+    from .reconstruction_status import clone_plan_pool
+    from .resources import parallel_iter,progress_slice,resource_profile
+
     selected=None if indices is None else tuple(tuple(digits_for(grid,i)) for i in indices)
     signature=(tuple(v.tobytes() for v in grid.locals),selected)
-    projections={}
-
     cached=getattr(r,'_joint_catalog',None)
     if cached is not None and cached[0]==signature:return cached[1]
-    entries=r._plans_for_all_poses(progress);by_ref=defaultdict(list)
+    entries=r._plans_for_all_poses(progress_slice(progress,0,.2));by_ref=defaultdict(list)
     for q in entries:by_ref[q['layer'],q['index']].append(q)
-    refs=[ref for rows in r.rules.nets.values() for ref in rows]
-    ordered_refs=refs.copy()
-    immutable=[ref for ref in refs if ref not in by_ref]
-    refs=sorted(by_ref,key=lambda ref:-len(by_ref[ref]))
-    if selected is not None:
-        for local in by_ref.values():
-            owners=entry_owners(local, grid)
-            if owners not in projections:
-                projections[owners]=sorted({tuple(d[o] for o in owners) for d in selected})
+    ordered_refs=[ref for rows in r.rules.nets.values() for ref in rows]
+    owners_by_ref={ref:entry_owners(local,grid) for ref,local in by_ref.items()}
+    distinct=set(owners_by_ref.values())
+    projections={axes:sorted({tuple(d[o] for o in axes) for d in selected}) for axes in distinct} if selected is not None else None
+    counts={ref:len(projections[axes]) if projections is not None else math.prod(grid.radices[o] for o in axes)
+            for ref,axes in owners_by_ref.items()}
+    refs=sorted(by_ref,key=lambda ref:-counts[ref]*len(by_ref[ref]))
+    profile=resource_profile()
+    workers=profile['workers']
+
+    def tasks():
+        for ref in refs:
+            axes=owners_by_ref[ref]
+            choices=iter(projections[axes]) if projections is not None else product(*(range(grid.radices[o]) for o in axes))
+            # Avoid one multi-DIE source monopolizing the tail after all other
+            # features finish. Keep single-DIE work in its original cache lane.
+            chunk=max(12,math.ceil(counts[ref]/(workers*2))) if workers>1 and counts[ref]>32 else counts[ref]
+            isolated=chunk<counts[ref]
+            if not isolated:yield ref,choices,False;continue
+            while digits:=tuple(islice(choices,chunk)):
+                yield ref,digits,True
+
     def static(ref):
         g=r.model.nodes[r.model.ids[ref]]['poly']
         return dict(owners=(),values={():dict(geometry=g,pieces=())},envelope=shapely.box(*g.bounds))
-    def build(ref):
-        local=by_ref[ref];owners=entry_owners(local,grid);values={};render_cache={}
-        from .reconstruction_events import _compact
-        choices=projections[owners] if selected is not None else product(*(range(grid.radices[o]) for o in owners))
-        for digits in choices:
-            cancel_check();states=np.zeros((grid.count,3))
-            for owner,digit in zip(owners,digits):states[owner]=grid.locals[owner][digit]
-            f=r.frame(states,targets=(ref,),diagnostics=False,render_cache=render_cache,_raw=True)
-            row=next((q for q in f['replacements'].get(ref[0],()) if ref[1] in q['indices']),None)
-            geometry=row['geometry'] if row is not None else r.model.nodes[r.model.ids[ref]]['poly']
-            values[digits]=dict(geometry=geometry,pieces=tuple(_compact(q) for q in f['pieces'] if (q['layer'],q['index'])==ref))
-        bounds=np.array([v['geometry'].bounds for v in values.values()])
-        return ref,dict(owners=owners,values=values,envelope=shapely.box(*bounds[:,:2].min(axis=0),*bounds[:,2:].max(axis=0)))
-    bank={ref:static(ref) for ref in immutable}
-    bank.update(parallel_map(build,refs,progress=lambda n,total:progress(round(100*n/max(1,total)),f'复用局部重构几何 {n}/{total}')))
-    bank={ref:bank[ref] for ref in ordered_refs}
+    def build(task):
+        ref,choices,isolated=task
+        axes=owners_by_ref[ref];values={};render_cache={}
+        nominal=r.model.nodes[r.model.ids[ref]]['poly']
+        states=np.zeros((grid.count,3))
+        solver=r
+        if isolated:
+            solver=Reconstructor(r.model,r.p,r.settings,reference=r,geometry_pool=r.geometry_pool)
+            solver._plans=clone_plan_pool({'local':by_ref[ref]})['local']
+            solver._envelopes=getattr(r,'_envelopes',{})
+        try:
+            for digits in choices:
+                cancel_check()
+                for owner,digit in zip(axes,digits):states[owner]=grid.locals[owner][digit]
+                f=solver.frame(states,targets=(ref,),diagnostics=False,render_cache=render_cache,_raw=True)
+                row=next((q for q in f['replacements'].get(ref[0],()) if ref[1] in q['indices']),None)
+                geometry=row['geometry'] if row is not None else nominal
+                values[digits]=dict(geometry=geometry,pieces=tuple(_compact(q) for q in f['pieces'] if (q['layer'],q['index'])==ref))
+        finally:
+            if isolated:solver.close()
+        return ref,values
+
+    total=sum(counts.values());done=0
+    results={ref:{} for ref in refs}
+    for ref,batch in parallel_iter(build,tasks(),profile,ordered=False):
+        results[ref].update(batch)
+        done+=len(batch)
+        if progress:progress(20+round(80*done/max(1,total)),f'复用局部重构几何 {done:,}/{total:,}')
+    bank={}
+    for ref in ordered_refs:
+        if ref not in results:bank[ref]=static(ref);continue
+        values=dict(sorted(results.pop(ref).items()))
+        envelope=shapely.box(*shapely.total_bounds([v['geometry'] for v in values.values()]))
+        bank[ref]=dict(owners=owners_by_ref[ref],values=values,envelope=envelope)
     r._joint_catalog=(signature,bank);return bank
 
 
@@ -162,6 +196,7 @@ def remember(r,states,frame):
 
 
 def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
+    from .drc_waivers import needs_events
     from .reconstruction_events import zone_key,active_region,current_failures,zone_severity,RANK
     from .width_keepout import routing_violations
     from .width_summary import strongest
@@ -172,7 +207,8 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
     from .evaluation_scope import digits_for
     visits=(digits_for(grid,i) for i in indices) if indices is not None else product(*(range(n) for n in grid.radices))
     total=len(indices) if indices is not None else grid.total+1
-    waiver_poses={};source_events={};mass=defaultdict(float);protected=set()
+    collect_events=needs_events(r.settings)
+    waiver_poses={};source_events={};event_refs={};mass=defaultdict(float);protected=set()
     if r.settings.reconstruction_auto_waive_drc:
         from .reconstruction_probability import extreme_weights
         from .evaluation_scope import conditional_weights
@@ -195,7 +231,8 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
     from .reconstruction import Reconstructor
     from .reconstruction_status import clone_plan_pool
     profile=resource_profile()
-    workers=min(total,geometry_budget(profile,sum(n['poly'].__sizeof__()+shapely.get_num_coordinates(n['poly'])*32 for n in r.model.nodes)))
+    packed_bytes=sum(n['poly'].__sizeof__()+int(shapely.get_num_coordinates(n['poly']))*32 for n in r.model.nodes)
+    workers=min(total,geometry_budget(profile,packed_bytes))
     local=threading.local();lock=threading.Lock();solvers=[]
     if workers>1:
         r._plans_for_all_poses(progress)
@@ -218,7 +255,7 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
         else:
             states=np.asarray([v[d] for v,d in zip(grid.locals,digits)])
             frame=solver.frame(states)
-        if r.settings.reconstruction_auto_waive_drc:
+        if collect_events:
             from .drc_waivers import scene_events
             frame['waiver_events']=scene_events(solver,states,frame)
         edges=routing_violations(r.model,states,r.p,r.settings,frame['replacements'])
@@ -250,12 +287,15 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
         remember(r,states,frame)
         clause=PoseClause(tuple((o,(int(d),)) for o,d in enumerate(digits)));index=grid.index(digits)
         if 'waiver_events' in frame:
-            events,unsafe,sources,hard=frame['waiver_events']
+            events,unsafe,sources,hard,sources_by_event=frame['waiver_events']
             if events:
-                value=weight(index,digits)
-                for event in events:mass[event]+=value
-                protected.update(unsafe)
+                if r.settings.reconstruction_auto_waive_drc:
+                    value=weight(index,digits)
+                    for event in events:mass[event]+=value
+                    protected.update(unsafe)
                 if not hard:waiver_poses[index]=events
+                for event,refs in sources_by_event.items():
+                    if event not in event_refs or not refs:event_refs[event]=refs
                 for ref,required in sources.items():
                     source_events.setdefault(ref,{})[index]=required
         if frame['violations'] or frame['hard_failures'] or current_failures(frame):scene_records.add(clause)
@@ -279,9 +319,9 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
         zones[key]=dict(complete=True,has_failure=bool(clauses),clauses=clauses,failing_states=idx.total+idx.zero,kinds=tuple(sorted(reasons[key])),
                         witness=witnesses.get(key),severity=severity.get(key,'green'),
                         probability=dict(lower=0.,upper=1.,certified=False,reason='有限离散极端不能证明连续概率上界'))
-    waiver_data=(dict(drc_event_probability={key:min(1.,value+error) for key,value in mass.items() if key not in protected},
-                      drc_event_poses=waiver_poses,drc_event_sources=source_events)
-                 if r.settings.reconstruction_auto_waive_drc else {})
+    waiver_data=dict(drc_event_poses=waiver_poses,drc_event_sources=source_events,drc_event_refs=event_refs) if collect_events else {}
+    if r.settings.reconstruction_auto_waive_drc:
+        waiver_data['drc_event_probability']={key:min(1.,value+error) for key,value in mass.items() if key not in protected}
     return dict(complete=True,grid=grid,grid_key=tuple(v.tobytes() for v in grid.locals),zones=zones,
                 routing_summary=dict(lines=routing_lines,witnesses=routing_witnesses,red_factors=sorted(routing_factors,key=lambda q:q.allowed)),
                 connection_factors=tuple(sorted(connection_records,key=lambda q:q.allowed)),red_factors=tuple(sorted(scene_records,key=lambda q:q.allowed)),package_states=total,selected_indices=tuple(indices) if indices is not None else None,

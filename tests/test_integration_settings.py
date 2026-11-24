@@ -35,7 +35,7 @@ class IntegrationSettingsTests(unittest.TestCase):
 
     def test_numeric_controls_validate_and_invalidate_cache(self):
         base=ViewSettings()
-        for key in ('reconstruction_corner_guard_um',):
+        for key in ('reconstruction_pad_trigger_um',):
             with self.subTest(key=key):
                 changed=ViewSettings.from_dict({key:getattr(base,key)+1})
                 self.assertNotEqual(changed.reconstruction_key(),base.reconstruction_key())
@@ -43,6 +43,10 @@ class IntegrationSettingsTests(unittest.TestCase):
                     with self.assertRaises(ValueError):ViewSettings.from_dict({key:bad})
         changed=replace(base,reconstruction_regions=(('3/0',(0.,0.,1.,1.),'move'),))
         self.assertNotEqual(changed.reconstruction_key(),base.reconstruction_key())
+        migrated=ViewSettings.from_dict({'reconstruction_corner_guard_um':-1,'reconstruction_node_snap_um':0})
+        self.assertEqual(migrated.reconstruction_node_snap_um,-1)
+        self.assertEqual(migrated.reconstruction_key(),base.reconstruction_key())
+        self.assertEqual(ViewSettings.from_dict({'reconstruction_corner_guard_um':2,'reconstruction_node_snap_um':3}).reconstruction_node_snap_um,3)
 
     def test_legacy_dropped_identity_migrates(self):
         identity=('3/0',2,(7,8))

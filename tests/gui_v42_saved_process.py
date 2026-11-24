@@ -17,9 +17,9 @@ def child(mode,folder):
    app.processEvents()
    if not (w._tasks or w.preview_pending or w.motion_pending or w.coverage_timer.isActive() or w._coverage_pending or w.viewport_timer.isActive() or w.transition.timer.isActive() or w.width_yield.timer.isActive() or w.reconstruction_yield.timer.isActive()):break
    time.sleep(.005)
-  else:raise AssertionError(w.runtime_view.toPlainText()[-4000:])
+  else:raise AssertionError(w.log_bus.text()[-4000:])
   assert not errors,errors
-  assert '[ERROR]' not in w.runtime_view.toPlainText(),w.runtime_view.toPlainText()[-4000:]
+  assert '[ERROR]' not in w.log_bus.text(),w.log_bus.text()[-4000:]
  def copper():return hashlib.sha256(w.current_frame['reconstruction']['replacements']['5/0'][0]['geometry'].wkb).hexdigest()
  saved=folder/'completed.dshift.json'
  try:

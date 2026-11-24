@@ -202,7 +202,8 @@ def scan(r,grid,progress=lambda *_:None,source_cache=None):
     bundles=dict(parallel_map(build,refs,progress=lambda n,total:progress(12+round(28*n/max(1,total)),f'重构逐图形几何 {n}/{total}')))
     from . import reconstruction_joint
     r._joint_catalog=((tuple(v.tobytes() for v in grid.locals),None),bundles)
-    if r.settings.reconstruction_auto_waive_drc or reconstruction_joint.needed(r,bundles,grid):
+    from .drc_waivers import needs_events
+    if needs_events(r.settings) or reconstruction_joint.needed(r,bundles,grid):
         return reconstruction_joint.scan(r,grid,bundles,lambda n,t:progress(40+round(n*.6),t))
     from .width_keepout import routing_violations
     from .width_witness import edge_witness

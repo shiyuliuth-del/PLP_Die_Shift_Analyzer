@@ -36,7 +36,7 @@ from .animation import Transition
 from .selection import GeometrySelection
 from .ticks import DistanceMinorLocator
 from .render_cache import SceneRenderer
-from .layer_controls import LayerDrag,LayerStyleDialog
+from .layer_controls import LayerCheckBox,LayerDrag,LayerStyleDialog
 from .layer_roles import NON_PARTICIPATING
 from .qt_compat import run_dialog,ACCEPTED
 from matplotlib.colors import LinearSegmentedColormap,Normalize
@@ -176,7 +176,7 @@ class NoWheelValues(QtCore.QObject):
 
 
 class MainWindow(W.QMainWindow):
-    def __init__(self,jobs_dir=None):
+    def __init__(self,jobs_dir=None,*,measured=False):
         super().__init__();self.setWindowTitle(f'Die Shift Analyze {__version__}')
         from .app_icon import window_icon
         self.setWindowIcon(window_icon())
@@ -187,7 +187,9 @@ class MainWindow(W.QMainWindow):
         self.resize(1540,1000);self.setMinimumSize(1120,740);self.setStyleSheet(STYLE)
         self.remote_locked=False;self.data=None;self.result=None;self.case=None;self.worker=None;self.project_path=None
         from .runtime_log import LogBus,RuntimeCapture
-        self.log_bus=LogBus(self,self.jobs_dir.parent/'logs'/'runtime.log');self.runtime_capture=RuntimeCapture(self.log_bus);self._tasks={};self._closing=False
+        self.requested_measured=bool(measured)
+        self.log_bus=LogBus(self.jobs_dir.parent/'logs'/'runtime.log',enabled=not measured)
+        self.runtime_capture=RuntimeCapture(self.log_bus);self._tasks={};self._closing=False
         self.per_die_values=[];self.per_die_pivots=[];self.reference_nsigma=6.;self._per_die_initialized=False;self.hardware_worker=None
         from .session_cache import ProjectCacheRegistry
         self.cache_registry=ProjectCacheRegistry();self.cache_project_key="empty";self.cache_group=self.cache_registry.get("empty")
@@ -336,16 +338,20 @@ class MainWindow(W.QMainWindow):
         build_controls(self,section('GDS/OAS'))
         dxf=section('DXF')
         self.dxf_button=W.QPushButton('DXF输出');dxf.addWidget(self.dxf_button)
-        self.regions_dxf_button=W.QPushButton('动静区输出');dxf.addWidget(self.regions_dxf_button)
+        regions_row=W.QHBoxLayout()
+        self.regions_dxf_button=W.QPushButton('动静区输出');regions_row.addWidget(self.regions_dxf_button)
+        self.regions_import_button=W.QPushButton('动静区输入');regions_row.addWidget(self.regions_import_button)
+        dxf.addLayout(regions_row)
         output.setSpacing(4)
         from .dxf_controls import build as build_dxf_controls
         build_dxf_controls(self,dxf)
         from .measured_ui import MeasuredOutput
         self.measured_output=MeasuredOutput(self,section('实测输出'));output.addStretch()
         self.dxf_button.setToolTip('按下方参数展开顶层并输出当前完成的几何；默认合并全部图层，不输出风险标记或恢复圆弧。')
-        from .export_ui import export_dxf
+        from .export_ui import export_dxf,import_regions
         self.dxf_button.clicked.connect(lambda:export_dxf(self))
         self.regions_dxf_button.clicked.connect(lambda:export_dxf(self,regions=True))
+        self.regions_import_button.clicked.connect(lambda:import_regions(self))
         self.run_button=W.QPushButton('方案评估');self.run_button.setObjectName('Primary');self.run_button.clicked.connect(lambda:self.run_evaluation());lay.addWidget(self.run_button);split.addWidget(left)
         self.tabs=W.QTabWidget();self.tabs.setCornerWidget(self.header_widget);split.addWidget(self.tabs);split.setSizes([445,1095])
         self.figure=Figure(figsize=(9,5));self.figure.subplots_adjust(left=.043,right=.993,bottom=.095,top=.99);self.canvas=FigureCanvasQTAgg(self.figure);self.ax=self.figure.add_subplot(111)
@@ -439,9 +445,25 @@ class MainWindow(W.QMainWindow):
         self.analysis_split.addWidget(chart_page);self.analysis_split.setSizes([330,400,0]);self.histogram_data=None;self._histogram_revealed=False
         self.tabs.currentChanged.connect(self.tab_changed)
         self.runtime_view=W.QPlainTextEdit();self.runtime_view.setReadOnly(True);self.runtime_view.setMaximumBlockCount(10000);self.runtime_view.setToolTip('界面保留最近10000行；完整日志：'+str(self.log_bus.path));self.runtime_view.setMaximumHeight(170);self.runtime_view.hide();root.addWidget(self.runtime_view)
-        self.runtime_toggle.toggled.connect(self.runtime_view.setVisible);self.log_bus.message.connect(self.runtime_view.appendPlainText)
+        self.runtime_sequence=0
+        self.runtime_timer=QtCore.QTimer(self);self.runtime_timer.setInterval(125);self.runtime_timer.timeout.connect(self.refresh_runtime)
+        self.runtime_toggle.toggled.connect(self.show_runtime)
+        self.runtime_toggle.setEnabled(self.log_bus.enabled)
         self.log_bus.emit('启动 '+__version__+'；硬件资源 '+str(resource_profile()))
         self.plot_layout()
+    def refresh_runtime(self):
+        if not self.runtime_toggle.isChecked() or not self.log_bus.enabled:return
+        self.runtime_sequence,lines=self.log_bus.read_after(self.runtime_sequence)
+        if lines:self.runtime_view.appendPlainText('\n'.join(lines))
+    def show_runtime(self,on):
+        visible=on and self.log_bus.enabled
+        self.runtime_view.setVisible(visible)
+        if visible:self.refresh_runtime();self.runtime_timer.start()
+        else:self.runtime_timer.stop()
+    def set_runtime_recording(self,enabled):
+        self.log_bus.set_enabled(enabled)
+        self.runtime_toggle.setEnabled(enabled)
+        self.show_runtime(self.runtime_toggle.isChecked())
     def build_settings(self,page):
         self.setting_sections={}
         def group(title):
@@ -615,11 +637,9 @@ class MainWindow(W.QMainWindow):
         spin(recon,'reconstruction_grid_nodes','良率积分每轴节点',3,9)
         self.setting_fields['reconstruction_grid_nodes'].setToolTip('完整有限网格，按区间概率质量积分；增大节点可检查连续空间误差。不是等概率极端计数。')
         live=W.QCheckBox('实时反馈动区变化');self.setting_fields['reconstruction_live']=live;recon.addRow(live);live.toggled.connect(self.settings_changed)
-        corner=spin(recon,'reconstruction_corner_guard_um','拐角吸附预留 / μm',-1,1000,2)
-        corner.setToolTip('−1 关闭拖动拐角吸附，0 随画布缩放，正值为距离。几何有效性仍会检查。')
         snap_row=W.QHBoxLayout()
         distance=spin(None,'reconstruction_node_snap_um','',-1,1000,3)
-        distance.setToolTip('−1 关闭，0 按当前缩放自动选择距离，正值为实际距离。')
+        distance.setToolTip('控制轮廓节点与拐角吸附。−1 关闭，0 随当前缩放，正值为实际距离。')
         snap_row.addWidget(distance);snap_row.addWidget(W.QLabel('吸附强度'))
         strength=spin(None,'reconstruction_node_snap_strength','',0,1,2)
         strength.setToolTip('0 无吸引，1 最大吸引。');snap_row.addWidget(strength)
@@ -705,7 +725,7 @@ class MainWindow(W.QMainWindow):
     def settings_changed(self,*_):
         if self.loading:return
         values={k:(w.currentData() if isinstance(w,W.QComboBox) else w.isChecked() if isinstance(w,W.QCheckBox) else w.text() if isinstance(w,W.QLineEdit) else w.value()) for k,w in self.setting_fields.items()}
-        for key in ('reconstruction_node_snap_um','reconstruction_corner_guard_um','reconstruction_waiver_mantissa'):
+        for key in ('reconstruction_node_snap_um','reconstruction_waiver_mantissa'):
             if -1 < values[key] < 0:
                 value=-1.
             elif key=='reconstruction_waiver_mantissa' and values['reconstruction_waiver_exponent']==0:
@@ -718,6 +738,8 @@ class MainWindow(W.QMainWindow):
         waiver_fields=('reconstruction_auto_waive_drc','reconstruction_waiver_mantissa','reconstruction_waiver_exponent')
         if any(getattr(updated,key)!=getattr(self.view_settings,key) for key in waiver_fields):
             switching=updated.reconstruction_auto_waive_drc!=self.view_settings.reconstruction_auto_waive_drc
+            if switching and not updated.reconstruction_auto_waive_drc:
+                updated=replace(updated,drc_waived_refs=(),drc_retained_refs=())
             self.view_settings=updated
             if switching:self.reconstruction_yield.refresh()
             self.replace_drc_waivers({} if switching and not updated.reconstruction_auto_waive_drc else self.ignored_drc)
@@ -1218,10 +1240,10 @@ class MainWindow(W.QMainWindow):
             from .output_compensation import default_amount
             saved_compensation=project.get('layer_compensation',{})
             for i,key in enumerate(self._layer_keys):
-                role=selected_roles.get(key,'不参与');check=W.QCheckBox();check.setChecked(project.get('visibility',{}).get(key,role not in NON_PARTICIPATING))
-                check.toggled.connect(lambda checked,k=key:self.visibility_changed(k));self.visible_boxes[key]=check;self.layer_table.setCellWidget(i,0,check);self.layer_drag.watch(check)
-                sel=W.QCheckBox();sel.setChecked(saved_sel.get(key,role=='固定RDL'))
-                sel.toggled.connect(lambda checked,k=key:self.selectability_changed(k));self.selectable_boxes[key]=sel;self.layer_table.setCellWidget(i,1,sel);self.layer_drag.watch(sel)
+                role=selected_roles.get(key,'不参与');check=LayerCheckBox();check.setChecked(project.get('visibility',{}).get(key,role not in NON_PARTICIPATING))
+                check.toggled.connect(lambda checked,k=key:self.visibility_changed(k));self.visible_boxes[key]=check;self.layer_table.setCellWidget(i,0,check)
+                sel=LayerCheckBox();sel.setChecked(saved_sel.get(key,role=='固定RDL'))
+                sel.toggled.connect(lambda checked,k=key:self.selectability_changed(k));self.selectable_boxes[key]=sel;self.layer_table.setCellWidget(i,1,sel)
                 self.layer_table.setItem(i,2,W.QTableWidgetItem(key))
                 box=W.QComboBox();box.addItems(ROLES);box.setCurrentText(role)
                 self.role_boxes[key]=box;self.layer_table.setCellWidget(i,3,box)
@@ -2800,13 +2822,13 @@ class MainWindow(W.QMainWindow):
 
     def drc_waiver_summary(self):
         cfg=self.view_settings
-        if self.extremes is None or self.dirty or not (self.ignored_drc or cfg.reconstruction_auto_waive_drc):
+        from .drc_waivers import needs_events,summary
+        if self.extremes is None or self.dirty or not (self.ignored_drc or needs_events(cfg)):
             return frozenset(),frozenset(),{}
-        from .drc_waivers import summary
         bank=self.reconstruction_yield.evidence if self.reconstruction_toggle.isChecked() else None
         context=self.drc_waiver_context() if self.ignored_drc else None
         key=(id(self.extremes),id(self.ignored_drc),context,id(bank),cfg.reconstruction_auto_waive_drc,
-             cfg.reconstruction_waiver_mantissa,cfg.reconstruction_waiver_exponent)
+             cfg.reconstruction_waiver_mantissa,cfg.reconstruction_waiver_exponent,cfg.drc_waived_refs,cfg.drc_retained_refs)
         cached=getattr(self,'_waiver_cache',None)
         if cached is not None and cached[0]==key:return cached[1]
         def states_at(index):
@@ -2824,13 +2846,16 @@ class MainWindow(W.QMainWindow):
         issue=self.filtered_issues[row]
         menu=W.QMenu(self.issue_table)
         action=menu.addAction('取消忽略此问题' if issue.get('ignored') else '忽略此问题')
+        if 'figure_policy' in issue:
+            action.setEnabled(False)
+            menu.addAction('由图形右键菜单的 DRC 忽略设置控制').setEnabled(False)
         action.triggered.connect(lambda:self.toggle_drc_issue(issue))
         getattr(menu,'exec',getattr(menu,'exec_',None))(self.issue_table.viewport().mapToGlobal(pos))
 
     def toggle_drc_issue(self,issue):
         from .drc_waivers import pose_id,record
         frame=self.current_frame
-        if self.remote_locked or self.data is None or frame is None or 'drc' not in frame:return
+        if self.remote_locked or self.data is None or frame is None or 'drc' not in frame or 'figure_policy' in issue:return
         rows=self.contact_entries(frame);pose=pose_id(frame['states'])
         index=-2  # A manual pose has no catalogue row.
         if not np.any(frame['states']):index=-1
@@ -2846,8 +2871,22 @@ class MainWindow(W.QMainWindow):
         else:records.pop(pose,None)
         self.replace_drc_waivers(records)
 
-    def replace_drc_waivers(self,records):
+    def change_drc_figure_waivers(self,refs,enabled):
+        if self.remote_locked or self.data is None or not self.reconstruction_toggle.isChecked():return
+        refs={(key,i) for key,i in refs if 0<=i<len(self.data.layers.get(key,()))}
+        ignored=set(self.view_settings.drc_waived_refs)
+        retained=set(self.view_settings.drc_retained_refs)
+        if enabled:ignored.update(refs);retained.difference_update(refs)
+        else:ignored.difference_update(refs);retained.update(refs)
+        updated=replace(self.view_settings,drc_waived_refs=tuple(sorted(ignored)),drc_retained_refs=tuple(sorted(retained)))
+        if updated==self.view_settings:return
+        self.edit_history.record()
+        self.view_settings=updated
+        self.replace_drc_waivers(self.ignored_drc,refresh_evidence=True)
+
+    def replace_drc_waivers(self,records,*,refresh_evidence=False):
         self.ignored_drc=records;self._issue_table_stamp=None;self._paint_pass=None
+        if refresh_evidence:self.reconstruction_yield.refresh()
         self.fill_issues()
         if self.extremes is not None and self.problem_filter.currentIndex()==1:
             self.show_extreme_page(self.preview_page,redraw=False,keep_pose=True)
@@ -2856,17 +2895,28 @@ class MainWindow(W.QMainWindow):
 
     def fill_issues(self):
         entries=self.contact_entries(self.current_frame);auto=self.drc_waiver_summary()[0]
-        stamp=(id(entries),self.view_settings.drc_checks,self.view_settings.drc_visible,id(self.ignored_drc),auto)
+        cfg=self.view_settings
+        figures=(cfg.drc_waived_refs,cfg.drc_retained_refs) if self.reconstruction_toggle.isChecked() else ((),())
+        stamp=(id(entries),cfg.drc_checks,cfg.drc_visible,id(self.ignored_drc),auto,figures)
         if stamp==self._issue_table_stamp:return
         from .drc_policy import visible
         self._drc_cleared_figures=frozenset()
-        if entries and (self.ignored_drc or auto):
-            from .drc_waivers import cleared_sources,event_id,pose_id,witness_id
+        if entries and (self.ignored_drc or auto or any(figures)):
+            from .drc_waivers import cleared_sources,event_id,figure_decision,figure_refs,pose_id,witness_id
             saved=self.ignored_drc.get(pose_id(self.current_frame['states']),{})
             waived=set(saved.get('ignored',()));retained=set(saved.get('retained',()))
-            flags=[((key:=witness_id(q)) in waived or bool(auto and event_id(q) in auto)) and key not in retained for q in entries]
+            ignored_refs,retained_refs=map(set,figures)
+            flags=[];display=[]
+            for row in entries:
+                decision=figure_decision(figure_refs(row),ignored_refs,retained_refs) if any(figures) else None
+                if decision is None:
+                    key=witness_id(row) if waived or retained else None
+                    flag=(key in waived or bool(auto and event_id(row) in auto)) and key not in retained
+                else:flag=decision
+                flags.append(flag)
+                display.append(dict(row,ignored=flag,figure_policy=decision) if decision is not None else dict(row,ignored=True) if flag else row)
             self._drc_cleared_figures=cleared_sources(self.current_frame,entries,flags)
-            entries=[dict(q,ignored=flag) if flag else q for q,flag in zip(entries,flags)]
+            entries=display
         self._issue_table_stamp=stamp;self.display_issues=[q for q in entries if visible(self.view_settings,q)]
         self.show_issue_page(self.issue_page)
     def show_issue_page(self,page):
@@ -3222,7 +3272,7 @@ class MainWindow(W.QMainWindow):
             for w in running:w.cancelled.set()
             event.ignore();return
         self._closing=True;self._queued_node_edit=None
-        for timer in (self.cache_status_timer,self.viewport_timer,self.coverage_timer,self.issue_navigation):timer.stop()
+        for timer in (self.cache_status_timer,self.viewport_timer,self.coverage_timer,self.issue_navigation,self.runtime_timer):timer.stop()
         W.QApplication.instance().removeEventFilter(self.wheel_filter)
         paths=self.job_watcher.directories()+self.job_watcher.files()
         if paths:self.job_watcher.removePaths(paths)
@@ -3233,7 +3283,7 @@ class MainWindow(W.QMainWindow):
 def launch(project=None,measured=False,ipc_endpoint=None):
     app=W.QApplication.instance() or W.QApplication([]);app.setApplicationName('Die Shift Analyze')
     startup_status={'failed':False}
-    window=MainWindow();window.requested_ipc_endpoint=ipc_endpoint;window.requested_measured=bool(measured);window.show()
+    window=MainWindow(measured=measured);window.requested_ipc_endpoint=ipc_endpoint;window.show()
     if measured:
         def startup_error(message):
             window.log_bus.emit(str(message),'ERROR');window._closing=True;startup_status['failed']=True

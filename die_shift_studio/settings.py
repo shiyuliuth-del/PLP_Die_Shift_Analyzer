@@ -29,6 +29,8 @@ class ViewSettings:
     max_memory_mb:int=0
     reconstruction_pad_trigger_um:float=5.
     reconstruction_node_snap_um:float=0.
+    drc_waived_refs:tuple=()
+    drc_retained_refs:tuple=()
     reconstruction_node_snap_strength:float=0.4
     save_project_results:bool=True
     result_cache_directory:str=''
@@ -117,7 +119,6 @@ class ViewSettings:
     reconstruction_added:tuple=() # source layer,index,nominal x,y,stable id
     reconstruction_grid_nodes:int=3
     reconstruction_intervals:tuple=()  # layer,index,owner,via refs,route fingerprint,s0,s1
-    reconstruction_corner_guard_um:float=0.
     reconstruction_auto_waive_drc:bool=False
     reconstruction_waiver_mantissa:int=1
     reconstruction_waiver_exponent:int=-6
@@ -181,6 +182,9 @@ class ViewSettings:
     @classmethod
     def from_dict(cls,values=None):
         values=dict(values or {})
+        old_corner=values.pop('reconstruction_corner_guard_um',0.)
+        if not values.get('reconstruction_node_snap_um',0.):
+            values['reconstruction_node_snap_um']=old_corner
         from .drc_policy import ALL
         for name in ('drc_checks','drc_visible'):
             raw=values.get(name,ALL)
@@ -199,7 +203,8 @@ class ViewSettings:
         values['reconstruction_intervals']=tuple(intervals)
         if 'reconstruction_fixed_via_mode' not in values and values.get('reconstruction_link_fixed_vias') is True:
             values['reconstruction_fixed_via_mode']='global'
-        for name in ('reconstruction_ignored','reconstruction_following','reconstruction_fixed_via_follows','reconstruction_box_excluded'):
+        for name in ('reconstruction_ignored','reconstruction_following','reconstruction_fixed_via_follows','reconstruction_box_excluded',
+                     'drc_waived_refs','drc_retained_refs'):
             refs=values.get(name,())
             if not isinstance(refs,(list,tuple)) or any(not isinstance(r,(list,tuple)) or len(r)!=2 or not isinstance(r[0],str) or type(r[1]) is not int or r[1]<0 for r in refs):raise ValueError('忽略重构图形编号无效')
             values[name]=tuple(sorted(set(tuple(r) for r in refs)))
@@ -241,14 +246,13 @@ class ViewSettings:
         limits['space_export_interval_um']=(.001,10000.)
         limits.update(reconstruction_node_snap_um=(-1,1000),reconstruction_node_snap_strength=(0,1))
         if -1 < q.reconstruction_node_snap_um < 0:raise ValueError('边界节点拖动吸附可填写 −1、0 或正距离')
-        if -1 < q.reconstruction_corner_guard_um < 0:raise ValueError('拐角吸附预留可填写 −1、0 或正距离')
         limits.update(reconstruction_waiver_mantissa=(1,9),reconstruction_waiver_exponent=(-99,0))
         integers.update(('reconstruction_waiver_mantissa','reconstruction_waiver_exponent'))
         if q.reconstruction_waiver_exponent==0 and q.reconstruction_waiver_mantissa!=1:
             raise ValueError('DRC 自动忽略概率不得大于 1')
         if type(q.reconstruction_auto_waive_drc) is not bool:raise ValueError('自动忽略低概率DRC必须为布尔值')
         limits.update(width_yield_exponent=(8,20),width_yield_seed=(0,2147483647),width_grid_nodes=(3,21))
-        limits.update(reconstruction_pad_trigger_um=(0,1000),reconstruction_grid_nodes=(3,9),reconstruction_corner_guard_um=(-1,1000),cache_max_entries=(10,100000),yield_sample_exponent=(8,20),yield_box_budget=(64,65536),yield_tolerance=(.000001,.1),
+        limits.update(reconstruction_pad_trigger_um=(0,1000),reconstruction_grid_nodes=(3,9),cache_max_entries=(10,100000),yield_sample_exponent=(8,20),yield_box_budget=(64,65536),yield_tolerance=(.000001,.1),
 
                       safe_box_precision=(.0001,.1),
                       safe_box_budget=(32,32768),safe_box_starts=(1,6),safe_box_passes=(1,8))
@@ -279,7 +283,7 @@ class ViewSettings:
     def reconstruction_key(self):
         """Everything the reconstruction result depends on besides the pose."""
         return (True,'nominal-route-continuity-v59',self.reconstruction_die_mode,self.reconstruction_fixed_via_mode,self.reconstruction_fixed_via_follows,self.reconstruction_box_excluded,self.drc_checks,self.evaluation_scope,self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_allow_moving_pad,self.reconstruction_pad_trigger_um,self.reconstruction_ignored,self.reconstruction_following,self.drc_tolerance_um,self.drc_min_angle_deg,
-                self.reconstruction_corner_guard_um,tuple(self.reconstruction_intervals),
+                tuple(self.reconstruction_intervals),
                 self.reconstruction_forced,self.reconstruction_angles,self.reconstruction_deleted,self.reconstruction_added,
                 tuple(self.reconstruction_regions),tuple(self.reconstruction_boxes),tuple(self.reconstruction_angle_boxes),tuple(self.reconstruction_cuts),
                 tuple(self.reconstruction_extra_cuts),tuple(self.reconstruction_second_cuts),

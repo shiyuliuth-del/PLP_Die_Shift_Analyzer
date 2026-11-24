@@ -25,7 +25,7 @@ def main():
         else:raise AssertionError('V35 UI timeout')
         app.processEvents()
         assert not errors,errors
-        assert '未处理异常' not in w.runtime_view.toPlainText(),w.runtime_view.toPlainText()[-2000:]
+        assert '未处理异常' not in w.log_bus.text(),w.log_bus.text()[-2000:]
     try:
         job=json.loads((ROOT/'examples/示例O_运动网络三线路通道.json').read_text(encoding='utf-8'))
         job['gds_path']=str(ROOT/'examples'/job['gds_path'])

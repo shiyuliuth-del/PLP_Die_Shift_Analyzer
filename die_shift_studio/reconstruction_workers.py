@@ -54,8 +54,8 @@ def _verify(digits, fresh=False):
                 item['nominal_regions'] = {'A': q['nominal_regions']['A']}
             pieces.append(item)
         summary = dict(pieces=pieces, repair_refs=frame['repair_refs'], hard_failures=frame['hard_failures'], violations=bool(frame['violations']))
-        if solver.settings.reconstruction_auto_waive_drc:
-            from .drc_waivers import scene_events
+        from .drc_waivers import needs_events,scene_events
+        if needs_events(solver.settings):
             summary['waiver_events']=scene_events(solver,states,frame)
         return digits, states, summary, edges
 

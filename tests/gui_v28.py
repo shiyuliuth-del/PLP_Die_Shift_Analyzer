@@ -26,7 +26,7 @@ def wait():
         time.sleep(.005)
     else:raise AssertionError('GUI timeout')
     assert not errors,errors
-    assert '未处理异常' not in w.runtime_view.toPlainText(),w.runtime_view.toPlainText()[-2000:]
+    assert '未处理异常' not in w.log_bus.text(),w.log_bus.text()[-2000:]
 
 def load(name,params=None):
     q=json.loads((ROOT/'examples'/(name+'.json')).read_text());q['parameters'].update(params or {})
