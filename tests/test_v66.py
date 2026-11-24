@@ -117,7 +117,8 @@ class V66Tests(unittest.TestCase):
         self.assertEqual(ViewSettings().space_export_interval_um, 100.)
         # Req 5: default expanded_process includes all 5 process sections
         norm = normalize_project({'schema_version': 5, 'roles': {}, 'parameters': {}})
-        self.assertEqual(set(norm['expanded_process']), {'线宽线距', '过孔包围量', '图形过滤', '芯片距离', '其他'})
+        self.assertEqual(set(norm['expanded_process']), {'线宽线距', '过孔包围量', '芯片距离', '其他'})
+        self.assertEqual(normalize_project({'schema_version':5,'expanded_process':['图形过滤']})['expanded_process'],['其他'])
         # Explicit saved expanded_process is preserved
         norm_explicit = normalize_project({'schema_version': 5, 'roles': {}, 'parameters': {}, 'expanded_process': ['线宽线距']})
         self.assertEqual(norm_explicit['expanded_process'], ['线宽线距'])

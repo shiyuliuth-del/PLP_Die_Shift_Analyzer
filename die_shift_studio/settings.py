@@ -117,7 +117,10 @@ class ViewSettings:
     reconstruction_added:tuple=() # source layer,index,nominal x,y,stable id
     reconstruction_grid_nodes:int=3
     reconstruction_intervals:tuple=()  # layer,index,owner,via refs,route fingerprint,s0,s1
-    reconstruction_corner_guard_um:float=3.0
+    reconstruction_corner_guard_um:float=0.
+    reconstruction_auto_waive_drc:bool=False
+    reconstruction_waiver_mantissa:int=1
+    reconstruction_waiver_exponent:int=-6
     yield_method:str='monte_carlo'
     yield_sample_exponent:int=12
     yield_box_budget:int=4096
@@ -238,8 +241,14 @@ class ViewSettings:
         limits['space_export_interval_um']=(.001,10000.)
         limits.update(reconstruction_node_snap_um=(-1,1000),reconstruction_node_snap_strength=(0,1))
         if -1 < q.reconstruction_node_snap_um < 0:raise ValueError('边界节点拖动吸附可填写 −1、0 或正距离')
+        if -1 < q.reconstruction_corner_guard_um < 0:raise ValueError('拐角吸附预留可填写 −1、0 或正距离')
+        limits.update(reconstruction_waiver_mantissa=(1,9),reconstruction_waiver_exponent=(-99,0))
+        integers.update(('reconstruction_waiver_mantissa','reconstruction_waiver_exponent'))
+        if q.reconstruction_waiver_exponent==0 and q.reconstruction_waiver_mantissa!=1:
+            raise ValueError('DRC 自动忽略概率不得大于 1')
+        if type(q.reconstruction_auto_waive_drc) is not bool:raise ValueError('自动忽略低概率DRC必须为布尔值')
         limits.update(width_yield_exponent=(8,20),width_yield_seed=(0,2147483647),width_grid_nodes=(3,21))
-        limits.update(reconstruction_pad_trigger_um=(0,1000),reconstruction_grid_nodes=(3,9),reconstruction_corner_guard_um=(0,1000),cache_max_entries=(10,100000),yield_sample_exponent=(8,20),yield_box_budget=(64,65536),yield_tolerance=(.000001,.1),
+        limits.update(reconstruction_pad_trigger_um=(0,1000),reconstruction_grid_nodes=(3,9),reconstruction_corner_guard_um=(-1,1000),cache_max_entries=(10,100000),yield_sample_exponent=(8,20),yield_box_budget=(64,65536),yield_tolerance=(.000001,.1),
 
                       safe_box_precision=(.0001,.1),
                       safe_box_budget=(32,32768),safe_box_starts=(1,6),safe_box_passes=(1,8))

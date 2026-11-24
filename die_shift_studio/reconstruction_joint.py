@@ -172,6 +172,21 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
     from .evaluation_scope import digits_for
     visits=(digits_for(grid,i) for i in indices) if indices is not None else product(*(range(n) for n in grid.radices))
     total=len(indices) if indices is not None else grid.total+1
+    waiver_poses={};source_events={};mass=defaultdict(float);protected=set()
+    if r.settings.reconstruction_auto_waive_drc:
+        from .reconstruction_probability import extreme_weights
+        from .evaluation_scope import conditional_weights
+        if indices is None:
+            local_weights,error=extreme_weights(grid,r.p)
+            def weight(index,digits):
+                return math.prod(local_weights[i][digit] for i,digit in enumerate(digits))
+        else:
+            chosen,raw_error,log_mass=conditional_weights(grid,r.p,indices)
+            retained=math.exp(log_mass)
+            error=min(1.,2*raw_error/max(retained-raw_error,np.finfo(float).tiny))
+            by_index=dict(zip(indices,chosen))
+            def weight(index,digits):return by_index[index]
+        error+=32*np.finfo(float).eps*total
     # Each lane owns its mutable plan, rule and frame caches. Every result is
     # reduced by its original digits, even when a later pose finishes first.
     import threading
@@ -203,6 +218,9 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
         else:
             states=np.asarray([v[d] for v,d in zip(grid.locals,digits)])
             frame=solver.frame(states)
+        if r.settings.reconstruction_auto_waive_drc:
+            from .drc_waivers import scene_events
+            frame['waiver_events']=scene_events(solver,states,frame)
         edges=routing_violations(r.model,states,r.p,r.settings,frame['replacements'])
         return digits,states,frame,edges
     import time
@@ -231,6 +249,15 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
         repairs+=bool(frame['repair_refs'])
         remember(r,states,frame)
         clause=PoseClause(tuple((o,(int(d),)) for o,d in enumerate(digits)));index=grid.index(digits)
+        if 'waiver_events' in frame:
+            events,unsafe,sources,hard=frame['waiver_events']
+            if events:
+                value=weight(index,digits)
+                for event in events:mass[event]+=value
+                protected.update(unsafe)
+                if not hard:waiver_poses[index]=events
+                for ref,required in sources.items():
+                    source_events.setdefault(ref,{})[index]=required
         if frame['violations'] or frame['hard_failures'] or current_failures(frame):scene_records.add(clause)
         if frame['hard_failures'] or any(q.get('connection_failed') for q in frame['pieces']):connection_records.add(clause)
         for q in frame['pieces']:
@@ -252,11 +279,14 @@ def scan(r,grid,bundles,progress=lambda *_:None,indices=None):
         zones[key]=dict(complete=True,has_failure=bool(clauses),clauses=clauses,failing_states=idx.total+idx.zero,kinds=tuple(sorted(reasons[key])),
                         witness=witnesses.get(key),severity=severity.get(key,'green'),
                         probability=dict(lower=0.,upper=1.,certified=False,reason='有限离散极端不能证明连续概率上界'))
+    waiver_data=(dict(drc_event_probability={key:min(1.,value+error) for key,value in mass.items() if key not in protected},
+                      drc_event_poses=waiver_poses,drc_event_sources=source_events)
+                 if r.settings.reconstruction_auto_waive_drc else {})
     return dict(complete=True,grid=grid,grid_key=tuple(v.tobytes() for v in grid.locals),zones=zones,
                 routing_summary=dict(lines=routing_lines,witnesses=routing_witnesses,red_factors=sorted(routing_factors,key=lambda q:q.allowed)),
                 connection_factors=tuple(sorted(connection_records,key=lambda q:q.allowed)),red_factors=tuple(sorted(scene_records,key=lambda q:q.allowed)),package_states=total,selected_indices=tuple(indices) if indices is not None else None,
                 geometry_checks=sum(len(b['values']) for b in bundles.values()) if bundles is not None else total,local_checks=total,pair_checks=total,
-                joint_repaired_states=repairs,scope=('所选' if indices is not None else '全部')+'离散极端；按电连接补偿后的实际铜联合核验。连续概率另给界限。')
+                joint_repaired_states=repairs,scope=('所选' if indices is not None else '全部')+'离散极端；按电连接补偿后的实际铜联合核验。连续概率另给界限。',**waiver_data)
 
 
 def yield_value(r,p,cfg,grid,bundles,progress,partial=None):

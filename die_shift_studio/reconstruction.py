@@ -407,7 +407,7 @@ class Reconstructor:
                     if line is not None:seen.add(line.wkb)
                     if line is None:continue
                     traced.append(line)
-                    plan=RoutePlan(layer,index,owner,local_base['refs'],source,line,land,tuple(fixed),self.tol,self.settings.reconstruction_corner_guard_um,memo_budget=memo_budget)
+                    plan=RoutePlan(layer,index,owner,local_base['refs'],source,line,land,tuple(fixed),self.tol,max(0.,self.settings.reconstruction_corner_guard_um),memo_budget=memo_budget)
                     terminal_fixed=real_fixed
                     plan.terminal_vias=(tuple(v['poly'] for v in moving),terminal_fixed)
                     physical_start=any(g.dwithin(shapely.Point(line.coords[0]),self.tol) for g in plan.terminal_vias[0])
@@ -527,7 +527,7 @@ class Reconstructor:
                     if progress and number%8==0:progress(25,f'分叉连接 {layer} #{index+1}：{number+1}/{len(pairs)}')
                 if rows and all(q['plan'] is not None for q in rows):return rows
             from .reconstruction_route import branch_sources
-            branches=branch_sources(source,land,fixed,mine[0]['center'],self._rule_width,self.tol,self.settings.reconstruction_corner_guard_um)
+            branches=branch_sources(source,land,fixed,mine[0]['center'],self._rule_width,self.tol,max(0.,self.settings.reconstruction_corner_guard_um))
             if branches:
                 return [dict(build_source(g,common,[anchor]),branch=i+1,branch_count=len(branches)) for i,(g,common,anchor) in enumerate(branches)]
             combined=build_source(source,land,fixed)
@@ -552,7 +552,7 @@ class Reconstructor:
                     anchor=shapely.Point(xy[int(np.argmax(dist))]).buffer(self.tol*16).intersection(source)
                     protected=[anchor]
                 protected=anchor_clusters(source,protected,local_land,self._rule_width,self.tol)
-                parts=branch_sources(source,local_land,protected,cluster[0]['center'],self._rule_width,self.tol,self.settings.reconstruction_corner_guard_um)
+                parts=branch_sources(source,local_land,protected,cluster[0]['center'],self._rule_width,self.tol,max(0.,self.settings.reconstruction_corner_guard_um))
                 if parts:
                     rows.extend(dict(build_source(g,trunk,[anchor],cluster),branch=j+1,branch_count=len(parts)) for j,(g,trunk,anchor) in enumerate(parts))
                 else:
@@ -563,7 +563,7 @@ class Reconstructor:
         # Route construction is pose-independent and reused after every handle edit.
         from .session_cache import logical_fingerprint
         base_key=logical_fingerprint((self.model.data.geometry_id,self.model.roles,self.model.connections.order,
-                                'source-routes-v58',self.settings.evaluation_scope=='risk',self.rules.identity,bool(getattr(self,'measured_only',False)),self.settings.reconstruction_allow_moving_pad,self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,self.settings.reconstruction_corner_guard_um,'c2'))
+                                'source-routes-v58',self.settings.evaluation_scope=='risk',self.rules.identity,bool(getattr(self,'measured_only',False)),self.settings.reconstruction_allow_moving_pad,self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,max(0.,self.settings.reconstruction_corner_guard_um),'c2'))
         # Forcing/editing one source must not rebuild every source path. Mine
         # membership includes enclosure filtering; all-via ownership controls
         # allocation. Existing path identities survive later manual edits.

@@ -113,12 +113,19 @@ def extended_masks(original, adjusted, masks, amount, dbu):
     # Very narrow features can disappear/merge on the output grid. Classify
     # each resulting face by its surviving overlap with nominal material.
     labels = {**masks, 'B': original.difference(shapely.union_all(list(masks.values())))}
+    trees = {key: shapely.STRtree(shapely.get_parts(g)) for key,g in labels.items() if not g.is_empty}
     classified = {key: [] for key in masks}
     for face in polygonize(shapely.union_all(lines)):
         if not adjusted.covers(face.representative_point()):
             continue
-        label = max(labels, key=lambda key: (face.intersection(labels[key]).area,
-                                            -face.distance(labels[key])))
+        overlap={}
+        for key,tree in trees.items():
+            near=tree.query(face,predicate='intersects')
+            if len(near):overlap[key]=float(shapely.area(shapely.intersection(tree.geometries[near],face)).sum())
+        if overlap and max(overlap.values())>0:
+            label=max(overlap,key=overlap.get)
+        else:
+            label=min(trees,key=lambda key:face.distance(trees[key].geometries[trees[key].nearest(face)]))
         if label in classified:
             classified[label].append(face)
     return {key: shapely.union_all(faces) for key, faces in classified.items()}
