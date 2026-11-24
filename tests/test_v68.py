@@ -19,6 +19,31 @@ from test_v38 import fixture
 
 
 class V68Tests(TestCase):
+    def test_failure_outline_and_dashed_segments_exclude_clean_sibling(self):
+        from types import SimpleNamespace
+        from die_shift_studio.reconstruction_diagnostic import display
+        from die_shift_studio.reconstruction_events import active_region,zone_severity
+
+        source=box(0,0,100,10)
+        healthy=box(55,0,90,10)
+        bad=dict(layer='5/0',index=4,die=0,interval=(0.,100.),connection_failed=True,
+                 regions=dict(A=source),route_plan=SimpleNamespace(partition=lambda *_:{}))
+        good=dict(layer='5/0',index=4,die=0,connection_failed=False,regions=dict(A=healthy))
+        result=dict(pieces=[bad,good],hard_failures=[(('5/0',4),'连接失败')],
+                    replacements={'5/0':[dict(indices=(4,),geometry=source)]})
+        sections=(None,None,None,None,np.array([[0.,0.],[0.,10.]]),np.array([[100.,0.],[100.,10.]]))
+        with patch('die_shift_studio.connection_curves.connection_data',return_value=sections):
+            frame=display(result,np.zeros((1,2)),np.zeros((1,3)))
+        rejected,clean=frame['pieces']
+        self.assertEqual(zone_severity(rejected),'red')
+        self.assertEqual(zone_severity(clean),'green')
+        self.assertTrue(active_region(rejected).equals(source.difference(healthy)))
+        self.assertEqual(rejected['diagnostic_outline'].intersection(healthy).length,0.)
+        self.assertTrue(frame['replacements']['5/0'][0]['geometry'].equals(healthy))
+        self.assertEqual(len(frame['failed_segments']),4)
+        for edge in frame['failed_segments']:
+            self.assertEqual(LineString(edge['points']).intersection(healthy).length,0.)
+
     def test_corner_snap_distance_is_optional_and_local(self):
         from die_shift_studio.reconstruction_route import RoutePlan
         route=LineString([(0,0),(80,0),(80,100)])

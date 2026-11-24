@@ -293,8 +293,8 @@ class ReconstructionOverlay:
             self.artists={}
             self.staged=PatchCollection([],facecolor='#5992b62a',edgecolor='#44698c',linestyles='--',linewidths=1.3,zorder=10);w.ax.add_collection(self.staged)
             self.warning=PatchCollection([],facecolor='none',edgecolor=WARNING_COLOR,linestyles='--',linewidths=.8,zorder=9.4);w.ax.add_collection(self.warning)
-            self.problems=PatchCollection([],facecolor='none',edgecolor='#b92d39',alpha=.7,linewidths=.9,zorder=9.7);w.ax.add_collection(self.problems)
-            self.low_problems=PatchCollection([],facecolor='none',edgecolor='#b92d39',alpha=.28,linestyles=':',linewidths=.7,zorder=9.6);w.ax.add_collection(self.low_problems)
+            self.problems=LineCollection([],colors='#b92d39',alpha=.7,linestyles='--',linewidths=.9,zorder=9.7);w.ax.add_collection(self.problems)
+            self.low_problems=LineCollection([],colors='#b92d39',alpha=.28,linestyles=':',linewidths=.7,zorder=9.6);w.ax.add_collection(self.low_problems)
             self.cuts=LineCollection([],colors=CUT_COLOR,linewidths=2.2,zorder=11.5);w.ax.add_collection(self.cuts)
             self.second_cuts=LineCollection([],colors=SECOND_CUT_COLOR,linewidths=2.2,zorder=11.6);w.ax.add_collection(self.second_cuts)
             self.points=Line2D([],[],ls='none',marker='o',markersize=8,color=CUT_COLOR,markeredgecolor='white',markeredgewidth=.8,zorder=12);w.ax.add_line(self.points)
@@ -379,7 +379,9 @@ class ReconstructionOverlay:
             paint_status=('low_'+status) if is_low else status
             if not gactive.is_empty and _in_view(gactive.bounds,w.view_bounds):
                 region_groups.setdefault((*ref,'A',paint_status),{})[id(gactive)]=gactive
-                if status=='red':(low_red if is_low else red).append(patch(gactive))
+                if status=='red':
+                    outline=q.get('diagnostic_outline') if not nominal else None
+                    (low_red if is_low else red).extend(_lines(gactive.boundary if outline is None else outline))
                 if q.get('routing_recovered') and not waived:warnings.append(patch(gactive))
             if q.get('box_invalid'):continue
             for kind,target,dot_list,line_list in (('moved','moved_cut',dots,first),('extra','extra_cut',far_dots,second)):
@@ -482,8 +484,8 @@ class ReconstructionOverlay:
                 t.get_bbox_patch().set_edgecolor(edge_color);t.set_visible(True)
             t.set_color(edge_color)
         for t in self.staged_tags[len(tag_items):]:t.set_visible(False)
-        self.problems.set_paths(red);self.problems.set_visible(bool(red))
-        self.low_problems.set_paths(low_red);self.low_problems.set_visible(bool(low_red))
+        self.problems.set_segments(red);self.problems.set_visible(bool(red))
+        self.low_problems.set_segments(low_red);self.low_problems.set_visible(bool(low_red))
         self.warning.set_paths(warnings);self.warning.set_visible(bool(warnings))
         self.cuts.set_segments(first);self.cuts.set_visible(bool(first));self.second_cuts.set_segments(second);self.second_cuts.set_visible(bool(second))
         self.points.set_data(np.array(dots).T if dots else [[],[]]);self.points.set_visible(bool(dots))
