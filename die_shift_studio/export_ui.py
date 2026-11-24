@@ -1,6 +1,7 @@
 """Native save picker and background export of a frozen completed scene."""
 from pathlib import Path
 from .qt_compat import QtWidgets as W,run_dialog,ACCEPTED
+from .layer_roles import EXPORT_ONLY,NON_PARTICIPATING
 
 
 def export_dxf(window,regions=False):
@@ -24,16 +25,16 @@ def export_dxf(window,regions=False):
     window.stop_animation()
     data=window.data;cache=window.geometry_cache;frame=window.current_frame
     options=window.dxf_settings
-    selected=frozenset(data.layers) if options.layer_scope=='all' else frozenset(k for k,v in window.visible_boxes.items() if v.isChecked()) if options.layer_scope=='visible' else frozenset(k for k,v in window.roles().items() if v!='不参与')
-    if not selected:window.error('所选导出范围没有图层');return
+    roles=window.roles()
+    selected=set(data.layers) if options.layer_scope=='all' else {k for k,v in window.visible_boxes.items() if v.isChecked()} if options.layer_scope=='visible' else {k for k,v in roles.items() if v not in NON_PARTICIPATING}
     flags=dict(reconstruction=window.reconstruction_toggle.isChecked())
     if frame is not None and getattr(window,'preview_pending',None):
         window.error('当前预演仍在更新，请显示完成后再输出');return
-    roles=window.roles()
     if regions:
         from .region_contract import EXPORT_ROLES
-        selected=frozenset(k for k in selected if roles.get(k) in EXPORT_ROLES)
-        if not selected:window.error('所选范围没有封装边框、芯片边框或固定RDL');return
+        selected={k for k in selected if roles.get(k) in EXPORT_ROLES}
+        selected.update(k for k,v in roles.items() if v==EXPORT_ONLY)
+    if not selected:window.error('所选导出范围没有图层');return
     process=window.params();view=window.view_settings;model=window.engine.contact if regions else None
     compensation=window.output_compensation()
     export_plans={}
@@ -80,6 +81,7 @@ def export_dxf(window,regions=False):
         message=f"DXF已输出：{result['path']} · {result['polygons']}个图形，{result['layers']}层；Flatten已完成，Merge {'开启' if result['merge_layers'] else '关闭'}（{result['input_polygons']}→{result['merged_polygons']}）；比例{result['scale']:g}，单位μm。"
         if result.get('regions'):
             message+=' 固定RDL按 _A 运动侧、_B 固定侧、_C 动区输出CAD块；封装和芯片完整轮廓分别在 PKG_REF、DIE_REF。'
+            if result['extra_layers']:message+=f" 已附带 {result['extra_layers']} 个标准DXF图层。"
             if result.get('unresolved_regions'):message+=f" {result['unresolved_regions']}个重构区域未完成有效连接；输出当前实际实体，红色提示区不导出。"
         if result['ignored']:message+=f"已跳过导入时未能识别的{result['ignored']}个图形。"
         window.log_bus.emit(message);window.statusBar().showMessage(message)

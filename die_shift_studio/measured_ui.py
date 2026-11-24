@@ -320,6 +320,7 @@ class MeasuredOutput(QtCore.QObject):
             if self.session:self.session.close();self.session=None
             if command=='project.close':
                 w.drop_result();w.data=None;w.case=None;w.project_path=None;w.geometry_cache=None;w.connections=None
+                w.layer_drag.end_drag()
                 w.layer_table.setRowCount(0);w.role_boxes={};w.visible_boxes={};w.compensation_boxes={};w._layer_keys=[];w.gds_label.clear()
                 w.top.blockSignals(True);w.top.clear();w.top.blockSignals(False)
                 w.ax.clear();w.canvas.draw_idle();w.refresh_jobs();return dict(status='completed',result={'closed':True})

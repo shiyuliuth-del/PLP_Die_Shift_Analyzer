@@ -16,7 +16,7 @@ class LogBus(QtCore.QObject):
             try:self.path.parent.mkdir(parents=True,exist_ok=True)
             except OSError:self.path=None
     def emit(self,text,level='INFO'):
-        stamp=datetime.now().astimezone().isoformat(timespec='milliseconds')
+        stamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         lines=[f'{stamp} [{level}] {line}' for line in str(text).rstrip().splitlines()]
         if self.path:
             try:

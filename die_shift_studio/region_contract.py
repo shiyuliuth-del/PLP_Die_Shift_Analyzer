@@ -56,10 +56,12 @@ def _records(path):
         yield record, fields
 
 
-def verify_written_contours(path, *, expected_blocks=None, expected_references=None, shared_layers=(), allow_closed_blocks=False):
+def verify_written_contours(path, *, expected_blocks=None, expected_references=None, shared_layers=(),
+                            allow_closed_blocks=False, expected_standard=None):
     """Read actual BLOCK/INSERT coordinates and audit the expanded linework."""
     section = block = None
     contents, block_layers, inserts, references = {}, {}, {}, []
+    standard, expected_standard = Counter(), expected_standard or {}
     for kind, fields in _records(path):
         attrs = dict(fields)
         if kind == 'SECTION':
@@ -91,8 +93,13 @@ def verify_written_contours(path, *, expected_blocks=None, expected_references=N
                 inserts[name] = layer
             elif kind == 'LWPOLYLINE' and attrs[8] in REFERENCE_LAYERS.values():
                 references.append((attrs[8], _outline(fields, attrs, True)))
+            elif (attrs.get(8),kind) in expected_standard:
+                standard[attrs[8],kind]+=1
+                if kind=='LWPOLYLINE':_outline(fields,attrs,True)
             else:
                 raise ValueError('动静区输出包含非轮廓实体')
+    if standard != expected_standard:
+        raise ValueError('一并导出的DXF实体回读不一致')
     if contents.pop('*Model_Space', []) or contents.pop('*Paper_Space', []):
         raise ValueError('动静区输出含未引用轮廓')
     block_layers.pop('*Model_Space', None); block_layers.pop('*Paper_Space', None)
@@ -131,9 +138,9 @@ def verify_written_contours(path, *, expected_blocks=None, expected_references=N
             raise ValueError(f'{name} ABC交界未严格闭合，未覆盖已有文件')
         segments.append(edges)
         summary[name] = dict(segments=len(edges), nodes=len(degree), closed=True, overlap=False)
-    if not summary:
+    if not summary and not standard:
         raise ValueError('未读回有效动静区轮廓')
-    if next(overlapping_edges(shapely.linestrings(np.concatenate(segments))), None) is not None:
+    if segments and next(overlapping_edges(shapely.linestrings(np.concatenate(segments))), None) is not None:
         raise ValueError('动静区DXF存在完全或部分重叠的轮廓线段')
     return summary
 

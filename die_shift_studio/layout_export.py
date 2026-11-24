@@ -121,7 +121,8 @@ def export_layout(w):
     if path==Path(w.data.path).resolve():w.error('不能覆盖当前源图纸，请使用新文件名');return
     w.layout_output_directory=str(path.parent);w.stop_animation()
     data=w.data;cache=w.geometry_cache;frame=w.current_frame;roles=w.roles();settings=w.view_settings;p=w.params();case=w.case
-    selected=set(data.layers) if options.layer_scope=='all' else {k for k,v in w.visible_boxes.items() if v.isChecked()} if options.layer_scope=='visible' else {k for k,v in roles.items() if v!='不参与'}
+    from .layer_roles import NON_PARTICIPATING
+    selected=set(data.layers) if options.layer_scope=='all' else {k for k,v in w.visible_boxes.items() if v.isChecked()} if options.layer_scope=='visible' else {k for k,v in roles.items() if v not in NON_PARTICIPATING}
     show_drc=w.show_issues.isChecked();reconstruction=w.reconstruction_toggle.isChecked();motions=w.motions()
     compensation=w.output_compensation()
     def work(progress):

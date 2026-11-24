@@ -4,6 +4,7 @@ import copy,math,os,tempfile,threading
 from pathlib import Path
 import numpy as np
 import shapely
+from .layer_roles import EXPORT_ONLY
 from .core import Parameters
 from .resources import cancel_check,resource_profile,progress_slice
 
@@ -125,7 +126,7 @@ class Session:
                     if not clean.is_valid or not np.isfinite(shapely.get_coordinates(clean)).all():
                         raise ValueError('重构结果无效，拒绝输出')
                     blobs.append(clean.wkb)
-                cached[key]=tuple(blobs)
+                cached[key]=tuple(b for b in blobs if b is not None) if self.roles.get(key)==EXPORT_ONLY else tuple(blobs)
             self._nominal_wkb=cached
             return cached
     def prepare_output(self):
@@ -150,6 +151,9 @@ class Session:
         nominal_wkbs=self._nominal_wkbs()
         layers={}
         for key,values in self.data.layers.items():
+            if self.roles.get(key)==EXPORT_ONLY:
+                layers[key]=nominal_wkbs[key]
+                continue
             current=frame.get('layers',{}).get(key,{}).get('polygons',values) if frame else values
             items=replacements.get(key,())
             hidden={i for q in items for i in q['indices']}

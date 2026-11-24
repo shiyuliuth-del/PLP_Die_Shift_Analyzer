@@ -1,8 +1,10 @@
 # Agent 自动入口
 
-源码、GitHub与发布只在本规范检出工作。先读 [Agent.md](Agent.md)、[AI交接](docs/AI_HANDOFF.md)、[现行合同](docs/DESIGN_REQUIREMENTS.md)、[已知问题](docs/KNOWN_ISSUES.md) 和 [轮次记录](docs/Agents.md)。当前说明见 [V68 使用说明](docs/V68_使用说明.md)。
+源码、GitHub与发布只在本规范检出工作。先读 [Agent.md](Agent.md)、[AI交接](docs/AI_HANDOFF.md)、[现行合同](docs/DESIGN_REQUIREMENTS.md)、[已知问题](docs/KNOWN_ISSUES.md) 和 [轮次记录](docs/Agents.md)。当前说明见 [V69 使用说明](docs/V69_使用说明.md)。
 
 唯一长期主线是main；最新用户要求优先。保留其他Agent的在途分支，不重写历史tag，不把研究目录整体提交。每轮同步主线、补有意义的回归、记录工程兼容与实际验收，通过PR提交GitHub。正式Release仅源码与校验值，根目录保留 BUILD.bat、DieShiftAnalyze_RUN.bat 和 RealDataAnalyze_RUN.bat。
+
+V69 层叠表保留原位数值输入框，用途与补偿不承担拖动换行。切到运动或固定 RDL 时补偿为 +1.500 μm，其余用途为 0.000 μm。重开工程沿用已存补偿及旧工程隐式零值。「一并导出」为静止、非分析用途，动静区 DXF 附加标准实体，实测复用补偿后的名义图形。
 
 V67 逐姿态忽略精确 DRC 位置，原始检查和实测诊断保留。图层补偿只应用于输出，ABC 分界按同一已补偿外轮廓重取，实测复用预先偏置的名义图形。默认显示 DRC、关动画、边界垂直、ABC 自动 JOIN。禁用自动计算时撤销和重做更新草稿标记。
 

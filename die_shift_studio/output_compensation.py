@@ -9,6 +9,10 @@ import shapely
 from .resources import cancel_check
 
 
+def default_amount(role):
+    return 1.5 if role in ('运动RDL','固定RDL') else 0.
+
+
 def normalize(values=None):
     if values is None:
         return {}
