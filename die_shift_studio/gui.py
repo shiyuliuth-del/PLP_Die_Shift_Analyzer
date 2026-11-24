@@ -624,7 +624,18 @@ class MainWindow(W.QMainWindow):
         choices['reconstruction_box_mode']=[('自由','free'),('符合边界角度','aligned')]
         choice(recon,'reconstruction_box_mode','框选边界')
         choices['reconstruction_fixed_via_mode']=[('关闭','off'),('全局模式','global'),('分别处理','individual')]
-        choice(recon,'reconstruction_fixed_via_mode','整块随动联动固定过孔')
+        choices['reconstruction_between_motion']=[('跟随幅度大的一侧','max'),('跟随幅度小的一侧','min'),('两侧平均','average')]
+        follow_row=W.QWidget();follow_layout=W.QHBoxLayout(follow_row);follow_layout.setContentsMargins(0,0,0,0)
+        fixed_via_box=W.QComboBox()
+        for text,value in choices['reconstruction_fixed_via_mode']:fixed_via_box.addItem(text,value)
+        self.setting_fields['reconstruction_fixed_via_mode']=fixed_via_box;fixed_via_box.currentIndexChanged.connect(self.settings_changed)
+        between_box=W.QComboBox()
+        for text,value in choices['reconstruction_between_motion']:between_box.addItem(text,value)
+        between_box.setToolTip('当一个图形存在多个动区时，控制动区之间刚性铜段的默认随动方式；也可单独选中该段右键切换。')
+        self.setting_fields['reconstruction_between_motion']=between_box;between_box.currentIndexChanged.connect(self.settings_changed)
+        follow_layout.addWidget(W.QLabel('固定过孔随动逻辑'));follow_layout.addWidget(fixed_via_box,1)
+        follow_layout.addWidget(W.QLabel('动区间随动逻辑'));follow_layout.addWidget(between_box,1)
+        recon.addRow(follow_row)
 
         choices['reconstruction_style']=[('直线','linear'),('一阶','c1'),('二阶','c2'),('圆弧','arc')]
         choice(recon,'reconstruction_style','连接样式')
@@ -855,6 +866,37 @@ class MainWindow(W.QMainWindow):
         try:self.case=build_case(self.data,self.roles(),layer_order=self.ordered_layers())
         except ValueError:pass
         self.apply_automatic();self.invalidate();self.plot_layout(preserve=True)
+    def apply_stackup(self,target_roles,target_order,target_compensation=None,*,case=None):
+        """Synchronize layer table roles, row order and output compensation without erroring on mismatch."""
+        if self.data is None:return
+        self.loading=True;self._reordering=True
+        try:
+            for key,role in target_roles.items():
+                if key in self.role_boxes:
+                    prev=self.role_boxes[key].currentText()
+                    if prev!=role:
+                        self.stage_hints.pop(key,None)
+                        self.role_boxes[key].setCurrentText(role)
+                        if key in self.visible_boxes:self.visible_boxes[key].setChecked(role not in NON_PARTICIPATING)
+                        if key in self.selectable_boxes:self.selectable_boxes[key].setChecked(role=='固定RDL')
+            if target_compensation:
+                for key,val in target_compensation.items():
+                    if key in self.compensation_boxes:self.compensation_boxes[key].setValue(float(val))
+            header=self.layer_table.verticalHeader()
+            for visual_target,key in enumerate(target_order):
+                if key not in self._layer_keys:continue
+                logical=self._layer_keys.index(key)
+                current_visual=header.visualIndex(logical)
+                if current_visual!=visual_target:header.moveSection(current_visual,visual_target)
+            self.case=case
+            if self.case is None:
+                try:self.case=build_case(self.data,self.roles(),layer_order=self.ordered_layers())
+                except ValueError:pass
+            self.connections=None;self.engine=None;self.revision+=1
+            self.apply_automatic()
+        finally:
+            self._reordering=False;self.loading=False
+        self.plot_layout(preserve=True)
     def overlay_widget(self,name):
         return self.show_issues if name=='drc' else getattr(self,name+'_toggle')
     def motions(self):return {key:default_motion(role) for key,role in self.roles().items()}
@@ -1255,6 +1297,7 @@ class MainWindow(W.QMainWindow):
                 compensation.setValue(saved_compensation.get(key,default))
                 compensation.setToolTip('输出层轮廓补偿 / μm。负值内缩，正值外扩。')
                 self.compensation_boxes[key]=compensation;self.layer_table.setCellWidget(i,4,compensation)
+                for widget in (check,sel,box,compensation):self.layer_drag.watch_context(widget)
             for j,width in enumerate([38,38,80,128,98]):self.layer_table.setColumnWidth(j,width)
             self.layer_table.horizontalHeader().setStretchLastSection(True)
             for key,w in self.fields.items():w.setValue(getattr(pars,key))
@@ -1712,13 +1755,13 @@ class MainWindow(W.QMainWindow):
     def clear_manual_cuts(self,*_):
         extras=getattr(self.view_settings,'reconstruction_extra_cuts',())
         dropped=getattr(self.view_settings,'reconstruction_dropped_cuts',())
-        if not any((self.view_settings.reconstruction_cuts,extras,dropped,self.view_settings.reconstruction_second_cuts,self.view_settings.reconstruction_intervals,self.view_settings.reconstruction_angles,self.view_settings.reconstruction_deleted,self.view_settings.reconstruction_added,self.view_settings.reconstruction_boxes,self.view_settings.reconstruction_angle_boxes)):return
+        if not any((self.view_settings.reconstruction_cuts,extras,dropped,self.view_settings.reconstruction_second_cuts,self.view_settings.reconstruction_intervals,self.view_settings.reconstruction_angles,self.view_settings.reconstruction_deleted,self.view_settings.reconstruction_added,self.view_settings.reconstruction_boxes,self.view_settings.reconstruction_angle_boxes,self.view_settings.reconstruction_between_overrides)):return
         from dataclasses import replace
         # Also restores the automatic cuts that were deleted, so one button undoes
         # every hand edit of the cut lines.
         self.edit_history.record()
         self.view_settings=replace(self.view_settings,reconstruction_cuts=(),
-                                   reconstruction_extra_cuts=(),reconstruction_second_cuts=(),reconstruction_dropped_cuts=(),reconstruction_intervals=(),reconstruction_angles=(),reconstruction_deleted=(),reconstruction_added=(),reconstruction_forced=(),reconstruction_boxes=(),reconstruction_angle_boxes=(),reconstruction_box_excluded=())
+                                   reconstruction_extra_cuts=(),reconstruction_second_cuts=(),reconstruction_dropped_cuts=(),reconstruction_intervals=(),reconstruction_angles=(),reconstruction_deleted=(),reconstruction_added=(),reconstruction_forced=(),reconstruction_boxes=(),reconstruction_angle_boxes=(),reconstruction_box_excluded=(),reconstruction_between_overrides=())
         self.invalidate_reconstruction_edit()
         self.statusBar().showMessage('已清除全部手动切口，并恢复被删除的自动切口')
         self.request_preview()
@@ -3015,10 +3058,42 @@ class MainWindow(W.QMainWindow):
         else:
             self.statusBar().showMessage(f'已设置：{action}（{len(refs)} 个过孔）')
 
+    def change_between_motion(self,block_id,mode):
+        if self.remote_locked or self.data is None:return
+        from .between_motion import LABELS,MODES
+        if mode is not None and mode not in MODES:return
+        layer,index,ax,ay=block_id
+        layer=str(layer);index=int(index);ax=round(float(ax),4);ay=round(float(ay),4)
+        # Replace any existing override on the same nominal block (matching exact anchor or within nominal geometry).
+        block_geom=None
+        if getattr(self,'selection',None) and self.selection.selected_between and self.selection.selected_between.get('id')==block_id:
+            block_geom=self.selection.selected_between.get('nominal')
+        rows=[]
+        for row in self.view_settings.reconstruction_between_overrides:
+            if (row[0],row[1])==(layer,index):
+                if (row[2],row[3])==(ax,ay):continue
+                if block_geom is not None and not block_geom.is_empty and block_geom.covers(shapely.Point(row[2],row[3])):continue
+            rows.append(row)
+        if mode is not None:
+            rows.append((layer,index,ax,ay,mode))
+        rows=tuple(sorted(set(rows)))
+        if rows==self.view_settings.reconstruction_between_overrides:return
+        self.edit_history.record()
+        self.view_settings=replace(self.view_settings,reconstruction_between_overrides=rows)
+        if getattr(self,'selection',None) and self.selection.selected_between and self.selection.selected_between.get('id')==block_id:
+            self.selection.selected_between=dict(self.selection.selected_between,mode=mode or self.view_settings.reconstruction_between_motion,custom=mode is not None)
+        self.invalidate_reconstruction_edit();self.request_preview(quiet=True)
+        label=LABELS[mode] if mode is not None else '默认（'+LABELS[self.view_settings.reconstruction_between_motion]+'）'
+        if getattr(self,'reconstruction_pending',False):
+            self.statusBar().showMessage(f'已暂存动区间随动逻辑：{label}（点击“重构计算”统一计算）')
+        else:
+            self.statusBar().showMessage(f'已设置动区间随动逻辑：{label}')
+
     def _strip_ignored_zones(self,settings,refs):
         """Automatically delete all movable regions on ignored fixed-RDL shapes."""
         fields=('reconstruction_intervals','reconstruction_angles','reconstruction_deleted','reconstruction_added',
-                'reconstruction_cuts','reconstruction_extra_cuts','reconstruction_second_cuts','reconstruction_dropped_cuts')
+                'reconstruction_cuts','reconstruction_extra_cuts','reconstruction_second_cuts','reconstruction_dropped_cuts',
+                'reconstruction_between_overrides')
         edits={name:tuple(row for row in getattr(settings,name) if tuple(row[:2]) not in refs) for name in fields}
         edits['reconstruction_forced']=tuple(sorted(set(settings.reconstruction_forced)-refs))
         edits['reconstruction_box_excluded']=tuple(sorted(set(settings.reconstruction_box_excluded)|refs))

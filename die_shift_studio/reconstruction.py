@@ -195,12 +195,14 @@ class Reconstructor:
         geometry_mb=max(4,min(512,resource_profile()['memory_budget_mb']//24))
         self.geometry_pool=geometry_pool if geometry_pool is not None else EphemeralCache(
             budget=geometry_mb*1024**2,max_entries=max(4096,128*geometry_mb))
-        from .manual_regions import boxes_by_source
-        def boxes(field,previous):
+        from .manual_regions import box_list_by_source
+        def box_lists(field,previous):
             values=getattr(settings,field)
-            return getattr(reference,previous) if reference is not None and getattr(reference.settings,field)==values else boxes_by_source(model,values)
-        self.source_boxes=boxes('reconstruction_boxes','source_boxes')
-        self.angle_boxes=boxes('reconstruction_angle_boxes','angle_boxes')
+            return getattr(reference,previous) if reference is not None and getattr(reference.settings,field)==values else box_list_by_source(model,values)
+        self.source_box_lists=box_lists('reconstruction_boxes','source_box_lists')
+        self.angle_box_lists=box_lists('reconstruction_angle_boxes','angle_box_lists')
+        self.source_boxes={ref:shapely.union_all(areas) for ref,areas in self.source_box_lists.items()}
+        self.angle_boxes={ref:shapely.union_all(areas) for ref,areas in self.angle_box_lists.items()}
         excluded=set(settings.reconstruction_box_excluded)
         excluded.update(set(settings.reconstruction_ignored)&set(settings.reconstruction_following))
         self.box_refs=(self.source_boxes.keys() | self.angle_boxes.keys())-excluded
@@ -613,19 +615,9 @@ class Reconstructor:
                and e['plan'].owner!=plan.owner and edit_key(e['plan']) not in deleted]
         return not any(getattr(e['plan'],'ownership_domain',e['plan'].source).intersects(box_poly) for e in peers)
 
-    def interval(self,entry):
+    def _interval_without_boxes(self,entry):
         plan=entry['plan']
         if plan is None:return None,False
-        ref=tuple(plan.key[:2])
-        if ref in self.box_refs and ref in self.source_boxes and self._box_applies(plan,self.source_boxes[ref]):
-            from .manual_regions import usable_partition
-            key=plan.key,plan.identity
-            if key not in self.box_partitions:
-                self.box_partitions[key]=usable_partition(plan,self.source_boxes[ref])
-            part=self.box_partitions[key]
-            if part is not None and not part['box_invalid']:return part,True
-            if part is not None and ref not in self.angle_boxes:return part,True
-        if 'merged_part' in entry:return entry['merged_part'],True
         a,b=plan.nominal_first,plan.nominal_second;manual=False
         for l,i,owner,refs,identity,left,right in self.settings.reconstruction_intervals:
             if (l,i,owner,normalize_via_refs(refs))==plan.key and identity==plan.identity:
@@ -635,13 +627,6 @@ class Reconstructor:
                 if part is not None:
                     a,b=part['a'],part['b'];manual=True
                     if not self.settings.reconstruction_regions:return dict(part,manual_angles=pinned),True
-        if ref in self.box_refs and ref in self.angle_boxes and self._box_applies(plan,self.angle_boxes[ref]):
-            from .manual_regions import aligned_partition
-            key=plan.key,plan.identity,'aligned'
-            if key not in self.box_partitions:
-                self.box_partitions[key]=aligned_partition(plan,self.angle_boxes[ref])
-            part=self.box_partitions[key]
-            if part is not None:return part,True
         if entry.get('seeded') and not self.settings.reconstruction_regions:
             from .reconstruction_edits import apply_angles
             return apply_angles(self.settings,plan,plan.partition(a,b)),True
@@ -669,6 +654,12 @@ class Reconstructor:
         from .reconstruction_edits import apply_angles
         base=plan.partition(a,b)
         return apply_angles(self.settings,plan,base),manual
+
+    def interval(self,entry):
+        plan=entry['plan']
+        if plan is None:return None,False
+        if 'merged_part' in entry:return entry['merged_part'],True
+        return self._interval_without_boxes(entry)
 
     def _manual_warning(self,entry,part):
         plan=entry['plan'];key=(plan.key,plan.identity,part['a'],part['b'])
@@ -772,14 +763,19 @@ class Reconstructor:
         retained,retained_pieces=reusable(self,states,selected)
         retained_refs={(layer,i) for layer,rows in retained.items() for row in rows for i in row['indices']}
         entries=[q for q in entries if (selected is None or (q['layer'],q['index']) in selected) and (q['layer'],q['index']) not in retained_refs]
-        from .moving_pair import frames as paired_frames,repose
-        references=paired_frames(entries,self.model.bound.centers,states)
+        from .moving_pair import MultiPairFrame,frames as paired_frames,repose
+        references=paired_frames(entries,self.model.bound.centers,states,settings=self.settings,interval_fn=lambda e:self.interval(e))
         local_states={}
         for entry in entries:
             ref=entry['layer'],entry['index']
             if ref in references:
                 if ref not in local_states:local_states[ref]=states.copy()
-                local_states[ref][entry['owner']]=references[ref].relative
+                ref_pose=references[ref]
+                if isinstance(ref_pose,MultiPairFrame):
+                    owner_frame=ref_pose.per_owner.get(entry['owner'])
+                    if owner_frame is not None:local_states[ref][entry['owner']]=owner_frame.relative
+                else:
+                    local_states[ref][entry['owner']]=ref_pose.relative
         # Independent source features share no mutable geometry. GEOS releases
         # the GIL for warp/validation, so larger frames use the existing hardware
         # admission policy rather than serially processing every route.
@@ -876,17 +872,25 @@ class Reconstructor:
                        bridge_length_um=0 if near is None else near.length,bridge_area_um2=regions['A'].area,bridge_span_um=b-a,
                        clearance_um=None,conflict=False,conflict_net=None,conflict_link=None,manual=manual,manual_lost=False,
                        cut_clamped=False,cut_window=None,orphan=entry['orphan'],follows=entry.get('following',entry['orphan']),warning=warning,valid=valid,priority_failure_mass=self.manual_masses.get((plan.key,plan.identity,a,b),entry.get('priority_failure_mass')) if plan else None)
+            if 'serial_between' in entry:
+                blk,mode_b,custom_b,anchor_b=entry['serial_between']
+                if anchor_b is not None and not blk.is_empty:
+                    posed_blk=transform(blk,self.model.bound.centers[owner],pose*entry['serial_left']) if np.any(pose) and entry['serial_left'] else blk
+                    piece['serial_between_block']=dict(ref=(layer,index),id=(layer,index,*anchor_b),nominal=blk,geometry=posed_blk,mode=mode_b,custom=custom_b,weight=entry['serial_left'])
             pieces.append(piece);feature['pieces'].append(piece)
         from .branch_regions import consolidate
         pieces=consolidate(self,pieces,states,local_states)
         features={}
         for q in pieces:
             features.setdefault((q['layer'],q['index']),dict(source=q['source'],pieces=[],net=q['net']))['pieces'].append(q)
-        out={};conflicts=0
+        out={};conflicts=0;between_blocks=[]
+        from .between_motion import anchor_of
         for (layer,index),feature in features.items():
             ps=feature['pieces'];source=feature['source']
             owners=sorted({q['die'] for q in ps}|{v['owner'] for v in self.vias_by_target.get((layer,index),()) if v['owner']>=0})
-            compose_key=('composed-continuity-v58',self.rules.identity,layer,index,quick,self.settings.reconstruction_style,self.settings.reconstruction_boundary_mode,self.settings.reconstruction_allow_moving_pad,
+            ref_between_overrides=tuple(o for o in getattr(self.settings,'reconstruction_between_overrides',()) if (o[0],o[1])==(layer,index))
+            compose_key=('composed-continuity-v71',self.rules.identity,layer,index,quick,self.settings.reconstruction_style,self.settings.reconstruction_boundary_mode,self.settings.reconstruction_allow_moving_pad,
+                         getattr(self.settings,'reconstruction_between_motion','max'),ref_between_overrides,
                          tuple((owner,states[owner].tobytes(),self.model.bound.centers[owner].tobytes()) for owner in owners),
                          tuple((q['route_identity'],q['interval'],q['boundary_angles'],q.get('ignored'),q.get('ignored_following'),q['endpoint_weights'],q['strict_box'].wkb if q.get('strict_box') is not None else None) for q in ps))
             saved=self.geometry_pool.get(compose_key)
@@ -899,10 +903,31 @@ class Reconstructor:
             else:
                 geometry,occupied,updates=saved
                 for q,update in zip(ps,updates):q.update(update);q['regions']=dict(q['regions'])
-            if (layer,index) in references:geometry=repose(ps,geometry,references[layer,index])
+            if (layer,index) in references:
+                ref_pose=references[layer,index]
+                geometry=repose(ps,geometry,ref_pose)
+                if isinstance(ref_pose,MultiPairFrame) and ref_pose.nominal_core is not None and not ref_pose.nominal_core.is_empty:
+                    ax,ay=anchor_of(ref_pose.nominal_core)
+                    posed_core=transform(ref_pose.nominal_core,ref_pose.center,ref_pose.base) if np.any(ref_pose.base) else ref_pose.nominal_core
+                    between_blocks.append(dict(ref=(layer,index),id=(layer,index,ax,ay),nominal=ref_pose.nominal_core,geometry=posed_core,mode=ref_pose.mode,custom=ref_pose.custom))
+            for q in ps:
+                if 'serial_between_block' in q:
+                    blk_item=dict(q['serial_between_block'])
+                    if (layer,index) in references and np.any(references[layer,index].base):
+                        blk_item['geometry']=transform(blk_item['geometry'],references[layer,index].center,references[layer,index].base)
+                    between_blocks.append(blk_item)
+                if 'between_blocks' in q:
+                    for blk_item in q['between_blocks']:
+                        item=dict(blk_item)
+                        if (layer,index) in references and np.any(references[layer,index].base):
+                            item['geometry']=transform(item['geometry'],references[layer,index].center,references[layer,index].base)
+                        between_blocks.append(item)
             out.setdefault(layer,[]).append(dict(indices=(index,),geometry=geometry,net=feature['net'],movable=occupied,moved=shapely.union_all([q['moved'] for q in ps])))
         for layer,rows in retained.items():out.setdefault(layer,[]).extend(rows)
         pieces.extend(retained_pieces)
+        for q in retained_pieces:
+            if 'serial_between_block' in q:between_blocks.append(q['serial_between_block'])
+            if 'between_blocks' in q:between_blocks.extend(q['between_blocks'])
         # Measure against final neighbouring copper, not source poses.
         for layer in (out if diagnostics else ()):
             replaced={q['indices'][0]:q['geometry'] for q in out[layer]}
@@ -931,7 +956,7 @@ class Reconstructor:
             measures=dict(parallel_map(measure,sorted({(q['index'],q['net']) for q in layer_pieces})))
             for q in layer_pieces:
                 if measures[q['index']] is not None:q.update(measures[q['index']]);conflicts+=int(q['conflict'])
-        result=dict(complete=True,reused_sources=len(retained_refs),auto_ignored=self.auto_ignored,rules=dict(width_um=self.rules.width,space_um=self.rules.space,annulus_um=self.p.annulus_um),configuration=self.settings.reconstruction_key(),dbu_um=self.tol,pieces=pieces,replacements=out,scope='共同端点按全输入概率参考选择；保持所选样式比较有限候选。未形成有效连接时取消连接段并保留两端；实际工况规则另检。不代表全局最优布线或产线签认。',
+        result=dict(complete=True,reused_sources=len(retained_refs),auto_ignored=self.auto_ignored,rules=dict(width_um=self.rules.width,space_um=self.rules.space,annulus_um=self.p.annulus_um),configuration=self.settings.reconstruction_key(),dbu_um=self.tol,pieces=pieces,replacements=out,between_blocks=tuple(between_blocks),scope='共同端点按全输入概率参考选择；保持所选样式比较有限候选。未形成有效连接时取消连接段并保留两端；实际工况规则另检。不代表全局最优布线或产线签认。',
                     parameters=dict(length_um=0.,width_um=0.,overlap_um=self.p.annulus_um,landing_diameters=AUTO_LANDING_DIAMETERS,shared_nominal=True,connection_style=self.settings.reconstruction_style,boundary_mode=self.settings.reconstruction_boundary_mode),
                     summary=dict(pieces=len(pieces),bridges=sum(not q['bridge'].is_empty for q in pieces),orphans=sum(q['orphan'] for q in pieces),conflicts=conflicts,
                                  warnings=sum(bool(q['warning']) for q in pieces),groups_used=len(features),manual_cuts=sum(q['manual'] for q in pieces),

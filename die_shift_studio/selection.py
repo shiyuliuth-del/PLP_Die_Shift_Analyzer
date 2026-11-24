@@ -15,17 +15,17 @@ def inverse_geometry(shape,center,state):
 
 class GeometrySelection:
     def __init__(self,window):
-        self.w=window;self.selected=[];self.index_stamp=None;self.groups={};self.press=None;self.last_pixel=None;self.cycle=[];self.cycle_index=-1
+        self.w=window;self.selected=[];self.selected_between=None;self.index_stamp=None;self.groups={};self.press=None;self.last_pixel=None;self.cycle=[];self.cycle_index=-1
         self.artist=None;self.deformed_artist=None;self.rubber=None;self.background=None
         for name,fn in [('button_press_event',self.down),('motion_notify_event',self.move),('button_release_event',self.up)]:window.canvas.mpl_connect(name,fn)
     def clear(self):
-        self.selected=[];self.cycle=[];self.last_pixel=None;self.press=None
+        self.selected=[];self.selected_between=None;self.cycle=[];self.last_pixel=None;self.press=None
         if self.rubber is not None:
             self.rubber.remove();self.rubber=None
             if self.background is not None:self.w.canvas.restore_region(self.background);self.background=None
         self.draw()
     def reset(self):
-        self.index_stamp=None;self.groups={};self.last_pixel=None;self.selected=[];self.artist=None;self.deformed_artist=None;self.rubber=None;self.press=None;self.cycle=[]
+        self.index_stamp=None;self.groups={};self.last_pixel=None;self.selected=[];self.selected_between=None;self.artist=None;self.deformed_artist=None;self.rubber=None;self.press=None;self.cycle=[]
     def indexed(self):
         w=self.w
         if not w.data:return
@@ -89,7 +89,35 @@ class GeometrySelection:
                     if ref not in found:found.append(ref)
         return sorted(found,key=lambda ref:(w.layer_artists[ref[0]].get_zorder(),order[ref[0]],ref[1]),reverse=True)
 
+    def find_between_block(self,point):
+        w=self.w
+        if not w.data or not w.reconstruction_toggle.isChecked():return None
+        overlay=getattr(w,'reconstruction_overlay',None)
+        data=(overlay.data() if overlay is not None else None) or (w.current_frame or {}).get('reconstruction') or {}
+        blocks=data.get('between_blocks',())
+        if not blocks:return None
+        select_boxes=getattr(w,'selectable_boxes',None)
+        def selectable(k):return True if not select_boxes else (k in select_boxes and select_boxes[k].isChecked())
+        x,y=float(point[0]),float(point[1]);pt=Point(x,y)
+        # Never steal clicks directly inside a movable zone A.
+        from .reconstruction_events import active_region
+        for q in (overlay.pieces() if overlay is not None else data.get('pieces',())):
+            a=active_region(q)
+            if not a.is_empty:
+                b=a.bounds
+                if b[0]<=x<=b[2] and b[1]<=y<=b[3] and a.covers(pt):return None
+        for block in blocks:
+            layer=block['ref'][0]
+            if not w.visible_boxes.get(layer) or not w.visible_boxes[layer].isChecked() or not selectable(layer):continue
+            g=block['geometry']
+            if g is None or g.is_empty:continue
+            b=g.bounds
+            if b[0]<=x<=b[2] and b[1]<=y<=b[3] and g.covers(pt):
+                return block
+        return None
+
     def apply_hits(self,hits,mode):
+        self.selected_between=None
         if mode=='add':
             self.selected=list(dict.fromkeys((*self.selected,*hits)))
         elif mode=='subtract':
@@ -100,6 +128,11 @@ class GeometrySelection:
 
     def click(self,point,pixel,mode='replace'):
         w=self.w;tol=np.ptp(w.ax.get_xlim())/max(1,w.ax.bbox.width)*3
+        if mode=='replace' and w.reconstruction_toggle.isChecked():
+            between=self.find_between_block(point)
+            if between is not None:
+                self.selected=[];self.selected_between=between;self.cycle=[];self.last_pixel=None
+                self.draw();return
         hits=self.hits(Point(point).buffer(tol),point=True)
         if mode=='replace':
             repeat=self.last_pixel is not None and np.linalg.norm(np.asarray(pixel)-self.last_pixel)<=4 and hits==self.cycle
@@ -169,10 +202,16 @@ class GeometrySelection:
             for k,i in refs:
                 if k in hidden_sources and w.visible_boxes[k].isChecked() and (k,i) in (summary or {}).get('lines',{}):
                     paths.append(w.geometry_patch(w.geometry_cache.layers[k]['geometry'][i]))
+        if self.selected_between is not None and not self.selected_between['geometry'].is_empty:
+            paths.append(w.geometry_patch(self.selected_between['geometry']))
         self.deformed_artist.set_paths(paths)
         if redraw:
             summary=w.width_overlay.shown_summary() if hasattr(w,'width_overlay') else None
-            if self.selected:w.statusBar().showMessage(f'选中 {len(self.selected)} 个图形；'+', '.join(f'{k} #{i+1}' for k,i in self.selected[:6]))
+            if self.selected_between is not None:
+                from .between_motion import LABELS
+                ref=self.selected_between['ref']
+                w.statusBar().showMessage(f"已选中动区间图形 {ref[0]} #{ref[1]+1} · 当前随动逻辑：{LABELS.get(self.selected_between['mode'],self.selected_between['mode'])}（右键可切换）")
+            elif self.selected:w.statusBar().showMessage(f'选中 {len(self.selected)} 个图形；'+', '.join(f'{k} #{i+1}' for k,i in self.selected[:6]))
             else:w.statusBar().showMessage('已取消图形选择')
             if w.tabs.currentIndex()!=0:return
             artists=[self.artist,self.deformed_artist]
@@ -180,5 +219,6 @@ class GeometrySelection:
                 w.width_overlay.draw();artists.extend(a for a in w.width_overlay.labels if a.get_visible())
             if w.reconstruction_toggle.isChecked():
                 w.reconstruction_overlay.draw_labels();artists.extend(a for a in w.reconstruction_overlay.labels if a.get_visible())
-            signature=(tuple(self.selected),w.width_overlay.stamp if w.width_toggle.isChecked() else None,w.reconstruction_overlay.stamp if w.reconstruction_toggle.isChecked() else None)
+            between_sig=self.selected_between['id'] if self.selected_between is not None else None
+            signature=(tuple(self.selected),between_sig,w.width_overlay.stamp if w.width_toggle.isChecked() else None,w.reconstruction_overlay.stamp if w.reconstruction_toggle.isChecked() else None)
             w.scene_renderer.draw_selection(artists,w.legend,signature)

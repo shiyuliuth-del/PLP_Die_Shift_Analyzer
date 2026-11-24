@@ -61,7 +61,7 @@ try:
  for q in w.current_frame['reconstruction']['pieces']:
   source=w.geometry_cache.layers[q['layer']]['geometry'][q['index']]
   wanted=source.intersection(shapely.Polygon(stored[1]))
-  if not wanted.is_empty:assert q['nominal_regions']['A'].symmetric_difference(wanted).area<1.e-6,(q['index'],q['nominal_regions']['A'].wkt,wanted.wkt)
+  if not wanted.is_empty:assert wanted.difference(q['nominal_regions']['A']).area<1.e-6,(q['index'],q['nominal_regions']['A'].wkt,wanted.wkt)
  key('Escape');assert w.region_select.mode is None
  # Paging must never truncate the full canvas catalogue or change the row's source.
  rows=[dict(kind='线宽不足',layer='5/0',layers=('5/0',),point=[i,0],geometry=shapely.box(i,0,i+.1,1),required_um=10) for i in range(600)]

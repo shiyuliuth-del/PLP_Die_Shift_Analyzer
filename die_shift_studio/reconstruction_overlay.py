@@ -27,6 +27,7 @@ STAGED_STYLE={
     '删除全部动区':('#ed9fa444','#c44a3d'),
     '固定过孔随动':('#c9b3eb55','#7f4ec2'),
     '固定过孔静止':('#d9dde255','#6c7886'),
+    '动区间随动':('#a6d4c555','#2a8568'),
 }
 
 
@@ -96,7 +97,7 @@ class ReconstructionOverlay:
         for ref in sorted(cur_follow^prev_follow):
             rdl_refs.add(ref)
             if ref in cur_ignored:tag(ref,'忽略·随动' if ref in cur_follow else '忽略·静止')
-        for name in ('ignored','following','forced','angles','intervals','added','deleted','regions','boxes','angle_boxes','box_excluded','cuts','extra_cuts','second_cuts','dropped_cuts','fixed_via_follows'):
+        for name in ('ignored','following','forced','angles','intervals','added','deleted','regions','boxes','angle_boxes','box_excluded','cuts','extra_cuts','second_cuts','dropped_cuts','fixed_via_follows','between_overrides'):
             field='reconstruction_'+name
             cur=set(getattr(cfg,field));prev=set(getattr(previous,field))
             if name in ('boxes','angle_boxes'):
@@ -111,6 +112,9 @@ class ReconstructionOverlay:
                 elif name=='fixed_via_follows':
                     ref=(str(row[0]),int(row[1]));via_refs.add(ref)
                     tag(ref,'固定过孔随动' if row in cur else '固定过孔静止')
+                elif name=='between_overrides':
+                    ref=(str(row[0]),int(row[1]));rdl_refs.add(ref)
+                    tag(ref,'动区间随动')
                 else:
                     ref=(str(row[0]),int(row[1]));rdl_refs.add(ref)
                     if name=='deleted' and row in cur:tag(ref,'删除动区')
@@ -136,6 +140,8 @@ class ReconstructionOverlay:
                         tuple(r for r in cfg.reconstruction_extra_cuts if (r[0],r[1])==target),
                         tuple(r for r in cfg.reconstruction_second_cuts if (r[0],r[1])==target),
                         tuple(r for r in cfg.reconstruction_dropped_cuts if (r[0],r[1])==target),
+                        tuple(r for r in cfg.reconstruction_between_overrides if (r[0],r[1])==target),
+                        cfg.reconstruction_between_motion,
                         cfg.reconstruction_boxes,cfg.reconstruction_angle_boxes,cfg.reconstruction_regions,
                         cfg.reconstruction_style,cfg.reconstruction_boundary_mode,cfg.reconstruction_allow_moving_pad)
             reuse_draft=(self.draft_frame is frame and self.draft_data is not None)
@@ -1059,14 +1065,11 @@ class RegionSelect:
             key,index=ref
             return key in layers and index<len(geometry[key]['geometry']) and geometry[key]['geometry'][index].intersects(polygon)
         removed=tuple(ref for ref in settings.reconstruction_box_excluded if not selected(ref))
-        unignored=tuple(ref for ref in settings.reconstruction_ignored if not selected(ref))
-        undeleted=tuple(row for row in settings.reconstruction_deleted if not selected(row[:2]))
-        changes={field:rows,'reconstruction_box_excluded':removed,'reconstruction_ignored':unignored,'reconstruction_deleted':undeleted}
-        if field=='reconstruction_angle_boxes':
-            # The new box takes precedence over existing cuts on sources it
-            # selects. Future drags then become the explicit per-route edits.
-            for name in ('reconstruction_intervals','reconstruction_angles'):
-                changes[name]=tuple(row for row in getattr(settings,name) if not selected(row[:2]))
+        unfollowed=tuple(ref for ref in settings.reconstruction_following if not selected(ref))
+        # Additive & expanding box selection (V71): never wipe existing intervals,
+        # angles or unrelated zones on the selected shape. Keep ignored shapes
+        # marked in reconstruction_ignored so expand() seeds only the boxed zone(s).
+        changes={field:rows,'reconstruction_box_excluded':removed,'reconstruction_following':unfollowed}
         updated=replace(settings,**changes)
         if updated==settings:return
         record(self.w);self.w.view_settings=updated

@@ -360,7 +360,8 @@ class RoutePlan:
             chord=shapely.intersection(self.source,shapely.LineString([point-u*size,point+u*size]))
             lines=[q for q in shapely.get_parts(chord) if q.geom_type=='LineString' and q.length>self.tolerance]
             result=min(lines,key=lambda g:float(g.distance(shapely.Point(point)))) if lines else None
-        if len(self.cache)>1024:self.cache.clear()
+        if len(self.cache)>4096:
+            for old_key in list(self.cache)[:1024]:del self.cache[old_key]
         self.cache[key]=result
         return result
 
@@ -376,11 +377,12 @@ class RoutePlan:
         except (ValueError,shapely.errors.GEOSException):return None
         land_area,land_bounds=self._land_info();anchor_bounds=self._anchor_info()
         eps=max(self.tolerance**2,land_area*1e-7)
-        candidates=[g for g in pieces if self._bounds_overlap(g.bounds,land_bounds) and g.intersection(self.land).area>=land_area-eps]
-        candidates=[g for g in candidates if all(not self._bounds_overlap(g.bounds,ab) or g.intersection(a).area<=eps for a,ab in zip(self.anchors,anchor_bounds))]
+        candidates=[g for g in pieces if self._bounds_overlap(g.bounds,land_bounds) and (g.covers(self.land) or g.intersection(self.land).area>=land_area-eps)]
+        candidates=[g for g in candidates if all(not self._bounds_overlap(g.bounds,ab) or not g.intersects(a) or g.intersection(a).area<=eps for a,ab in zip(self.anchors,anchor_bounds))]
         if len(pieces)<2 or len(candidates)!=1:result=None
         else:result=candidates[0],face,shapely.union_all([g for g in pieces if g is not candidates[0]])
-        if len(self.cache)>1024:self.cache.clear()
+        if len(self.cache)>4096:
+            for old_key in list(self.cache)[:1024]:del self.cache[old_key]
         self.cache[key]=result
         return result
 
@@ -391,12 +393,19 @@ class RoutePlan:
     def moving_line_partition(self,b,angles=(0.,0.)):
         """Find the first usable straight moving-side section beyond the pad."""
         b=self.fixed_side(b)
+        angles=tuple(map(float,angles))
+        mkey=('moving-line',round(b,8),angles)
+        if mkey in self.cache:
+            cached=self.cache[mkey]
+            return None if cached is None else dict(cached)
         step=max(self.tolerance*8,1e-4)
         lo=self.land_end+step
         hi=b-step
-        if hi<lo:return None
+        if hi<lo or self.prefix(b,angles[1]) is None:
+            self.cache[mkey]=None;return None
         part=self.partition(lo,b,angles)
-        if part is not None:return part
+        if part is not None:
+            self.cache[mkey]=dict(part);return part
         # Include bend limits so a usable neck is not skipped by uniform probes.
         ends=[corner+guard for corner,guard in self.corners if lo<corner+guard<hi]
         stations=sorted(set([*np.linspace(lo,hi,17)[1:],*ends]))
@@ -412,7 +421,8 @@ class RoutePlan:
                 candidate=self.partition(mid,b,angles)
                 if candidate is None:previous=mid
                 else:pos=mid;part=candidate
-            return part
+            self.cache[mkey]=dict(part);return part
+        self.cache[mkey]=None
         return None
 
     def partition(self,a,b,angles=(0.,0.)):
@@ -438,7 +448,7 @@ class RoutePlan:
             except (ValueError,shapely.errors.GEOSException):return None
             land_area,land_bounds=self._land_info()
             epsilon=max(self.tolerance**2,land_area*1e-7)
-            movable=[g for g in pieces if self._bounds_overlap(g.bounds,land_bounds) and g.intersection(self.land).area>=land_area-epsilon]
+            movable=[g for g in pieces if self._bounds_overlap(g.bounds,land_bounds) and (g.covers(self.land) or g.intersection(self.land).area>=land_area-epsilon)]
             if len(movable)!=1 or len(pieces)<2:return None
             c=movable[0];a_shape=shapely.union_all([g for g in pieces if g is not c])
         if a_shape.is_empty:return None
@@ -451,7 +461,8 @@ class RoutePlan:
             if union.symmetric_difference(self.source).area>area_eps:return None
         a_shape,b_shape,c=(clean_overlay(g,self.tolerance) for g in (a_shape,b_shape,c))
         result={'A':a_shape,'B':b_shape,'C':c,'near':near,'far':far,'a':a,'b':b,'angles':angles}
-        if len(self.cache)>1024:self.cache.clear()
+        if len(self.cache)>4096:
+            for old_key in list(self.cache)[:1024]:del self.cache[old_key]
         self.cache[key]=dict(result)
         return result
 

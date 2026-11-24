@@ -11,6 +11,10 @@ from .reconstruction_edits import key
 
 
 def expand(r,entries):
+    from hashlib import sha256
+    from .between_motion import anchor_of,lookup_mode,solve_serial_weights
+    from .manual_regions import aligned_partition,usable_partition
+    from .reconstruction_edits import apply_angles
     attached=defaultdict(list);seeded={};result=[]
     for row in r.settings.reconstruction_added:
         layer,index,x,y,identity,*scope=row
@@ -20,11 +24,66 @@ def expand(r,entries):
             best=min(candidates,key=lambda e:e['plan'].route.distance(shapely.Point(x,y)))
             if scope==['seed']:seeded[id(best)]=(x,y,identity)
             else:attached[id(best)].append((x,y,identity,scope))
+    box_excluded=set(r.settings.reconstruction_box_excluded)
+    ignored_set=set(r.settings.reconstruction_ignored)
+    deleted_set=set(r.settings.reconstruction_deleted)
+    source_box_lists=getattr(r,'source_box_lists',{})
+    angle_box_lists=getattr(r,'angle_box_lists',{})
+
+    def _clone_child(plan,identity,a,b):
+        child=copy.copy(plan);child.cache={};child.pose_memo=OrderedDict();child.memo_bytes=0
+        child.identity=identity;child.nominal_first=float(a);child.nominal_second=float(b)
+        return child
+
+    def _finish_serial(rows,entry):
+        usable=[e for e in rows if e['plan'] is not None]
+        invalid=[e for e in rows if e['plan'] is None]
+        usable.sort(key=lambda e:e['serial_part']['a'])
+        merged=[]
+        for e in usable:
+            if merged and e['serial_part']['a']<=merged[-1]['serial_part']['b']+r.tol:
+                lead=merged[-1];a=lead['serial_part']['a'];b=max(lead['serial_part']['b'],e['serial_part']['b'])
+                joined=lead['plan'].partition(a,b)
+                if joined is not None:
+                    joined=apply_angles(r.settings,lead['plan'],joined) or joined
+                    lead['serial_part']=joined;lead['merged_part']=joined
+                    lead['plan'].merged_keys=(*getattr(lead['plan'],'merged_keys',()),key(e['plan']))
+                    continue
+            merged.append(e)
+        usable=merged
+        if len(usable)<=1:
+            out=invalid
+            for e in usable:
+                part=e.pop('serial_part',None)
+                if part is not None:e['merged_part']=part
+                out.append(e)
+            return out
+        # Compute intermediate rigid copper blocks and resolve their motion weights
+        # from per-segment overrides or the global reconstruction_between_motion setting.
+        ref=(entry['layer'],entry['index'])
+        occupied=shapely.Polygon();blocks=[]
+        fixed=usable[-1]['serial_part']['B']
+        for e in usable:
+            part=e['serial_part']
+            block=part['C'].difference(occupied)
+            blocks.append(block)
+            occupied=shapely.union_all([occupied,part['A'],part['C']])
+        between_modes=[];between_meta=[]
+        for block in blocks[1:]:
+            mode,custom=lookup_mode(r.settings,ref,block,r.tol)
+            between_modes.append(mode);between_meta.append((block,mode,custom))
+        weights=solve_serial_weights(between_modes)
+        for j,e in enumerate(usable):
+            e.update(serial_left=weights[j],serial_right=weights[j+1],
+                     serial_block=blocks[j],serial_fixed=fixed)
+            if j>0:
+                blk,mode,custom=between_meta[j-1]
+                e['serial_between']=(blk,mode,custom,anchor_of(blk) if not blk.is_empty else None)
+        return invalid+usable
+
     for entry in entries:
         plan=entry['plan']
-        if (entry['layer'],entry['index']) in getattr(r,'box_refs',()):
-            if plan is None or key(plan) not in r.settings.reconstruction_deleted:result.append(entry)
-            continue
+        ref=(entry['layer'],entry['index'])
         extras=attached.get(id(entry),());seed=seeded.get(id(entry))
         if seed and plan is not None:
             x,y,identity=seed;child=copy.copy(plan);child.cache={};child.pose_memo=OrderedDict();child.memo_bytes=0
@@ -33,55 +92,105 @@ def expand(r,entries):
             changed,_=child.edit(a,b,0,position-child.tolerance*16) if position<a else child.edit(a,b,1,position+child.tolerance*16) if position>b else (child.partition(a,b),False)
             if changed is not None:child.nominal_first,child.nominal_second=changed['a'],changed['b']
             entry=dict(entry,plan=child,seeded=True);plan=child
-        if plan is None or not extras:
-            if plan is None or key(plan) not in r.settings.reconstruction_deleted:result.append(entry)
-            continue
-        base,_=r.interval(entry)
-        if base is None:result.append(entry);continue
-        a,b=(extras[0][3][1:] if extras[0][3] else (plan.nominal_first,plan.nominal_second))
-        marks=sorted((float(plan.route.project(shapely.Point(x,y))),identity) for x,y,identity,scope in extras)
-        # The full interval is partitioned into genuine, disjoint serial zones.
-        # Cursor positions choose seams; clamp away from the rigid terminals.
-        spacing=max(plan.tolerance*32,min(plan.guard,(b-a)/(len(marks)+1)*.05))
-        boundaries=[a]
-        for j,(s,_) in enumerate(marks):
-            boundaries.append(float(np.clip(s,boundaries[-1]+spacing*4,b-(len(marks)-j)*spacing*4)))
-        boundaries.append(b);rows=[]
-        identities=[None,*[identity for _,identity in marks]]
-        for j,identity in enumerate(identities):
-            child=copy.copy(plan);child.cache={};child.pose_memo=OrderedDict();child.memo_bytes=0
-            child.identity=plan.identity if identity is None else plan.identity.split('~')[0]+'~'+identity
-            child.nominal_first=boundaries[j]+(spacing if j else 0)
-            child.nominal_second=boundaries[j+1]-(spacing if j<len(identities)-1 else 0)
-            local=dict(entry,plan=child,serial_base=plan.identity)
-            if key(child) in r.settings.reconstruction_deleted:continue
-            part,_=r.interval(local)
-            if part is None:
-                local.update(plan=None,orphan=False,warning='新增动区截面无法分离连接端；保留原图并标记')
-            else:local['serial_part']=part
-            rows.append(local)
-        usable=[e for e in rows if e['plan'] is not None]
-        usable.sort(key=lambda e:e['serial_part']['a'])
-        merged=[]
-        for e in usable:
-            if merged and e['serial_part']['a']<=merged[-1]['serial_part']['b']+r.tol:
-                lead=merged[-1];a=lead['serial_part']['a'];b=max(lead['serial_part']['b'],e['serial_part']['b'])
-                joined=lead['plan'].partition(a,b)
-                if joined is not None:
-                    lead['serial_part']=joined;lead['merged_part']=joined
-                    lead['plan'].merged_keys=(*getattr(lead['plan'],'merged_keys',()),key(e['plan']))
-                    continue
-            merged.append(e)
-        usable=merged
-        rows=[e for e in rows if e['plan'] is None]+usable
-        total=sum(max(r.tol,e['serial_part']['b']-e['serial_part']['a']) for e in usable);used=0.;occupied=shapely.Polygon()
-        fixed=usable[-1]['serial_part']['B'] if usable else entry['source']
-        for e in usable:
-            part=e['serial_part'];length=part['b']-part['a']
-            e.update(serial_left=1-used/total,serial_right=max(0.,1-(used+length)/total),
-                     serial_block=part['C'].difference(occupied),serial_fixed=fixed)
-            occupied=shapely.union_all([occupied,part['A'],part['C']]);used+=length
-        result.extend(rows)
+
+        free_boxes=() if ref in box_excluded else source_box_lists.get(ref,())
+        aligned_boxes=() if ref in box_excluded else angle_box_lists.get(ref,())
+        applicable_boxes=[]
+        if plan is not None and (free_boxes or aligned_boxes):
+            for is_free,box_list in ((True,free_boxes),(False,aligned_boxes)):
+                for bp in box_list:
+                    if not r._box_applies(plan,bp):continue
+                    bpart=usable_partition(plan,bp) if is_free else aligned_partition(plan,bp)
+                    if bpart is None:continue
+                    applicable_boxes.append((is_free,bp,bpart))
+
+        if plan is None:
+            result.append(entry);continue
+
+        # Step 1: Collect existing zones on this plan (unless ref was ignored before boxes).
+        rows=[]
+        had_only_boxes=(ref in ignored_set and bool(applicable_boxes))
+        if not had_only_boxes:
+            if not extras:
+                if key(plan) not in deleted_set:
+                    part,_=r._interval_without_boxes(entry)
+                    if part is not None:
+                        local=dict(entry,serial_part=part,merged_part=part)
+                        rows.append(local)
+                    else:
+                        rows.append(entry)
+            else:
+                base,_=r._interval_without_boxes(entry)
+                if base is None:
+                    rows.append(entry)
+                else:
+                    a,b=(extras[0][3][1:] if extras[0][3] else (plan.nominal_first,plan.nominal_second))
+                    marks=sorted((float(plan.route.project(shapely.Point(x,y))),identity) for x,y,identity,scope in extras)
+                    spacing=max(plan.tolerance*32,min(plan.guard,(b-a)/(len(marks)+1)*.05))
+                    boundaries=[a]
+                    for j,(s,_) in enumerate(marks):
+                        boundaries.append(float(np.clip(s,boundaries[-1]+spacing*4,b-(len(marks)-j)*spacing*4)))
+                    boundaries.append(b)
+                    identities=[None,*[identity for _,identity in marks]]
+                    for j,identity in enumerate(identities):
+                        cid=plan.identity if identity is None else plan.identity.split('~')[0]+'~'+identity
+                        child=_clone_child(plan,cid,boundaries[j]+(spacing if j else 0),boundaries[j+1]-(spacing if j<len(identities)-1 else 0))
+                        local=dict(entry,plan=child,serial_base=plan.identity)
+                        if key(child) in deleted_set:continue
+                        part,_=r._interval_without_boxes(local)
+                        if part is None:
+                            local.update(plan=None,orphan=False,warning='新增动区截面无法分离连接端；保留原图并标记')
+                        else:
+                            local['serial_part']=part;local['merged_part']=part
+                        rows.append(local)
+
+        # Step 2: Apply boxed zones ADDITIVELY (never deleting non-overlapping existing zones;
+        # overlapping boxes expand the existing zone's range).
+        for box_idx,(is_free,bp,bpart) in enumerate(applicable_boxes):
+            ba,bb=float(bpart['a']),float(bpart['b'])
+            overlapping=[idx for idx,row in enumerate(rows)
+                         if row.get('serial_part') is not None
+                         and (row['serial_part']['a']<=bb+r.tol and ba<=row['serial_part']['b']+r.tol)]
+            if overlapping:
+                # Expand existing overlapping zone(s) to cover union with this box.
+                lead=rows[overlapping[0]]
+                new_a=min(ba,*(rows[i]['serial_part']['a'] for i in overlapping))
+                new_b=max(bb,*(rows[i]['serial_part']['b'] for i in overlapping))
+                if is_free:
+                    combined=shapely.union_all([*(rows[i]['serial_part']['A'] for i in overlapping),bp])
+                    expanded=usable_partition(lead['plan'],combined)
+                    if expanded is None:
+                        angles=(bpart['angles'][0] if ba<=rows[overlapping[0]]['serial_part']['a'] else lead['serial_part'].get('angles',(0.,0.))[0],
+                                bpart['angles'][1] if bb>=rows[overlapping[-1]]['serial_part']['b'] else lead['serial_part'].get('angles',(0.,0.))[1])
+                        expanded=lead['plan'].partition(new_a,new_b,angles) or lead['plan'].partition(new_a,new_b)
+                else:
+                    expanded=lead['plan'].partition(new_a,new_b)
+                    if expanded is not None:
+                        expanded=apply_angles(r.settings,lead['plan'],expanded) or expanded
+                if expanded is not None:
+                    lead['serial_part']=expanded;lead['merged_part']=expanded
+                    for i in reversed(overlapping[1:]):
+                        lead['plan'].merged_keys=(*getattr(lead['plan'],'merged_keys',()),key(rows[i]['plan']))
+                        rows.pop(i)
+            else:
+                # Disjoint box: add as an independent new movable zone on this plan!
+                tag=sha256(repr((plan.identity,round(ba,4),round(bb,4),int(is_free),box_idx)).encode()).hexdigest()[:10]
+                cid=plan.identity if not rows and key(plan) not in deleted_set else plan.identity.split('~')[0]+'~box'+tag
+                child=_clone_child(plan,cid,ba,bb)
+                if key(child) in deleted_set:continue
+                local=dict(entry,plan=child,serial_base=plan.identity)
+                # Respect any subsequent drag/rotation edit saved on this boxed zone's identity.
+                saved_part,saved_manual=r._interval_without_boxes(local)
+                use_part=saved_part if (saved_manual and saved_part is not None) else bpart
+                local['serial_part']=use_part;local['merged_part']=use_part
+                rows.append(local)
+
+        if not rows:continue
+        if len(rows)==1 and not applicable_boxes and not extras:
+            row=rows[0];row.pop('serial_part',None)
+            result.append(row)
+        else:
+            result.extend(_finish_serial(rows,entry))
     return result
 
 
@@ -89,11 +198,15 @@ def serial_render(r,entry,part,center,pose):
     from .reconstruction import transform
     from .reconstruction_route import warp
     left,right=entry['serial_left'],entry['serial_right']
+    adjusted=dict(part,C=entry['serial_block'],B=entry['serial_fixed'])
+    if abs(left-right)<=1e-12 or not np.any(pose):
+        active=transform(part['A'],center,pose*right)
+        regions=dict(A=active,C=transform(entry['serial_block'],center,pose*left),B=entry['serial_fixed'])
+        return adjusted,regions,None
     theta=right*pose[2];co,si=np.cos(theta),np.sin(theta)
     translation=np.array([[co,si],[-si,co]])@((left-right)*pose[:2])
     relative=np.r_[translation,(left-right)*pose[2]]
     geos,error=warp(part,entry['plan'],center,relative,r.settings.reconstruction_style)
-    adjusted=dict(part,C=entry['serial_block'],B=entry['serial_fixed'])
     if error:return adjusted,None,error
     active=transform(geos['A'],center,pose*right)
     seams=shapely.union_all([transform(part['C'],center,pose*left).boundary,transform(part['B'],center,pose*right).boundary])
@@ -160,6 +273,7 @@ def live_serial(original,settings,old,ref,draft=False):
             changed,rows,repaired,blocked=resolve(rebuilt,changed,rows,old['states'])
             from .ignored_motion import add_linked_geometry
             changed=add_linked_geometry(rebuilt,changed,old['states'])
+        between=tuple(b for b in data.get('between_blocks',()) if b['ref']!=ref)+tuple(local.get('between_blocks',()))
     finally:
         rebuilt.close()
-    return dict(old,_reconstruction_changed_refs=tuple(sorted({ref,*repaired})),reconstruction=dict(data,configuration=settings.reconstruction_key(),pieces=rows,replacements=changed,violations=[],constraints_complete=False,repair_refs=repaired,hard_failures=blocked,electrically_valid=not bool(blocked)))
+    return dict(old,_reconstruction_changed_refs=tuple(sorted({ref,*repaired})),reconstruction=dict(data,configuration=settings.reconstruction_key(),pieces=rows,replacements=changed,between_blocks=between,violations=[],constraints_complete=False,repair_refs=repaired,hard_failures=blocked,electrically_valid=not bool(blocked)))

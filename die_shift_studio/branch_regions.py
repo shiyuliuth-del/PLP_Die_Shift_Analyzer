@@ -210,21 +210,24 @@ def assemble(r,source,rows,states):
         neighbours.append(ids)
         for ix,i in enumerate(ids):
             for j in ids[ix+1:]:edges[i,j]=edges.get((i,j),0.)+1/max(r._rule_width,rigid[i].distance(rigid[j]))
-    unknown=[i for i in range(physical_count) if i not in known];index={v:i for i,v in enumerate(unknown)}
-    mat=np.zeros((len(unknown),len(unknown)));rhs=np.zeros(len(unknown))
-    for (i,j),weight in edges.items():
-        for a,b in ((i,j),(j,i)):
-            if a not in index:continue
-            mat[index[a],index[a]]+=weight
-            if b in index:mat[index[a],index[b]]-=weight
-            else:rhs[index[a]]+=weight*known[b]
-    values=dict(known)
-    if unknown:
-        solved=np.linalg.lstsq(mat,rhs,rcond=None)[0]
-        values.update((i,float(np.clip(v,0,1))) for i,v in zip(unknown,solved))
+    unknown=[i for i in range(physical_count) if i not in known]
+    from .between_motion import anchor_of,lookup_mode,solve_graph_weights
+    ref=(rows[0]['layer'],rows[0]['index'])
+    between_modes={};between_meta={}
+    for i in unknown:
+        mode_i,custom_i=lookup_mode(r.settings,ref,rigid[i],r.tol)
+        between_modes[i]=mode_i;between_meta[i]=(mode_i,custom_i)
+    values=solve_graph_weights(physical_count,known,edges,between_modes)
     mobile=[i for i in range(physical_count) if values[i]>1e-12];static=[i for i in range(physical_count) if i not in mobile]
     c=_fast_union([rigid[i] for i in mobile]);b=_fast_union([rigid[i] for i in static])
     cposed=_fast_union([clean_overlay(transform(rigid[i],center,pose*values[i]),r.tol) for i in mobile]);style=r.settings.reconstruction_style
+    between_blocks=[]
+    for i in unknown:
+        if rigid[i].is_empty:continue
+        ax,ay=anchor_of(rigid[i])
+        mode_i,custom_i=between_meta[i]
+        posed_blk=clean_overlay(transform(rigid[i],center,pose*values[i]),r.tol) if values[i]>1e-12 and shifted else rigid[i]
+        between_blocks.append(dict(ref=ref,id=(ref[0],ref[1],ax,ay),nominal=rigid[i],geometry=posed_blk,mode=mode_i,custom=custom_i,weight=values[i]))
     source_exterior=source.boundary.buffer(r.tol*4)
     def deform(g,ids):
         if not shifted:return g
@@ -341,6 +344,8 @@ def assemble(r,source,rows,states):
                  whole_landing=nearcut.geom_type in ('Point','MultiPoint'),whole_fixed_landing=farcut.geom_type in ('Point','MultiPoint'),
                  via_refs=tuple(sorted({ref for v in members for ref in v['via_refs']})))
         result.append(q)
+    if result and between_blocks:
+        result[0]['between_blocks']=tuple(between_blocks)
     return result
 
 
@@ -352,7 +357,10 @@ def consolidate(r,pieces,states,local_states=None):
     for rows in groups.values():
         source=rows[0]['route_plan'].source
         posed=(local_states or {}).get((rows[0]['layer'],rows[0]['index']),states)
-        cache_key=('branch-assembly-local-intervals-v57',r.rules.identity,r.settings.reconstruction_style,
+        ref=(rows[0]['layer'],rows[0]['index'])
+        ref_overrides=tuple(o for o in getattr(r.settings,'reconstruction_between_overrides',()) if (o[0],o[1])==ref)
+        cache_key=('branch-assembly-local-intervals-v71',r.rules.identity,r.settings.reconstruction_style,
+                   getattr(r.settings,'reconstruction_between_motion','max'),ref_overrides,
                    tuple(r.model.bound.centers[rows[0]['die']]),posed[rows[0]['die']].tobytes(),
                    tuple((q['route_identity'],q['interval'],q['boundary_angles'],tuple(q['nominal_regions'][k].wkb for k in 'ABC')) for q in rows))
         cached=r.geometry_pool.get(cache_key)

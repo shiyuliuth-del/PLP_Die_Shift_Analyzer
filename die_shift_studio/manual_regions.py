@@ -108,7 +108,9 @@ def move_side(settings,plan,press,cursor,visible_box=None):
     return (cfg,part) if part is not None else None
 
 
-def boxes_by_source(model, rows):
+def box_list_by_source(model, rows):
+    """Return disjoint connected box polygons per intersected source ref."""
+    from .reconstruction_route import parts
     by_layer={}
     for layer, xy in rows:
         if layer in model.cache.layers:
@@ -120,7 +122,11 @@ def boxes_by_source(model, rows):
         i,j=tree.query(boxes,predicate='intersects')
         for box,ref in zip(i,j):
             result.setdefault((layer,int(ref)),[]).append(boxes[int(box)])
-    return {ref:shapely.union_all(areas) for ref,areas in result.items()}
+    return {ref:tuple(parts(shapely.union_all(areas))) for ref,areas in result.items()}
+
+
+def boxes_by_source(model, rows):
+    return {ref:shapely.union_all(areas) for ref,areas in box_list_by_source(model, rows).items()}
 
 
 def usable_partition(plan, polygon):

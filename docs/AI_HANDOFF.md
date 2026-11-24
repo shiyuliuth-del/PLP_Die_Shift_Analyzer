@@ -1,3 +1,13 @@
+# V71 框选叠加扩展、动区间随动、层叠自动同步与右键样式
+
+`manual_regions.box_list_by_source` 按源保留不相交的选框连通分量；`reconstruction_zones.expand` 与 `RegionSelect._finish` 将框选改为叠加与重叠扩展，不再清除同图形已有的 `reconstruction_intervals`、`reconstruction_angles` 或其他动区（单图形支持任意数量手动动区，自动规划在单线段区间仍最多 2 个）。
+
+新增 `between_motion.py` 与 `ViewSettings.reconstruction_between_motion`（默认 `'max'`：跟随幅度大的一侧；可选 `'min'`：跟随幅度小的一侧、`'average'`：两侧平均）及 `reconstruction_between_overrides`（按 `(layer, index, ax, ay, mode)` 持久化并参与 `reconstruction_key`、`edit_history`、`area_filter.remap_project`、`reconstruction_incremental`）。`reconstruction_zones.expand`、`moving_pair.MultiPairFrame`（双 DIE 共有刚性核）与 `branch_regions.assemble`（分叉浮动刚体块）统一求解并输出 `between_blocks`。画布 `GeometrySelection` 支持左键单独选中动区间刚性块，`shape_menu.py` 提供右键逐段切换三种随动逻辑；重构预演面板将原「整块随动联动固定过孔」更名为「固定过孔随动逻辑」并置于「动区间随动逻辑」左侧。
+
+`region_import.metadata_for` 保存 `roles` 与 `layer_order`，`region_import.resolve_stackup` 与 `export_ui.import_regions`、`MainWindow.apply_stackup` 在动静区输入时忽略软件当前层叠差异，读取后自动将软件层叠用途、层序与输出补偿更新为 DXF 状态（无注释 DXF 自动将 `_A/_B/_C` 层设为 `固定RDL`）。
+
+`layer_controls.LayerDrag` 保持左键选择/拖行，改用右键单击层叠表格行（含单元格内控件）弹出 `LayerStyleDialog`。性能优化方面，向量化 `stack.Connections.resolve_ownership`（12,000 图形构建提速约 3.2×）、缓存 `RoutePlan.moving_line_partition`、扩大路径缓存并前置 `covers` 检查，同时在 `region_import.assign` 预处理轮廓缓冲。回归见 `tests/test_v71.py`，说明见 [V71 使用说明](V71_使用说明.md)。
+
 # V70 主程序动静区输入与图形 DRC
 
 动静区 DXF 按名义零偏移设计导出。`region_import` 读入平面 ASCII CAD 块与直线实体，区分 `_A` 运动侧、`_B` 固定侧、`_C` 动区。新版导出附加有界 JSON 注释。导入必须核对当前几何和工艺，按记录重建名义铜并比对真实输出轮廓。旧版按端点、真实铜范围及走线路径恢复可编辑切口。带补偿时尝试匹配原铜或补偿后的对应外轮廓。含歧义的输入整笔不应用。

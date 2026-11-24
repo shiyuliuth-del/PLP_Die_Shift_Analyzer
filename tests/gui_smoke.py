@@ -179,7 +179,7 @@ with tempfile.TemporaryDirectory() as tmp:
     from die_shift_studio.layer_controls import LayerStyleDialog
     with patch('die_shift_studio.gui.run_dialog',return_value=1),patch.object(LayerStyleDialog,'value',return_value=dict(color='#95b8d1',alpha=.35,fill=True,width=.8,linestyle='--')):
         logical=window._layer_keys.index('40/0');point=window.layer_table.visualItemRect(window.layer_table.item(logical,2)).center()
-        QTest.mouseClick(window.layer_table.viewport(),Qt.LeftButton,pos=point);app.processEvents()
+        QTest.mouseClick(window.layer_table.viewport(),Qt.RightButton,pos=point);app.processEvents()
     assert window.layer_styles['40/0']['alpha']==.35 and window.layer_artists['40/0'].get_alpha()==.35
     window.setting_fields['space_cmap'].setCurrentIndex(window.setting_fields['space_cmap'].findData('cividis'));wait_idle()
     assert window.space_artists[0].get_cmap().name=='cividis' and window.result is snapshot
