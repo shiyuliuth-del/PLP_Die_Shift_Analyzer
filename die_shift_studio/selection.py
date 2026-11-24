@@ -207,13 +207,20 @@ class GeometrySelection:
                and k not in getattr(w,'width_hidden_sources',()) for q in items if any((k,i) in refs for i in q['indices'])]
         hidden_sources=getattr(w,'width_hidden_sources',())
         if refs and hidden_sources and w.view_settings.width_display['描边']!='hide':
+            from .reconstruction import transform
             summary=w.width_overlay.shown_summary()
+            posed={(layer,i):row['geometry'] for layer in hidden_sources for row in replacements.get(layer,()) for i in row['indices']}
+            bound=w.viewport_index.bound
             for k,i in refs:
                 if k in hidden_sources and w.visible_boxes[k].isChecked() and (k,i) in (summary or {}).get('lines',{}):
-                    shapes=w.rendered_layers.get(k)
-                    if shapes is not None and i<len(shapes):
-                        polys.append(shapes[i])
-            self.artist.set_verts(polys)
+                    geometry=posed.get((k,i))
+                    if geometry is None:
+                        geometry=w.geometry_cache.layers[k]['geometry'][i]
+                        if w.shown_states is not None and bound is not None and k in bound.owners:
+                            owner=int(bound.owners[k][i])
+                            if owner>=0 and w.shown_states[owner].any():
+                                geometry=transform(geometry,bound.centers[owner],w.shown_states[owner])
+                    paths.append(w.geometry_patch(geometry))
         if between is not None:
             paths.append(w.geometry_patch(between['geometry']))
         self.deformed_artist.set_paths(paths)
