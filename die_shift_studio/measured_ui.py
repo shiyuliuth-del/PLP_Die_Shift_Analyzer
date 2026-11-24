@@ -373,6 +373,8 @@ class MeasuredOutput(QtCore.QObject):
             if policy not in ('strict','omit_failed_regions'):raise ValueError('未知实测输出策略')
             nominal_bypass=args.get('nominal_bypass',False)
             if type(nominal_bypass) is not bool:raise ValueError('nominal_bypass须为布尔值')
+            allow_drc_skip=args.get('allow_drc_skip',False)
+            if type(allow_drc_skip) is not bool:raise ValueError('allow_drc_skip须为布尔值')
             template = None
             template_sha256 = args.get('template_sha256')
             template_path = args.get('template_path')
@@ -411,7 +413,7 @@ class MeasuredOutput(QtCore.QObject):
             if use_processes:
                 lanes=process_lanes
             self.batch=dict(id=uuid.uuid4().hex,client_id=client_id,store=Store(destination.parent,self.session.data.dbu_um,max(1024**2,memory*1024**2//5),checkpoint_destination=destination.with_name(destination.stem+'.'+uuid.uuid4().hex[:12]+'.partial.oas'),error_layer=error_layer,error2_layer=error2_layer,failure_layer=failure_layer,template=template),lock=threading.Lock(),path=destination,baseline=baseline,budget_lock=threading.Lock(),budget_sample=0.,over_budget=False,
-                            executor=ThreadPoolExecutor(max_workers=lanes*2 if use_processes else lanes,thread_name_prefix='dsa-batch'),processes=None,pending=set(),inflight=set(),completed=0,failed=0,failures=[],ending=False,lanes=lanes,memory_mb=memory,template_sha256=template_sha256,semaphore=threading.Semaphore(lanes),output_policy=policy,nominal_bypass=nominal_bypass)
+                            executor=ThreadPoolExecutor(max_workers=lanes*2 if use_processes else lanes,thread_name_prefix='dsa-batch'),processes=None,pending=set(),inflight=set(),completed=0,failed=0,failures=[],ending=False,lanes=lanes,memory_mb=memory,template_sha256=template_sha256,semaphore=threading.Semaphore(lanes),output_policy=policy,nominal_bypass=nominal_bypass,allow_drc_skip=allow_drc_skip)
             if use_processes:
                 from .measured_workers import BatchWorkers
                 try:
@@ -419,7 +421,7 @@ class MeasuredOutput(QtCore.QObject):
                 except Exception:
                     self.close_batch()
                     raise
-            return dict(status='completed',result=dict(batch_id=self.batch['id'],threads=lanes,execution='processes' if use_processes else 'threads',max_memory_mb=memory,queue_limit=lanes*4,template_sha256=template_sha256,output_policy=policy,nominal_bypass=nominal_bypass,error_layer=dict(layer=error_layer[0],datatype=error_layer[1],name='ERROR'),error2_layer=self.batch['store'].serious_layer_receipt(),failure_layer=dict(layer=failure_layer[0],datatype=failure_layer[1],name='FAIL')))
+            return dict(status='completed',result=dict(batch_id=self.batch['id'],threads=lanes,execution='processes' if use_processes else 'threads',max_memory_mb=memory,queue_limit=lanes*4,template_sha256=template_sha256,output_policy=policy,nominal_bypass=nominal_bypass,allow_drc_skip=allow_drc_skip,error_layer=dict(layer=error_layer[0],datatype=error_layer[1],name='ERROR'),error2_layer=self.batch['store'].serious_layer_receipt(),failure_layer=dict(layer=failure_layer[0],datatype=failure_layer[1],name='FAIL')))
         if command=='batch.submit':
             batch=self.batch
             if batch is None or batch['ending']:raise RuntimeError('批次未开始或已结束接收')
@@ -430,6 +432,9 @@ class MeasuredOutput(QtCore.QObject):
             use_nominal=args.get('use_nominal',False)
             if type(use_nominal) is not bool or (use_nominal and not batch['nominal_bypass']):
                 raise ValueError('原图直出须在batch.begin明确启用')
+            skip_drc=args.get('skip_drc',False)
+            if type(skip_drc) is not bool or (skip_drc and (not batch['allow_drc_skip'] or use_nominal)):
+                raise ValueError('跳过普通DRC须在batch.begin明确启用，且不能与原图直出同用')
             from .measured_core import pose_parameters
             pose_parameters(session.case,session.p,rows)
             if (not isinstance(name,str) or not 1<=len(name)<=120 or name=='TopCell' or name.startswith('G_')
@@ -460,10 +465,10 @@ class MeasuredOutput(QtCore.QObject):
                     try:
                         with budget_scope(lambda:self.check_batch_memory(batch)):
                             if batch['processes']:
-                                layers,details=batch['processes'].solve(rows,batch['output_policy'])
+                                layers,details=batch['processes'].solve(rows,batch['output_policy'],skip_drc)
                             else:
                                 with serial_scope():
-                                    _,snapshot,details=session.run(rows,preview=False,output_policy=batch['output_policy'])
+                                    _,snapshot,details=session.run(rows,preview=False,output_policy=batch['output_policy'],skip_drc=skip_drc)
                                 layers=snapshot.layers
                             self.check_batch_memory(batch,force=True)
                     except Exception as exc:

@@ -77,7 +77,7 @@ def catalogue(frame,case,model=None):
         lo-=pad;hi+=pad
         corners=(np.array([[lo[0],lo[1]],[hi[0],lo[1]],[hi[0],hi[1]],[lo[0],hi[1]]])@basis.T+anchor).tolist()
         angle=math.atan2(unit[1],unit[0])
-        severe=bool(q.get('connection_failure') or q.get('short_circuit'))
+        severe=bool(q.get('connection_failure') or q.get('short_circuit') or q.get('serious'))
         rows.append(dict(die_ids=sorted(dies) or [0],number=i+1,kind=q['kind'],layers=list(q.get('layers',(q.get('layer',''),))),
                          bounds_um=bounds,point_um=point,marker_corners_um=corners,marker_angle_deg=math.degrees(angle),package_relative_bounds_um=(np.asarray(bounds)-np.tile(origin,2)).tolist(),
                          required_um=q.get('required_um'),required_deg=q.get('required_deg'),actual_um=q.get('actual_um'),actual_deg=q.get('actual_deg'),
