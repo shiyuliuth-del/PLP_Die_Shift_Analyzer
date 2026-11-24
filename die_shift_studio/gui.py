@@ -1580,7 +1580,7 @@ class MainWindow(W.QMainWindow):
         if hasattr(self,'reconstruction_yield'):self.reconstruction_yield.reset()
         try:
             if stage:self.reconstruction_overlay.stage()
-            self.reconstruction_overlay.draw();self.render_scene()
+            self.reconstruction_overlay.draw();self.selection.draw(redraw=False);self.render_scene()
         except Exception as exc:self.log_bus.emit(f'待计算动区预览未生成：{exc}')
         self.statusBar().showMessage('重构修改待应用；已标记调整图形，点击“重构计算”统一计算。')
 
@@ -1761,7 +1761,7 @@ class MainWindow(W.QMainWindow):
         # every hand edit of the cut lines.
         self.edit_history.record()
         self.view_settings=replace(self.view_settings,reconstruction_cuts=(),
-                                   reconstruction_extra_cuts=(),reconstruction_second_cuts=(),reconstruction_dropped_cuts=(),reconstruction_intervals=(),reconstruction_angles=(),reconstruction_deleted=(),reconstruction_added=(),reconstruction_forced=(),reconstruction_boxes=(),reconstruction_angle_boxes=(),reconstruction_box_excluded=(),reconstruction_between_overrides=())
+                                   reconstruction_extra_cuts=(),reconstruction_second_cuts=(),reconstruction_dropped_cuts=(),reconstruction_intervals=(),reconstruction_angles=(),reconstruction_deleted=(),reconstruction_added=(),reconstruction_forced=(),reconstruction_boxes=(),reconstruction_angle_boxes=(),reconstruction_box_order=(),reconstruction_box_starts=(),reconstruction_box_excluded=(),reconstruction_between_overrides=())
         self.invalidate_reconstruction_edit()
         self.statusBar().showMessage('已清除全部手动切口，并恢复被删除的自动切口')
         self.request_preview()
@@ -2011,7 +2011,7 @@ class MainWindow(W.QMainWindow):
             key=(tuple(self.ax.get_xlim()),tuple(self.ax.get_ylim()),tuple(self.ax.bbox.bounds),self._legend_stamp,self.space_stamp,
                  self.legend.get_visible() if self.legend is not None else False,tuple(a.get_visible() for a in self.space_artists))
             self.scene_renderer.draw(key,self.legend)
-            if not self.selection.selected:
+            if not self.selection.selected and self.selection.selected_between is None:
                 self.scene_renderer.unselected_key=self.scene_renderer.selection_key(self.legend)
         else:self.canvas.draw_idle()
     def update_die_label_visibility(self,*_):
@@ -3080,8 +3080,6 @@ class MainWindow(W.QMainWindow):
         if rows==self.view_settings.reconstruction_between_overrides:return
         self.edit_history.record()
         self.view_settings=replace(self.view_settings,reconstruction_between_overrides=rows)
-        if getattr(self,'selection',None) and self.selection.selected_between and self.selection.selected_between.get('id')==block_id:
-            self.selection.selected_between=dict(self.selection.selected_between,mode=mode or self.view_settings.reconstruction_between_motion,custom=mode is not None)
         self.invalidate_reconstruction_edit();self.request_preview(quiet=True)
         label=LABELS[mode] if mode is not None else '默认（'+LABELS[self.view_settings.reconstruction_between_motion]+'）'
         if getattr(self,'reconstruction_pending',False):

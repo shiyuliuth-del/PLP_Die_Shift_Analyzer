@@ -265,7 +265,8 @@ def assemble(r,source,rows,states):
         if not members or not ids:continue
         q=dict(members[0]);posed=None;flow_steps=0
         high=max(values[i] for i in ids);low=min(values[i] for i in ids)
-        if high-low<=1e-10 and high<=1e-10:continue  # fixed-to-fixed copper has no moving terminal
+        if high<=1e-10 and not any(m.get('boxed') for m in members):
+            continue  # Do not automatically create a transition between fixed sides.
         guides=[_fast_union([part[name] for _,part in contributors if part is not None]) for name in ('near','far')]
         def face(weight,side):
             # Difference/union can leave ulp-different seam coordinates. A
@@ -307,7 +308,8 @@ def assemble(r,source,rows,states):
                 # material outside this transition; final whole-net guard runs.
                 if candidate.is_valid and candidate.geom_type=='Polygon' and not candidate.is_empty:posed=candidate
             except (ValueError,shapely.errors.GEOSException):pass
-        if posed is None:posed=deform(group,ids)
+        if posed is None:
+            posed=transform(group,center,pose*high) if high-low<=1e-10 else deform(group,ids)
         valid=posed.is_valid and posed.geom_type=='Polygon'
         if not valid:
             from .continuous_warp import domain
@@ -362,7 +364,7 @@ def consolidate(r,pieces,states,local_states=None):
         cache_key=('branch-assembly-local-intervals-v71',r.rules.identity,r.settings.reconstruction_style,
                    getattr(r.settings,'reconstruction_between_motion','max'),ref_overrides,
                    tuple(r.model.bound.centers[rows[0]['die']]),posed[rows[0]['die']].tobytes(),
-                   tuple((q['route_identity'],q['interval'],q['boundary_angles'],tuple(q['nominal_regions'][k].wkb for k in 'ABC')) for q in rows))
+                   tuple((q['route_identity'],q['interval'],q['boundary_angles'],q.get('boxed'),tuple(q['nominal_regions'][k].wkb for k in 'ABC')) for q in rows))
         cached=r.geometry_pool.get(cache_key)
         if cached is not None:
             other.extend(dict(q,regions=dict(q['regions'])) for q in cached);continue

@@ -9,7 +9,7 @@ from .area_filter import remap_project
 
 DRC_FIELDS=('drc_waived_refs','drc_retained_refs')
 RECONSTRUCTION_FIELDS=tuple('reconstruction_'+name for name in (
-    'regions','boxes','angle_boxes','box_excluded','fixed_via_follows','between_overrides','cuts','extra_cuts',
+    'regions','boxes','angle_boxes','box_order','box_starts','box_excluded','fixed_via_follows','between_overrides','cuts','extra_cuts',
     'second_cuts','dropped_cuts','ignored','following','forced','angles','deleted','added','intervals'))
 EDIT_FIELDS=RECONSTRUCTION_FIELDS+DRC_FIELDS
 
@@ -49,7 +49,8 @@ class EditHistory:
         staged=getattr(w,'_staged_restored_edits',None)
         if staged:
             staged_edits,staged_width=staged
-            edits={name:tuple(dict.fromkeys(tuple(edits[name])+tuple(staged_edits.get(name,())))) for name in EDIT_FIELDS}
+            from .manual_regions import BOX_HISTORY_FIELDS
+            edits={name:(edits[name] if name in BOX_HISTORY_FIELDS else tuple(dict.fromkeys(tuple(edits[name])+tuple(staged_edits.get(name,()))))) for name in EDIT_FIELDS}
             width=tuple(sorted(set(width)|set(staged_width)))
         deletions=w._effective_deleted_shapes() if hasattr(w,'_effective_deleted_shapes') else tuple(getattr(data,'deleted_shapes',()))
         return dict(edits=edits,width=tuple(sorted(width)),drc=getattr(w,'ignored_drc',{}),
@@ -123,7 +124,9 @@ class EditHistory:
                 if state['nodes']!=before['nodes']:w._stage_history_nodes(state['nodes'])
                 actual_refs={(layer,raw) for layer,indices in getattr(w.data,'area_indices',{}).items() for raw in indices}
                 if actual_refs:
-                    missing_edits={name:tuple(row for row in state['edits'].get(name,()) if len(row)>=2 and (row[0],int(row[1])) not in actual_refs) for name in EDIT_FIELDS}
+                    from .manual_regions import BOX_HISTORY_FIELDS
+                    missing_edits={name:tuple(row for row in state['edits'].get(name,()) if len(row)>=2 and (row[0],int(row[1])) not in actual_refs)
+                                   for name in EDIT_FIELDS if name not in (*BOX_HISTORY_FIELDS,'reconstruction_regions')}
                     missing_width=tuple(ref for ref in state['width'] if tuple(ref) not in actual_refs)
                     w._staged_restored_edits=(missing_edits,missing_width) if (any(missing_edits.values()) or missing_width) else None
                 else:

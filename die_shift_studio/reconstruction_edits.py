@@ -92,7 +92,7 @@ def change_zone(window,action,piece=None,ref=None,point=None,side=None,refs=()):
         refs={tuple(ref) for ref in refs}
         if not refs:return
         fields=('reconstruction_intervals','reconstruction_angles','reconstruction_deleted','reconstruction_added',
-                'reconstruction_cuts','reconstruction_extra_cuts','reconstruction_second_cuts','reconstruction_dropped_cuts')
+                'reconstruction_cuts','reconstruction_extra_cuts','reconstruction_second_cuts','reconstruction_dropped_cuts','reconstruction_between_overrides')
         edits={name:tuple(row for row in getattr(cfg,name) if row[:2] not in refs) for name in fields}
         updated=replace(cfg,**edits,reconstruction_ignored=tuple(sorted(ignored|refs)),
                         reconstruction_forced=tuple(sorted(forced-refs)),
@@ -122,14 +122,22 @@ def change_zone(window,action,piece=None,ref=None,point=None,side=None,refs=()):
         if current:
             import shapely
             from .selection import inverse_geometry
-            target=min(current,key=lambda q:q['bridge'].distance(shapely.Point(point)))
+            from .moving_pair import boundary_pose
+            probe=shapely.Point(point);frame=window.current_frame
+            def nominal_at(q):
+                if q['bridge'].covers(probe):
+                    return q['route_plan'].route.interpolate(project_click(q,point))
+                side=0 if q['regions']['C'].covers(probe) else 1
+                center,state=boundary_pose(q,frame,side)
+                return inverse_geometry(probe,center,state) if state.any() else probe
+            nominal_sites=[(q,nominal_at(q)) for q in current]
+            target,nominal=min(nominal_sites,key=lambda item:(
+                item[0]['route_plan'].route.distance(item[1]),item[0]['bridge'].distance(probe)))
             plan=target['route_plan'];base_id=plan.identity.split('~')[0]
-            a,b=target['interval'];probe=shapely.Point(point)
-            if target['bridge'].covers(probe):
-                position=project_click(target,point);nominal=plan.route.interpolate(position)
-            else:
-                nominal=inverse_geometry(probe,window.current_frame['rotation_centers'][target['die']],window.current_frame['states'][target['die']]) if target['regions']['C'].covers(probe) else probe
-                position=float(plan.route.project(nominal))
+            a,b=target['interval']
+            if not plan.source.covers(nominal):
+                nominal=shapely.shortest_line(plan.source,nominal).interpolate(0)
+            position=float(plan.route.project(nominal))
             guard=max(plan.tolerance*32,plan.guard)
             half=max(guard*2,min((b-a)*.2,30.));chosen=None
             for scale in (1,2,4,8,16,32):
@@ -139,20 +147,33 @@ def change_zone(window,action,piece=None,ref=None,point=None,side=None,refs=()):
             if chosen is None:
                 window.statusBar().showMessage('该点击位置不能形成保持连接的动区，未在其他位置替代添加');return
             left,right=chosen;identity=uuid.uuid4().hex[:12];new_id=base_id+'~'+identity
+            saved={tuple(r[:5]):r for r in intervals}
+            automatic=[q for q in current if q.get('graph_branch') and not q['manual']
+                       and q['die']==target['die'] and q['nominal_regions']['A'].covers(nominal)]
             scoped=[q for q in current if q['route_plan'].identity.split('~')[0]==base_id]
             outer_a=min([left,*[q['interval'][0] for q in scoped]]);outer_b=max([right,*[q['interval'][1] for q in scoped]])
-            saved={tuple(r[:5]):r for r in intervals}
-            for q in scoped:
-                identity_key=key(q['route_plan']);lo,hi=q['interval']
-                if q is target:
-                    if position>=(a+b)/2:hi=min(hi,left-guard)
-                    else:lo=max(lo,right+guard)
-                    if hi<=lo:
-                        deleted=tuple(set(deleted)|{identity_key});continue
-                saved[identity_key]=(*identity_key,lo,hi)
-            saved[(*plan.key,new_id)]=(*plan.key,new_id,left,right)
+            if any(q is target for q in automatic):
+                # All automatic branch paths using this same trunk must take the
+                # local interval. An unedited sibling otherwise grows it back.
+                ends=[plan.route.interpolate(s) for s in (left,right)]
+                for q in automatic:
+                    route=q['route_plan']
+                    lo,hi=sorted(float(route.route.project(end)) for end in ends)
+                    part=route.partition(lo,hi)
+                    if part is not None:
+                        identity_key=key(route);saved[identity_key]=(*identity_key,part['a'],part['b'])
+            else:
+                for q in scoped:
+                    identity_key=key(q['route_plan']);lo,hi=q['interval']
+                    if q is target:
+                        if position>=(a+b)/2:hi=min(hi,left-guard)
+                        else:lo=max(lo,right+guard)
+                        if hi<=lo:
+                            deleted=tuple(set(deleted)|{identity_key});continue
+                    saved[identity_key]=(*identity_key,lo,hi)
+                saved[(*plan.key,new_id)]=(*plan.key,new_id,left,right)
+                added=(*added,(*ref,float(plan.route.interpolate(position).x),float(plan.route.interpolate(position).y),identity,base_id,outer_a,outer_b))
             intervals=list(saved.values())
-            added=(*added,(*ref,float(plan.route.interpolate(position).x),float(plan.route.interpolate(position).y),identity,base_id,outer_a,outer_b))
         else:
             import shapely
             from .selection import inverse_geometry
