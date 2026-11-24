@@ -111,7 +111,8 @@ class Connections:
     def component_geometry(self,key,index):
         component=self.component(key,index)
         if component not in self._component_geometry:
-            self._component_geometry[component]=shapely.union_all([self.nodes[i][2] for i in self.components[component]])
+            members=self.components[component]
+            self._component_geometry[component]=self.nodes[members[0]][2] if len(members)==1 else shapely.union_all([self.nodes[i][2] for i in members])
         return self._component_geometry[component]
     def fixed_interfaces(self,key,index):
         """Copper of the fixed RDL a moving via lands on.
@@ -188,15 +189,28 @@ class Connections:
         # actual terminal component for EACH DIE, not the global final plane.
         # A component with downward links is a carrier, never a new chip root:
         # fanout over another DIE must continue to follow its original DIE.
-        tree=STRtree(case['dies']);eps=max(1e-12,self.data.dbu_um**2*.01)
+        dies_arr=np.asarray(case['dies'],object)
+        tree=STRtree(dies_arr);eps=max(1e-12,self.data.dbu_um**2*.01)
         candidates={i:[] for i in range(len(case['dies']))}
+        leaf_meta=[];leaf_polys=[]
         for rank,ids in enumerate(self.plane_nodes):
             for node in ids:
                 component=uf.find(node)
                 if down[component]:continue
-                p=self.nodes[node][2]
-                for owner in tree.query(p,predicate='intersects'):
-                    if p.intersection(case['dies'][owner]).area>eps:candidates[int(owner)].append((rank,component,self.nodes[node][0]))
+                leaf_meta.append((rank,component,self.nodes[node][0]))
+                leaf_polys.append(self.nodes[node][2])
+        if leaf_polys:
+            poly_arr=np.asarray(leaf_polys,object)
+            pi,di=tree.query(poly_arr,predicate='intersects')
+            if len(pi):
+                covered=shapely.covers(dies_arr[di],poly_arr[pi])
+                areas=shapely.area(poly_arr[pi])
+                keep=covered&(areas>eps)
+                rem=~covered
+                if np.any(rem):
+                    keep[rem]=shapely.area(shapely.intersection(poly_arr[pi[rem]],dies_arr[di[rem]]))>eps
+                for k in np.flatnonzero(keep):
+                    candidates[int(di[k])].append(leaf_meta[int(pi[k])])
         self.terminal_planes_by_die=[]
         for owner,choices in candidates.items():
             rank=max((r for r,_,_ in choices),default=-1)
@@ -216,11 +230,15 @@ class Connections:
         local={component:set() for component in moving_down}
         for key in self.order:
             if self.roles.get(key)!='运动过孔':continue
-            for i,poly in enumerate(self.geometry[key]):
-                owners=tree.query(poly,predicate='covered_by')
-                if len(owners)==1:
-                    component=self.component(key,i)
-                    if component in local:local[component].add(int(owners[0]))
+            polys=self.geometry[key]
+            if not len(polys):continue
+            vi,oi=tree.query(polys,predicate='covered_by')
+            if not len(vi):continue
+            counts=np.bincount(vi,minlength=len(polys))
+            for idx,owner in zip(vi,oi):
+                if counts[idx]==1:
+                    component=self.component(key,int(idx))
+                    if component in local:local[component].add(int(owner))
         anchored={}
         for ids in reversed(self.plane_nodes):
             for component in {uf.find(i) for i in ids}:

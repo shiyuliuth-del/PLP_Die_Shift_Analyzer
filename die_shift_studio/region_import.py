@@ -69,7 +69,53 @@ def metadata_for(data,roles,order,parameters,settings,layers,dxf,compensation):
     layers=tuple(sorted(k for k in layers if roles.get(k)=='固定RDL'))
     edits={k:tuple(row for row in getattr(settings,k) if row[0] in layers) for k in edit_fields()}
     return dict(context=context_id(data,roles,order,parameters,settings),layers=layers,edits=edits,
+                roles=dict(roles),layer_order=list(order),
                 references=references,dxf=asdict(dxf),compensation=compensation)
+
+
+def resolve_stackup(contours,record,data,current_roles,current_order,current_compensation):
+    """Derive target stackup (roles, layer_order, motions, compensation) from DXF, ignoring current mismatch."""
+    from .layer_roles import canonical_roles
+    from .preview import default_motion
+    from .output_compensation import normalize as normalize_compensation
+    available=set(data.layers)
+    target_roles=dict(current_roles)
+    target_order=[k for k in current_order if k in available]
+    target_comp=dict(current_compensation)
+    if isinstance(record,dict):
+        saved_roles=record.get('roles')
+        if isinstance(saved_roles,dict):
+            try:
+                parsed=canonical_roles(saved_roles)
+                for k,role in parsed.items():
+                    if k in available:target_roles[k]=role
+            except ValueError:pass
+        saved_order=record.get('layer_order')
+        if isinstance(saved_order,list) and all(isinstance(k,str) for k in saved_order):
+            ordered=[k for k in saved_order if k in available]
+            for k in target_order:
+                if k not in ordered:ordered.append(k)
+            target_order=ordered
+        saved_comp=record.get('compensation')
+        if isinstance(saved_comp,dict):
+            try:
+                parsed_comp=normalize_compensation(saved_comp)
+                for k,val in parsed_comp.items():
+                    if k in available:target_comp[k]=val
+            except ValueError:pass
+    # Always map DXF _A/_B/_C layers present in this drawing to 固定RDL so external/legacy DXFs never fail on mismatch.
+    for layer in contours:
+        if layer in available:target_roles[layer]='固定RDL'
+    # Ensure board/die reference roles exist if current project had cleared them.
+    for ref_role in ('封装边框','芯片边框'):
+        if ref_role not in target_roles.values():
+            for k,r in getattr(data,'auto_roles',{}).items():
+                if k in available and r==ref_role:target_roles[k]=ref_role
+    for k in data.layers:
+        target_roles.setdefault(k,'不参与')
+        if k not in target_order:target_order.append(k)
+    target_motions={k:default_motion(role) for k,role in target_roles.items()}
+    return target_roles,target_order,target_motions,target_comp
 
 
 def recover_metadata(record,contours,data,roles,order,parameters,settings):
@@ -197,7 +243,10 @@ def assign(lines,sources,epsilon):
             cancel_check()
             candidates=[]
             for i in tree.query(line,predicate='dwithin',distance=epsilon):
-                if i not in buffer:buffer[i]=sources[i].boundary.buffer(epsilon,quad_segs=2)
+                if i not in buffer:
+                    buf=sources[i].boundary.buffer(epsilon,quad_segs=2)
+                    shapely.prepare(buf)
+                    buffer[i]=buf
                 if buffer[i].covers(line):candidates.append(int(i))
             if len(candidates)!=1:raise ValueError(f'_{kind} 轮廓无法唯一匹配当前名义铜图形（{line.centroid.x:.3f}, {line.centroid.y:.3f} μm）')
             matched[candidates[0]][kind].append(line)
@@ -265,8 +314,8 @@ def read_domains(source,cache,roles,compensation,scale,dbu):
     result={}
     epsilon=max(dbu*.1,1e-7)
     for layer,raw in source.items():
-        if roles.get(layer)!='固定RDL':
-            raise ValueError(f'DXF 图层 {layer} 须在当前工程设置为固定RDL')
+        if layer not in cache.layers:
+            continue
         nominal=cache.layers[layer]['geometry']
         amount=float(compensation.get(layer,0.))
         scaled_maps=[raw]

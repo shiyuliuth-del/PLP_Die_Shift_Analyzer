@@ -16,28 +16,51 @@ def issue_refs(window):
 def show_shape_menu(window,event,point):
     if window.data is None:return
     selection=window.selection
-    picked=None
+    picked=None;between=None
     if window.reconstruction_toggle.isChecked():
         picked=window.reconstruction_overlay.pick(*point,window.cut_drag._tolerance())
-        if not selection.selected and picked and picked[2] in ('moved','extra'):
+        if picked is None:
+            between=selection.selected_between if (selection.selected_between is not None and not selection.selected_between['geometry'].is_empty and selection.selected_between['geometry'].covers(Point(point))) else selection.find_between_block(point)
+            if between is None and selection.selected_between is not None and not selection.selected:
+                between=selection.selected_between
+        if between is not None:
+            selection.selected=[];selection.selected_between=between;selection.draw()
+        elif not selection.selected and picked and picked[2] in ('moved','extra'):
             selection.apply_hits([(picked[0]['layer'],picked[0]['index'])],'replace')
-    if not selection.selected:
+    if between is None and not selection.selected:
         tolerance=3*abs(window.ax.get_xlim()[1]-window.ax.get_xlim()[0])/max(1,window.ax.bbox.width)
         hits=selection.hits(Point(point).buffer(tolerance),point=True)
         if not hits:return
         selection.last_pixel=None
         selection.apply_hits(hits[:1],'replace')
-    refs=tuple(selection.selected)
+    refs=tuple(selection.selected) if between is None else (between['ref'],)
     menu=W.QMenu(window.canvas)
-    if len(refs)==1:
+    if between is not None:
+        from .between_motion import LABELS,MODES
+        ref=between['ref'];cur_mode=between['mode']
+        summary=f"动区间图形 · {ref[0]} #{ref[1]+1} · 当前：{LABELS.get(cur_mode,cur_mode)}"
+        menu.addAction(summary).setEnabled(False)
+        if not getattr(window,'remote_locked',False):
+            source_data=window.data;source_group=window.cache_group;block_id=between['id']
+            def set_between(mode):
+                if window.data is source_data and window.cache_group is source_group and window.reconstruction_toggle.isChecked():
+                    window.change_between_motion(block_id,mode)
+            for mode in MODES:
+                prefix='✓ ' if cur_mode==mode else ''
+                menu.addAction(f'{prefix}动区间随动：{LABELS[mode]}',lambda m=mode:set_between(m))
+            if between.get('custom'):
+                menu.addAction('恢复默认动区间随动逻辑',lambda:set_between(None))
+            menu.addSeparator()
+    elif len(refs)==1:
         key,i=refs[0];kind,xy,_=shape_nodes(window.data,key,i)
         summary=f'{key} #{i+1} · {kind} · {len(xy)} 个名义节点'
         pending=((getattr(getattr(window,'reconstruction_overlay',None),'staged_overlay',None) or {}).get('actions',{})).get(refs[0])
         if pending and getattr(window,'reconstruction_pending',False):
             summary+=' · 待算：'+' + '.join(pending)
+        menu.addAction(summary).setEnabled(False)
     else:
         summary=f'已选 {len(refs)} 个图形 · {len({k for k,_ in refs})} 层'
-    menu.addAction(summary).setEnabled(False)
+        menu.addAction(summary).setEnabled(False)
     if window.width_toggle.isChecked():
         ignored=window.ignored_width_lines;selected=set(refs)
         add=(issue_refs(window)&selected)-ignored;remove=ignored&selected

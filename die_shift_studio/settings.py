@@ -96,6 +96,8 @@ class ViewSettings:
     reconstruction_box_mode:str="aligned"
     reconstruction_fixed_via_mode:str="off"
     reconstruction_fixed_via_follows:tuple=()
+    reconstruction_between_motion:str="max"
+    reconstruction_between_overrides:tuple=()
     reconstruction_box_excluded:tuple=()
 
     # 重构预演初始参数
@@ -218,6 +220,8 @@ class ViewSettings:
         from .manual_regions import normalize as normalize_boxes
         for name in ('reconstruction_boxes','reconstruction_angle_boxes'):
             values[name]=normalize_boxes(values.get(name,()))
+        from .between_motion import normalize_overrides
+        values['reconstruction_between_overrides']=normalize_overrides(values.get('reconstruction_between_overrides',()))
         values['reconstruction_regions']=cls._normalize_regions(values.get('reconstruction_regions',()))
         values['reconstruction_dropped_cuts']=cls._normalize_dropped(values.get('reconstruction_dropped_cuts',()))
         values['width_display']=normalize_display(values.get('width_display',{}))
@@ -232,7 +236,7 @@ class ViewSettings:
                  'probability_interpolation':('nearest','bilinear','bicubic'),
                  'probability_cmap':('blue','teal','amber','rose','YlGnBu','BuPu','viridis','cividis','plasma','magma','turbo'),
                  'animation_strategy':('prepared','stream'),'evaluation_scope':('all','focus','risk'),'reconstruction_die_mode':('auto','follow','stationary'),
-                 'space_scope':('moving','package'),'reconstruction_box_mode':('free','aligned'),'reconstruction_fixed_via_mode':('off','global','individual')}
+                 'space_scope':('moving','package'),'reconstruction_box_mode':('free','aligned'),'reconstruction_fixed_via_mode':('off','global','individual'),'reconstruction_between_motion':('max','min','average')}
         for key,allowed in choices.items():
             if getattr(q,key) not in allowed:raise ValueError('无效设置：'+key)
         limits={'width_yield_decimals':(0,12),'width_label_decimals':(0,6),'width_label_font_pt':(6,24),'drc_tolerance_um':(-10000,10000),'probability_gamma':(.1,1.),'contact_marker_size':(.1,10000),'unadapted_marker_size':(.1,10000),'drc_min_angle_deg':(1,179),'sample_exponent':(8,18),'random_seed':(0,2147483647),'quadrature_order':(5,81),
@@ -282,7 +286,7 @@ class ViewSettings:
 
     def reconstruction_key(self):
         """Everything the reconstruction result depends on besides the pose."""
-        return (True,'nominal-route-continuity-v59',self.reconstruction_die_mode,self.reconstruction_fixed_via_mode,self.reconstruction_fixed_via_follows,self.reconstruction_box_excluded,self.drc_checks,self.evaluation_scope,self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_allow_moving_pad,self.reconstruction_pad_trigger_um,self.reconstruction_ignored,self.reconstruction_following,self.drc_tolerance_um,self.drc_min_angle_deg,
+        return (True,'nominal-route-continuity-v59',self.reconstruction_die_mode,self.reconstruction_fixed_via_mode,self.reconstruction_fixed_via_follows,self.reconstruction_between_motion,self.reconstruction_between_overrides,self.reconstruction_box_excluded,self.drc_checks,self.evaluation_scope,self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_allow_moving_pad,self.reconstruction_pad_trigger_um,self.reconstruction_ignored,self.reconstruction_following,self.drc_tolerance_um,self.drc_min_angle_deg,
                 tuple(self.reconstruction_intervals),
                 self.reconstruction_forced,self.reconstruction_angles,self.reconstruction_deleted,self.reconstruction_added,
                 tuple(self.reconstruction_regions),tuple(self.reconstruction_boxes),tuple(self.reconstruction_angle_boxes),tuple(self.reconstruction_cuts),

@@ -23,39 +23,45 @@ def import_regions(window):
         from .contact import ContactModel
         from .core import build_case
         from .fast_preview import GeometryCache
-        from .region_import import configure,read,read_domains,recover_metadata,validate_rebuild
+        from .region_import import configure,read,read_domains,recover_metadata,resolve_stackup,validate_rebuild
         from .resources import progress_slice
-        if progress:progress(0,'读取动静区 DXF 并匹配源图形')
+        if progress:progress(0,'读取动静区 DXF 并同步层叠状态')
         contours,record=read(name,with_metadata=True)
+        contours={k:v for k,v in contours.items() if k in data.layers}
+        if not contours:raise ValueError('DXF 中的动静区图层与当前图纸没有任何匹配图层')
+        target_roles,target_order,target_motions,target_comp=resolve_stackup(contours,record,data,roles,order,compensation)
+        stackup_changed=(target_roles!=roles or target_order!=order or target_comp!=compensation)
         cache=geometry or GeometryCache(data)
-        current=case or build_case(data,roles,geometry=cache.geometries,layer_order=order)
-        model=ContactModel(data,current,roles,current['connections'],cache,motions,params)
+        current=case if (case is not None and not stackup_changed) else build_case(data,target_roles,geometry=cache.geometries,layer_order=target_order)
+        model=ContactModel(data,current,target_roles,current['connections'],cache,target_motions,params)
         verification=progress_slice(progress,18,.82)
         try:
-            restored=recover_metadata(record,contours,data,roles,order,params,settings)
+            restored=recover_metadata(record,contours,data,target_roles,target_order,params,settings)
             if restored is not None:
                 from .dxf_settings import DxfSettings
                 from .output_compensation import normalize
                 options=DxfSettings.from_dict(record.get('dxf'))
                 offsets=normalize(record.get('compensation'))
                 if validate_rebuild(model,params,restored,contours,options,offsets,verification,references=record.get('references')):
-                    return restored,len(contours),'已核对原生动区及输出轮廓'
+                    return restored,len(contours),'已核对原生动区及输出轮廓',target_roles,target_order,target_comp,current,stackup_changed
         except (TypeError,ValueError,OverflowError):
             if progress:progress(18,'原生记录无法复核，依据 DXF 轮廓导入')
         try:
-            domains=read_domains(contours,cache,roles,compensation,window_options.scale,data.dbu_um)
-            return configure(model,params,settings,domains,verification),len(contours),'已核对源铜、切口及实际动区'
+            domains=read_domains(contours,cache,target_roles,target_comp,window_options.scale,data.dbu_um)
+            return configure(model,params,settings,domains,verification),len(contours),'已核对源铜、切口及实际动区',target_roles,target_order,target_comp,current,stackup_changed
         except ValueError:
             # Legacy files only carry exterior outlines. If they match the
             # current generated layout, the existing settings resolve them.
-            if validate_rebuild(model,params,settings,contours,window_options,compensation,verification):
-                return settings,len(contours),'与当前名义动静区一致'
+            if validate_rebuild(model,params,settings,contours,window_options,target_comp,verification):
+                return settings,len(contours),'与当前名义动静区一致',target_roles,target_order,target_comp,current,stackup_changed
             raise
 
     def complete(out):
         if window.data is not data or window.view_settings!=settings or window.remote_locked:return
-        updated,count,reason=out
+        updated,count,reason,target_roles,target_order,target_comp,current,stackup_changed=out
         window.edit_history.record()
+        if stackup_changed:
+            window.apply_stackup(target_roles,target_order,target_comp,case=current)
         window.view_settings=updated
         window.dxf_directory=str(Path(name).parent)
         window.reconstruction_pending=False
@@ -66,7 +72,8 @@ def import_regions(window):
         blocked=toggle.blockSignals(True);toggle.setChecked(True);toggle.blockSignals(blocked)
         window.invalidate_reconstruction_edit()
         window.request_preview(quiet=True)
-        window.log_bus.emit(f'已按 DXF 名义坐标应用 {count} 层动静区定义。{reason}。')
+        suffix='，已自动同步 DXF 层叠状态' if stackup_changed else ''
+        window.log_bus.emit(f'已按 DXF 名义坐标应用 {count} 层动静区定义。{reason}{suffix}。')
 
     window.start_worker(work,complete)
 
