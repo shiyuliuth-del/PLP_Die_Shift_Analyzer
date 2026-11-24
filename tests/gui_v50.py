@@ -19,7 +19,7 @@ def wait():
  while time.monotonic()<end:
   app.processEvents();time.sleep(.005)
   if not (w._tasks or w.preview_pending or w.reconstruction_yield.pending or w.reconstruction_yield.timer.isActive() or w.coverage_timer.isActive()):return
- raise AssertionError(w.runtime_view.toPlainText()[-4000:])
+ raise AssertionError(w.log_bus.text()[-4000:])
 def event(name,p,button=1,key=None,step=0):
  x,y=w.ax.transData.transform(p);e=MouseEvent(name,w.canvas,x,y,button=button,key=key,step=step);w.canvas.callbacks.process(name,e);app.processEvents()
 try:

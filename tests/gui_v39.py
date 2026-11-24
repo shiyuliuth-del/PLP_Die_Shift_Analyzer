@@ -19,9 +19,9 @@ def wait(expect_diagnostic=False):
  else:raise AssertionError('timeout')
  assert not errors,errors
  if expect_diagnostic and (w.current_frame or {}).get('diagnostic_only'):
-  assert '当前姿态无法生成保持电连接' in w.runtime_view.toPlainText()
-  assert 'Traceback' not in w.runtime_view.toPlainText()
- else:assert '[ERROR]' not in w.runtime_view.toPlainText(),w.runtime_view.toPlainText()[-6000:]
+  assert '当前姿态无法生成保持电连接' in w.log_bus.text()
+  assert 'Traceback' not in w.log_bus.text()
+ else:assert '[ERROR]' not in w.log_bus.text(),w.log_bus.text()[-6000:]
 
 def event(name,xy):
  px,py=w.ax.transData.transform(xy);ev=MouseEvent(name,w.canvas,px,py,button=1)
@@ -79,7 +79,7 @@ try:
   combo.setCurrentIndex(combo.findData(style));wait()
   assert w.current_frame['reconstruction']['parameters']['connection_style']==style
  assert '重构良率' in w.width_yield.label.text()
- assert w.reconstruction_yield.bank and w.reconstruction_yield.bank['total']>0,w.runtime_view.toPlainText()[-6000:]
+ assert w.reconstruction_yield.bank and w.reconstruction_yield.bank['total']>0,w.log_bus.text()[-6000:]
  q2=next(p for p in w.current_frame['reconstruction']['pieces'] if p['die']==0)
  # Whole landing point pulses while stationary hover and while dragging.
  w.setting_fields['reconstruction_allow_moving_pad'].setChecked(True);wait()

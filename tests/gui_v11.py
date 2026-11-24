@@ -18,7 +18,7 @@ def wait(timeout=120,allow_errors=False):
 def shot(name):w.canvas.draw();w.grab().save(str(ROOT/'figures'/('software_V14_'+name+'.png')))
 assert not w.runtime_toggle.isChecked() and w.runtime_view.isHidden()
 w.runtime_toggle.setChecked(True);assert not w.runtime_view.isHidden()
-print('V11 standard-output capture sentinel');sys.stderr.write('V11 standard-error capture sentinel\n');app.processEvents()
+print('V11 standard-output capture sentinel');sys.stderr.write('V11 standard-error capture sentinel\n');app.processEvents();w.refresh_runtime()
 assert 'capture sentinel' in w.runtime_view.toPlainText();assert '[ERROR]' in w.runtime_view.toPlainText()
 assert w.log_bus.path.exists() and 'standard-output' in w.log_bus.path.read_text()
 w.load_project(ROOT/'Jobs/示例F_逐芯片幅度与迭代窗口.dshift.json');wait()
@@ -64,6 +64,7 @@ np.testing.assert_array_equal(w.shown_states,w.manual_states)
 # Deliberate worker failure is timestamped and always resets progress/controls.
 w.start_worker(lambda progress:(_ for _ in ()).throw(ValueError('V11 handled-error sentinel')),lambda _:None)
 wait(allow_errors=True);assert len(errors)==1 and 'handled-error sentinel' in errors[0];errors.clear()
+w.refresh_runtime()
 assert w.progress.isHidden() and w.run_button.isEnabled();assert 'handled-error sentinel' in w.runtime_view.toPlainText()
 # Pink final-layout violations at a stricter minimum angle, with source-layer visibility.
 w.drc_toggle.setChecked(True);wait();w.setting_fields['deformation_min_angle_deg'].setValue(170);wait();assert w.current_frame['deformation']['violations']

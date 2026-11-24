@@ -30,7 +30,7 @@ def main():
                 time.sleep(.005)
             else:raise AssertionError('integration GUI timeout')
             assert not errors,errors
-            assert '未处理异常' not in w.runtime_view.toPlainText(),w.runtime_view.toPlainText()[-3000:]
+            assert '未处理异常' not in w.log_bus.text(),w.log_bus.text()[-3000:]
         def mouse(kind,x,y):
             px,py=w.ax.transData.transform((x,y))
             w.canvas.callbacks.process(kind,MouseEvent(kind,w.canvas,px,py,button=1))
@@ -69,7 +69,7 @@ def main():
                 assert w.view_settings.reconstruction_cuts==(plane,)
                 before=preview.call_count
                 w.dirty=False;w._coupled_key=('old',);w._coupled_data={'old':True}
-                w.setting_fields['reconstruction_corner_guard_um'].setValue(w.view_settings.reconstruction_corner_guard_um+1)
+                w.setting_fields['reconstruction_pad_trigger_um'].setValue(w.view_settings.reconstruction_pad_trigger_um+1)
                 assert preview.call_count>before
                 assert not w.dirty and w._coupled_key is None and w._coupled_data is None
                 assert w.view_settings.reconstruction_boxes==saved_regions
@@ -96,7 +96,7 @@ def main():
                                                 'summary':{'regions_ambiguous':2}}}
                 w.show_frame_status(status_frame)
                 app.processEvents()
-                assert '2 处手动动区归属不明确，未应用' in w.runtime_view.toPlainText()
+                assert '2 处手动动区归属不明确，未应用' in w.log_bus.text()
             w.load_project(project);settle()
             assert w.view_settings.reconstruction_boxes==saved_regions
             assert w.view_settings.reconstruction_second_cuts==(plane,),(w.view_settings.reconstruction_second_cuts,plane)

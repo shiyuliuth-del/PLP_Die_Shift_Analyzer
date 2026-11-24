@@ -50,9 +50,10 @@ def placement(name,origin=(0.,0.),angle=0.,dbu=.001):
     return (b'\x12\xb2'+string(name)+real(angle) if angle else b'\x11\xb0'+string(name))+sint(int(xy[0]))+sint(int(xy[1]))
 
 
-def polygons(layers,dbu,origin=(0.,0.),*,stats=None):
+def polygons(layers,dbu,origin=(0.,0.),*,stats=None,offset=(0.,0.)):
     from .gds_merge import winding_outline
     out=bytearray()
+    translation=np.rint(np.asarray(offset)/dbu)-np.rint(np.asarray(origin)/dbu)
     for key,values in sorted(layers.items()):
         layer,datatype=map(int,key.split('/'))
         if min(layer,datatype)<0:raise ValueError('Invalid layer')
@@ -65,7 +66,7 @@ def polygons(layers,dbu,origin=(0.,0.),*,stats=None):
                 # Quantize shared global nodes FIRST. Rounding local .5 values
                 # after subtracting different integer origins can otherwise
                 # disagree by one DBU (ties-to-even is not translation invariant).
-                xy=np.rint(winding_outline(g)/dbu)-np.rint(np.asarray(origin)/dbu)
+                xy=np.rint(winding_outline(g)/dbu)+translation
                 if not np.isfinite(xy).all() or np.max(abs(xy),initial=0)>2**52:raise ValueError('Polygon coordinates outside safe range')
                 xy=xy.astype(np.int64);xy=xy[np.any(xy!=np.roll(xy,1,axis=0),axis=1)]
                 # User-authorized removal of fragments with no area on the
@@ -85,11 +86,13 @@ class Store:
     """Incremental OAS stream and disk-backed cell index, under caller lock.
 
     Completed packets flush in blocks to the same temporary OAS. SQLite holds
-    only the index/placements, never all copper. Finalization appends TopCell.
+    only the index/placements, never all copper. Flat output streams into the
+    TopCell body. Hierarchical output writes package placements last.
     """
-    def __init__(self,directory,dbu,memory_bytes=64*1024**2,checkpoint_destination=None,*,error_layer=None,error2_layer=None,failure_layer=None,template=None):
+    def __init__(self,directory,dbu,memory_bytes=64*1024**2,checkpoint_destination=None,*,error_layer=None,error2_layer=None,failure_layer=None,template=None,create_cells=True):
         if not math.isfinite(dbu) or dbu<=0:raise ValueError('Output DBU must be finite and positive')
         self.template=template is not None
+        self.create_cells=create_cells;self.nominal_layers=None
         self.failure_layer=failure_layer;self.failed_packages=0
         diagnostic_layers=(('ERROR',error_layer),('ERROR2',error2_layer),('FAIL',failure_layer))
         layer_ids=[pair for _,pair in diagnostic_layers if pair is not None]
@@ -119,6 +122,8 @@ class Store:
                     layer, datatype = map(int, key.split('/'))
                     self.emit(b'\x0b' + string(label) + b'\x03' + uint(layer) + b'\x03' + uint(datatype))
             self.cell('G_TEMPLATE', body)
+        if not self.create_cells:
+            self.start_top(self.emit)
     def add(self,name,layers,position,board_origin,*,errors=None,die_count=0,failure_outline=None):
         return self.commit(self.prepare(name,layers,position,board_origin,errors=errors,die_count=die_count,failure_outline=failure_outline))
 
@@ -127,6 +132,9 @@ class Store:
         if not name or len(name)>120 or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-' for c in name):raise ValueError('Cell name must be 1–120 ASCII letters/digits/_/-')
         if name=='TopCell' or name.startswith('G_'):raise ValueError('Reserved cell name')
         children=[];cells=[];marker_count=0;serious_count=0;failed=0;stats={}
+        shift=np.asarray(position,dtype=float)-np.asarray(board_origin)
+        if shift.shape!=(2,) or not np.isfinite(shift).all():raise ValueError('Package origin must have two finite coordinates')
+        offset=(0.,0.) if self.create_cells else shift
         for pair in (self.error_layer,self.error2_layer,self.failure_layer):
             if pair is not None and f'{pair[0]}/{pair[1]}' in layers:
                 raise ValueError('诊断层与源图层冲突')
@@ -135,20 +143,27 @@ class Store:
             outline=shapely.from_wkb(failure_outline)
             if outline.is_empty or not outline.is_valid or outline.geom_type not in ('Polygon','MultiPolygon'):
                 raise ValueError('FAIL须使用有效的真实封装边框')
-            body=polygons({f'{self.failure_layer[0]}/{self.failure_layer[1]}':[failure_outline]},self.dbu)
+            body=polygons({f'{self.failure_layer[0]}/{self.failure_layer[1]}':[failure_outline]},self.dbu,offset=offset)
             if not body:raise ValueError('FAIL封装边框在输出格点上退化')
-            child='G_FAIL_'+name;cells.append((child,body));children.append(placement(child,dbu=self.dbu));failed=1
+            if self.create_cells:
+                child='G_FAIL_'+name;cells.append((child,body));children.append(placement(child,dbu=self.dbu))
+            else:
+                children.append(body)
+            failed=1
         # Reuse canonical source features, not just whole layers. Changing one
         # trace must not duplicate all unchanged traces in the same fixed layer.
-        for key,blobs in sorted(layers.items()):
-            for blob in blobs:
-                g=shapely.from_wkb(blob)
-                if g.is_empty:continue
-                origin=np.rint(np.asarray(g.bounds[:2])/self.dbu)*self.dbu
-                body=polygons({key:[blob]},self.dbu,origin,stats=stats)
-                if not body:continue
-                child='G_'+hashlib.sha256(body).hexdigest();cells.append((child,body))
-                children.append(placement(child,origin,dbu=self.dbu))
+        if self.create_cells:
+            for key,blobs in sorted(layers.items()):
+                for blob in blobs:
+                    g=shapely.from_wkb(blob)
+                    if g.is_empty:continue
+                    origin=np.rint(np.asarray(g.bounds[:2])/self.dbu)*self.dbu
+                    body=polygons({key:[blob]},self.dbu,origin,stats=stats)
+                    if not body:continue
+                    child='G_'+hashlib.sha256(body).hexdigest();cells.append((child,body))
+                    children.append(placement(child,origin,dbu=self.dbu))
+        else:
+            children.append(polygons(layers,self.dbu,offset=shift,stats=stats))
         if errors is not None:
             if self.error_layer is None:raise ValueError('批次没有配置ERROR图层')
             from .oas_errors import rectangles
@@ -158,13 +173,18 @@ class Store:
             for error in errors:
                 target=serious if self.error2_layer and error.get('severity')=='serious' else normal
                 target.append(error)
-            groups=[('ERROR',self.error_layer,rectangles(normal,die_count,self.dbu,with_placements=True))]
+            groups=[('ERROR',self.error_layer,rectangles(normal,die_count,self.dbu,with_placements=self.create_cells))]
             if self.error2_layer:
-                markers=rectangles(serious,die_count,self.dbu,with_placements=True)
+                markers=rectangles(serious,die_count,self.dbu,with_placements=self.create_cells)
                 serious_count=sum(map(len,markers.values()))
                 groups.append(('ERROR2',self.error2_layer,markers))
             for label, pair, markers in groups:
                 error_key=f'{pair[0]}/{pair[1]}'
+                marker_count+=sum(map(len,markers.values()))
+                if not self.create_cells:
+                    children.append(polygons({error_key:[blob for shapes in markers.values() for blob in shapes]},
+                                             self.dbu,offset=shift))
+                    continue
                 for die,shapes in markers.items():
                     direct=[];refs=[]
                     for blob,origin,angle in shapes:
@@ -178,20 +198,25 @@ class Store:
                     child=f'G_{label}_{name}_DIE_{die}'
                     cells.append((child,polygons({error_key:direct},self.dbu)+b''.join(refs)))
                     children.append(placement(child,dbu=self.dbu))
-                marker_count+=sum(map(len,markers.values()))
-        body=b''.join(children);shift=np.asarray(position,dtype=float)-np.asarray(board_origin)
-        if shift.shape!=(2,) or not np.isfinite(shift).all():raise ValueError('Package origin must have two finite coordinates')
+        body=b''.join(children)
         return name,cells,body,tuple(shift),marker_count,serious_count,failed,stats
 
     def add_nominal(self,name,position,board_origin,load_layers):
         cells=[];stats={}
-        if self.nominal_count==0:
+        shift=np.asarray(position,dtype=float)-np.asarray(board_origin)
+        if shift.shape!=(2,) or not np.isfinite(shift).all():raise ValueError('Package origin must have two finite coordinates')
+        body=b''
+        if not self.create_cells:
+            if self.nominal_layers is None:
+                self.nominal_layers=load_layers()
+            body=polygons(self.nominal_layers,self.dbu,offset=shift,stats=stats)
+            if not body:raise ValueError('名义封装在输出格点上没有有效图形')
+        elif self.nominal_count==0:
             body=polygons(load_layers(),self.dbu,stats=stats)
             if not body:raise ValueError('名义封装在输出格点上没有有效图形')
             cells.append(('G_NOMINAL',body))
-        shift=np.asarray(position,dtype=float)-np.asarray(board_origin)
-        if shift.shape!=(2,) or not np.isfinite(shift).all():raise ValueError('Package origin must have two finite coordinates')
-        markers=self.commit((name,cells,b'',tuple(shift),0,0,0,stats),target='G_NOMINAL')
+            body=b''
+        markers=self.commit((name,cells,body,tuple(shift),0,0,0,stats),target='G_NOMINAL')
         self.nominal_count+=1
         return markers
 
@@ -209,16 +234,24 @@ class Store:
         self.stream.write(data);self.crc=zlib.crc32(data,self.crc)
     def cell(self,name,body):
         self.emit(b'\x0e'+string(name))
+        self.block(body)
+    def block(self,body):
         compressor=zlib.compressobj(3,zlib.DEFLATED,-15);compressed=compressor.compress(body)+compressor.flush()
         self.emit(b'\x22\0'+uint(len(body))+uint(len(compressed))+compressed)
+    def start_top(self,emit):
+        emit(b'\x0e'+string('TopCell'))
+        if self.template:emit(placement('G_TEMPLATE',dbu=self.dbu))
     def flush(self, *, checkpoint=True):
         for name,target,cells,body,(x,y) in self.pending:
             cancel_check()
-            for child,content in cells:
-                cursor=self.db.execute('insert or ignore into cells values (?)',(child,))
-                if cursor.rowcount:self.cell(child,content)
-            if target==name:
-                self.db.execute('insert into cells values (?)',(name,));self.cell(name,body)
+            if self.create_cells:
+                for child,content in cells:
+                    cursor=self.db.execute('insert or ignore into cells values (?)',(child,))
+                    if cursor.rowcount:self.cell(child,content)
+                if target==name:
+                    self.db.execute('insert into cells values (?)',(name,));self.cell(name,body)
+            elif body:
+                self.block(body)
             self.db.execute('insert into packages values (?,?,?,?)',(name,target,x,y))
         self.db.commit();self.stream.flush();self.pending.clear();self.pending_names.clear();self.bytes=0
         os.fsync(self.stream.fileno())
@@ -236,10 +269,11 @@ class Store:
                 def emit(data):
                     nonlocal crc
                     out.write(data);crc=zlib.crc32(data,crc)
-                emit(b'\x0e'+string('TopCell'))
-                if self.template:emit(placement('G_TEMPLATE',dbu=self.dbu))
-                for cell,x,y in self.db.execute('select target,x,y from packages order by name'):
-                    emit(placement(cell,(x,y),dbu=self.dbu))
+                if self.create_cells:
+                    self.start_top(emit)
+                    for cell,x,y in self.db.execute('select target,x,y from packages order by name'):
+                        cancel_check()
+                        emit(placement(cell,(x,y),dbu=self.dbu))
                 emit(b'\x02'+uint(248)+b'\0'*248+b'\x01');out.write(struct.pack('<I',crc));out.flush();os.fsync(out.fileno())
             if not verify_crc(name):raise ValueError('阶段OAS校验失败')
             os.replace(name,target);self.checkpoint_count=self.count
@@ -249,17 +283,20 @@ class Store:
     def write(self,destination,progress=None):
         if self.finished:raise RuntimeError('Batch OAS already finalized')
         if not self.count:raise ValueError('批次没有成功的封装Cell，不替换已有文件')
-        self.flush();destination=Path(destination);self.emit(b'\x0e'+string('TopCell'))
-        if self.template:self.emit(placement('G_TEMPLATE',dbu=self.dbu))
-        total=self.db.execute('select count(*) from cells').fetchone()[0]
-        for i,(name,x,y) in enumerate(self.db.execute('select target,x,y from packages order by name')):
-            cancel_check();self.emit(placement(name,(x,y),dbu=self.dbu))
-            if progress and i%256==0:progress(round(90*i/max(self.count,1)),'输出TopCell封装引用')
+        self.flush();destination=Path(destination)
+        geometry_cells=0
+        if self.create_cells:
+            self.start_top(self.emit)
+            total=self.db.execute('select count(*) from cells').fetchone()[0]
+            geometry_cells=total-self.count+self.nominal_count
+            for i,(name,x,y) in enumerate(self.db.execute('select target,x,y from packages order by name')):
+                cancel_check();self.emit(placement(name,(x,y),dbu=self.dbu))
+                if progress and i%256==0:progress(round(90*i/max(self.count,1)),'输出TopCell封装引用')
         self.emit(b'\x02'+uint(248)+b'\0'*248+b'\x01');self.stream.write(struct.pack('<I',self.crc))
         self.stream.flush();os.fsync(self.stream.fileno());self.stream.close();self.finished=True
         if not verify_crc(self.stage):raise ValueError('OAS checksum validation failed')
         cancel_check();os.replace(self.stage,destination)
-        return dict(path=str(destination.resolve()),cells=self.count,nominal_packages=self.nominal_count,failed_packages=self.failed_packages,failure_layer=(dict(layer=self.failure_layer[0],datatype=self.failure_layer[1],name='FAIL') if self.failure_layer else None),unique_geometry_cells=total-self.count+self.nominal_count,bytes=destination.stat().st_size,dbu_um=self.dbu,top_cell='TopCell',error_layer=(dict(layer=self.error_layer[0],datatype=self.error_layer[1],name='ERROR') if self.error_layer else None),error_rectangles=self.error_rectangles,error2_layer=self.serious_layer_receipt(),error2_rectangles=self.error2_rectangles,error_packages=self.error_packages,discarded_subgrid_fragments=self.discarded_subgrid_fragments)
+        return dict(path=str(destination.resolve()),cells=self.count,create_cells=self.create_cells,nominal_packages=self.nominal_count,failed_packages=self.failed_packages,failure_layer=(dict(layer=self.failure_layer[0],datatype=self.failure_layer[1],name='FAIL') if self.failure_layer else None),unique_geometry_cells=geometry_cells,bytes=destination.stat().st_size,dbu_um=self.dbu,top_cell='TopCell',error_layer=(dict(layer=self.error_layer[0],datatype=self.error_layer[1],name='ERROR') if self.error_layer else None),error_rectangles=self.error_rectangles,error2_layer=self.serious_layer_receipt(),error2_rectangles=self.error2_rectangles,error_packages=self.error_packages,discarded_subgrid_fragments=self.discarded_subgrid_fragments)
     def close(self):
         if not self.stream.closed:self.stream.close()
         self.db.close();self.temp.cleanup()

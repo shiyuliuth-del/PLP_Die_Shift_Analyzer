@@ -50,7 +50,7 @@ def candidate(base,lines,r):
     """A bounded plane cut candidate; actual final copper is still native-checked."""
     from .reconstruction_route import terminal_marks
     for route in lines:
-        plan=PlaneRoute(base['layer'],base['index'],base['owner'],base['refs'],base['routing_source'],route,base['land'],tuple(base['anchors']),r.tol,max(0.,r.settings.reconstruction_corner_guard_um))
+        plan=PlaneRoute(base['layer'],base['index'],base['owner'],base['refs'],base['routing_source'],route,base['land'],tuple(base['anchors']),r.tol,0.)
         plan.pad_trigger=r.settings.reconstruction_pad_trigger_um
         fixed=tuple(v['poly'] for v in r.stays if v['net']==base['net'] and plan.source.intersects(v['poly']))
         plan.terminal_vias=(tuple(v['poly'] for v in base['mine']),fixed)

@@ -34,8 +34,19 @@ def run():
                     if errors:raise AssertionError(errors)
                     return
                 time.sleep(.01)
-            raise AssertionError(w.runtime_view.toPlainText()[-4000:])
+            raise AssertionError(w.log_bus.text()[-4000:])
         try:
+            assert w.runtime_view.isHidden() and not w.runtime_timer.isActive()
+            w.log_bus.emit('hidden-log v70')
+            app.processEvents()
+            assert not w.runtime_view.toPlainText() and 'hidden-log v70' in w.log_bus.text()
+            w.runtime_toggle.setChecked(True)
+            assert 'hidden-log v70' in w.runtime_view.toPlainText() and w.runtime_timer.isActive()
+            w.set_runtime_recording(False);w.log_bus.emit('measured-log v70')
+            assert 'measured-log v70' not in w.log_bus.text() and w.runtime_view.isHidden() and not w.runtime_timer.isActive()
+            w.set_runtime_recording(True)
+            assert w.runtime_timer.isActive() and not w.runtime_view.isHidden()
+            w.runtime_toggle.setChecked(False)
             engine,data,_=fixture()
             p,roles=engine.p,engine.roles
             engine.close()
@@ -177,6 +188,12 @@ def run():
                 usage.setCurrentText(role)
                 assert w.compensation_boxes['90/7'].value()==amount
             assert not w.visible_boxes['90/7'].isChecked()
+            for checkbox in (w.visible_boxes['90/7'],w.selectable_boxes['90/7']):
+                assert not checkbox.isChecked()
+                qtest.mouseClick(checkbox,left)
+                assert checkbox.isChecked(), '层叠复选框必须单击切换'
+                qtest.mouseClick(checkbox,left)
+                assert not checkbox.isChecked()
             w.compensation_boxes['90/7'].setValue(2.5)
             w.write_project(saved)
             w.load_project(saved);wait()

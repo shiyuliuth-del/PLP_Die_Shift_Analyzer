@@ -3,26 +3,46 @@ import sys
 import logging
 import traceback
 import warnings
+from collections import deque
 from datetime import datetime
+from itertools import islice
 from pathlib import Path
 from threading import Lock
-from .qt_compat import QtCore,Signal
-
-class LogBus(QtCore.QObject):
-    message=Signal(str)
-    def __init__(self,parent=None,path=None):
-        super().__init__(parent);self.path=Path(path) if path else None;self.lock=Lock()
+class LogBus:
+    def __init__(self,path=None,*,enabled=True):
+        self.path=Path(path) if path else None
+        self.lock=Lock()
+        self.enabled=enabled
+        self.lines=deque(maxlen=10000)
+        self.sequence=0
         if self.path:
             try:self.path.parent.mkdir(parents=True,exist_ok=True)
             except OSError:self.path=None
+    def set_enabled(self,enabled):
+        with self.lock:self.enabled=enabled
+
+    def read_after(self,sequence):
+        with self.lock:
+            if sequence==self.sequence:return sequence,[]
+            begin=max(0,sequence-self.sequence+len(self.lines))
+            return self.sequence,list(islice(self.lines,begin,None))
+
+    def text(self):
+        return '\n'.join(self.read_after(0)[1])
+
     def emit(self,text,level='INFO'):
+        if not self.enabled:return
         stamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         lines=[f'{stamp} [{level}] {line}' for line in str(text).rstrip().splitlines()]
-        if self.path:
-            try:
-                with self.lock,self.path.open('a',encoding='utf-8') as f:f.write('\n'.join(lines)+'\n')
-            except OSError:pass
-        for line in lines:self.message.emit(line)
+        if not lines:return
+        with self.lock:
+            if not self.enabled:return
+            self.lines.extend(lines)
+            self.sequence+=len(lines)
+            if self.path:
+                try:
+                    with self.path.open('a',encoding='utf-8') as f:f.write('\n'.join(lines)+'\n')
+                except OSError:pass
 
 class Stream:
     def __init__(self,original,bus,level):self.original=original;self.bus=bus;self.level=level

@@ -29,7 +29,7 @@ with tempfile.TemporaryDirectory(prefix='rda-plans-process-') as name:
                     template=str(folder/'RealDataAnalyse/Template/GD55_Template.gds'),
                     files=[dict(path=str(p),enabled=True) for p in files],
                     profile=DEFAULT_PROFILE,shared_mapping=True,
-                    controls=dict(dies=3,workers=2,memory=512,retries=1,timeout=0))
+                    controls=dict(dies=3,workers=2,memory=512,retries=1,timeout=0,create_cells=index!=0))
         ids.append(plans.add(capture(config,threading.Event())))
     command=[os.environ['REALDATA_TEST_EXE']] if os.environ.get('REALDATA_TEST_EXE') else [sys.executable,str(ROOT/'RealDataAnalyse/main.py')]
     result=root/'result.json'
@@ -37,15 +37,20 @@ with tempfile.TemporaryDirectory(prefix='rda-plans-process-') as name:
     outcome=json.loads(result.read_text());assert completed.returncode==0 and outcome['completed']==2,outcome
     previous_end=0
     before=[]
-    for plan_id in ids:
+    for index,plan_id in enumerate(ids):
         row=plans.get(plan_id);output=Path(row['output'])
         assert row['status']=='completed' and row['progress']==100,row
         assert previous_end<=row['started']<=row['ended'];previous_end=row['ended']
         assert list(output.parent.iterdir())==[output],list(output.parent.iterdir())
         assert verify_crc(output)
         layout=gdstk.read_oas(output);top=layout.top_level()[0]
-        assert top.name=='TopCell' and len(top.references)==3
-        assert len({ref.cell_name for ref in top.references})==3 and any(ref.cell_name=='G_TEMPLATE' for ref in top.references)
+        assert top.name=='TopCell'
+        if index==0:
+            assert {cell.name for cell in layout.cells}=={'TopCell','G_TEMPLATE'}
+            assert {ref.cell_name for ref in top.references}=={'G_TEMPLATE'} and top.polygons
+        else:
+            assert len(top.references)==3
+            assert len({ref.cell_name for ref in top.references})==3 and any(ref.cell_name=='G_TEMPLATE' for ref in top.references)
         before.append((output,sha256(output),output.stat().st_mtime_ns))
         conversation=(Path(row['folder'])/'RealDataAnalyse/logs/IPC-conversation.log').read_text()
         assert 'batch.submit' in conversation and 'Die Shift Analyze → RealDataAnalyse' in conversation

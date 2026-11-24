@@ -103,9 +103,8 @@ class V69Tests(TestCase):
         with TemporaryDirectory() as tmp:
             path=Path(tmp)/'runtime.log'
             bus=LogBus(path=path)
-            seen=[]
-            bus.message.connect(seen.append)
             bus.emit('测试\n第二行','ERROR')
+            _,seen=bus.read_after(0)
             self.assertRegex(seen[0],r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[ERROR\] 测试$')
             self.assertEqual(seen[0][:19],seen[1][:19])
             self.assertEqual(path.read_text(encoding='utf-8').splitlines(),seen)

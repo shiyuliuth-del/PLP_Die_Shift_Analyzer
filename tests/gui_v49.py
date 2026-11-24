@@ -21,7 +21,7 @@ def wait(limit=120):
   app.processEvents()
   if not any((w._tasks,w.worker,w.preview_workers,w.preview_pending,w.filter_job,w.transition.timer.isActive(),w.constraint_feedback.worker,w.constraint_feedback.pending,w.reconstruction_yield.worker,w.reconstruction_yield.pending,w.reconstruction_yield.timer.isActive(),w.coverage_timer.isActive())):return
   time.sleep(.005)
- raise AssertionError(w.runtime_view.toPlainText()[-5000:])
+ raise AssertionError(w.log_bus.text()[-5000:])
 def event(name,point,button=1,step=0):
  x,y=w.ax.transData.transform(point);e=MouseEvent(name,w.canvas,x,y,button=button,step=step);w.canvas.callbacks.process(name,e);app.processEvents()
 def key(k,modifier=None):
@@ -71,6 +71,6 @@ try:
  assert len(w.display_issues)==600
  w.show_issues.setChecked(True);w.view_bounds=(-1,-1,601,2);w.drc_overlay.draw();assert len(w.rendered_issues)==600
  assert not errors,errors
- assert 'Traceback' not in w.runtime_view.toPlainText(),w.runtime_view.toPlainText()[-6000:]
+ assert 'Traceback' not in w.log_bus.text(),w.log_bus.text()[-6000:]
  print('GUI_V49_PASS rulers/shortcuts/project restoration, rotated exact box and paged DRC source identities',flush=True)
 finally:close_window(app,w);tmp.cleanup()

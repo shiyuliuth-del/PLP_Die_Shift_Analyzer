@@ -91,11 +91,11 @@ class MeasuredOutput(QtCore.QObject):
             if timer is not None:timer.stop()
         if hasattr(w,'reconstruction_overlay'):w.reconstruction_overlay.pulse_timer.stop()
         self.endpoint.setText(str(self.server.endpoint));w.remote_locked=True;w.progress.hide();self.ready=False;self.last_error=None;self.current=None
+        w.set_runtime_recording(False)
         profile=resource_profile();cpu=profile['cpu']
         cpu_target=min(cpu,self.options.max_threads) if self.options.max_threads else max(1,cpu-1 if cpu>=4 else cpu)
         self.pool=ThreadPoolExecutor(max_workers=max(2,min(32,cpu_target)),thread_name_prefix='dsa-measured')
         self.transition={'job':self.new_job('session.freeze'),'phase':'freeze'} if w.data is not None else None;self.apply_lock(force=True)
-        w.log_bus.emit('实测输出已开启；等待指令，不进行方案评估或良率计算。IPC：'+str(self.server.endpoint))
     def new_job(self,command):
         key=uuid.uuid4().hex;self.jobs[key]=dict(task_id=key,command=command,status='queued',progress=0,created=time.time())
         while len(self.jobs)>10000:
@@ -227,6 +227,7 @@ class MeasuredOutput(QtCore.QObject):
             if not self.active():
                 if self.render_engine:self.render_engine.close();self.render_engine=None
                 w.remote_locked=False
+                if not w._closing:w.set_runtime_recording(True)
                 w.current_frame=None;w.shown_states=None;w.manual_states=None;w.active_preview=None;w.engine=None
                 for name,enabled in getattr(self,'saved_overlays',{}).items():
                     widget=w.overlay_widget(name);widget.blockSignals(True);widget.setChecked(enabled);widget.blockSignals(False)
@@ -376,6 +377,8 @@ class MeasuredOutput(QtCore.QObject):
             if type(nominal_bypass) is not bool:raise ValueError('nominal_bypass须为布尔值')
             allow_drc_skip=args.get('allow_drc_skip',False)
             if type(allow_drc_skip) is not bool:raise ValueError('allow_drc_skip须为布尔值')
+            create_cells=args.get('create_cells',True)
+            if type(create_cells) is not bool:raise ValueError('create_cells须为布尔值')
             template = None
             template_sha256 = args.get('template_sha256')
             template_path = args.get('template_path')
@@ -413,7 +416,7 @@ class MeasuredOutput(QtCore.QObject):
             use_processes=(process_lanes>=2 and requested_count>=4)
             if use_processes:
                 lanes=process_lanes
-            self.batch=dict(id=uuid.uuid4().hex,client_id=client_id,store=Store(destination.parent,self.session.data.dbu_um,max(1024**2,memory*1024**2//5),checkpoint_destination=destination.with_name(destination.stem+'.'+uuid.uuid4().hex[:12]+'.partial.oas'),error_layer=error_layer,error2_layer=error2_layer,failure_layer=failure_layer,template=template),lock=threading.Lock(),path=destination,baseline=baseline,budget_lock=threading.Lock(),budget_sample=0.,over_budget=False,
+            self.batch=dict(id=uuid.uuid4().hex,client_id=client_id,store=Store(destination.parent,self.session.data.dbu_um,max(1024**2,memory*1024**2//5),checkpoint_destination=destination.with_name(destination.stem+'.'+uuid.uuid4().hex[:12]+'.partial.oas'),error_layer=error_layer,error2_layer=error2_layer,failure_layer=failure_layer,template=template,create_cells=create_cells),lock=threading.Lock(),path=destination,baseline=baseline,budget_lock=threading.Lock(),budget_sample=0.,over_budget=False,
                             executor=ThreadPoolExecutor(max_workers=lanes*2 if use_processes else lanes,thread_name_prefix='dsa-batch'),processes=None,pending=set(),inflight=set(),completed=0,failed=0,failures=[],ending=False,lanes=lanes,memory_mb=memory,template_sha256=template_sha256,semaphore=threading.Semaphore(lanes),output_policy=policy,nominal_bypass=nominal_bypass,allow_drc_skip=allow_drc_skip)
             if use_processes:
                 from .measured_workers import BatchWorkers
@@ -422,7 +425,7 @@ class MeasuredOutput(QtCore.QObject):
                 except Exception:
                     self.close_batch()
                     raise
-            return dict(status='completed',result=dict(batch_id=self.batch['id'],threads=lanes,execution='processes' if use_processes else 'threads',max_memory_mb=memory,queue_limit=lanes*4,template_sha256=template_sha256,output_policy=policy,nominal_bypass=nominal_bypass,allow_drc_skip=allow_drc_skip,error_layer=dict(layer=error_layer[0],datatype=error_layer[1],name='ERROR'),error2_layer=self.batch['store'].serious_layer_receipt(),failure_layer=dict(layer=failure_layer[0],datatype=failure_layer[1],name='FAIL')))
+            return dict(status='completed',result=dict(batch_id=self.batch['id'],threads=lanes,execution='processes' if use_processes else 'threads',max_memory_mb=memory,queue_limit=lanes*4,template_sha256=template_sha256,output_policy=policy,nominal_bypass=nominal_bypass,allow_drc_skip=allow_drc_skip,create_cells=create_cells,error_layer=dict(layer=error_layer[0],datatype=error_layer[1],name='ERROR'),error2_layer=self.batch['store'].serious_layer_receipt(),failure_layer=dict(layer=failure_layer[0],datatype=failure_layer[1],name='FAIL')))
         if command=='batch.submit':
             batch=self.batch
             if batch is None or batch['ending']:raise RuntimeError('批次未开始或已结束接收')

@@ -70,6 +70,8 @@ def validate(snapshot, output, check_hash=False, stop=None):
         raise ValueError('启用忽略阈值须为布尔值')
     if type(controls.get('skip_drc_enabled',False)) is not bool:
         raise ValueError('启用忽略DRC须为布尔值')
+    if type(controls.get('create_cells',True)) is not bool:
+        raise ValueError('结果自动建Cell须为布尔值')
     skips_failed_measurements(controls)
     if (not 1 <= controls['dies'] <= 10000 or not 0 <= controls['workers'] <= 64
             or (controls['memory'] != 0 and not 128 <= controls['memory'] <= 1048576)
@@ -317,7 +319,8 @@ class PlanRunner:
                     if self.trace: self.trace.set_root(workspace)
                     return Runner(database, meta['config']['endpoint'], meta['config']['project'], row['output'],
                                   stop=self.stop, trace=self.trace, template=snapshot.get('template'), progress=report,
-                                  bypass_limits=limits, skip_drc_limits=skip_drc_limits).run()
+                                  bypass_limits=limits, skip_drc_limits=skip_drc_limits,
+                                  create_cells=controls.get('create_cells',True)).run()
             validate(snapshot, row['output'], check_hash=True, stop=self.stop)
             project = materialize(row, self.stop)
             configure_logging(workspace)
@@ -360,6 +363,7 @@ class PlanRunner:
             return Runner(database, endpoint, project, row['output'], controls['workers'], controls['memory'], controls['retries'],
                    controls['timeout'], self.stop, report, transport=transport, trace=self.trace,
                    bypass_limits=limits, skip_drc_limits=skip_drc_limits, on_launch=launched_callback,
+                   create_cells=controls.get('create_cells',True),
                    template=snapshot.get('template'), expected_template_sha256=expected.get(snapshot.get('template'))).run()
         finally:
             if transport is not None and (owned or owned_pid):

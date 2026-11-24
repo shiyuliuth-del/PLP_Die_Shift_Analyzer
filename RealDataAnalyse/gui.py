@@ -28,7 +28,7 @@ COMMANDS = {
     'preview.submit': {'dies': [{'die': 1, 'dx_um': 0, 'dy_um': 0, 'angle_deg': 0}]},
     'export.gds': {'filename': 'measured.gds'},
     'batch.begin': {'filename': 'measured.oas', 'output_policy': 'omit_failed_regions',
-                    'nominal_bypass': False, 'allow_drc_skip': False},
+                    'nominal_bypass': False, 'allow_drc_skip': False, 'create_cells': True},
     'batch.submit': {'batch_id': '', 'cell': 'Package_000001', 'position_um': [0, 0], 'dies': [],
                      'use_nominal': False, 'skip_drc': False},
     'batch.end': {'batch_id': ''}, 'task.get': {'task_id': ''},
@@ -167,7 +167,9 @@ class Window(W.QMainWindow):
         form = W.QFormLayout(connection)
         folder_row = W.QHBoxLayout()
         self.folder = W.QLineEdit()
-        self.folder.setReadOnly(True)
+        self.folder.setPlaceholderText('输入项目文件夹，按 Enter 确认')
+        self.folder.textEdited.connect(lambda _: self.folder.setStyleSheet(''))
+        self.folder.editingFinished.connect(lambda: QtCore.QTimer.singleShot(0, self.apply_folder_text))
         self.folder_button = W.QPushButton('选择项目文件夹…')
         folder_row.addWidget(self.folder, 1)
         folder_row.addWidget(self.folder_button)
@@ -199,7 +201,7 @@ class Window(W.QMainWindow):
         self.timeout.setSpecialValueText('0（无超时）')
         form.addRow(controls)
         self.bypass_enabled, self.bypass_limits = self.threshold_row(
-            form, '忽略阈值', '封装内每颗 DIE 的绝对偏移与旋转均严格小于对应阈值时，跳过重构并使用共享名义封装 Cell。')
+            form, '忽略重构', '封装内每颗 DIE 的绝对偏移与旋转均严格小于对应阈值时，输出名义封装图形。')
         self.skip_drc_enabled, self.skip_drc_limits = self.threshold_row(
             form, '忽略DRC', '封装内每颗 DIE 的绝对偏移与旋转均严格小于对应阈值时，按实测姿态重构并跳过普通 DRC，保留连接安全检查。')
         layout.addWidget(connection)
@@ -233,8 +235,8 @@ class Window(W.QMainWindow):
         self.mapping_shared = W.QCheckBox('所有 Excel 共用列映射')
         self.mapping_shared.setChecked(True)
         self.mapping_shared.setToolTip('勾选：所有Excel共用列映射；取消：点击上方Excel行编辑该文件的独立映射')
-        profile_layout.addWidget(self.mapping_shared)
         sheet_row = W.QHBoxLayout()
+        sheet_row.addWidget(self.mapping_shared)
         sheet_row.addWidget(W.QLabel('工作表'))
         self.sheet = W.QLineEdit(DEFAULT_PROFILE['sheet'])
         sheet_row.addWidget(self.sheet, 1)
@@ -269,9 +271,16 @@ class Window(W.QMainWindow):
         tabs.addTab(self.task_tab, '任务运行')
         task_layout = W.QVBoxLayout(self.task_tab)
         self.ignore_measurement_failure = W.QCheckBox('忽略测量失败')
+        self.ignore_measurement_failure.setChecked(True)
         self.ignore_measurement_failure.setEnabled(False)
         self.ignore_measurement_failure.setToolTip('勾选时跳过有芯片测量失败的封装。不勾选时采用失败行填写的 X/Y 偏移与旋转角。')
-        task_layout.addWidget(self.ignore_measurement_failure)
+        self.create_cells = W.QCheckBox('结果自动建Cell')
+        self.create_cells.setToolTip('勾选时为封装及内部内容建立层级。不勾选时直接写入结果顶层。')
+        task_options = W.QHBoxLayout()
+        task_options.addWidget(self.ignore_measurement_failure)
+        task_options.addWidget(self.create_cells)
+        task_options.addStretch()
+        task_layout.addLayout(task_options)
         controls = W.QHBoxLayout()
         self.import_button = W.QPushButton('创建任务')
         self.create_plan_button = W.QPushButton('创建计划任务')
@@ -288,8 +297,7 @@ class Window(W.QMainWindow):
         for col, width in enumerate((170, 200, 320, 100)):
             self.table.setColumnWidth(col, width)
         self.table.setMinimumHeight(150)
-        self.result_frame = table_frame(self.table, 240, self.settings, 'results')
-        task_layout.addWidget(self.result_frame, 1)
+        task_layout.addWidget(self.table, 1)
         self.table.cellDoubleClicked.connect(self.show_dies)
         paging = W.QHBoxLayout()
         prev = W.QPushButton('上一页')
@@ -468,10 +476,10 @@ class Window(W.QMainWindow):
 
     def busy(self, on):
         for widget in (self.connect_button, self.start_button, self.add_files, self.remove_files,
-                       self.folder_button, self.import_button, self.create_plan_button, self.run_button, self.send_button,
+                       self.folder, self.folder_button, self.import_button, self.create_plan_button, self.run_button, self.send_button,
                        self.endpoint, self.project, self.database, self.output, self.template, self.profile,
                        self.workers, self.memory, self.retries, self.timeout, self.file_view, self.sheet, self.header_row, self.mapping_shared,
-                       *self.path_buttons, self.bypass_enabled, self.skip_drc_enabled):
+                       *self.path_buttons, self.bypass_enabled, self.skip_drc_enabled, self.create_cells):
             widget.setEnabled(not on)
         self.sync_bypass_fields()
         self.dies.setEnabled(not on and not self.measurement)
@@ -584,18 +592,35 @@ class Window(W.QMainWindow):
         if folder:
             self.open_folder(folder)
 
+    def folder_status(self, valid):
+        background = '#dff3e3' if valid else '#f8dddd'
+        self.folder.setStyleSheet(f'QLineEdit {{ background-color: {background}; color: #142536; }}')
+
+    def apply_folder_text(self):
+        if self.worker or self.pending_close or self.folder_button.hasFocus():
+            return
+        path = self.folder.text().strip().strip('"').strip()
+        if not path:
+            self.folder_status(False)
+        elif self.project_root is not None and str(self.project_root) == path:
+            self.folder_status(True)
+        else:
+            self.open_folder(path)
+
     def open_folder(self, folder, link=True):
         if self.worker:
             return
         if self.project_root is not None:
             try:
-                self.persist()
+                self.persist(check_folder=False)
             except (OSError, ValueError) as exc:
                 self.log(exc)
                 return
         endpoint, timeout = self.endpoint.text(), self.timeout.value()
+        self.folder.setText(str(folder))
+        accepted = False
         def load(stop, progress):
-            config = load_folder(folder)
+            config = load_folder(Path(folder).expanduser())
             configure_logging(config['workspace'])
             self.conversation.set_root(config['workspace'])
             if Path(config['database']).is_file():
@@ -608,6 +633,7 @@ class Window(W.QMainWindow):
                         config['resume_skip_failed'] = skips_failed_measurements(meta)
                     if meta.get('state') != 'completed' and frozen.get('project') == config['project']:
                         config['resume_endpoint'] = frozen.get('endpoint')
+                        config['resume_create_cells'] = frozen.get('create_cells',True)
                 except (OSError, ValueError, sqlite3.Error) as exc:
                     self.logger.warning('读取任务恢复信息失败：%s', exc)
             if link:
@@ -619,10 +645,13 @@ class Window(W.QMainWindow):
                     config['connection_error'] = str(exc)
             return config
         def done(config):
+            nonlocal accepted
+            accepted = True
             self.project_root = Path(config['folder'])
             self.measurement = config.get('measurement')
             self.excluded_excel = set(map(Path,config['excluded_excel']))
             self.folder.setText(config['folder'])
+            self.folder_status(True)
             self.project.setText(config['project'])
             self.template.setText(config['template'])
             self.database.setText(config['database'])
@@ -648,7 +677,9 @@ class Window(W.QMainWindow):
                 field.setValue(value)
             self.skip_drc_enabled.setChecked(config['controls'].get('skip_drc_enabled') is True)
             self.ignore_measurement_failure.setChecked(config.get('resume_skip_failed',
-                                                                 config['controls'].get('skip_failed_measurements') is True))
+                                                                 config['controls'].get('skip_failed_measurements',True) is True))
+            self.create_cells.setChecked(config.get('resume_create_cells',
+                                                     config['controls'].get('create_cells') is True))
             self.logger = configure_logging(config['workspace'])
             self.page = 0
             self.table.setRowCount(0)
@@ -662,7 +693,10 @@ class Window(W.QMainWindow):
                 self.button_status(self.start_button, False)
                 self.logger.error('工程已选择，但联动失败：%s', config['connection_error'])
                 raise ValueError('项目已载入，联动失败：' + config['connection_error'])
-        self.execute(load, done, operation='载入项目文件夹')
+        def failed(_):
+            if not accepted:
+                self.folder_status(False)
+        self.execute(load, done, failed, operation='载入项目文件夹')
 
     def set_files(self, files):
         self.capture_mapping()
@@ -759,11 +793,14 @@ class Window(W.QMainWindow):
                 'bypass_enabled':self.bypass_enabled.isChecked(),
                 'skip_drc_limits':[field.value() for field in self.skip_drc_limits],
                 'skip_drc_enabled':self.skip_drc_enabled.isChecked(),
-                'skip_failed_measurements':self.ignore_measurement_failure.isChecked()}
+                'skip_failed_measurements':self.ignore_measurement_failure.isChecked(),
+                'create_cells':self.create_cells.isChecked()}
 
-    def persist(self):
+    def persist(self, *, check_folder=True):
         if self.project_root is None:
             raise ValueError('请先选择项目文件夹')
+        if check_folder and self.folder.text() != str(self.project_root):
+            raise ValueError('请先确认输入的项目文件夹')
         files = self.file_entries()
         profile = copy.deepcopy(self.shared_profile)
         save_folder(self.project_root, self.project.text(), files, self.database.text(), self.output.text(), profile,
@@ -870,7 +907,8 @@ class Window(W.QMainWindow):
                       template=self.template.text().strip(), workers=self.workers.value(), memory_mb=self.memory.value(),
                       retries=self.retries.value(), timeout=self.timeout.value(),
                       bypass_limits=[field.value() for field in self.bypass_limits] if self.bypass_enabled.isChecked() else (0,0,0),
-                      skip_drc_limits=[field.value() for field in self.skip_drc_limits] if self.skip_drc_enabled.isChecked() else (0,0,0))
+                      skip_drc_limits=[field.value() for field in self.skip_drc_limits] if self.skip_drc_enabled.isChecked() else (0,0,0),
+                      create_cells=self.create_cells.isChecked())
         entries = self.file_entries()
         selected = sorted(p['path'] for p in entries if p['enabled'])
         profile = copy.deepcopy(self.shared_profile)
@@ -1131,7 +1169,7 @@ class Window(W.QMainWindow):
         else:
             if self.project_root is not None:
                 try:
-                    self.persist()
+                    self.persist(check_folder=False)
                 except (OSError, ValueError) as exc:
                     self.logger.error('关闭时项目设置未保存：%s', exc)
             self.conversation.close()

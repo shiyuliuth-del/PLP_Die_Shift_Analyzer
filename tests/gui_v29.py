@@ -24,7 +24,7 @@ def settle():
         time.sleep(.004)
     else:raise AssertionError('UI did not settle')
     assert not errors,errors
-    assert '未处理异常' not in w.runtime_view.toPlainText(),w.runtime_view.toPlainText()[-1500:]
+    assert '未处理异常' not in w.log_bus.text(),w.log_bus.text()[-1500:]
 
 def click(xy,mod=keys.NoModifier):
     x,y=w.ax.transData.transform(xy);ratio=w.canvas.device_pixel_ratio
