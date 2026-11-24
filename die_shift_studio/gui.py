@@ -1573,13 +1573,13 @@ class MainWindow(W.QMainWindow):
         for button in (self.region_move,):
             button.blockSignals(True);button.setChecked(False);button.blockSignals(False)
 
-    def defer_reconstruction(self,stage=True):
+    def defer_reconstruction(self):
         self.reconstruction_pending=True;self.stop_animation();self.cancel_previews()
         self.preview_ticket+=1;self.preview_pending=None
         self.constraint_feedback.cancel()
         if hasattr(self,'reconstruction_yield'):self.reconstruction_yield.reset()
         try:
-            if stage:self.reconstruction_overlay.stage()
+            self.reconstruction_overlay.stage()
             self.reconstruction_overlay.draw();self.selection.draw(redraw=False);self.render_scene()
         except Exception as exc:self.log_bus.emit(f'待计算动区预览未生成：{exc}')
         self.statusBar().showMessage('重构修改待应用；已标记调整图形，点击“重构计算”统一计算。')
@@ -3208,7 +3208,7 @@ class MainWindow(W.QMainWindow):
             self.selection.selected=[item for item in self.selection.selected if item not in removed_selected]
             self.selection.draw()
             self.edit_history.record(before)
-            self.defer_reconstruction(stage=True)
+            self.defer_reconstruction()
             self.statusBar().showMessage(f'已暂存删除 {len(added)} 个图形（保持特殊标记，点击“重构计算”按顺序应用）')
             return
         project=canonical_project(original,self.project_settings())

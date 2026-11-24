@@ -84,7 +84,7 @@ class ReconstructionOverlay:
             if self.draft_frame is frame:return self.draft_data
             self.draft_frame=self.draft_data=None
         return (frame or {}).get('reconstruction')
-    def stage(self):
+    def stage(self,*,after_failed_drag=False):
         w=self.w;frame=w.current_frame
         cfg=w.view_settings;previous=w._applied_preview_settings
         if previous is None:
@@ -93,7 +93,7 @@ class ReconstructionOverlay:
             from .settings import ViewSettings
             previous=ViewSettings()
         key=cfg.reconstruction_key()
-        if self._stage_frame is frame and self.staged_overlay and self.staged_overlay['key']==key:return
+        if not after_failed_drag and self._stage_frame is frame and self.staged_overlay and self.staged_overlay['key']==key:return
         self._stage_frame=frame
         if key==previous.reconstruction_key():
             self._cancel_stage_worker()
@@ -170,12 +170,27 @@ class ReconstructionOverlay:
             prev_sigs=self._stage_ref_keys if reuse_draft else {}
             new_sigs={ref:ref_sig(ref) for ref in rdl_refs}
             dirty_refs=sorted(ref for ref in rdl_refs if prev_sigs.get(ref)!=new_sigs[ref])
+            drag=w.cut_drag
+            retained=drag.retained
+            if retained is not None and retained['frame'] is frame and retained.get('live_key', (None,))[0]==key:
+                piece=retained['piece']
+                if dirty_refs==[(piece['layer'],piece['index'])] and self.draft_frame is frame and self.draft_key==key:
+                    self._stage_ref_keys=new_sigs
+                    self.draft_data=dict(self.draft_data,draft_refs=draft_refs)
+                    dirty_refs=[]
+                    reuse_draft=True
+                if dirty_refs==[(piece['layer'],piece['index'])] and (drag.worker is not None or drag.pending is not None):
+                    # Pointer release and its already running local preview
+                    # share the same inputs. Paint tags now and let it publish
+                    # the draft, without a second synchronous solver call.
+                    self._cancel_stage_worker();self.stamp=None
+                    return
             if not dirty_refs and reuse_draft:
                 self.draft_key=key
                 self.draft_data=dict(self.draft_data,draft_refs=draft_refs)
             else:
                 piece_count=sum(1 for q in data['pieces'] if (q['layer'],q['index']) in dirty_refs)
-                if piece_count>8 and not getattr(w,'_closing',False):
+                if (piece_count>8 or drag.worker is not None or after_failed_drag) and not getattr(w,'_closing',False):
                     # Heavy multi-zone polygon: paint staged markers immediately on the main
                     # thread and compute the local draft asynchronously so the UI never hangs.
                     self._stage_pending=(frame,base_frame,solver,cfg,dirty_refs,new_sigs,draft_refs,key)
@@ -898,15 +913,17 @@ class CutDrag:
 
         worker=Worker(work,self.w)
         self.worker=worker
+        failed=False
 
         def accepted(frame):
             active=self.state is state
             if worker.cancelled.is_set() or self.w._closing or not (active or self.retained is state):return
             if key!=state.get('live_key'):return
+            if not active and key[0]!=self.w.view_settings.reconstruction_key():return
             current=self.w.current_frame
             if current is not original and current is not state.get('live_frame'):return
             state['painted_marker']=marker
-            frame['reconstruction']['draft_refs']=(ref,)
+            frame['reconstruction']['draft_refs']=tuple(sorted({ref,*base['reconstruction'].get('draft_refs',())}))
             if self.w.view_settings.reconstruction_auto:
                 if not active:return
                 frame=dict(frame,drc=[],drc_locations=[],drc_pending=True)
@@ -917,7 +934,7 @@ class CutDrag:
                 overlay=self.w.reconstruction_overlay
                 overlay.draft_frame=current
                 overlay.draft_key=settings.reconstruction_key()
-                overlay.draft_data=dict(frame['reconstruction'],draft_refs=(ref,))
+                overlay.draft_data=frame['reconstruction']
             state['live_result_key']=key
             state['live_result']=frame['reconstruction']
             overlay=self.w.reconstruction_overlay
@@ -932,9 +949,16 @@ class CutDrag:
                 QtCore.QTimer.singleShot(0,self.w.close)
             else:
                 self._start_live()
+                if failed and self.worker is None and self.retained is state and self.w.reconstruction_pending:
+                    self.w.reconstruction_overlay.stage(after_failed_drag=True)
+
+        def report(message):
+            nonlocal failed
+            failed=True
+            self.w.log_bus.emit('拖动预演：'+message,'ERROR')
 
         worker.done.connect(accepted)
-        worker.failed.connect(lambda message:self.w.log_bus.emit('拖动预演：'+message,'ERROR'))
+        worker.failed.connect(report)
         worker.finished.connect(finished)
         worker.start()
 
@@ -966,11 +990,7 @@ class CutDrag:
             w.invalidate_reconstruction_edit()
             w.request_preview(quiet=True)
         else:
-            # The latest local preview can finish after mouse-up. If no live
-            # result matches the final position yet, stage immediately so the
-            # edited shape is visibly marked even with auto-calculation off.
-            need_stage=(not updated.reconstruction_live) or (state.get('live_result_key')!=state.get('live_key'))
-            w.defer_reconstruction(stage=need_stage)
+            w.defer_reconstruction()
         overlay.clear_hover();overlay.draw();w.render_scene()
 
     def cancel(self,redraw=True):

@@ -250,6 +250,8 @@ jobs:
         shell: cmd
         run: |
           set PYTHONPATH=.;tests
+          "%DIE_SHIFT_PYTHON%" tests/gui_v50.py
+          if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" -m unittest test_v26.V26Tests.test_all_729_statuses_match_full_geometry_and_drc test_evaluation_scope -v
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" tests/gui_v49_gd55.py

@@ -145,7 +145,7 @@ class EditHistory:
                 if state['width']!=before['width']:w.width_yield.refresh()
                 has_pending=bool(w.pending_deleted_shapes or w.pending_restored_shapes or w.pending_node_shapes or (w._applied_preview_settings is not None and w.view_settings.reconstruction_key()!=w._applied_preview_settings.reconstruction_key()))
                 if has_pending:
-                    w.defer_reconstruction(stage=True)
+                    w.defer_reconstruction()
                 else:
                     w._clear_pending_layout_markers()
                     w.reconstruction_pending=False
