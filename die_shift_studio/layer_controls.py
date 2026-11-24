@@ -7,7 +7,7 @@ class LayerDrag(QtCore.QObject):
         super().__init__(table);self.table=table;self.press=None;self.dragging=False
         self.watch(table.viewport())
     def watch(self,widget):
-        widget.setProperty('dsa_layer_drag_owner',id(self));widget.installEventFilter(self);widget.setMouseTracking(True)
+        widget.setProperty('dsa_layer_drag_owner',id(self));widget.installEventFilter(self)
     def end_drag(self):
         started=self.dragging
         if self.press is not None:W.QApplication.instance().removeEventFilter(self)
@@ -31,7 +31,7 @@ class LayerDrag(QtCore.QObject):
         local=self.table.viewport().mapFromGlobal(pos)
         if event.type()==types.MouseButtonPress and event.button()==left:
             row=self.table.rowAt(local.y());col=self.table.columnAt(local.x())
-            if row<0:return False
+            if row<0 or col not in (0,1,2):return False
             self.end_drag()
             self.press=(pos,row,col);W.QApplication.instance().installEventFilter(self)
             self.table.setCurrentCell(row,col);return True
@@ -52,7 +52,6 @@ class LayerDrag(QtCore.QObject):
             if not dragged and self.table.rowAt(local.y())==row:
                 widget=self.table.cellWidget(row,col)
                 if isinstance(widget,W.QCheckBox):widget.click()
-                elif isinstance(widget,W.QComboBox):widget.showPopup()
                 elif col==2:self.styleRequested.emit(row)
             return True
         return False

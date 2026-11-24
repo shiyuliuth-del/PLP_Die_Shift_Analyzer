@@ -9,6 +9,7 @@ from shapely.strtree import STRtree
 from .resources import parallel_map,resource_profile
 from .session_cache import EphemeralCache
 from .preview import rigid_transform,default_motion
+from .layer_roles import NON_PARTICIPATING
 
 
 def polygons_from_arrays(arrays):
@@ -138,7 +139,7 @@ def check_frame(bound,roles,p,result,states,layers,scheme,connections=None,check
 class PreviewEngine:
     """One engine per geometry/role/motion generation; called by one UI worker."""
     def __init__(self,cache,case,roles,motions,p,result,connections,cache_group=None,cache_identity=None,contact_model=None):
-        self.bound=cache.bind(case,motions,[k for k in cache.layers if roles.get(k,'不参与')!='不参与'],p)
+        self.bound=cache.bind(case,motions,[k for k in cache.layers if roles.get(k,'不参与') not in NON_PARTICIPATING],p)
         self.roles=roles;self.p=p;self.result=result;self.connections=connections;self.cache_group=cache_group
         from .settings import ViewSettings
         self.default_settings=ViewSettings()

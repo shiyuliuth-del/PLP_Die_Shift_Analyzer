@@ -88,6 +88,27 @@ def _vertices(ring):
     return xy
 
 
+def outline_entity(rings,options):
+    return len(rings)==1 and options.polygon_mode=='outline'
+
+
+def write_polygon(writer,name,polygon,rings,handle,owner,options):
+    if outline_entity(rings,options):
+        doc._write_outline(writer,dict(vertices=rings[0]),name,handle,owner)
+    else:
+        # Straight edge loops retain holes without bridges or fitting.
+        hatch=dict(handle=handle,encoded_layer=name,seed=polygon.representative_point().coords[0],
+                   loops=[dict(vertices=xy,flags=1 if j==0 else 0) for j,xy in enumerate(rings)])
+        doc._write_hatch(writer,hatch,owner)
+
+
+def polygon_entities(prepared):
+    for name,polygon in prepared:
+        if not polygon.is_valid or not np.isfinite(polygon.bounds).all():
+            raise ValueError(f'图层 {name} 的合并/缩放结果无效')
+        yield name,polygon,[_vertices(polygon.exterior),*[_vertices(r) for r in polygon.interiors]]
+
+
 def _handles(layers,count,blocks=()):
     alloc=doc.HandleAllocator();h={}
     for name in doc.STANDARD_TABLES:h['table_'+name]=alloc.take()
@@ -131,10 +152,8 @@ def write(snapshot,path,progress=lambda *_:None,*,settings=None):
     if progress:progress(0,'准备当前几何DXF')
     polygons=[];names=set();extent=np.array([math.inf,math.inf,-math.inf,-math.inf])
     prepared,source_count,merged_count=prepare(snapshot,options,progress)
-    for name,p in prepared:
-        if not p.is_valid or not np.isfinite(p.bounds).all():raise ValueError(f'图层 {name} 的合并/缩放结果无效')
+    for name,p,rings in polygon_entities(prepared):
         names.add(name)
-        rings=[_vertices(p.exterior),*[_vertices(r) for r in p.interiors]]
         bounds=np.asarray(p.bounds);extent[:2]=np.minimum(extent[:2],bounds[:2]);extent[2:]=np.maximum(extent[2:],bounds[2:])
         polygons.append((name,p,rings))
     output_layer_count=len(names)
@@ -149,12 +168,7 @@ def write(snapshot,path,progress=lambda *_:None,*,settings=None):
             doc._write_classes(writer);doc._write_tables(writer,handles,layers,extent);doc._write_blocks(writer,handles)
             writer.extend(((0,'SECTION'),(2,'ENTITIES')))
             for i,((name,p,rings),handle) in enumerate(zip(polygons,entity_handles)):
-                if len(rings)==1 and options.polygon_mode=='outline':doc._write_outline(writer,dict(vertices=rings[0]),name,handle,handles['block_record_model'])
-                else:
-                    # Straight edge loops retain holes without bridges or fitting.
-                    hatch=dict(handle=handle,encoded_layer=name,seed=p.representative_point().coords[0],
-                               loops=[dict(vertices=xy,flags=1 if j==0 else 0) for j,xy in enumerate(rings)])
-                    doc._write_hatch(writer,hatch,handles['block_record_model'])
+                write_polygon(writer,name,p,rings,handle,handles['block_record_model'],options)
                 if progress and i%64==0:progress(15+round(70*i/len(polygons)),'写出DXF直线轮廓')
             writer.add(0,'ENDSEC');doc._write_objects(writer,handles);f.flush();os.fsync(f.fileno())
         if progress:progress(90,'核对DXF实体与完整性')

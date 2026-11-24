@@ -37,6 +37,7 @@ from .selection import GeometrySelection
 from .ticks import DistanceMinorLocator
 from .render_cache import SceneRenderer
 from .layer_controls import LayerDrag,LayerStyleDialog
+from .layer_roles import NON_PARTICIPATING
 from .qt_compat import run_dialog,ACCEPTED
 from matplotlib.colors import LinearSegmentedColormap,Normalize
 
@@ -1207,23 +1208,29 @@ class MainWindow(W.QMainWindow):
             self.layer_split.setSizes([project.get('layer_table_height',300),max(220,self.layer_split.height()-project.get('layer_table_height',300))])
             selected_roles=project.get('roles',data.auto_roles)
             self.stage_hints=project.get('stage_hints',{})
+            self.layer_drag.end_drag()
             self.role_boxes={};self.visible_boxes={};self.selectable_boxes={};self.compensation_boxes={}
             self._layer_keys=stack_order(data,selected_roles,project.get('layer_order'))
             self.layer_table.setRowCount(0);self.layer_table.setRowCount(len(self._layer_keys))
             header=self.layer_table.verticalHeader()
             for i in range(header.count()):header.moveSection(header.visualIndex(i),i)
             saved_sel=project.get('selectability',{})
+            from .output_compensation import default_amount
+            saved_compensation=project.get('layer_compensation',{})
             for i,key in enumerate(self._layer_keys):
-                role=selected_roles.get(key,'不参与');check=W.QCheckBox();check.setChecked(project.get('visibility',{}).get(key,role not in ('不参与','非金属图形')))
+                role=selected_roles.get(key,'不参与');check=W.QCheckBox();check.setChecked(project.get('visibility',{}).get(key,role not in NON_PARTICIPATING))
                 check.toggled.connect(lambda checked,k=key:self.visibility_changed(k));self.visible_boxes[key]=check;self.layer_table.setCellWidget(i,0,check);self.layer_drag.watch(check)
                 sel=W.QCheckBox();sel.setChecked(saved_sel.get(key,role=='固定RDL'))
                 sel.toggled.connect(lambda checked,k=key:self.selectability_changed(k));self.selectable_boxes[key]=sel;self.layer_table.setCellWidget(i,1,sel);self.layer_drag.watch(sel)
                 self.layer_table.setItem(i,2,W.QTableWidgetItem(key))
                 box=W.QComboBox();box.addItems(ROLES);box.setCurrentText(role)
-                self.role_boxes[key]=box;self.layer_table.setCellWidget(i,3,box);self.layer_drag.watch(box)
+                self.role_boxes[key]=box;self.layer_table.setCellWidget(i,3,box)
                 box.currentTextChanged.connect(lambda _,k=key:self.role_changed(k))
-                compensation=W.QDoubleSpinBox();compensation.setDecimals(3);compensation.setRange(-1000,1000)
-                compensation.setKeyboardTracking(False);compensation.setValue(project.get('layer_compensation',{}).get(key,0.))
+                compensation=W.QDoubleSpinBox()
+                compensation.setDecimals(3);compensation.setRange(-1000,1000);compensation.setKeyboardTracking(False)
+                compensation.setFocusPolicy(getattr(Qt,'FocusPolicy',Qt).ClickFocus)
+                default=0. if project else default_amount(role)
+                compensation.setValue(saved_compensation.get(key,default))
                 compensation.setToolTip('输出层轮廓补偿 / μm。负值内缩，正值外扩。')
                 self.compensation_boxes[key]=compensation;self.layer_table.setCellWidget(i,4,compensation)
             for j,width in enumerate([38,38,80,128,98]):self.layer_table.setColumnWidth(j,width)
@@ -1264,9 +1271,11 @@ class MainWindow(W.QMainWindow):
                 self.selection.selected=kept;self.selection.draw()
     def role_changed(self,key):
         if self.loading:return
+        from .output_compensation import default_amount
         self.stage_hints.pop(key,None)
         role=self.role_boxes[key].currentText()
-        self.visible_boxes[key].blockSignals(True);self.visible_boxes[key].setChecked(role!='不参与');self.visible_boxes[key].blockSignals(False)
+        self.compensation_boxes[key].setValue(default_amount(role))
+        self.visible_boxes[key].blockSignals(True);self.visible_boxes[key].setChecked(role not in NON_PARTICIPATING);self.visible_boxes[key].blockSignals(False)
         if key in self.selectable_boxes:
             self.selectable_boxes[key].blockSignals(True);self.selectable_boxes[key].setChecked(role=='固定RDL');self.selectable_boxes[key].blockSignals(False)
         old=self.motions();old[key]=default_motion(self.roles()[key]);self.case=None

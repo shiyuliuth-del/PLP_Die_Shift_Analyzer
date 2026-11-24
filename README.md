@@ -1,4 +1,6 @@
-# Die Shift Analyze V68
+# Die Shift Analyze V69
+
+V69 修正层叠表格的补偿编辑和用途单击选取。运动及固定 RDL 在更改用途时默认补偿 +1.500 μm，并新增「一并导出」用途。详见 [V69 使用说明](docs/V69_使用说明.md)。
 
 V68 将 RealDataAnalyse 分为「信息读取」和「任务运行」，增加按封装跳过普通 DRC 的阈值，常驻显示 FAIL 封装数，并在恢复时重新绑定原任务的 IPC 入口。详见 [V68 使用说明](docs/V68_使用说明.md)。
 
@@ -37,7 +39,7 @@ V50：芯片对重点组合、分叉边界修正、当前姿态GDS/OAS与旋转E
 软件分析Die-first封装的DIE平移与旋转，提供三方案初筛、实体覆盖与极端足迹、通道宽度风险、重构动区编辑、规则/联合模型良率、工程结果保存、GDS/OAS导入、实测IPC及批量OAS输出。长度均为μm，GDS/OAS只读，工程节点可编辑。
 
 - [实测IPC接口与注意事项](docs/MEASURED_OUTPUT_API.md) · [GD55-1105独立验证脚本](tools/verify_measured_gd55.py)
-- [用户操作](docs/V68_使用说明.md)
+- [用户操作](docs/V69_使用说明.md)
 - [AI交接：主要功能、代码地图、算法和后续重点](docs/AI_HANDOFF.md)
 - [现行设计合同](docs/DESIGN_REQUIREMENTS.md)
 - [已知边界](docs/KNOWN_ISSUES.md)

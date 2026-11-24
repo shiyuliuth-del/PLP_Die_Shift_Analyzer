@@ -44,6 +44,7 @@ def run():
                 layer,datatype=map(int,name.split('/'))
                 cell.add(*(gdstk.Polygon(xy,layer=layer,datatype=datatype) for xy in rows))
             cell.add(gdstk.rectangle((200,100),(310,140),layer=5))
+            cell.add(gdstk.rectangle((0,0),(50,50),layer=90,datatype=7))
             layout=folder/'test.gds';lib.write_gds(layout)
             job=folder/'test.dshift.json'
             job.write_text(json.dumps(dict(schema_version=5,gds_path=str(layout),top_cell='TOP',roles=roles,
@@ -91,7 +92,28 @@ def run():
             assert w.show_issues.isChecked() and not w.view_settings.animation_enabled
             assert w.view_settings.reconstruction_boundary_mode=='perpendicular' and w.dxf_settings.region_auto_join
             assert w.output_compensation()=={}
-            w.compensation_boxes['5/0'].setValue(-12.345)
+            left=getattr(getattr(Qt,'MouseButton',Qt),'LeftButton')
+            none=getattr(getattr(Qt,'KeyboardModifier',Qt),'NoModifier')
+            editor=w.compensation_boxes['5/0'].lineEdit()
+            w.canvas.setFocus();app.processEvents()
+            qtest.mouseMove(editor,editor.rect().center())
+            assert w.canvas.hasFocus() and not editor.hasFocus()
+            qtest.mouseClick(editor,left)
+            assert editor.hasFocus()
+            editor.selectAll();qtest.keyClicks(editor,'-12.345')
+            start=QtCore.QPoint(1,editor.height()//2)
+            end=QtCore.QPoint(editor.width()-2,editor.height()//2)
+            qtest.mousePress(editor,left,pos=start)
+            from die_shift_studio.qt_compat import QtGui
+            move=QtGui.QMouseEvent(getattr(QtCore.QEvent,'Type',QtCore.QEvent).MouseMove,
+                QtCore.QPointF(end),QtCore.QPointF(editor.mapToGlobal(end)),
+                getattr(getattr(Qt,'MouseButton',Qt),'NoButton'),left,none)
+            app.sendEvent(editor,move)
+            qtest.mouseRelease(editor,left,pos=end)
+            assert editor.selectedText()=='-12.345'
+            w.plot_layout(preserve=True);app.processEvents()
+            assert editor.hasFocus() and editor.selectedText()=='-12.345'
+            qtest.keyClick(editor,keys.Key_Return)
             assert w.output_compensation()=={'5/0':-12.345}
             # A press whose release belongs to a cell editor must not arm a
             # later unpressed mouse move. Reproduce at the actual viewport.
@@ -146,6 +168,22 @@ def run():
             assert not w.ignored_drc
             w.clear_cached_results();wait()
             assert not w.undo_button.isEnabled() and not w.redo_button.isEnabled()
+            usage=w.role_boxes['90/7'];w.layer_table.scrollToItem(w.layer_table.item(w._layer_keys.index('90/7'),2))
+            app.processEvents()
+            qtest.mouseClick(usage,left,pos=QtCore.QPoint(usage.width()-8,usage.height()//2))
+            assert usage.view().isVisible(), '用途必须单击打开'
+            usage.hidePopup()
+            for role,amount in (('运动RDL',1.5),('固定RDL',1.5),('运动过孔',0.),('一并导出',0.)):
+                usage.setCurrentText(role)
+                assert w.compensation_boxes['90/7'].value()==amount
+            assert not w.visible_boxes['90/7'].isChecked()
+            w.compensation_boxes['90/7'].setValue(2.5)
+            w.write_project(saved)
+            w.load_project(saved);wait()
+            assert w.role_boxes['90/7'].currentText()=='一并导出'
+            assert w.output_compensation()['90/7']==2.5
+            assert w.output_compensation()['5/0']==-12.345
+            assert not w.visible_boxes['90/7'].isChecked()
         finally:
             close_window(app,w)
     print('GUI_V64_EDITING_PASS delete, reuse of source indices, pending marker, undo/redo, and save/restore')

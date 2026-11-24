@@ -8,13 +8,15 @@ import math
 import os
 from pathlib import Path
 import tempfile
-from collections import defaultdict
+from collections import Counter,defaultdict
+from dataclasses import replace
 from typing import NamedTuple
 from .resources import cancel_check,parallel_iter,resource_profile,geometry_budget
 import numpy as np
 import shapely
-from .dxf_export import PairWriter,_handles,_verify
+from .dxf_export import PairWriter,_handles,_verify,outline_entity,polygon_entities,write_polygon
 from . import dxf_document as doc
+from .layer_roles import EXPORT_ONLY
 from .region_contract import (EXPORT_ROLES, PUBLIC_KIND, REFERENCE_LAYERS,
                               overlapping_edges, verify_written_contours)
 
@@ -299,7 +301,17 @@ def write_regions(snapshot,reconstruction,roles,path,progress=lambda *_:None,*,s
     from .dxf_settings import DxfSettings
     options=settings or DxfSettings();path=Path(path)
     groups,shared,inputs,merged=_prepare(snapshot,reconstruction,roles,options,progress,compensation,dbu)
-    if not groups:raise ValueError('当前没有可导出的有效轮廓')
+    extra_layers={k:v for k,v in snapshot.layers.items() if roles.get(k)==EXPORT_ONLY}
+    extra=[]
+    if extra_layers:
+        from .output_compensation import compensate_snapshot
+        from .dxf_prepare import prepare
+        if progress:progress(58,'准备一并导出的DXF图层')
+        extra_snapshot=compensate_snapshot(replace(snapshot,layers=extra_layers),compensation or {},dbu)
+        prepared,source_count,merged_count=prepare(extra_snapshot,options,None)
+        extra=list(polygon_entities(prepared))
+        inputs+=source_count;merged+=merged_count
+    if not groups and not extra:raise ValueError('当前没有可导出的有效轮廓')
     blocks=[];references=[];names=set();lo=np.array([np.inf,np.inf]);hi=-lo
     count=0
     for i,(layer,paths,closed) in enumerate(groups):
@@ -309,25 +321,35 @@ def write_regions(snapshot,reconstruction,roles,path,progress=lambda *_:None,*,s
             count+=1
         if closed:references.extend((layer,xy[:-1]) for xy in paths)
         else:blocks.append(dict(name=f'RDL_{i+1}',layer=layer,outlines=paths))
+    for layer,polygon,_ in extra:
+        names.add(layer)
+        bounds=polygon.bounds
+        lo=np.minimum(lo,bounds[:2]);hi=np.maximum(hi,bounds[2:])
+    standard_entities=Counter((layer,'LWPOLYLINE' if outline_entity(rings,options) else 'HATCH') for layer,_,rings in extra)
     extent=np.r_[lo,hi];layers=[dict(encoded_name=n,color=7) for n in sorted(names|{'0'})]
-    handles,entities=_handles(layers,len(references),blocks)
+    handles,entities=_handles(layers,len(references)+len(extra),blocks)
     fd,temp=tempfile.mkstemp(prefix='.die-shift-regions-',suffix='.dxf',dir=path.parent)
     try:
         with os.fdopen(fd,'w',encoding='ascii',newline='') as stream:
-            w=PairWriter(stream);doc._write_header(w,handles,extent,0);doc._write_classes(w)
+            w=PairWriter(stream);doc._write_header(w,handles,extent,int(bool(extra) and options.show_fill));doc._write_classes(w)
             doc._write_tables(w,handles,layers,extent,blocks);doc._write_blocks(w,handles,blocks)
             w.extend(((0,'SECTION'),(2,'ENTITIES')))
             for (layer,xy),handle in zip(references,entities):
                 cancel_check()
                 doc._write_outline(w,dict(vertices=xy),layer,handle,handles['block_record_model'])
+            for (layer,poly,rings),handle in zip(extra,entities[len(references):]):
+                cancel_check()
+                write_polygon(w,layer,poly,rings,handle,handles['block_record_model'],options)
             for i,block in enumerate(blocks):
                 cancel_check()
                 doc._write_insert(w,block,handles['block_record_model'])
                 if progress and i%128==0:progress(65+round(25*i/len(blocks)),'写出按源图形和图层分组的CAD块')
             w.add(0,'ENDSEC');doc._write_objects(w,handles);stream.flush();os.fsync(stream.fileno())
+        count+=len(extra)
         _verify(temp,count,extent)
         if progress:progress(92,'回读核对CAD块、闭合与重复轮廓')
-        topology=verify_written_contours(temp,expected_blocks=blocks,expected_references=references,shared_layers=shared,allow_closed_blocks=bool(getattr(options,'region_auto_join',False)))
+        topology=verify_written_contours(temp,expected_blocks=blocks,expected_references=references,shared_layers=shared,
+                                        allow_closed_blocks=bool(getattr(options,'region_auto_join',False)),expected_standard=standard_entities)
         digest=hashlib.sha256()
         with open(temp,'rb') as stream:
             for chunk in iter(lambda:stream.read(1024*1024),b''):digest.update(chunk)
@@ -338,4 +360,5 @@ def write_regions(snapshot,reconstruction,roles,path,progress=lambda *_:None,*,s
     if progress:progress(100,'动静区DXF输出完成')
     return dict(path=str(path),polygons=count,layers=len(names),sha256=digest.hexdigest(),ignored=snapshot.ignored_count,
                 input_polygons=inputs,merged_polygons=merged,flattened=True,merge_layers=True,scale=options.scale,regions=True,topology=topology,
+                extra_layers=len({row[0] for row in extra}),
                 unresolved_regions=sum(not q.get('valid',True) for q in reconstruction.get('pieces',())))

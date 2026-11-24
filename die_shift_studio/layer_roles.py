@@ -1,5 +1,7 @@
 """Public roles describe motion, not a fabrication-stage assumption."""
-ROLES=['不参与','封装边框','芯片边框','运动过孔','固定过孔','运动RDL','固定RDL','禁布区']
+EXPORT_ONLY='一并导出'
+ROLES=['不参与',EXPORT_ONLY,'封装边框','芯片边框','运动过孔','固定过孔','运动RDL','固定RDL','禁布区']
+NON_PARTICIPATING=frozenset(('不参与',EXPORT_ONLY))
 PHYSICAL={'运动过孔','固定过孔','运动RDL','固定RDL'}
 MOVING={'运动过孔','运动RDL'}
 ALIASES={'非金属图形':'不参与','芯片原始焊盘':'运动过孔','BGA接收盘':'固定过孔','晶圆段输出焊盘':'运动过孔',
