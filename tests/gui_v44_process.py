@@ -84,6 +84,36 @@ def main():
                 Runner(**kwargs, transport=t).run()
             assert len(gdstk.read_oas(out).top_level()[0].references) == 5
             identity = t.request('info')['result']['session_identity']
+            if not os.environ.get('REALDATA_TEST_EXE'):
+                # Abruptly exit the isolated client after a durable receipt,
+                # leaving the running server and its owned batch untouched.
+                interrupted = folder/'client-exit.sqlite'
+                import_files(files,interrupted,1,1,threading.Event())
+                interrupted_output = folder/'client-exit.oas'
+                interrupted_output.write_bytes(b'previous file')
+                recovery = dict(kwargs,database=str(interrupted),output=str(interrupted_output),workers=1)
+                kill_client = """
+import json, os, sys
+from RealDataAnalyse.runner import Runner
+def crash(update):
+    if isinstance(update, dict) and update.get('current') and not update.get('published'):
+        os._exit(91)
+Runner(**json.loads(sys.argv[1]), progress=crash).run()
+"""
+                process = subprocess.run([sys.executable,'-c',kill_client,json.dumps(recovery)],cwd=ROOT,timeout=180)
+                assert process.returncode == 91
+                assert interrupted_output.read_bytes() == b'previous file'
+                ledger = Ledger(interrupted)
+                try:
+                    saved_progress = ledger.get('display_progress')
+                    assert saved_progress[0] > 0 and ledger.get('state') == 'running'
+                finally:
+                    ledger.close()
+                marks = []
+                Runner(**recovery,progress=marks.append).run()
+                counters = [mark for mark in marks if isinstance(mark,dict)]
+                assert counters[0]['current'] == saved_progress[0] and counters[-1]['published']
+                assert len(gdstk.read_oas(interrupted_output).top_level()[0].references) == 5
             # A second imported journal simulates a new lot and loss of service.
             database2 = folder / 'restart.sqlite'
             import_files(files, database2, 1, 2, threading.Event())

@@ -229,9 +229,11 @@ class Session:
             with self.lock:r.plan_pool.update(clone_plan_pool(self.plan_pool))
             r._plans_for_all_poses(progress)
             with self.lock:self.plan_pool.update(clone_plan_pool(r.plan_pool))
-    def run(self,rows,progress=None,*,preview=True,diagnostic=False,output_policy='strict'):
+    def run(self,rows,progress=None,*,preview=True,diagnostic=False,output_policy='strict',skip_drc=False):
         if output_policy not in ('strict','omit_failed_regions'):raise ValueError('未知实测输出策略')
         states,p=pose_parameters(self.case,self.p,rows);model,r=self.model(p)
+        checks=replace(self.settings,drc_checks=('keepout',)) if skip_drc else self.settings
+        zero_key=(output_policy,skip_drc)
         self.ensure_plans(r,progress_slice(progress,0,.2))
         # Measured commands check their own actual-copper DRC; no other poses,
         # probability, width analysis or yield work is started.
@@ -246,7 +248,7 @@ class Session:
             if not active_refs and not link_failures and len(zero_dies)==len(states):
                 result=r.frame(states,progress=progress_slice(progress,20,.5),targets=set(),diagnostics=False)
                 if not result.get('hard_failures') and not result.get('replacements') and not result.get('pieces'):
-                    cached_zero=self._zero_pose_cache.get(output_policy)
+                    cached_zero=self._zero_pose_cache.get(zero_key)
                     if cached_zero is not None:
                         z_frame,z_snap,z_details=cached_zero
                         return dict(z_frame,rotation_centers=model.bound.centers.copy()),z_snap,copy.deepcopy(z_details)
@@ -288,13 +290,17 @@ class Session:
         from .measured_issues import catalogue
         from .reconstruction_diagnostic import markers
         if not hasattr(r,'display_drc'):r.display_drc=GlobalDRC(model,p)
-        frame['drc']=r.display_drc.frame(states,result['replacements'],self.settings,progress_slice(progress,70,.15),electrical=True)
+        frame['drc']=r.display_drc.frame(states,result['replacements'],checks,progress_slice(progress,70,.15),electrical=True)
+        if skip_drc:
+            from .drc_policy import category
+            frame['drc']=[dict(q,serious=True) if category(q['kind'])=='keepout' else q for q in frame['drc']]
         frame['drc'].extend(markers(result,self.data.dbu_um));frame['measure_drc']=bool(preview)
         original_failures=tuple(result.get('hard_failures',()));omissions=[]
         if original_failures and output_policy=='omit_failed_regions':
             from .partial_output import omit
             frame,omissions=omit(model,frame)
-            frame['drc'].extend(r.display_drc.frame(states,frame['reconstruction']['replacements'],self.settings,progress_slice(progress,85,.1),electrical=True))
+            after=r.display_drc.frame(states,frame['reconstruction']['replacements'],checks,progress_slice(progress,85,.1),electrical=True)
+            frame['drc'].extend(dict(q,serious=True) if skip_drc and category(q['kind'])=='keepout' else q for q in after)
             for q in omissions:
                 if q.get('quantization'):frame['drc'].append(dict(layer=q['layer'],layers=(q['layer'],),refs=((q['layer'],q['index']),),kind=q['reason'],geometry=shapely.box(*q['bounds_um']),connection_failure=True))
         frame['drc_locations']=locations(frame['drc'],measure=preview,separate_shorts=True)
@@ -304,7 +310,8 @@ class Session:
             from .topology_routing import failure_message
             frame['reconstruction']=display(result,frame['rotation_centers'],states);frame['diagnostic_only']=True
             details=dict(connection_failure_count=len(result['hard_failures']),connection_failures=[dict(layer=ref[0],index=ref[1],reason=reason) for ref,reason in result['hard_failures']],fixed_rdl_drc_checked=True,diagnostic_only=True,
-                         drc_issues=issues,drc_count=len(issues),drc_passed=False,coordinate_frame='GDS顶层坐标，单位μm；package_relative_bounds_um以名义封装左下角为原点')
+                         drc_issues=issues,drc_count=len(issues),drc_passed=None if skip_drc else False,coordinate_frame='GDS顶层坐标，单位μm；package_relative_bounds_um以名义封装左下角为原点')
+            if skip_drc:details.update(skip_drc=True,fixed_rdl_drc_checked=False)
             if diagnostic:return frame,None,details
             raise DiagnosticFailure(failure_message(result['hard_failures']),frame,details)
         failures=[dict(layer=q['layer'],index=q['index'],reason=q.get('warning','无法连接')) for q in result['pieces'] if q.get('connection_failed')]
@@ -323,9 +330,12 @@ class Session:
         details=dict(output_policy=output_policy,partial_output=bool(original_failures),omitted_regions=omissions,omitted_region_count=len(omissions),connection_failures=failures,connection_failure_count=max(len(failures),len(original_failures)),
                      fixed_rdl_drc_checked=True,drc_issues=issues,drc_count=len(issues),drc_passed=not issues,coordinate_frame='GDS顶层坐标，单位μm；package_relative_bounds_um以名义封装左下角为原点',rule_groups=len(result.get('violations',())),
                      scope='当前实测姿态的实际铜DRC及连接检查；不计算其他姿态、概率或良率，不代表工艺签核')
+        if skip_drc:
+            details.update(skip_drc=True,fixed_rdl_drc_checked=False,drc_passed=None,
+                           scope='实测重构、连通、异网接触和禁布区核验')
         if use_zero_skip and len(zero_dies)==len(states) and not active_refs and not link_failures and not result.get('hard_failures') and not result.get('replacements') and not result.get('pieces'):
             with self.lock:
-                self._zero_pose_cache[output_policy]=(frame,frozen,copy.deepcopy(details))
+                self._zero_pose_cache[zero_key]=(frame,frozen,copy.deepcopy(details))
         return frame,frozen,details
     def close(self):
         for r in self.instances:r.close()

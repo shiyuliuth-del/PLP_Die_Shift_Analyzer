@@ -100,11 +100,19 @@ def _read_file(path, profile, scratch, stop, progress):
 
 
 def import_files(paths, database, die_count, workers, stop, progress=lambda _: None, profile=None, profiles=None,
-                 measurement=None, project=None, endpoint=None, geometry=None, ignore_measurement_failure=False):
+                 measurement=None, project=None, endpoint=None, geometry=None, ignore_measurement_failure=None,
+                 *, skip_failed_measurements=None):
     """Build a new journal atomically; errors never create a runnable partial run."""
     profile = profile or DEFAULT_PROFILE
-    if type(ignore_measurement_failure) is not bool:
-        raise ValueError('忽略测量失败须为布尔值')
+    if ignore_measurement_failure is not None and type(ignore_measurement_failure) is not bool:
+        raise ValueError('旧测量失败选项须为布尔值')
+    if skip_failed_measurements is None:
+        skip_failed_measurements = ignore_measurement_failure is False
+    else:
+        if type(skip_failed_measurements) is not bool:
+            raise ValueError('忽略测量失败须为布尔值')
+        if ignore_measurement_failure is not None:
+            raise ValueError('请只指定一种测量失败处理选项')
     paths = [Path(p).resolve() for p in paths]
     profiles = {str(Path(path).resolve()): value for path, value in (profiles or {}).items()}
     if set(profiles) - {str(p) for p in paths}:
@@ -180,7 +188,7 @@ def import_files(paths, database, die_count, workers, stop, progress=lambda _: N
                 futures = []
                 for i, path in enumerate(paths):
                     arguments = (profiles.get(str(path), profile), Path(temp) / f'{i}.sqlite', stop, progress)
-                    futures.append(pool.submit(import_part, path, path_dies[path.parent], *arguments, ignore_measurement_failure) if geometry
+                    futures.append(pool.submit(import_part, path, path_dies[path.parent], *arguments, not skip_failed_measurements) if geometry
                                    else pool.submit(_read_file, path, *arguments))
                 sources = []
                 for future in as_completed(futures):
@@ -220,7 +228,7 @@ def import_files(paths, database, die_count, workers, stop, progress=lambda _: N
                 ledger.db.execute('drop table production')
                 ledger.db.commit()
                 ledger.set('measurement', measurement)
-                ledger.set('ignore_measurement_failure', ignore_measurement_failure)
+                ledger.set('skip_failed_measurements', skip_failed_measurements)
                 ledger.set('measured_max_available', True)
                 ledger.set('nominal_geometry', geometry)
                 ledger.set('die_names', order)

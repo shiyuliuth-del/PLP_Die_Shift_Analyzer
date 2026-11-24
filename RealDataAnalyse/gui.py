@@ -10,10 +10,10 @@ from die_shift_studio.jobs import REALDATA_DIRECTORY
 from die_shift_studio.qt_compat import QtCore, QtGui, QtWidgets as W, Signal
 from . import __version__
 from .excel import DEFAULT_PROFILE, HEADERS, import_files
-from .measurements import HEADINGS, SUFFIXES, folders, nominal_geometry
+from .measurements import HEADINGS, SUFFIXES, folders, nominal_geometry, skips_failed_measurements
 from .projects import load_folder, save_folder, inside, copy_excel, copy_inputs, template_file
 from .runner import Runner, nominal_limits
-from .storage import Ledger, configure_logging
+from .storage import Ledger, configure_logging, read_task_metadata
 from .transport import Transport, default_endpoint, installation
 from .conversation import Conversation
 from .instances import connect as connect_instance, project_matches
@@ -27,8 +27,10 @@ COMMANDS = {
     'output.configure': {'output_directory': '', 'max_threads': 0, 'max_memory_mb': 0},
     'preview.submit': {'dies': [{'die': 1, 'dx_um': 0, 'dy_um': 0, 'angle_deg': 0}]},
     'export.gds': {'filename': 'measured.gds'},
-    'batch.begin': {'filename': 'measured.oas', 'output_policy': 'omit_failed_regions', 'nominal_bypass': False},
-    'batch.submit': {'batch_id': '', 'cell': 'Package_000001', 'position_um': [0, 0], 'dies': [], 'use_nominal': False},
+    'batch.begin': {'filename': 'measured.oas', 'output_policy': 'omit_failed_regions',
+                    'nominal_bypass': False, 'allow_drc_skip': False},
+    'batch.submit': {'batch_id': '', 'cell': 'Package_000001', 'position_um': [0, 0], 'dies': [],
+                     'use_nominal': False, 'skip_drc': False},
     'batch.end': {'batch_id': ''}, 'task.get': {'task_id': ''},
     'task.issues': {'task_id': '', 'offset': 0, 'limit': 128},
     'compute.cancel': {}, 'app.shutdown': {},
@@ -65,6 +67,7 @@ class ProgressBar(W.QProgressBar):
         self.elapsed = 0
         self.failed = False
         self.count_only = False
+        self.failed_packages = 0
         self.clock_timer = QtCore.QTimer(self)
         self.clock_timer.setTimerType(getattr(QtCore.Qt, 'TimerType', QtCore.Qt).PreciseTimer)
         self.clock_timer.setInterval(1000)
@@ -95,13 +98,14 @@ class ProgressBar(W.QProgressBar):
         times = f'开始 {started} · 总耗时 {duration} · '
         if include_end and self.end_time is not None:
             times += f'结束 {time.strftime("%H:%M:%S", time.localtime(self.end_time))} · '
-        return percent + times + self.detail
+        return f'{percent}{times}FAIL {self.failed_packages} · {self.detail}'
 
     def begin(self):
         self.started = time.monotonic()
         self.start_time = time.time()
         self.end_time = None
         self.count_only = False
+        self.failed_packages = 0
         self.clock_timer.start()
 
     def finish(self):
@@ -122,8 +126,9 @@ class ProgressBar(W.QProgressBar):
         self.setToolTip(self.label(self.value() / max(1, self.maximum()), include_end=True))
         self.update()
 
-    def package_status(self, completed, total, published):
+    def package_status(self, completed, total, published, failed_packages=0):
         self.count_only = True
+        self.failed_packages = failed_packages
         fill = round(10000 * completed / max(1,total))
         self.status(f'已完成 {completed} / {total}', 10000 if published else min(fill, 9900), 10000)
 
@@ -167,8 +172,6 @@ class Window(W.QMainWindow):
         folder_row.addWidget(self.folder, 1)
         folder_row.addWidget(self.folder_button)
         form.addRow('项目文件夹', folder_row)
-        self.template = self.path_row(form,'模板图纸','', '*.gds *.oas *.oasis','template', on_pick=self.select_template)
-        self.template.setClearButtonEnabled(True)
         # Paths are project-owned state, never independent user input rows.
         self.project = W.QLineEdit(self)
         self.database = W.QLineEdit(self)
@@ -195,28 +198,10 @@ class Window(W.QMainWindow):
         self.timeout = self.spin(controls, '任务超时秒', 0, 86400, 0)
         self.timeout.setSpecialValueText('0（无超时）')
         form.addRow(controls)
-        bypass = W.QHBoxLayout()
-        self.bypass_enabled = W.QCheckBox()
-        self.bypass_enabled.setAccessibleName('启用忽略阈值')
-        self.bypass_enabled.setToolTip('勾选后按 X、Y 和旋转角度过滤')
-        bypass.addWidget(self.bypass_enabled)
-        self.bypass_limits = []
-        for label, maximum in (('X (μm)', 1e9), ('Y (μm)', 1e9), ('旋转 (°)', 360)):
-            bypass.addWidget(W.QLabel(label))
-            field = W.QDoubleSpinBox()
-            field.setRange(0, maximum)
-            field.setDecimals(3)
-            field.setEnabled(False)
-            field.setSingleStep(.1)
-            field.setToolTip('封装内每颗DIE的绝对偏移和绝对旋转均严格小于对应阈值时，使用同一名义封装Cell。任一阈值为0时关闭。')
-            bypass.addWidget(field)
-            self.bypass_limits.append(field)
-        form.addRow('忽略阈值', bypass)
-        self.bypass_enabled.toggled.connect(self.sync_bypass_fields)
-        self.ignore_measurement_failure = W.QCheckBox('忽略测量失败')
-        self.ignore_measurement_failure.setEnabled(False)
-        self.ignore_measurement_failure.setToolTip('对机台标记失败的芯片，采用该行的 X/Y 偏移与旋转角。适用于机台生产格式。')
-        form.addRow(self.ignore_measurement_failure)
+        self.bypass_enabled, self.bypass_limits = self.threshold_row(
+            form, '忽略阈值', '封装内每颗 DIE 的绝对偏移与旋转均严格小于对应阈值时，跳过重构并使用共享名义封装 Cell。')
+        self.skip_drc_enabled, self.skip_drc_limits = self.threshold_row(
+            form, '忽略DRC', '封装内每颗 DIE 的绝对偏移与旋转均严格小于对应阈值时，按实测姿态重构并跳过普通 DRC，保留连接安全检查。')
         layout.addWidget(connection)
         tabs = W.QTabWidget()
         self.tabs = tabs
@@ -225,15 +210,16 @@ class Window(W.QMainWindow):
         batch_scroll = W.QScrollArea()
         batch_scroll.setWidgetResizable(True)
         batch_scroll.setWidget(batch)
-        tabs.addTab(batch_scroll, 'Excel批量 / 故障恢复')
+        tabs.addTab(batch_scroll, '信息读取')
         batch_layout = W.QVBoxLayout(batch)
+        self.excel_section, excel_files = self.input_section(batch_layout, 'Excel文件', True)
         row = W.QHBoxLayout()
         self.add_files = W.QPushButton('添加Excel行')
         self.remove_files = W.QPushButton('删除选中行')
         row.addWidget(self.add_files)
         row.addWidget(self.remove_files)
         row.addStretch()
-        batch_layout.addLayout(row)
+        excel_files.addLayout(row)
         self.file_view = W.QTableWidget(0, 2)
         self.file_view.setHorizontalHeaderLabels(['使用', 'Excel文件（相对于项目文件夹）'])
         self.file_view.setColumnWidth(0, 55)
@@ -242,10 +228,9 @@ class Window(W.QMainWindow):
         self.file_view.setMinimumHeight(100)
         self.file_view.setMaximumHeight(160)
         self.file_frame = table_frame(self.file_view, 135, self.settings, 'excel')
-        batch_layout.addWidget(self.file_frame)
-        profile_box = W.QGroupBox()
-        profile_layout = W.QVBoxLayout(profile_box)
-        self.mapping_shared = W.QCheckBox('Excel列映射（长度μm，角度°；中心留空沿用工程）')
+        excel_files.addWidget(self.file_frame)
+        self.mapping_section, profile_layout = self.input_section(batch_layout, 'Excel列映射', False)
+        self.mapping_shared = W.QCheckBox('所有 Excel 共用列映射')
         self.mapping_shared.setChecked(True)
         self.mapping_shared.setToolTip('勾选：所有Excel共用列映射；取消：点击上方Excel行编辑该文件的独立映射')
         profile_layout.addWidget(self.mapping_shared)
@@ -266,7 +251,27 @@ class Window(W.QMainWindow):
         self.profile.setMaximumHeight(220)
         self.profile_frame = table_frame(self.profile, 230, self.settings, 'mapping')
         profile_layout.addWidget(self.profile_frame)
-        batch_layout.addWidget(profile_box)
+        self.mark_section, marks = self.input_section(batch_layout, 'Mark信息', True)
+        mark_form = W.QFormLayout()
+        self.template = self.path_row(mark_form, '模板图纸', '', '*.gds *.oas *.oasis', 'template', on_pick=self.select_template)
+        self.template.setClearButtonEnabled(True)
+        marks.addLayout(mark_form)
+        self.mark_table = W.QTableWidget(0, 4)
+        self.mark_table.setHorizontalHeaderLabels(['Mark名称', '形状', 'X (μm)', 'Y (μm)'])
+        self.mark_table.setEditTriggers(getattr(W.QAbstractItemView, 'EditTrigger', W.QAbstractItemView).NoEditTriggers)
+        self.mark_table.horizontalHeader().setStretchLastSection(True)
+        self.mark_table.setMinimumHeight(85)
+        self.mark_table.setMaximumHeight(180)
+        marks.addWidget(table_frame(self.mark_table, 100, self.settings, 'marks'))
+        batch_layout.addStretch(1)
+
+        self.task_tab = W.QWidget()
+        tabs.addTab(self.task_tab, '任务运行')
+        task_layout = W.QVBoxLayout(self.task_tab)
+        self.ignore_measurement_failure = W.QCheckBox('忽略测量失败')
+        self.ignore_measurement_failure.setEnabled(False)
+        self.ignore_measurement_failure.setToolTip('勾选时跳过有芯片测量失败的封装。不勾选时采用失败行填写的 X/Y 偏移与旋转角。')
+        task_layout.addWidget(self.ignore_measurement_failure)
         controls = W.QHBoxLayout()
         self.import_button = W.QPushButton('创建任务')
         self.create_plan_button = W.QPushButton('创建计划任务')
@@ -275,7 +280,7 @@ class Window(W.QMainWindow):
         self.stop_button.setEnabled(False)
         for widget in (self.import_button, self.create_plan_button, self.run_button, self.stop_button):
             controls.addWidget(widget)
-        batch_layout.addLayout(controls)
+        task_layout.addLayout(controls)
         self.table = W.QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(['封装ID', 'Cell', '各DIE偏移（μm / °）', '状态', '任务/错误'])
         self.table.setEditTriggers(W.QAbstractItemView.EditTrigger.NoEditTriggers if hasattr(W.QAbstractItemView, 'EditTrigger') else W.QAbstractItemView.NoEditTriggers)
@@ -284,7 +289,7 @@ class Window(W.QMainWindow):
             self.table.setColumnWidth(col, width)
         self.table.setMinimumHeight(150)
         self.result_frame = table_frame(self.table, 240, self.settings, 'results')
-        batch_layout.addWidget(self.result_frame, 1)
+        task_layout.addWidget(self.result_frame, 1)
         self.table.cellDoubleClicked.connect(self.show_dies)
         paging = W.QHBoxLayout()
         prev = W.QPushButton('上一页')
@@ -294,7 +299,7 @@ class Window(W.QMainWindow):
         self.page_label = W.QLabel()
         paging.addWidget(self.page_label)
         paging.addStretch()
-        batch_layout.addLayout(paging)
+        task_layout.addLayout(paging)
         debug = W.QWidget()
         tabs.addTab(debug, '全部IPC命令调试')
         debug_layout = W.QVBoxLayout(debug)
@@ -369,8 +374,41 @@ class Window(W.QMainWindow):
         self.timer = QtCore.QTimer(self)
         self.timer.setInterval(500)
         self.timer.timeout.connect(self.refresh)
-        self.timer.timeout.connect(self.progress.update)
         self.timer.start()
+
+    @staticmethod
+    def input_section(parent, label, visible):
+        check = W.QCheckBox(label)
+        content = W.QWidget()
+        layout = W.QVBoxLayout(content)
+        layout.setContentsMargins(0, 0, 0, 0)
+        check.setChecked(visible)
+        check.toggled.connect(content.setVisible)
+        parent.addWidget(check)
+        parent.addWidget(content)
+        content.setVisible(visible)
+        return check, layout
+
+    def threshold_row(self, form, label, help_text):
+        row = W.QHBoxLayout()
+        enabled = W.QCheckBox()
+        enabled.setAccessibleName('启用' + label)
+        enabled.setToolTip(help_text)
+        row.addWidget(enabled)
+        fields = []
+        for axis, maximum in (('X (μm)', 1e9), ('Y (μm)', 1e9), ('旋转 (°)', 360)):
+            row.addWidget(W.QLabel(axis))
+            field = W.QDoubleSpinBox()
+            field.setRange(0, maximum)
+            field.setDecimals(3)
+            field.setSingleStep(.1)
+            field.setEnabled(False)
+            field.setToolTip(help_text)
+            row.addWidget(field)
+            fields.append(field)
+        enabled.toggled.connect(self.sync_bypass_fields)
+        form.addRow(label, row)
+        return enabled, fields
 
     def path_row(self, form, label, default, pattern, key, save=False, readonly=False, on_pick=None):
         row = W.QHBoxLayout()
@@ -405,7 +443,8 @@ class Window(W.QMainWindow):
     def log(self, message):
         if isinstance(message, dict):
             if message.get('package_count'):
-                self.progress.package_status(message['current'], message['total'], message['published'])
+                self.progress.package_status(message['current'], message['total'], message['published'],
+                                             message.get('failed_packages',0))
                 return
             if not self.progress.count_only:
                 self.progress.status(message.get('text', ''), message.get('current'), message.get('total'))
@@ -422,15 +461,17 @@ class Window(W.QMainWindow):
             self.progress.status(text)
 
     def sync_bypass_fields(self):
-        for field in self.bypass_limits:
-            field.setEnabled(self.bypass_enabled.isEnabled() and self.bypass_enabled.isChecked())
+        for check, fields in ((self.bypass_enabled, self.bypass_limits),
+                              (self.skip_drc_enabled,self.skip_drc_limits)):
+            for field in fields:
+                field.setEnabled(check.isEnabled() and check.isChecked())
 
     def busy(self, on):
         for widget in (self.connect_button, self.start_button, self.add_files, self.remove_files,
                        self.folder_button, self.import_button, self.create_plan_button, self.run_button, self.send_button,
                        self.endpoint, self.project, self.database, self.output, self.template, self.profile,
                        self.workers, self.memory, self.retries, self.timeout, self.file_view, self.sheet, self.header_row, self.mapping_shared,
-                       *self.path_buttons, self.bypass_enabled):
+                       *self.path_buttons, self.bypass_enabled, self.skip_drc_enabled):
             widget.setEnabled(not on)
         self.sync_bypass_fields()
         self.dies.setEnabled(not on and not self.measurement)
@@ -514,8 +555,8 @@ class Window(W.QMainWindow):
                      lambda reply: self.accept_info(reply['result']),
                      lambda error: self.button_status(self.connect_button, False), '查询连接状态')
 
-    def linked_project(self, endpoint, project, stop, progress, timeout, output=None):
-        transport, info, launched = connect_instance(project, endpoint, stop, progress, timeout, self.conversation)
+    def linked_project(self, endpoint, project, stop, progress, timeout, output=None, *, exact=False):
+        transport, info, launched = connect_instance(project, endpoint, stop, progress, timeout, self.conversation, exact=exact)
         if output is not None and not info.get('batch') and not info.get('running'):
             directory = Path(output).parent.parent / "Cache" / "Manual"
             directory.mkdir(parents=True, exist_ok=True)
@@ -557,9 +598,23 @@ class Window(W.QMainWindow):
             config = load_folder(folder)
             configure_logging(config['workspace'])
             self.conversation.set_root(config['workspace'])
+            if Path(config['database']).is_file():
+                import sqlite3
+                try:
+                    meta = read_task_metadata(config['database'])
+                    frozen = meta.get('config') or {}
+                    config['failed_packages'] = meta.get('display_progress',[0,meta.get('failed_packages',0)])[1]
+                    if meta.get('measurement') and meta.get('state') != 'completed':
+                        config['resume_skip_failed'] = skips_failed_measurements(meta)
+                    if meta.get('state') != 'completed' and frozen.get('project') == config['project']:
+                        config['resume_endpoint'] = frozen.get('endpoint')
+                except (OSError, ValueError, sqlite3.Error) as exc:
+                    self.logger.warning('读取任务恢复信息失败：%s', exc)
             if link:
                 try:
-                    config['info'] = self.linked_project(endpoint, config['project'], stop, progress, timeout, config['output'])
+                    resume_endpoint = config.get('resume_endpoint')
+                    config['info'] = self.linked_project(resume_endpoint or endpoint, config['project'], stop,
+                                                         progress, timeout, config['output'], exact=bool(resume_endpoint))
                 except Exception as exc:
                     config['connection_error'] = str(exc)
             return config
@@ -572,6 +627,9 @@ class Window(W.QMainWindow):
             self.template.setText(config['template'])
             self.database.setText(config['database'])
             self.output.setText(config['output'])
+            if config.get('resume_endpoint'):
+                self.endpoint.setText(config['resume_endpoint'])
+            self.progress.failed_packages = config.get('failed_packages',0)
             self.shared_profile = copy.deepcopy(config['profile'])
             self.file_profiles = {entry['path']: copy.deepcopy(entry['profile']) for entry in config['files'] if 'profile' in entry}
             self.mapping_file = None
@@ -586,7 +644,11 @@ class Window(W.QMainWindow):
             for field, value in zip(self.bypass_limits, nominal_limits(config['controls'].get('bypass_limits',(0,0,0)))):
                 field.setValue(value)
             self.bypass_enabled.setChecked(config['controls'].get('bypass_enabled') is True)
-            self.ignore_measurement_failure.setChecked(config['controls'].get('ignore_measurement_failure') is True)
+            for field, value in zip(self.skip_drc_limits, nominal_limits(config['controls'].get('skip_drc_limits',(0,0,0)))):
+                field.setValue(value)
+            self.skip_drc_enabled.setChecked(config['controls'].get('skip_drc_enabled') is True)
+            self.ignore_measurement_failure.setChecked(config.get('resume_skip_failed',
+                                                                 config['controls'].get('skip_failed_measurements') is True))
             self.logger = configure_logging(config['workspace'])
             self.page = 0
             self.table.setRowCount(0)
@@ -678,7 +740,6 @@ class Window(W.QMainWindow):
                          '全局实际中心X', '全局实际中心Y', '原始偏移X', '原始偏移Y', '度')
                         if self.measurement else
                         ('文本', '从1起的整数', 'μm', 'μm', '度', 'μm', 'μm', '可选 / μm', '可选 / μm'))
-        self.mapping_shared.setText('Excel列映射（全局坐标）' if self.measurement else 'Excel列映射（长度μm，角度°；中心留空沿用工程）')
         self.profile.setRowCount(len(fields))
         for row, (field, description) in enumerate(zip(fields, descriptions)):
             for column, text in enumerate((field, profile['columns'].get(field, field), description)):
@@ -696,7 +757,9 @@ class Window(W.QMainWindow):
         return {**{key:getattr(self,key).value() for key in ('dies','workers','memory','retries','timeout')},
                 'bypass_limits':[field.value() for field in self.bypass_limits],
                 'bypass_enabled':self.bypass_enabled.isChecked(),
-                'ignore_measurement_failure':self.ignore_measurement_failure.isChecked()}
+                'skip_drc_limits':[field.value() for field in self.skip_drc_limits],
+                'skip_drc_enabled':self.skip_drc_enabled.isChecked(),
+                'skip_failed_measurements':self.ignore_measurement_failure.isChecked()}
 
     def persist(self):
         if self.project_root is None:
@@ -783,7 +846,7 @@ class Window(W.QMainWindow):
                 self.log_view.appendPlainText('导入警告 · ' + warning)
             self.persist()
         project, measurement = self.project.text(), self.measurement
-        ignore_failure = bool(measurement) and self.ignore_measurement_failure.isChecked()
+        skip_failed = self.ignore_measurement_failure.isChecked()
         endpoint, timeout = self.endpoint.text(), self.timeout.value()
         def prepare(stop, progress):
             geometry = None
@@ -791,7 +854,7 @@ class Window(W.QMainWindow):
                 info = self.linked_project(endpoint, project, stop, progress, timeout, str(output))
                 geometry = nominal_geometry(info)
             result = import_files(files, target, dies, workers, stop, progress, profile, profiles,
-                                  measurement=measurement, geometry=geometry, ignore_measurement_failure=ignore_failure)
+                                  measurement=measurement, geometry=geometry, skip_failed_measurements=skip_failed)
             if measurement:
                 result['info'] = info
             return result
@@ -806,30 +869,34 @@ class Window(W.QMainWindow):
         kwargs = dict(database=self.database.text(), endpoint=self.endpoint.text(), project=self.project.text(), output=self.output.text(),
                       template=self.template.text().strip(), workers=self.workers.value(), memory_mb=self.memory.value(),
                       retries=self.retries.value(), timeout=self.timeout.value(),
-                      bypass_limits=[field.value() for field in self.bypass_limits] if self.bypass_enabled.isChecked() else (0,0,0))
+                      bypass_limits=[field.value() for field in self.bypass_limits] if self.bypass_enabled.isChecked() else (0,0,0),
+                      skip_drc_limits=[field.value() for field in self.skip_drc_limits] if self.skip_drc_enabled.isChecked() else (0,0,0))
         entries = self.file_entries()
         selected = sorted(p['path'] for p in entries if p['enabled'])
         profile = copy.deepcopy(self.shared_profile)
         profiles = self.import_profiles(entries) or {}
         def run(stop, progress):
-            import sqlite3
-            with closing(sqlite3.connect(Path(kwargs['database']).resolve().as_uri() + '?mode=ro', uri=True)) as db:
-                meta = {k: json.loads(v) for k, v in db.execute('select key,value from meta')}
-            progress(dict(current=0, total=meta.get('count',0), package_count=True, published=False))
+            meta = read_task_metadata(kwargs['database'])
+            completed, failed = meta.get('display_progress',[0,0])
+            progress(dict(current=completed, total=meta.get('count',0), package_count=True, published=False,
+                          failed_packages=failed))
             if (selected != sorted(p['path'] for p in meta.get('sources', [])) or profile != meta.get('profile')
                     or profiles != meta.get('profiles', {}) or self_die != meta.get('die_count')
                     or measurement != meta.get('measurement')
-                    or ignore_failure != meta.get('ignore_measurement_failure',False)):
+                    or (measurement and skip_failed != skips_failed_measurements(meta))):
                 raise ValueError('Excel勾选、列映射、DIE数量或测量失败选项与任务记录不符，请先创建新任务')
             from .storage import sha256
             for index, source in enumerate(meta.get('sources', []), 1):
                 progress(dict(text=f'核对Excel输入 · {index}/{len(selected)} · {Path(source["path"]).name}', current=index - 1, total=len(selected)))
                 if sha256(source['path'], stop) != source['sha256']:
                     raise ValueError('Excel内容已修改，请先校验并创建新任务')
+            frozen = meta.get('config') or {}
+            if frozen.get('project') == kwargs['project'] and frozen.get('endpoint'):
+                kwargs['endpoint'] = frozen['endpoint']
             return Runner(**kwargs, stop=stop, progress=progress, trace=self.conversation).run()
         self_die = self.dies.value()
         measurement = self.measurement
-        ignore_failure = bool(measurement) and self.ignore_measurement_failure.isChecked()
+        skip_failed = self.ignore_measurement_failure.isChecked()
         def done(value):
             if value['state'] != 'completed' or self.pending_close:
                 return
@@ -975,7 +1042,8 @@ class Window(W.QMainWindow):
                     elif isinstance(receipt,dict) and ('drc_count' in receipt or receipt.get('connection_failure_count')):
                         serious = receipt.get('error2_rectangles', 0)
                         ordinary = receipt.get('error_rectangles', 0) - serious
-                        result = (f'DRC {receipt.get("drc_count",0)}项 · 连接失败 {receipt.get("connection_failure_count",0)}项 · '
+                        drc = '普通DRC已跳过' if receipt.get('skip_drc') else f'DRC {receipt.get("drc_count",0)}项'
+                        result = (f'{drc} · 连接失败 {receipt.get("connection_failure_count",0)}项 · '
                                   f'ERROR矩形 {ordinary}个 · ERROR2矩形 {serious}个 · FAIL封装 {receipt.get("failed_packages",0)}个'
                                   + ('。问题位置已移除，正常部分已保留。' if receipt.get('partial_output') else ''))
                 except (ValueError,TypeError):pass

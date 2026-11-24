@@ -13,6 +13,7 @@ import uuid
 
 from die_shift_studio.jobs import REALDATA_DIRECTORY, atomic_save, provision_project
 from .excel import import_files
+from .measurements import skips_failed_measurements
 from .instances import connect
 from .projects import inside, template_file
 from .runner import Runner, nominal_limits
@@ -27,6 +28,9 @@ def capture(config, stop):
     snapshot = copy.deepcopy(config)
     snapshot['inputs'] = []
     try:
+        controls = snapshot.get('controls')
+        if isinstance(controls, dict):
+            controls['skip_failed_measurements'] = skips_failed_measurements(controls, legacy_default=False)
         root = Path(config['folder']).resolve()
         project = inside(root, config['project'])
         snapshot['engineering'] = json.loads(project.read_text(encoding='utf8'))
@@ -61,10 +65,12 @@ def validate(snapshot, output, check_hash=False, stop=None):
         raise ValueError('输出位置不是普通文件')
     controls = snapshot['controls']
     nominal_limits(controls.get('bypass_limits',(0,0,0)))
+    nominal_limits(controls.get('skip_drc_limits',(0,0,0)))
     if type(controls.get('bypass_enabled',True)) is not bool:
         raise ValueError('启用忽略阈值须为布尔值')
-    if type(controls.get('ignore_measurement_failure',False)) is not bool:
-        raise ValueError('忽略测量失败须为布尔值')
+    if type(controls.get('skip_drc_enabled',False)) is not bool:
+        raise ValueError('启用忽略DRC须为布尔值')
+    skips_failed_measurements(controls)
     if (not 1 <= controls['dies'] <= 10000 or not 0 <= controls['workers'] <= 64
             or (controls['memory'] != 0 and not 128 <= controls['memory'] <= 1048576)
             or not 0 <= controls['retries'] <= 10 or not 0 <= controls['timeout'] <= 86400):
@@ -266,20 +272,27 @@ class PlanRunner:
         self.stop = stop if stop is not None else threading.Event()
         self.progress = progress
         self.trace = trace
+        self.queue_progress = None
 
     def run_one(self, row):
         snapshot = row['snapshot']; plan_id = row['id']; controls = snapshot['controls']
         # An older plan already froze its effective thresholds on creation.
         limits = controls.get('bypass_limits',(0,0,0)) if controls.get('bypass_enabled',True) else (0,0,0)
+        skip_drc_limits = controls.get('skip_drc_limits',(0,0,0)) if controls.get('skip_drc_enabled',False) else (0,0,0)
         project = None; transport = None; owned = row.get('owned_instance')
         owned_pid = row.get('owned_pid'); owned_birth = row.get('owned_birth')
         batch_owner = None
         last_update = [0.]
         last_number = [0.]
+        live_failures = 0
         def report(value, base=25, span=60):
+            nonlocal live_failures
             if isinstance(value, dict):
                 text = value.get('text','')
                 fraction = value.get('current',0)/max(1,value.get('total',1))
+                if self.queue_progress and value.get('package_count') and value['failed_packages'] != live_failures:
+                    live_failures = value['failed_packages']
+                    self.queue_progress(live_failures=live_failures)
             else: text, fraction = str(value), None
             if text.startswith(('OAS', '最终提交')): base, span = 85, 14
             number = last_number[0] if fraction is None else max(last_number[0], min(99., base + span*max(0., min(1.,fraction))))
@@ -303,8 +316,8 @@ class PlanRunner:
                     configure_logging(workspace)
                     if self.trace: self.trace.set_root(workspace)
                     return Runner(database, meta['config']['endpoint'], meta['config']['project'], row['output'],
-                                  stop=self.stop, trace=self.trace, template=snapshot.get('template'),
-                                  bypass_limits=limits).run()
+                                  stop=self.stop, trace=self.trace, template=snapshot.get('template'), progress=report,
+                                  bypass_limits=limits, skip_drc_limits=skip_drc_limits).run()
             validate(snapshot, row['output'], check_hash=True, stop=self.stop)
             project = materialize(row, self.stop)
             configure_logging(workspace)
@@ -335,7 +348,7 @@ class PlanRunner:
                 import_files([item['path'] for item in selected], database, controls['dies'], controls['workers'], self.stop,
                              lambda message: report(message,0,15), snapshot['profile'], profiles,
                              measurement=measurement, geometry=geometry,
-                             ignore_measurement_failure=bool(measurement) and controls.get('ignore_measurement_failure',False))
+                             skip_failed_measurements=skips_failed_measurements(controls))
             with closing(sqlite3.connect(database.as_uri()+'?mode=ro', uri=True)) as db:
                 batch_owner = json.loads(db.execute("select value from meta where key='run_id'").fetchone()[0])
                 sources = json.loads(db.execute("select value from meta where key='sources'").fetchone()[0])
@@ -346,7 +359,7 @@ class PlanRunner:
                 connect_plan()
             return Runner(database, endpoint, project, row['output'], controls['workers'], controls['memory'], controls['retries'],
                    controls['timeout'], self.stop, report, transport=transport, trace=self.trace,
-                   bypass_limits=limits,
+                   bypass_limits=limits, skip_drc_limits=skip_drc_limits, on_launch=launched_callback,
                    template=snapshot.get('template'), expected_template_sha256=expected.get(snapshot.get('template'))).run()
         finally:
             if transport is not None and (owned or owned_pid):
@@ -394,15 +407,18 @@ class PlanRunner:
 
     def run(self):
         totals = dict(completed=0, failed=0, skipped=0)
+        completed_failures = 0
         with Lease(str(self.plans.path)+'.execution'):
             # This lock proves no previous queue executor remains alive.
             with closing(self.plans.db()) as db, db:
                 db.execute("update plans set status='paused',severity='warning',message='上次执行中断，可继续' where status='running'")
                 last_seq = db.execute('select coalesce(max(seq),0) from plans').fetchone()[0]
                 total = db.execute("select count(*) from plans where status!='completed' and seq<=?",(last_seq,)).fetchone()[0]
-            def report_queue(published=False):
+            def report_queue(published=False, *, live_failures=0):
                 self.progress(dict(current=totals['completed'], total=total,
-                                   package_count=True, published=published))
+                                   package_count=True, published=published,
+                                   failed_packages=completed_failures+live_failures))
+            self.queue_progress = report_queue
             report_queue(published=total==0)
             self.plans.recheck(owned=True)
             seq = 0
@@ -424,6 +440,7 @@ class PlanRunner:
                 except Exception as exc:
                     self.plans.update(plan_id, status='error', severity='error', ended=time.time(), message=str(exc))
                     totals['failed'] += 1
+                    report_queue()
                     self.progress(str(exc))
                     if '队列停止' in str(exc): break
                 else:
@@ -433,6 +450,8 @@ class PlanRunner:
                                       message=f'OAS已校验并提交 · 含问题{summary.get("issue_packages",0)}封装 · '
                                               f'ERROR {ordinary} · ERROR2 {serious} · FAIL {summary.get("failed_packages",0)}封装')
                     totals['completed'] += 1
+                    completed_failures += summary.get('failed_packages',0)
                     report_queue(totals['completed']==total)
+        self.queue_progress = None
         state = 'paused' if self.stop.is_set() else ('completed_with_errors' if totals['failed'] or totals['skipped'] else 'completed')
         return dict(state=state, **totals)

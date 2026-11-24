@@ -308,7 +308,7 @@ class RoutePlan:
             if best is None or score<best[0]:best=(score,s)
         return float(previous) if best is None else best[1]
 
-    def snap(self,s,which,other,allow_pad=True):
+    def snap(self,s,which,other,allow_pad=True,corner_snap=None):
         eps=max(self.tolerance*8,1e-4)
         lo=0. if which==0 else max(other+eps,self.land_end+eps)
         hi=min(other-eps,self.fixed_start-eps) if which==0 else self.fixed_start-eps
@@ -318,6 +318,10 @@ class RoutePlan:
         if which==0 and s<=self.land_end+eps:
             return 0. if allow_pad and self.allows_pad_point and s<=max(0.,self.land_end-margin) else min(hi,self.land_end+eps)
         for corner,radius in self.corners:
+            if corner_snap is not None:
+                if corner_snap<=0:break
+                segment=int(np.searchsorted(self.marks,corner))
+                radius=min(corner_snap,.3*min(self.lengths[segment-1:segment+1]))
             if corner-radius<s<corner+radius:
                 options=[x for x in (corner-radius,corner+radius) if lo<=x<=hi]
                 if options:s=min(options,key=lambda x:abs(x-s))
@@ -550,20 +554,20 @@ class RoutePlan:
         if not safe:self.warning='动区长度小于全输入位移的保守过渡余量；需检查当前重构'
         return best[3]
 
-    def edit(self,a,b,which,position,allow_pad=True):
-        target=self.snap(position,which,b if which==0 else a,allow_pad)
+    def edit(self,a,b,which,position,allow_pad=True,corner_snap=None):
+        target=self.snap(position,which,b if which==0 else a,allow_pad,corner_snap)
         start=a if which==0 else b
         trials=[target,*np.linspace(target,start,25)[1:]]
         for value in trials:
-            value=self.snap(float(value),which,b if which==0 else a,allow_pad)
+            value=self.snap(float(value),which,b if which==0 else a,allow_pad,corner_snap)
             part=self.partition(value,b) if which==0 else self.partition(a,value)
             if part is not None:return part,abs(value-position)>max(self.tolerance*8,.01)
         return self.partition(a,b),True
 
 
-    def edit_pose(self,a,b,which,position,center,state,style,cursor=None):
+    def edit_pose(self,a,b,which,position,center,state,style,cursor=None,corner_snap=None):
         """Independent source handle, with a physical-order stop in line mode."""
-        part,clamped=self.edit(a,b,which,position,self.pad_hit(cursor,which))
+        part,clamped=self.edit(a,b,which,position,self.pad_hit(cursor,which),corner_snap)
         if part is None or style!='linear':return part,clamped
         from .connection_curves import linear_gap
         minimum=self.tolerance*16
@@ -576,7 +580,7 @@ class RoutePlan:
         start=a if which==0 else b;target=part['a'] if which==0 else part['b']
         good=old;lo,hi=0.,1.
         for _ in range(16):
-            t=(lo+hi)/2;probe,_=self.edit(a,b,which,start+t*(target-start))
+            t=(lo+hi)/2;probe,_=self.edit(a,b,which,start+t*(target-start),corner_snap=corner_snap)
             if probe is not None and linear_gap(probe,self,center,state)>minimum:lo=t;good=probe
             else:hi=t
         return good,True

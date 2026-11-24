@@ -17,7 +17,7 @@ else:
     from PyQt5.QtTest import QTest
 from RealDataAnalyse.gui import Window, ProgressBar
 from RealDataAnalyse.transport import Transport
-from RealDataAnalyse.storage import configure_logging, sha256
+from RealDataAnalyse.storage import Ledger, configure_logging, sha256
 
 ROOT = Path(__file__).resolve().parents[1]
 app = W.QApplication.instance() or W.QApplication([])
@@ -51,6 +51,22 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         assert [field.value() for field in w.bypass_limits] == [0,0,0]
         assert not w.bypass_enabled.text() and not w.bypass_enabled.isChecked()
         assert all(field.decimals() == 3 and not field.isEnabled() for field in w.bypass_limits)
+        assert all(field.decimals() == 3 and not field.isEnabled() for field in w.skip_drc_limits)
+        assert not w.skip_drc_enabled.isChecked()
+        assert [w.tabs.tabText(i) for i in range(2)] == ['信息读取','任务运行']
+        assert w.ignore_measurement_failure.parentWidget() is w.task_tab
+        assert w.excel_section.isChecked() and w.mark_section.isChecked()
+        assert w.mark_table.isVisible() and w.template.isVisible() and w.mark_table.rowCount() == 0
+        w.mark_section.click()
+        assert not w.mark_table.isVisible() and not w.template.isVisible()
+        w.mark_section.click()
+        w.excel_section.click()
+        assert not w.file_view.isVisible() and not w.add_files.isVisible()
+        w.excel_section.click()
+        assert w.mapping_section.text() == 'Excel列映射' and not w.mapping_section.isChecked()
+        assert not w.profile.isVisible()
+        w.mapping_section.click()
+        assert w.profile.isVisible()
         assert not w.conversation_timer.isActive()
         w.conversation.record('send',endpoint,{'id':'hidden-tab'})
         assert not w.conversation.drain() and not w.conversation_view.toPlainText()
@@ -108,11 +124,15 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         assert all(field.isEnabled() for field in w.bypass_limits)
         for field, value in zip(w.bypass_limits, (2.5,3,.125)):
             field.setValue(value)
+        w.skip_drc_enabled.click()
+        for field, value in zip(w.skip_drc_limits, (3,4,.5)):
+            field.setValue(value)
         excel = folder/'RealDataAnalyse/Excel'
         shutil.copyfile(excel/'GD55_SYNTHETIC_DIE1.xlsx', excel/'Z_new.xlsx')
         w.open_folder(folder, link=False); wait(w)
         assert [field.value() for field in w.bypass_limits] == [2.5,3,.125]
         assert w.bypass_enabled.isChecked()
+        assert w.skip_drc_enabled.isChecked() and [field.value() for field in w.skip_drc_limits] == [3,4,.5]
         assert w.file_view.rowCount() == 4 and w.file_entries()[-1]['enabled']
         select(3); w.remove_files.click()
         assert w.file_view.rowCount() == 3 and (excel/'Z_new.xlsx').is_file()
@@ -132,6 +152,8 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         select(1)
         assert w.sheet.text() == 'SeparateSheet' and w.header_row.value() == 2
         select(0)
+        w.mapping_section.setChecked(False)
+        assert not w.profile.isVisible()
         w.import_button.click(); wait(w)
         assert w.table.rowCount() == 36
         previous_database = w.database.text()
@@ -151,6 +173,17 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
         assert w.completion_dialog is None or not w.completion_dialog.isVisible()
         assert not Path(w.output.text()).exists()
         w.file_view.item(1, 0).setCheckState(getattr(QtCore.Qt, 'CheckState', QtCore.Qt).Checked)
+        journal = Ledger(previous_database)
+        try:
+            journal.set('config',dict(project=w.project.text(),endpoint=str(endpoint)))
+            journal.set('state','paused')
+            journal.set('display_progress',[2,1])
+        finally:
+            journal.close()
+        w.endpoint.setText(str(root/'changed-endpoint.json'))
+        w.open_folder(folder,link=False); wait(w)
+        assert Path(w.endpoint.text()) == endpoint
+        w.endpoint.setText(str(root/'changed-endpoint.json'))
         with patch('RealDataAnalyse.gui.Runner') as runner:
             runner.return_value.run.return_value = dict(state='completed', output=w.output.text())
             w.bypass_enabled.click()
@@ -163,26 +196,30 @@ with tempfile.TemporaryDirectory(prefix='rda-project-ui-') as temp:
             w.run_button.click(); wait(w)
             runner.return_value.run.assert_called_once()
             assert runner.call_args.kwargs['bypass_limits'] == [2.5,3,.125]
+            assert runner.call_args.kwargs['skip_drc_limits'] == [3,4,.5]
+            assert runner.call_args.kwargs['endpoint'] == str(endpoint)
+            assert 'FAIL 1' in w.progress.label(.5)
             assert all(label in w.progress.toolTip() for label in ('开始 ', '结束 ', '耗时 '))
             assert w.progress.started is None and w.progress.end_time >= w.progress.start_time
             dialog = w.completion_dialog
             assert dialog.isVisible() and dialog.windowTitle() == '任务完成'
             assert w.completion_path.isReadOnly() and w.completion_path.text() == w.output.text()
             dialog.accept(); app.processEvents()
+        w.endpoint.setText(str(endpoint))
         assert w.template.text()==str(folder/'RealDataAnalyse/Template/GD55_Template.gds')
         assert sha256(folder/'GD55_1105.gds') == before
         assert (folder/'RealDataAnalyse/logs/RealDataAnalyse.log').is_file()
         clock = ProgressBar()
         assert '开始 --:--:-- · 总耗时 00:00:00' in clock.label(0)
         clock.begin()
-        clock.package_status(6,12,False)
+        clock.package_status(6,12,False,2)
         initial = clock.toolTip()
         until = time.monotonic() + 4
         while clock.toolTip() == initial and time.monotonic() < until:
             QTest.qWait(50)
         assert clock.toolTip() != initial
         assert clock.value() == 5000
-        assert all(label in clock.label(.5) for label in ('开始 ', '总耗时 ', '已完成 6 / 12'))
+        assert all(label in clock.label(.5) for label in ('开始 ', '总耗时 ', 'FAIL 2', '已完成 6 / 12'))
         clock.finish()
         final = clock.label(.5)
         assert not clock.clock_timer.isActive() and '结束 ' in clock.toolTip()

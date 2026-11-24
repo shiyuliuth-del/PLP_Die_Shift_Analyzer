@@ -19,7 +19,7 @@ def _initialize(inputs, stop, over_budget):
     _session = Session(*inputs)
 
 
-def _compute(rows, policy):
+def _compute(rows, policy, skip_drc=False):
     def budget():
         if _over_budget.is_set():
             raise MemoryError('独立计算进程超过批次共享内存预算')
@@ -27,7 +27,7 @@ def _compute(rows, policy):
     with cancellation_scope(_stop), budget_scope(budget), serial_scope():
         from .reconstruction_diagnostic import DiagnosticFailure
         try:
-            _, snapshot, details = _session.run(rows,preview=False,output_policy=policy)
+            _, snapshot, details = _session.run(rows,preview=False,output_policy=policy,skip_drc=skip_drc)
             cancel_check()
             return True, snapshot.layers, details
         except DiagnosticFailure as exc:
@@ -88,10 +88,10 @@ class BatchWorkers:
         finally:
             self.budget_lock.release()
 
-    def solve(self, rows, policy):
+    def solve(self, rows, policy, skip_drc=False):
         pool = self.executor()
         try:
-            future = pool.submit(_compute,rows,policy)
+            future = pool.submit(_compute,rows,policy,skip_drc)
             while True:
                 try:
                     ok, payload, details = future.result(timeout=.25)

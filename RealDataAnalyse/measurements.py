@@ -101,7 +101,21 @@ def scalar(value, label):
     return number
 
 
-def import_part(path, die, profile, scratch, stop, progress, ignore_measurement_failure=False):
+def skips_failed_measurements(settings, *, legacy_default=True):
+    """Translate an existing task/plan policy without reinterpreting it."""
+    if 'skip_failed_measurements' in settings:
+        value = settings['skip_failed_measurements']
+    else:
+        previous = settings.get('ignore_measurement_failure', not legacy_default)
+        if type(previous) is not bool:
+            raise ValueError('旧测量失败选项须为布尔值')
+        value = not previous
+    if type(value) is not bool:
+        raise ValueError('忽略测量失败须为布尔值')
+    return value
+
+
+def import_part(path, die, profile, scratch, stop, progress, use_failed_offsets):
     before = sha256(path, stop)
     with closing(sqlite3.connect(scratch)) as db:
         db.execute(f'create table poses({POSE_COLUMNS})')
@@ -152,7 +166,7 @@ def import_part(path, die, profile, scratch, stop, progress, ignore_measurement_
                             raise ValueError('是否成功须为0或1')
                         if success:
                             ax, ay, angle = [scalar(values[i], HEADINGS[i]) for i in (5, 6, 9)]
-                        elif ignore_measurement_failure:
+                        elif use_failed_offsets:
                             dx, dy, angle = [scalar(values[i], HEADINGS[i]) for i in (7, 8, 9)]
                             ax, ay = [scalar(Decimal(str(center)) + Decimal(str(offset)), label)
                                       for center, offset, label in ((tx, dx, HEADINGS[5]), (ty, dy, HEADINGS[6]))]
@@ -369,7 +383,7 @@ def package_rows(db, geometry, scale, tolerance, stop, progress, names, warn):
                     if record[-3]:
                         source, line = record[-2:]
                         path = Path(source)
-                        warn(f'封装 {package} · {path.parent.name}/{path.name} 第{line}行：忽略测量失败，已采用本行偏移和旋转角')
+                        warn(f'封装 {package} · {path.parent.name}/{path.name} 第{line}行：机台标记测量失败，已采用本行偏移和旋转角')
                 payload = dict(cell=cell, position_um=position, dies=poses, measured_max=measured_max)
                 db.execute('insert into packages(seq,package,cell,payload) values(?,?,?,?)',
                            (index, package, cell, dumps(payload)))

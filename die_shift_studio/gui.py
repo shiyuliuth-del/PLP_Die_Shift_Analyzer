@@ -48,9 +48,9 @@ SPECS={
  'panel_layers':('固定RDL层数',0,32,0), 'wafer_layers':('运动RDL层数',0,32,0),
  'line_width_um':('固定线宽 / μm',.01,10000,3),'line_space_um':('固定线距 / μm',.01,10000,3),
  'wafer_line_width_um':('运动线宽 / μm',.01,10000,3),'wafer_line_space_um':('运动线距 / μm',.01,10000,3),
- 'minimum_edge_um':('最短边长 / μm',0,10000,6),'minimum_area_um2':('最小图形面积 / μm²',0,1e12,6),'package_clearance_um':('图形将距封装边框 / μm',0,10000,3),'via_diameter_um':('连接孔直径 / μm',.01,10000,3),'annulus_um':('固定RDL包围量 / μm',0,10000,3),'moving_annulus_um':('运动RDL包围量 / μm',0,10000,3),
-   'min_die_gap_um':('芯片间要求净距 / μm',0,10000,3),
- 'min_package_clearance_um':('芯片到封装边要求净距 / μm',0,10000,3),
+ 'minimum_edge_um':('最短边长 / μm',0,10000,6),'minimum_area_um2':('最小图形面积 / μm²',0,1e12,6),'package_clearance_um':('图形距封装边框 / μm',0,10000,3),'via_diameter_um':('连接孔直径 / μm',.01,10000,3),'annulus_um':('固定RDL包围量 / μm',0,10000,3),'moving_annulus_um':('运动RDL包围量 / μm',0,10000,3),
+   'min_die_gap_um':('芯片边框最小间距 / μm',0,10000,3),
+ 'min_package_clearance_um':('芯片到封装最小间距 / μm',0,10000,3),
  'single_bound_x_um':('单芯片 X 边界 / μm',0,10000,3),'single_bound_y_um':('单芯片 Y 边界 / μm',0,10000,3),
  'multi_bound_x_um':('多芯片每颗 X 边界 / μm',0,10000,3),'multi_bound_y_um':('多芯片每颗 Y 边界 / μm',0,10000,3),
  'bound_angle_deg':('角度边界 / °',0,180,4),
@@ -324,7 +324,6 @@ class MainWindow(W.QMainWindow):
         page=self._page('工艺');self.process_layout=page;self.process_sections={}
         self._group(page,'线宽线距',['panel_layers','wafer_layers','line_width_um','line_space_um','wafer_line_width_um','wafer_line_space_um','package_clearance_um'],collapsed=True)
         self._group(page,'过孔包围量',['moving_annulus_um','annulus_um'],collapsed=True)
-        self._group(page,'图形过滤',['minimum_area_um2'],collapsed=True)
         self._group(page,'芯片距离',['min_die_gap_um','min_package_clearance_um'],collapsed=True)
         self.fixed_assignment='all'
         page.addStretch()
@@ -577,6 +576,7 @@ class MainWindow(W.QMainWindow):
         # Insert the dimensions before the spacer at the end of the process page.
         self.process_layout.takeAt(self.process_layout.count()-1)
         drc_group=self._group(self.process_layout,'其他',[],collapsed=True)
+        self.parameter_field(drc_group,'minimum_area_um2')
         self.parameter_field(drc_group,'minimum_edge_um')
         spin(drc_group,'drc_min_angle_deg','最小铜图形内角 / °',1,179,1)
         spin(drc_group,'drc_tolerance_um','尺寸容差 ± / μm',-10000,10000,3)
@@ -614,10 +614,26 @@ class MainWindow(W.QMainWindow):
         spin(recon,'reconstruction_grid_nodes','良率积分每轴节点',3,9)
         self.setting_fields['reconstruction_grid_nodes'].setToolTip('完整有限网格，按区间概率质量积分；增大节点可检查连续空间误差。不是等概率极端计数。')
         live=W.QCheckBox('实时反馈动区变化');self.setting_fields['reconstruction_live']=live;recon.addRow(live);live.toggled.connect(self.settings_changed)
-        spin(recon,'reconstruction_corner_guard_um','拐角吸附预留 / μm',0,1000,2)
-        spin(recon,'reconstruction_node_snap_um','边界节点拖动吸附 / μm',-1,1000,3).setToolTip(
-            '−1 关闭，0 按当前缩放自动选择距离，正值为实际距离。')
-        spin(recon,'reconstruction_node_snap_strength','吸附强度',0,1,2).setToolTip('0 无吸引，1 最大吸引。')
+        corner=spin(recon,'reconstruction_corner_guard_um','拐角吸附预留 / μm',-1,1000,2)
+        corner.setToolTip('−1 关闭拖动拐角吸附，0 随画布缩放，正值为距离。几何有效性仍会检查。')
+        snap_row=W.QHBoxLayout()
+        distance=spin(None,'reconstruction_node_snap_um','',-1,1000,3)
+        distance.setToolTip('−1 关闭，0 按当前缩放自动选择距离，正值为实际距离。')
+        snap_row.addWidget(distance);snap_row.addWidget(W.QLabel('吸附强度'))
+        strength=spin(None,'reconstruction_node_snap_strength','',0,1,2)
+        strength.setToolTip('0 无吸引，1 最大吸引。');snap_row.addWidget(strength)
+        recon.addRow('拖动吸附 / μm',snap_row)
+        waiver_row=W.QHBoxLayout()
+        auto_waive=W.QCheckBox('自动忽略低概率DRC')
+        self.setting_fields['reconstruction_auto_waive_drc']=auto_waive
+        auto_waive.setToolTip('按当前计算范围内同一规则和源对象的联合离散事件概率判断。关闭时清除所有忽略。')
+        waiver_row.addWidget(auto_waive)
+        mantissa=spin(None,'reconstruction_waiver_mantissa','',1,9)
+        mantissa.setAccessibleName('概率系数')
+        exponent=spin(None,'reconstruction_waiver_exponent','',-99,0)
+        exponent.setAccessibleName('概率指数')
+        waiver_row.addWidget(mantissa);waiver_row.addWidget(W.QLabel('× 10^'));waiver_row.addWidget(exponent)
+        recon.addRow(waiver_row);auto_waive.toggled.connect(self.settings_changed)
         from .drc_policy import build as build_drc_policy
         drawing=build_drc_policy(self,page)
         markers=W.QCheckBox('显示DRC问题');self.setting_fields['show_contact_markers']=markers;drawing.addRow(markers);markers.toggled.connect(self.settings_changed)
@@ -688,13 +704,23 @@ class MainWindow(W.QMainWindow):
     def settings_changed(self,*_):
         if self.loading:return
         values={k:(w.currentData() if isinstance(w,W.QComboBox) else w.isChecked() if isinstance(w,W.QCheckBox) else w.text() if isinstance(w,W.QLineEdit) else w.value()) for k,w in self.setting_fields.items()}
-        if -1 < values['reconstruction_node_snap_um'] < 0:
-            field=self.setting_fields['reconstruction_node_snap_um']
-            blocked=field.blockSignals(True)
-            field.setValue(-1)
-            field.blockSignals(blocked)
-            values['reconstruction_node_snap_um']=-1.
+        for key in ('reconstruction_node_snap_um','reconstruction_corner_guard_um','reconstruction_waiver_mantissa'):
+            if -1 < values[key] < 0:
+                value=-1.
+            elif key=='reconstruction_waiver_mantissa' and values['reconstruction_waiver_exponent']==0:
+                value=1
+            else:continue
+            field=self.setting_fields[key]
+            blocked=field.blockSignals(True);field.setValue(value);field.blockSignals(blocked)
+            values[key]=value
         updated=ViewSettings.from_dict(dict(asdict(self.view_settings),**values))
+        waiver_fields=('reconstruction_auto_waive_drc','reconstruction_waiver_mantissa','reconstruction_waiver_exponent')
+        if any(getattr(updated,key)!=getattr(self.view_settings,key) for key in waiver_fields):
+            switching=updated.reconstruction_auto_waive_drc!=self.view_settings.reconstruction_auto_waive_drc
+            self.view_settings=updated
+            if switching:self.reconstruction_yield.refresh()
+            self.replace_drc_waivers({} if switching and not updated.reconstruction_auto_waive_drc else self.ignored_drc)
+            return
         if updated.space_export_interval_um!=self.view_settings.space_export_interval_um:
             self.view_settings=updated
             return
@@ -2763,18 +2789,25 @@ class MainWindow(W.QMainWindow):
         return logical_fingerprint((self.data.geometry_id,self.data.top_name,self.roles(),self.ordered_layers(),
                                     asdict(self.params()),cfg.drc_checks,cfg.drc_tolerance_um,cfg.drc_min_angle_deg,reconstruction))
 
-    def approved_drc_poses(self):
-        if not self.ignored_drc or self.extremes is None or self.dirty:return frozenset()
-        from .drc_waivers import approved
-        context=self.drc_waiver_context()
-        key=(id(self.extremes),id(self.ignored_drc),context)
+    def drc_waiver_summary(self):
+        cfg=self.view_settings
+        if self.extremes is None or self.dirty or not (self.ignored_drc or cfg.reconstruction_auto_waive_drc):
+            return frozenset(),frozenset(),{}
+        from .drc_waivers import summary
+        bank=self.reconstruction_yield.evidence if self.reconstruction_toggle.isChecked() else None
+        context=self.drc_waiver_context() if self.ignored_drc else None
+        key=(id(self.extremes),id(self.ignored_drc),context,id(bank),cfg.reconstruction_auto_waive_drc,
+             cfg.reconstruction_waiver_mantissa,cfg.reconstruction_waiver_exponent)
         cached=getattr(self,'_waiver_cache',None)
         if cached is not None and cached[0]==key:return cached[1]
         def states_at(index):
             return self.extremes[index]['states'] if index>=0 else np.zeros((self.extremes.count,3))
-        poses=approved(self.ignored_drc,context,self.extremes,states_at)
-        self._waiver_cache=(key,poses)
-        return poses
+        value=summary(cfg,bank,self.ignored_drc,context,self.extremes,states_at)
+        self._waiver_cache=(key,value)
+        return value
+
+    def approved_drc_poses(self):
+        return self.drc_waiver_summary()[1]
 
     def issue_menu(self,pos):
         row=self.issue_table.indexAt(pos).row()
@@ -2797,10 +2830,10 @@ class MainWindow(W.QMainWindow):
         if self.reconstruction_toggle.isChecked() and not frame.get('reconstruction',{}).get('constraints_complete'):
             index=-2
         old=self.ignored_drc.get(pose,{})
-        entry=record(frame,rows,old,issue,self.drc_waiver_context(),index)
+        entry=record(frame,rows,old,issue,self.drc_waiver_context(),index,self.drc_waiver_summary()[0])
         self.edit_history.record()
         records=dict(self.ignored_drc)
-        if entry['ignored']:records[pose]=entry
+        if entry['ignored'] or entry['retained']:records[pose]=entry
         else:records.pop(pose,None)
         self.replace_drc_waivers(records)
 
@@ -2810,20 +2843,22 @@ class MainWindow(W.QMainWindow):
         if self.extremes is not None and self.problem_filter.currentIndex()==1:
             self.show_extreme_page(self.preview_page,redraw=False,keep_pose=True)
         else:self.refresh_extreme_colors(self.current_frame)
-        self.drc_overlay.draw()
-        self.render_scene()
+        self.reconstruction_overlay.draw();self.drc_overlay.draw();self.render_scene()
 
     def fill_issues(self):
-        entries=self.contact_entries(self.current_frame)
-        stamp=(id(entries),self.view_settings.drc_checks,self.view_settings.drc_visible,id(self.ignored_drc))
+        entries=self.contact_entries(self.current_frame);auto=self.drc_waiver_summary()[0]
+        stamp=(id(entries),self.view_settings.drc_checks,self.view_settings.drc_visible,id(self.ignored_drc),auto)
         if stamp==self._issue_table_stamp:return
         from .drc_policy import visible
-        entries=[q for q in entries if visible(self.view_settings,q)]
-        if entries and self.ignored_drc:
-            from .drc_waivers import pose_id,witness_id
-            waived=set(self.ignored_drc.get(pose_id(self.current_frame['states']),{}).get('ignored',()))
-            if waived:entries=[dict(q,ignored=witness_id(q) in waived) for q in entries]
-        self._issue_table_stamp=stamp;self.display_issues=entries
+        self._drc_cleared_figures=frozenset()
+        if entries and (self.ignored_drc or auto):
+            from .drc_waivers import cleared_sources,event_id,pose_id,witness_id
+            saved=self.ignored_drc.get(pose_id(self.current_frame['states']),{})
+            waived=set(saved.get('ignored',()));retained=set(saved.get('retained',()))
+            flags=[((key:=witness_id(q)) in waived or bool(auto and event_id(q) in auto)) and key not in retained for q in entries]
+            self._drc_cleared_figures=cleared_sources(self.current_frame,entries,flags)
+            entries=[dict(q,ignored=flag) if flag else q for q,flag in zip(entries,flags)]
+        self._issue_table_stamp=stamp;self.display_issues=[q for q in entries if visible(self.view_settings,q)]
         self.show_issue_page(self.issue_page)
     def show_issue_page(self,page):
         entries=getattr(self,'display_issues',[]);size=self.view_settings.table_page_limit

@@ -90,16 +90,30 @@ def run():
             assert len(w.data.layers['5/0'])==1 and w.data.deleted_shapes
             assert w.show_issues.isChecked() and not w.view_settings.animation_enabled
             assert w.view_settings.reconstruction_boundary_mode=='perpendicular' and w.dxf_settings.region_auto_join
+            assert w.output_compensation()=={}
             w.compensation_boxes['5/0'].setValue(-12.345)
             assert w.output_compensation()=={'5/0':-12.345}
+            # A press whose release belongs to a cell editor must not arm a
+            # later unpressed mouse move. Reproduce at the actual viewport.
+            view=w.layer_table.viewport();old_order=w.ordered_layers()
+            qtest.mousePress(view,getattr(getattr(Qt,'MouseButton',Qt),'LeftButton'),
+                             pos=w.layer_table.visualItemRect(w.layer_table.item(0,2)).center())
+            assert w.layer_drag.press is not None
+            qtest.mouseRelease(w.compensation_boxes['5/0'],
+                               getattr(getattr(Qt,'MouseButton',Qt),'LeftButton'))
+            qtest.mouseMove(view,w.layer_table.visualItemRect(w.layer_table.item(2,2)).center())
+            assert w.ordered_layers()==old_order and w.layer_drag.press is None
             from shapely.geometry import box
             from die_shift_studio.drc_waivers import pose_id
             w.problem_filter.setCurrentIndex(0);app.processEvents()
             w.select_preview(1,0);wait()
             assert w.active_preview is not None
-            frame=dict(w.current_frame,drc=[dict(kind='线宽不足',layer='5/0',geometry=box(40,0,45,5))])
+            piece=w.current_frame['reconstruction']['pieces'][0]
+            witness=dict(kind='线宽不足',layer='5/0',refs=(('5/0',piece['index']),),geometry=box(40,0,45,5))
+            frame=dict(w.current_frame,drc=[witness],nominal_global=False)
             frame.pop('drc_locations',None)
-            frame['reconstruction']=dict(frame['reconstruction'],constraints_complete=True,hard_failures=())
+            frame['reconstruction']=dict(frame['reconstruction'],constraints_complete=True,hard_failures=(),
+                                         pieces=[dict(piece,rule_witnesses=[witness],connection_failed=False)])
             w.current_frame=frame
             w.fill_issues()
             def click_waiver(expected):
@@ -114,14 +128,22 @@ def run():
                 app.processEvents()
             click_waiver('忽略此问题')
             assert len(frame['drc'])==1 and w.issue_table.item(0,0).background().color().name()=='#e4f4e8'
+            assert next(iter(w.reconstruction_overlay.zone_views.values()))[1]=='green'
+            assert not w.reconstruction_overlay.problems.get_visible()
             assert w.active_preview in w.approved_drc_poses()
             click_waiver('取消忽略此问题')
             assert not w.ignored_drc and not w.approved_drc_poses()
+            assert next(iter(w.reconstruction_overlay.zone_views.values()))[1]=='yellow'
             w.undo_edit()
             assert pose_id(frame['states']) in w.ignored_drc
             w.write_project(saved)
             w.load_project(saved);wait()
             assert w.ignored_drc and w.output_compensation()=={'5/0':-12.345}
+            auto=w.setting_fields['reconstruction_auto_waive_drc']
+            auto.setChecked(True)
+            assert w.ignored_drc
+            auto.setChecked(False);wait()
+            assert not w.ignored_drc
             w.clear_cached_results();wait()
             assert not w.undo_button.isEnabled() and not w.redo_button.isEnabled()
         finally:

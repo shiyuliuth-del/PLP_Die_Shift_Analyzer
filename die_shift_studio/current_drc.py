@@ -51,7 +51,12 @@ def frame(checker,states,replacements,settings,progress,owners=None,scopes=None,
         checker.rigid_candidates=candidates
     proved={}
     for ref,g in overrides.items():
-        node=m.nodes[m.ids[ref]];normalized=g.normalize()
+        node=m.nodes[m.ids[ref]]
+        owner=linked.get(ref,node['owner'])
+        if g is node['poly'] and (owner<0 or not np.any(states[owner])):
+            proved[ref]=owner
+            continue
+        normalized=g.normalize()
         for owner in dict.fromkeys([linked.get(ref,node['owner']),*sorted(checker.rigid_candidates.get(ref,()))]):
             expected=m.moved(node['poly'],owner,states)
             # Verify coordinates, not area or bounding boxes. A copper edit
