@@ -8,6 +8,7 @@ ELEMENTS={'固定RDL':'原始固定 RDL 线路','运动RDL':'原始运动 RDL �
           '固定过孔孔盘':'固定孔盘','固定障碍':'整块固定障碍','禁布区':'禁布区','截面':'通道矩形','描边':'风险线路描边',
           '标注':'文字和箭头','边距':'封装边缘与禁布区违规'}
 DEFAULTS={k:'dim' if k in ('固定RDL','运动RDL') else 'show' for k in ELEMENTS}
+FIXED_VIA_MODES=(('关闭','off'),('全局随动','global'),('全局静止','global_static'),('分别处理','individual'))
 
 
 def normalize_display(values):
@@ -258,7 +259,7 @@ class ViewSettings:
                  'probability_interpolation':('nearest','bilinear','bicubic'),
                  'probability_cmap':('blue','teal','amber','rose','YlGnBu','BuPu','viridis','cividis','plasma','magma','turbo'),
                  'animation_strategy':('prepared','stream'),'evaluation_scope':('all','focus','risk'),'reconstruction_die_mode':('auto','follow','stationary'),
-                 'space_scope':('moving','package'),'reconstruction_box_mode':('free','aligned'),'reconstruction_fixed_via_mode':('off','global','individual'),'reconstruction_between_motion':MODES}
+                 'space_scope':('moving','package'),'reconstruction_box_mode':('free','aligned'),'reconstruction_fixed_via_mode':tuple(mode for _,mode in FIXED_VIA_MODES),'reconstruction_between_motion':MODES}
         for key,allowed in choices.items():
             if getattr(q,key) not in allowed:raise ValueError('无效设置：'+key)
         limits={'width_yield_decimals':(0,12),'width_label_decimals':(0,6),'width_label_font_pt':(6,24),'drc_tolerance_um':(-10000,10000),'probability_gamma':(.1,1.),'contact_marker_size':(.1,10000),'unadapted_marker_size':(.1,10000),'drc_min_angle_deg':(1,179),'sample_exponent':(8,18),'random_seed':(0,2147483647),'quadrature_order':(5,81),
@@ -298,6 +299,10 @@ class ViewSettings:
         for key in integers:data[key]=int(data[key])
         data["probability_ranges"]=tuple((int(level),color) for level,color in q.probability_ranges)
         return cls(**data)
+
+    @property
+    def links_fixed_vias(self):
+        return self.reconstruction_fixed_via_mode in ('global','individual')
 
     def width_key(self):
         return (True,'nominal-physical-throat-v50-pair-focus',self.drc_checks,self.drc_tolerance_um,self.evaluation_scope)

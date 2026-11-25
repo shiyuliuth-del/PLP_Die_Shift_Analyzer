@@ -362,7 +362,7 @@ def live_serial(original,settings,old,ref,draft=False):
             repaired,blocked=(),()
         else:
             from .topology_routing import resolve
-            if settings.reconstruction_fixed_via_mode!='off':
+            if settings.links_fixed_vias:
                 # A local edit can change the motion of a shared fixed via.
                 rebuilt._plans=[q for q in original._plans if (q['layer'],q['index'])!=ref]+list(rebuilt._plans or ())
             changed,rows,repaired,blocked=resolve(rebuilt,changed,rows,old['states'])

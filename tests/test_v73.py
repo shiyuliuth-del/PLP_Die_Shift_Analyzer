@@ -224,6 +224,10 @@ class V73Tests(unittest.TestCase):
                 modes=w.setting_fields['reconstruction_between_motion']
                 self.assertEqual(modes.itemText(0),'静止不动')
                 self.assertEqual(modes.currentData(),'max')
+                fixed_via=w.setting_fields['reconstruction_fixed_via_mode']
+                self.assertEqual([fixed_via.itemText(i) for i in range(fixed_via.count())],
+                                 ['关闭','全局随动','全局静止','分别处理'])
+                self.assertIn('固定过孔随动',[label.text() for label in fixed_via.parentWidget().findChildren(W.QLabel)])
                 trigger = w.setting_fields['reconstruction_pad_trigger_um']
                 accuracy = w.setting_fields['reconstruction_grid_nodes']
                 self.assertEqual(trigger.accessibleName(), '孔盘整体触发')
@@ -272,10 +276,36 @@ class V73Tests(unittest.TestCase):
                 wait()
                 self.assertEqual(w.selection.selected_between['mode'],'static')
                 self.assertEqual(w.view_settings.reconstruction_between_overrides,((*block['id'],'static'),))
+                layer=block['ref'][0]
+                w.set_view((point.x,point.y),60.,45.)
+                w.plot_layout(preserve=True)
+                w.canvas.draw()
+                dots=w.reconstruction_overlay.stationary_artists[layer]
+                self.assertTrue(dots.get_visible())
+                from matplotlib.colors import to_rgba
+                from die_shift_studio.reconstruction_overlay import between_color
+                style=w.style_for(layer)
+                rgb=to_rgba(style['color'])[:3]
+                darker=np.array(between_color(rgb,'static'))
+                self.assertTrue(np.all(darker<=between_color(rgb,'min')))
+                self.assertTrue(np.any(darker<between_color(rgb,'min')))
+                colors=w.reconstruction_overlay.artists[layer,'C'].get_facecolors()
+                self.assertTrue(np.any(np.all(np.isclose(colors,(*darker,style['alpha'])),axis=1)))
+                patterned=np.asarray(w.canvas.buffer_rgba()).copy()
+                dots.set_visible(False)
+                w.canvas.draw()
+                yy,xx=np.where(np.any(patterned!=np.asarray(w.canvas.buffer_rgba()),axis=2))
+                self.assertGreater(len(xx),0)
+                pixels=w.ax.transData.inverted().transform(np.column_stack((xx+.5,patterned.shape[0]-yy-.5)))
+                pixel_um=abs(np.diff(w.ax.get_xlim())[0])/w.ax.bbox.width
+                fixed=w.reconstruction_overlay.between_views[block['id']]['geometry']
+                self.assertTrue(np.all(shapely.contains_xy(fixed.buffer(2*pixel_um),pixels[:,0],pixels[:,1])))
+                dots.set_visible(True)
                 action, = [a for a in menu[0].actions() if a.text().endswith('两侧平均')]
                 action.trigger()
                 wait()
                 self.assertEqual(w.selection.selected_between['mode'], 'average')
+                self.assertFalse(dots.get_visible())
                 self.assertEqual(w.view_settings.reconstruction_between_overrides, ((*block['id'], 'average'),))
 
                 # A worker exception must not keep the new override or its undo

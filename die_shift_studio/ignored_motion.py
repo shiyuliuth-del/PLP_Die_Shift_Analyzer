@@ -101,7 +101,7 @@ def linked_fixed_vias(r,entries):
 
 
 def linked_owners(r,states):
-    if r.settings.reconstruction_fixed_via_mode=='off':return {},()
+    if not r.settings.links_fixed_vias:return {},()
     if getattr(r,'_linked_plans',None) is not r._plans:
         r._linked_vias=linked_fixed_vias(r,r._plans or ())
         r._linked_plans=r._plans

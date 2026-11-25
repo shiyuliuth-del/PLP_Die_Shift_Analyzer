@@ -300,7 +300,7 @@ class V71Tests(unittest.TestCase):
                 raise AssertionError('GUI wait timeout')
 
             try:
-                # Req 4 & Req 2 UI: 固定过孔随动逻辑 on the LEFT of 动区间随动逻辑, default='max'
+                # The fixed via choices sit to the left of the between-zone choices.
                 fixed_combo = w.setting_fields['reconstruction_fixed_via_mode']
                 between_combo = w.setting_fields['reconstruction_between_motion']
                 self.assertEqual(between_combo.currentData(), 'max')
@@ -311,9 +311,9 @@ class V71Tests(unittest.TestCase):
                 row_parent = fixed_combo.parentWidget()
                 self.assertIs(row_parent, between_combo.parentWidget())
                 row_labels = [lbl.text() for lbl in row_parent.findChildren(W.QLabel)]
-                self.assertIn('固定过孔随动逻辑', row_labels)
+                self.assertIn('固定过孔随动', row_labels)
                 self.assertIn('动区间随动逻辑', row_labels)
-                self.assertLess(row_labels.index('固定过孔随动逻辑'), row_labels.index('动区间随动逻辑'))
+                self.assertLess(row_labels.index('固定过孔随动'), row_labels.index('动区间随动逻辑'))
 
                 engine, data, _ = fixture()
                 p, roles = engine.p, engine.roles

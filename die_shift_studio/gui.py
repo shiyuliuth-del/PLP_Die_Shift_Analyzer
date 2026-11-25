@@ -30,7 +30,7 @@ from matplotlib.transforms import Affine2D
 from matplotlib import patheffects
 from .plot_geometry import geometry_path
 from .safe_range_plot import draw_safe_ranges
-from .settings import ViewSettings
+from .settings import FIXED_VIA_MODES, ViewSettings
 from .pivots import rotation_centers
 from .setting_widgets import PivotEditor,ColorButton,RangeEditor
 from .animation import Transition
@@ -625,18 +625,19 @@ class MainWindow(W.QMainWindow):
         recon.addRow(row)
         choices['reconstruction_box_mode']=[('自由','free'),('符合边界角度','aligned')]
         choice(recon,'reconstruction_box_mode','框选边界')
-        choices['reconstruction_fixed_via_mode']=[('关闭','off'),('全局模式','global'),('分别处理','individual')]
+        choices['reconstruction_fixed_via_mode']=FIXED_VIA_MODES
         from .between_motion import LABELS,MODES
         choices['reconstruction_between_motion']=[(LABELS[mode],mode) for mode in MODES]
         follow_row=W.QWidget();follow_layout=W.QHBoxLayout(follow_row);follow_layout.setContentsMargins(0,0,0,0)
         fixed_via_box=W.QComboBox()
         for text,value in choices['reconstruction_fixed_via_mode']:fixed_via_box.addItem(text,value)
+        fixed_via_box.setToolTip('全局随动：与整块随动铜名义相连的固定过孔全部随动。全局静止：固定过孔保持原位。分别处理：通过右键逐孔设置。')
         self.setting_fields['reconstruction_fixed_via_mode']=fixed_via_box;fixed_via_box.currentIndexChanged.connect(self.settings_changed)
         between_box=W.QComboBox()
         for text,value in choices['reconstruction_between_motion']:between_box.addItem(text,value)
         between_box.setToolTip('当一个图形存在多个动区时，控制动区之间刚性铜段的默认随动方式；也可单独选中该段右键切换。')
         self.setting_fields['reconstruction_between_motion']=between_box;between_box.currentIndexChanged.connect(self.settings_changed)
-        follow_layout.addWidget(W.QLabel('固定过孔随动逻辑'));follow_layout.addWidget(fixed_via_box,1)
+        follow_layout.addWidget(W.QLabel('固定过孔随动'));follow_layout.addWidget(fixed_via_box,1)
         follow_layout.addWidget(W.QLabel('动区间随动逻辑'));follow_layout.addWidget(between_box,1)
         recon.addRow(follow_row)
 

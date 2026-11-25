@@ -100,7 +100,7 @@ def prepare(r,grid,progress=lambda *_:None,*,indices=None):
 def needed(r,bundles,grid=None):
     from .reconstruction_events import compatible_candidates
     mode=r.settings.reconstruction_fixed_via_mode
-    if mode!='off':
+    if r.settings.links_fixed_vias:
         from .ignored_motion import linked_fixed_vias
         ports=linked_fixed_vias(r,r._plans or ())
         if ports and (mode=='global' or ports.keys()&set(r.settings.reconstruction_fixed_via_follows)):return True

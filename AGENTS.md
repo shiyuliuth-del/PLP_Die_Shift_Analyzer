@@ -1,6 +1,6 @@
 # Agent 自动入口
 
-源码、GitHub与发布只在本规范检出工作。先读 [Agent.md](Agent.md)、[AI交接](docs/AI_HANDOFF.md)、[现行合同](docs/DESIGN_REQUIREMENTS.md)、[已知问题](docs/KNOWN_ISSUES.md) 和 [轮次记录](docs/Agents.md)。当前说明见 [V76 使用说明](docs/V76_使用说明.md)。
+源码、GitHub与发布只在本规范检出工作。先读 [Agent.md](Agent.md)、[AI交接](docs/AI_HANDOFF.md)、[现行合同](docs/DESIGN_REQUIREMENTS.md)、[已知问题](docs/KNOWN_ISSUES.md) 和 [轮次记录](docs/Agents.md)。当前说明见 [V77 使用说明](docs/V77_使用说明.md)。
 
 唯一长期主线是main；最新用户要求优先。保留其他Agent的在途分支，不重写历史tag，不把研究目录整体提交。每轮同步主线、补有意义的回归、记录工程兼容与实际验收，通过PR提交GitHub。正式Release仅源码与校验值，根目录保留 BUILD.bat、DieShiftAnalyze_RUN.bat 和 RealDataAnalyze_RUN.bat。
 
@@ -67,3 +67,5 @@ V74 按同一源轮廓投影恢复数值误差造成的遗漏接缝，DXF 验证
 V75 串联路径按局部随动关系排除同动边界，再按有效过渡数量等分型变量。框选顺序标识跨线路绑定，拖动预览和正式计算都从同一名义截面出发。拆分只解除拖动绑定，保存、撤销和 DXF 元数据保留拆分。SH22 的完整截面及跨归属刚性铜段点选须继续回归。
 
 V76 「静止不动」固定的是图纸坐标，在随动参考系下换算为相应的局部逆变换。全局默认仍为跟随幅度大的一侧。纯信息菜单行保持禁用并显示灰底。专项验收覆盖两侧独立偏移旋转、DXF 固定侧和 Qt 操作。
+
+V77 静止动区间以深色铜和裁剪到真实材料内的灰菱形点阵区分，补偿后的 DXF 轮廓延续 `_B` 归属。固定过孔随动的旧 `global` 即全局随动，新增 `global_static` 显式保持全局静止，关闭和分别处理的工程值照常恢复。
