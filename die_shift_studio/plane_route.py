@@ -74,6 +74,7 @@ def candidate(base,lines,r):
 
 def live_part(r,plan,part,center,pose):
     if part.get('strict_box') is not None:return part
+    if part['near'].is_empty or part['far'].is_empty:return part
     mode=r.settings.reconstruction_boundary_mode
     if mode=='perpendicular':return part
     from .reconstruction import transform

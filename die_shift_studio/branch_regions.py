@@ -56,7 +56,7 @@ def interior_interfaces(source,domain,rigid,tolerance,*,exterior=None):
 
 
 def path_sections(rows):
-    return [q['route_plan'].partition(*q['interval'],q.get('boundary_angles',(0.,0.))) for q in rows]
+    return [q.get('branch_section') or q['route_plan'].partition(*q['interval'],q.get('boundary_angles',(0.,0.))) for q in rows]
 
 
 def transition_domains(source,rows,tol,sections=None):
@@ -66,10 +66,9 @@ def transition_domains(source,rows,tol,sections=None):
     A component belongs to A only when an interior route interval visits it.
     """
     from shapely.ops import split,substring
-    if any(q.get('strict_box') is not None for q in rows):
-        active=shapely.union_all([q['nominal_regions']['A'] for q in rows])
-        return active,parts(source.difference(active))
-    components=parts(source);intervals=[];blades={}
+    strict=[q['nominal_regions']['A'] for q in rows if q.get('strict_box') is not None]
+    components=parts(source.difference(_fast_union(strict))) if strict else parts(source)
+    intervals=[];blades={}
     if sections is None:sections=path_sections(rows)
     # If pose-tilted blades from different branch members cross inside source,
     # revert the colliding members to perpendicular cuts so seams never crisscross.
@@ -95,6 +94,7 @@ def transition_domains(source,rows,tol,sections=None):
                 fallback=rows[i]['route_plan'].partition(*rows[i]['interval'],(0.,0.))
                 if fallback is not None:sections[i]=fallback
     for row,part in zip(rows,sections):
+        if row.get('strict_box') is not None:continue
         plan=row['route_plan'];a,b=row['interval'];eps=min(tol*8,(b-a)*.05)
         if b-a>tol:intervals.append(substring(plan.route,a+eps,b-eps))
         if part is None:continue
@@ -125,7 +125,7 @@ def transition_domains(source,rows,tol,sections=None):
         (selected if is_selected else rigid).append(g)
     # Keep the split cells. Re-differencing their union from the original
     # outline can weld independent rigid branches along an ulp-wide residue.
-    return _fast_union(selected),rigid
+    return _fast_union([*strict,*selected]),rigid
 
 
 def merge_rigid_cells(cells,tol):
@@ -171,7 +171,7 @@ def assemble(r,source,rows,states):
     # Absorb narrow terminal-free floating rigid slivers sandwiched between two
     # transition domains of the same owner (e.g. close parallel branch cuts on
     # a shared copper neck) so they form one clean, wider transition zone.
-    if len(domains)>1 and not any(q.get('strict_box') is not None for q in rows):
+    if len(domains)>1 and not any(q.get('strict_box') is not None or q.get('boxed') for q in rows):
         gap_limit=max(r._rule_width*2.5,50.)
         absorbed=set()
         domain_tree=shapely.STRtree(domains)
@@ -220,14 +220,9 @@ def assemble(r,source,rows,states):
     values=solve_graph_weights(physical_count,known,edges,between_modes)
     mobile=[i for i in range(physical_count) if values[i]>1e-12];static=[i for i in range(physical_count) if i not in mobile]
     c=_fast_union([rigid[i] for i in mobile]);b=_fast_union([rigid[i] for i in static])
-    cposed=_fast_union([clean_overlay(transform(rigid[i],center,pose*values[i]),r.tol) for i in mobile]);style=r.settings.reconstruction_style
-    between_blocks=[]
-    for i in unknown:
-        if rigid[i].is_empty:continue
-        ax,ay=anchor_of(rigid[i])
-        mode_i,custom_i=between_meta[i]
-        posed_blk=clean_overlay(transform(rigid[i],center,pose*values[i]),r.tol) if values[i]>1e-12 and shifted else rigid[i]
-        between_blocks.append(dict(ref=ref,id=(ref[0],ref[1],ax,ay),nominal=rigid[i],geometry=posed_blk,mode=mode_i,custom=custom_i,weight=values[i]))
+    posed_rigid=[clean_overlay(transform(g,center,pose*values[i]),r.tol)
+                 if values[i]>1e-12 and shifted else g for i,g in enumerate(rigid[:physical_count])]
+    cposed=_fast_union([posed_rigid[i] for i in mobile]);style=r.settings.reconstruction_style
     source_exterior=source.boundary.buffer(r.tol*4)
     def deform(g,ids):
         if not shifted:return g
@@ -247,7 +242,7 @@ def assemble(r,source,rows,states):
             v=xy-center;angles=pose[2]*fraction;co=np.cos(angles);si=np.sin(angles)
             return np.column_stack([co*v[:,0]-si*v[:,1],si*v[:,0]+co*v[:,1]])+center+fraction[:,None]*pose[:2]
         return shapely.transform(dense,coordinates)
-    result=[]
+    result=[];memberships={}
     from shapely.ops import substring
     paths=[]
     for q,part in zip(rows,sections):
@@ -262,9 +257,11 @@ def assemble(r,source,rows,states):
                       if (paths[idx][0].get('strict_box') is not None and group.intersection(paths[idx][0]['nominal_regions']['A']).area>r.tol*r.tol)
                       or group.intersection(paths[idx][2]).length>r.tol*4]
         members=[q for q,part in contributors]
-        if not members or not ids:continue
+        if not members:continue
+        if not ids and not any(m.get('boxed') for m in members):continue
         q=dict(members[0]);posed=None;flow_steps=0
-        high=max(values[i] for i in ids);low=min(values[i] for i in ids)
+        q.pop('serial_between_block',None)
+        high=max((values[i] for i in ids),default=0.);low=min((values[i] for i in ids),default=0.)
         if high<=1e-10 and not any(m.get('boxed') for m in members):
             continue  # Do not automatically create a transition between fixed sides.
         guides=[_fast_union([part[name] for _,part in contributors if part is not None]) for name in ('near','far')]
@@ -274,9 +271,11 @@ def assemble(r,source,rows,states):
             # touch points are NOT whole-pad controls.
             seam=interior_interfaces(source,group,[rigid[i] for i in ids if i<physical_count and abs(values[i]-weight)<1e-10],r.tol,exterior=source_exterior)
             if any(m.get('strict_box') is not None for m in members):
-                from .manual_regions import partition
-                faces=[partition(m['route_plan'],m['strict_box']) for m in members if m.get('strict_box') is not None]
-                seam=shapely.union_all([p['near' if side==0 else 'far'] for p in faces if p is not None and p['near' if side==0 else 'far'].geom_type not in ('Point','MultiPoint')])
+                name='near' if side==0 else 'far'
+                chosen=[p[name] for m,p in contributors if m.get('strict_box') is not None and p is not None
+                        and p[name].geom_type=='LineString' and p[name].length>r.tol
+                        and p[name].intersection(group.buffer(r.tol*4)).length>=p[name].length-r.tol*8]
+                if chosen:seam=_fast_union(chosen)
             terminals=[]
             for member in members:
                 plan=member['route_plan'];s=member['interval'][side]
@@ -322,8 +321,7 @@ def assemble(r,source,rows,states):
                 physical=[i for i in ids if i<physical_count]
                 if physical:alternative,flow_steps=domain(group,[rigid[i] for i in physical],[values[i] for i in physical],center,pose,r._rule_width,r.tol)
             if alternative is not None:posed=alternative;valid=True
-        if any(q.get('box_invalid') for q in members):valid=False
-        if not valid:posed=shapely.Polygon()
+        invalid_box=any(q.get('box_invalid') for q in members)
         # Whole-pad controls are physical terminal locations. Floating material
         # weights apply to interface lines, never to the terminal itself.
         near_original,far_original=nearcut,farcut
@@ -332,22 +330,34 @@ def assemble(r,source,rows,states):
         remaining=[g for g in leaves(far_original,r.tol) if nearcut.is_empty or g.hausdorff_distance(nearcut)>r.tol*8]
         farcut=representative(shapely.GeometryCollection(remaining),nearcut,r.tol,focus=guides[1] if not guides[1].is_empty else None)
         if nearcut.geom_type in ('Point','MultiPoint'):high=1.
-        if farcut.is_empty or nearcut.is_empty:
-            # A disconnected Boolean remnant is not another editable zone.
-            # The source composition retains unassigned material as B.
-            continue
+        missing_face=farcut.is_empty or nearcut.is_empty
+        if missing_face and not any(m.get('boxed') for m in members):continue
+        valid=valid and not invalid_box and not missing_face and bool(ids)
+        if not valid:posed=shapely.Polygon()
+        warning=q['warning'] if valid else ('框选动区缺少有效的分支连接截面' if missing_face or invalid_box else '分叉动区型变折叠，已取消连接段')
+        for i in ids:
+            if i<physical_count and group.boundary.intersection(rigid[i].boundary.buffer(r.tol*2)).length>r.tol*8:
+                memberships[i]=memberships.get(i,0)+1
         q.update(regions=dict(A=posed,B=b,C=cposed),nominal_regions=dict(A=group,B=b,C=c),
                  bridge=posed,movable=c,moved=cposed,fixed=b,immovable=b,span=group,
                  moved_cut=transform(nearcut,center,pose*high),cut=nearcut,extra_cut=transform(farcut,center,pose*low),endpoint_weights=(high,low),
                  fallback_regions=dict(A=shapely.Polygon(),B=b,C=cposed),connection_failed=not valid,valid=valid,missing_region=group,
-                 warning=q['warning'] if valid else '分叉动区型变折叠，已取消连接段',
+                 warning=warning,box_invalid=invalid_box or missing_face,
                  graph_members=tuple(members),route_identity='graph:'+':'.join(sorted(v['route_identity'] for v in members))+'@'+str(domain_index),
                  source_scope_complete=False,flow_steps=flow_steps,bridge_area_um2=posed.area,movable_area_um2=c.area,moved_area_um2=cposed.area,fixed_area_um2=b.area,
                  whole_landing=nearcut.geom_type in ('Point','MultiPoint'),whole_fixed_landing=farcut.geom_type in ('Point','MultiPoint'),
                  via_refs=tuple(sorted({ref for v in members for ref in v['via_refs']})))
         result.append(q)
-    if result and between_blocks:
+    if result:
+        between_blocks=[]
+        for i,count in sorted(memberships.items()):
+            if count<2 or rigid[i].area<=r.tol**2:continue
+            ax,ay=anchor_of(rigid[i])
+            mode,custom=between_meta.get(i,('average',False))
+            between_blocks.append(dict(ref=ref,id=(*ref,ax,ay),nominal=rigid[i],geometry=posed_rigid[i],
+                                       mode=mode,custom=custom,weight=values[i],locked=i in known))
         result[0]['between_blocks']=tuple(between_blocks)
+        result[0]['branch_rigid']=tuple(zip(rigid[:physical_count],posed_rigid))
     return result
 
 
@@ -361,7 +371,7 @@ def consolidate(r,pieces,states,local_states=None):
         posed=(local_states or {}).get((rows[0]['layer'],rows[0]['index']),states)
         ref=(rows[0]['layer'],rows[0]['index'])
         ref_overrides=tuple(o for o in getattr(r.settings,'reconstruction_between_overrides',()) if (o[0],o[1])==ref)
-        cache_key=('branch-assembly-local-intervals-v71',r.rules.identity,r.settings.reconstruction_style,
+        cache_key=('branch-assembly-local-intervals-v73',r.rules.identity,r.settings.reconstruction_style,
                    getattr(r.settings,'reconstruction_between_motion','max'),ref_overrides,
                    tuple(r.model.bound.centers[rows[0]['die']]),posed[rows[0]['die']].tobytes(),
                    tuple((q['route_identity'],q['interval'],q['boundary_angles'],q.get('boxed'),tuple(q['nominal_regions'][k].wkb for k in 'ABC')) for q in rows))

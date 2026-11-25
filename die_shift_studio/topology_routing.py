@@ -278,7 +278,11 @@ def resolve(r,replacements,pieces,states,progress=None):
     for layer,rows in out.items():
         for row in rows:
             for i in row['indices']:objects[layer,i]=private(row['geometry'])
-    mutable={ref for ref,rows in by_ref.items() if any(not q.get('ignored') for q in rows)}
+    from .topology_checks import BRANCH_CONTACT,branch_cells,preserves_branch_contacts
+    branch_failed={ref for ref,rows in by_ref.items() if any(q.get('branch_conflict') is not None for q in rows)}
+    mutable={ref for ref,rows in by_ref.items() if ref not in branch_failed and any(not q.get('ignored') for q in rows)}
+    branches={ref:(objects[ref],branch_cells(rows)) for ref,rows in by_ref.items()
+              if ref in mutable and any(q.get('branch_rigid') for q in rows)}
     enclosures={};protected={}
     for ref in objects:
         ports[ref]=[];enclosures[ref]=[];protected[ref]=[]
@@ -313,7 +317,9 @@ def resolve(r,replacements,pieces,states,progress=None):
         return shapely.union_all([g.intersection(box) for other,g in objects.items() if nets[other][0]==nets[ref][0] and nets[other]!=nets[ref] and g.intersects(box)]+[r.rules.keepout.intersection(box),*[g.intersection(box) for g in foreign_hits(ref,box)]])
     def enters_keepout(g):return not r.rules.keepout.is_empty and shapely.relate_pattern(g,r.rules.keepout,'T********')
     def acceptable(ref,candidate):
+        branch=branches.get(ref)
         return (preserves_box(ref,candidate) and not foreign_hits(ref,candidate) and
+                (branch is None or preserves_branch_contacts(candidate,*branch,r.tol)) and
                 same_connections(original[ref],candidate,[g for _,_,g in terminals[ref]],ports[ref],r.tol))
     def attempt(ref,reason,*,pad_only=False):
         if ref not in mutable or any(q.get('box_invalid') for q in by_ref.get(ref,())):return None
@@ -425,6 +431,7 @@ def resolve(r,replacements,pieces,states,progress=None):
             percent=70+round(20*number/max(1,len(objects)))
             if percent!=previous_percent:progress(percent,f'最终连接核验 {number+1}/{len(objects)}');previous_percent=percent
         if any(q.get('box_invalid') for q in by_ref.get(ref,())):blocked.append((ref,'框选动区没有切断运动—固定连接路径，严格区域不能完成适配'))
+        if ref in branch_failed:blocked.append((ref,BRANCH_CONTACT))
         if not checked[ref][0]:blocked.append((ref,'无法获得包含全部过孔且保持原拓扑的连通铜'))
         if checked[ref][1]:blocked.append((ref,'固定RDL进入禁布区，无法在保持电连接的同时避让'))
         if foreign_hits(ref,objects[ref]):blocked.append((ref,'固定RDL仍接触其他网络的实际过孔或同层金属'))
@@ -444,9 +451,15 @@ def resolve(r,replacements,pieces,states,progress=None):
     for ref,reason in blocked:
         rows=by_ref.get(ref,())
         if not rows:continue
+        if reason==BRANCH_CONTACT:
+            for q in rows:
+                witness=q.get('branch_conflict')
+                if witness is not None:q.update(connection_failed=True,valid=False,warning=reason,hard_unroutable=True,failure_witness=witness)
+            continue
         ids,witness=locate(rows,objects[ref],ports[ref],foreign_hits(ref,objects[ref])+[objects[other] for other in refs if other!=ref and nets[other][0]==nets[ref][0] and nets[other]!=nets[ref] and objects[other].intersects(objects[ref])],r.rules.keepout,r.tol)
         for i,q in enumerate(rows):
-            if i in ids:q.update(connection_failed=True,valid=False,warning=reason,hard_unroutable=True,failure_witness=witness)
+            if i in ids and q.get('branch_conflict') is None:
+                q.update(connection_failed=True,valid=False,warning=reason,hard_unroutable=True,failure_witness=witness)
 
     for layer,rows in out.items():
         for row in rows:

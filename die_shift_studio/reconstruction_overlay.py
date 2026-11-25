@@ -468,7 +468,7 @@ class ReconstructionOverlay:
             if block['mode']!='average':
                 paint_by_ref[ref].append(g)
                 region_groups.setdefault((*ref,'C',block['mode']),{})[id(g)]=g
-            if previous is not None:
+            if previous is not None and not block.get('locked'):
                 before=lookup_mode(previous,ref,block['nominal'])
                 after=lookup_mode(w.view_settings,ref,block['nominal'])
                 if before!=after:
@@ -980,6 +980,13 @@ class CutDrag:
         changed=updated.reconstruction_key()!=w.view_settings.reconstruction_key()
         if not changed:
             self._cancel_live();overlay.clear_hover();overlay.draw();w.render_scene()
+            if not state['moved'] and event.inaxes is w.ax and event.xdata is not None:
+                # A 12 px handle target can cover a very short rigid strip.
+                # Actual movement is a drag; a stationary click still selects
+                # the physical strip underneath that generous hit target.
+                point=(event.xdata,event.ydata)
+                if w.selection.find_between_block(point) is not None:
+                    w.selection.click(point,(event.x,event.y))
             if state['resume_preview']:w.request_preview(quiet=True,pose_change=True)
             return
         self.retained=state

@@ -28,13 +28,34 @@ def ordered_boxes(settings):
     return tuple((mode,*next(rows[mode])) for mode in box_order(settings))
 
 
-def partition(plan,polygon):
+def route_box_spans(plan,polygon):
+    """Separate visits to a box by arclength, even when they share one net."""
+    spans=[]
+    for line in shapely.get_parts(plan.route.intersection(polygon)):
+        if line.geom_type!='LineString' or line.length<=plan.tolerance:continue
+        ends=[plan.route.project(shapely.Point(line.coords[i])) for i in (0,-1)]
+        spans.append(tuple(sorted(ends)))
+    merged=[]
+    for a,b in sorted(spans):
+        if merged and a<=merged[-1][1]+plan.tolerance:
+            merged[-1]=(merged[-1][0],max(b,merged[-1][1]))
+        else:merged.append((a,b))
+    return merged
+
+
+def partition(plan,polygon,span=None):
     from .reconstruction_route import parts
     active=plan.source.intersection(polygon)
+    if span is not None and active.geom_type!='Polygon':
+        from shapely.ops import substring
+        trace=substring(plan.route,*span)
+        active=shapely.union_all([g for g in parts(active) if g.intersection(trace).length>plan.tolerance])
     if active.is_empty or active.area<=plan.tolerance**2:return None
-    marks=shapely.line_locate_point(plan.route,shapely.points(shapely.get_coordinates(plan.route.intersection(polygon))))
-    if not len(marks):marks=shapely.line_locate_point(plan.route,shapely.points(shapely.get_coordinates(active)))
-    a,b=float(marks.min()),float(marks.max())
+    if span is None:
+        marks=shapely.line_locate_point(plan.route,shapely.points(shapely.get_coordinates(plan.route.intersection(polygon))))
+        if not len(marks):marks=shapely.line_locate_point(plan.route,shapely.points(shapely.get_coordinates(active)))
+        span=float(marks.min()),float(marks.max())
+    a,b=span
     moving=[];fixed=[];ambiguous=False;terminals=getattr(plan,'terminal_vias',((plan.land,),tuple(plan.anchors)))
     moving_terminal=shapely.union_all(terminals[0]);anchors=shapely.union_all(terminals[1])
     for g in parts(plan.source.difference(active)):
@@ -163,9 +184,9 @@ def boxes_by_source(model, rows):
     return {ref:shapely.union_all(areas) for ref,areas in box_list_by_source(model, rows).items()}
 
 
-def usable_partition(plan, polygon):
+def usable_partition(plan, polygon, span=None):
     """Keep valid cuts; extend trapped boxes across the local trace if needed."""
-    initial = partition(plan, polygon)
+    initial = partition(plan, polygon, span)
     def good(part):
         if not part or part['box_invalid'] or part['box_complex']:
             return False
@@ -188,7 +209,7 @@ def usable_partition(plan, polygon):
         return initial
 
     xy = shapely.get_coordinates(polygon)
-    s = plan.route.project(polygon.representative_point())
+    s = sum(span)/2 if span is not None else plan.route.project(polygon.representative_point())
     tangent = np.asarray(plan.tangent(s))
     rect = shapely.get_coordinates(polygon.minimum_rotated_rectangle)
     edges = np.diff(rect,axis=0)
@@ -209,22 +230,28 @@ def usable_partition(plan, polygon):
         pad = np.array([along,across])*base
         a,b = lo-pad,hi+pad
         grown = shapely.Polygon(np.array([[a[0],a[1]],[b[0],a[1]],[b[0],b[1]],[a[0],b[1]]])@basis.T+center)
-        result = partition(plan, grown)
+        local_span=None
+        if span is not None:
+            candidates=route_box_spans(plan,grown)
+            local_span=next((pair for pair in candidates if pair[0]-plan.tolerance<=s<=pair[1]+plan.tolerance),None)
+            if local_span is None:continue
+        result = partition(plan, grown, local_span)
         if good(result):
             return result
     return initial
 
 
 
-def aligned_partition(plan,polygon):
+def aligned_partition(plan,polygon,span=None):
     """Use the selected copper to find the interval, leaving blade angles dynamic."""
-    selected=plan.route.intersection(polygon)
-    if selected.is_empty:
-        selected=plan.source.intersection(polygon)
-    xy=shapely.get_coordinates(selected)
-    if not len(xy):return None
-    marks=shapely.line_locate_point(plan.route,shapely.points(xy))
-    lo,hi=float(marks.min()),float(marks.max())
+    if span is None:
+        selected=plan.route.intersection(polygon)
+        if selected.is_empty:selected=plan.source.intersection(polygon)
+        xy=shapely.get_coordinates(selected)
+        if not len(xy):return None
+        marks=shapely.line_locate_point(plan.route,shapely.points(xy))
+        span=float(marks.min()),float(marks.max())
+    lo,hi=span
     if hi-lo<plan.tolerance*2:lo-=plan.tolerance*8;hi+=plan.tolerance*8
     for expansion in (0.,plan.guard,plan.guard*4):
         a=plan.snap(max(0.,lo-expansion),0,plan.length,allow_pad=True)
@@ -232,4 +259,10 @@ def aligned_partition(plan,polygon):
         if b>a:
             result=plan.partition(a,b)
             if result is not None:return result
+    # A route can end exactly on a shared ownership seam. Recede a
+    # few grid cells so the fixed face remains a real section of copper.
+    if hi>=plan.fixed_start-plan.tolerance*8:
+        a=plan.snap(max(0.,lo),0,plan.length,allow_pad=True)
+        b=min(hi,plan.fixed_start-plan.tolerance*16)
+        if b>a:return plan.partition(a,b)
     return None

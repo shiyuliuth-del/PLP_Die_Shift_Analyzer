@@ -47,8 +47,10 @@ def measure(part,plan,center,pose,regions):
         body=regions['A'].difference(fixed if landing.is_empty else landing if fixed.is_empty else shapely.union_all([landing,fixed]))
     body_parts=parts(body)
     if not body_parts:raise ValueError('连接区无有效多边形')
-    body=body_parts[0] if len(body_parts)==1 else shapely.union_all(body_parts)
-    boundary=body.boundary
+    # Union can retain a GeometryCollection after precision reduction.
+    # Measure just the physical polygon rings, for which boundary is defined.
+    copper=parts(shapely.union_all(body_parts)) if len(body_parts)>1 else body_parts
+    boundary=shapely.union_all([polygon.boundary for polygon in copper])
     if boundary is None or boundary.is_empty:raise ValueError('连接区无有效边界')
     faces=shapely.union_all([shapely.LineString(moved),shapely.LineString(far)]).buffer(plan.tolerance*4)
     sides=[g for g in shapely.get_parts(boundary.difference(faces)) if g.geom_type=='LineString']

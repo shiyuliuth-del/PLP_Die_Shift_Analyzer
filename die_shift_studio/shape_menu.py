@@ -19,10 +19,15 @@ def show_shape_menu(window,event,point):
     picked=None;between=None
     if window.reconstruction_toggle.isChecked():
         picked=window.reconstruction_overlay.pick(*point,window.cut_drag._tolerance())
+        current=selection.selected_between
+        if current is not None and current['geometry'].contains(Point(point)):
+            # Give the selected strip its own menu even if it is narrower than
+            # the two adjacent boundary handles' pointer tolerance.
+            picked=None
         if picked is None:
-            between=selection.selected_between if (selection.selected_between is not None and not selection.selected_between['geometry'].is_empty and selection.selected_between['geometry'].covers(Point(point))) else selection.find_between_block(point)
-            if between is None and selection.selected_between is not None and not selection.selected:
-                between=selection.selected_between
+            between=current if current is not None and current['geometry'].covers(Point(point)) else selection.find_between_block(point)
+            if between is None and current is not None and not selection.selected:
+                between=current
         if between is not None:
             selection.selected=[];selection.selected_between=between;selection.draw()
         elif not selection.selected and picked and picked[2] in ('moved','extra'):
@@ -38,9 +43,10 @@ def show_shape_menu(window,event,point):
     if between is not None:
         from .between_motion import LABELS,MODES
         ref=between['ref'];cur_mode=between['mode']
-        summary=f"动区间图形 · {ref[0]} #{ref[1]+1} · 当前：{LABELS.get(cur_mode,cur_mode)}"
+        policy='由端点约束' if between.get('locked') else LABELS.get(cur_mode,cur_mode)
+        summary=f"动区间图形 · {ref[0]} #{ref[1]+1} · 当前：{policy}"
         menu.addAction(summary).setEnabled(False)
-        if not getattr(window,'remote_locked',False):
+        if not getattr(window,'remote_locked',False) and not between.get('locked'):
             source_data=window.data;source_group=window.cache_group;block_id=between['id']
             def set_between(mode):
                 if window.data is source_data and window.cache_group is source_group and window.reconstruction_toggle.isChecked():

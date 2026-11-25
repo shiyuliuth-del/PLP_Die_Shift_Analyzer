@@ -229,7 +229,8 @@ class GeometrySelection:
             if between is not None:
                 from .between_motion import LABELS
                 ref=between['ref']
-                w.statusBar().showMessage(f"已选中动区间图形 {ref[0]} #{ref[1]+1} · 当前随动逻辑：{LABELS[between['mode']]}（右键可切换）")
+                policy='由端点约束' if between.get('locked') else LABELS[between['mode']]+'（右键可切换）'
+                w.statusBar().showMessage(f"已选中动区间图形 {ref[0]} #{ref[1]+1} · 当前随动逻辑：{policy}")
             elif self.selected:w.statusBar().showMessage(f'选中 {len(self.selected)} 个图形；'+', '.join(f'{k} #{i+1}' for k,i in self.selected[:6]))
             else:w.statusBar().showMessage('已取消图形选择')
             if w.tabs.currentIndex()!=0:return
