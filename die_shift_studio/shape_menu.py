@@ -20,14 +20,16 @@ def show_shape_menu(window,event,point):
     if window.reconstruction_toggle.isChecked():
         picked=window.reconstruction_overlay.pick(*point,window.cut_drag._tolerance())
         current=getattr(selection,'selected_between',None)
-        if current is not None and current['geometry'].contains(Point(point)):
-            # Give the selected strip its own menu even if it is narrower than
-            # the two adjacent boundary handles' pointer tolerance.
+        candidate=(selection.find_between_block(point)
+                   if hasattr(selection,'find_between_block') else None)
+        if candidate is not None and candidate['geometry'].contains(Point(point)):
+            # The interior is the copper's menu even when both handle hit
+            # circles overlap it. The actual boundary still has its own menu.
             picked=None
-        if picked is None:
-            between=current if current is not None and current['geometry'].covers(Point(point)) else selection.find_between_block(point)
-            if between is None and current is not None and not selection.selected:
-                between=current
+            between=candidate
+        elif picked is None:
+            between=candidate
+            if between is None and current is not None and not selection.selected:between=current
         if between is not None:
             selection.selected=[];selection.selected_between=between;selection.draw()
         elif not selection.selected and picked and picked[2] in ('moved','extra'):
@@ -46,6 +48,8 @@ def show_shape_menu(window,event,point):
         policy='由端点约束' if between.get('locked') else LABELS.get(cur_mode,cur_mode)
         summary=f"动区间图形 · {ref[0]} #{ref[1]+1} · 当前：{policy}"
         menu.addAction(summary).setEnabled(False)
+        if between.get('locked'):
+            menu.addAction('该段铜与端孔或归属接缝相连，随动由连接约束决定').setEnabled(False)
         if not getattr(window,'remote_locked',False) and not between.get('locked'):
             source_data=window.data;source_group=window.cache_group;block_id=between['id']
             def set_between(mode):
@@ -53,7 +57,7 @@ def show_shape_menu(window,event,point):
                     window.change_between_motion(block_id,mode)
             for mode in MODES:
                 prefix='✓ ' if cur_mode==mode else ''
-                menu.addAction(f'{prefix}动区间随动：{LABELS[mode]}',lambda m=mode:set_between(m))
+                menu.addAction(f'{prefix}动区间随动：{LABELS[mode]}',lambda *_,m=mode:set_between(m))
             if between.get('custom'):
                 menu.addAction('恢复默认动区间随动逻辑',lambda:set_between(None))
             menu.addSeparator()

@@ -111,6 +111,7 @@ class GeometrySelection:
         select_boxes=getattr(w,'selectable_boxes',None)
         def selectable(k):return True if not select_boxes else (k in select_boxes and select_boxes[k].isChecked())
         x,y=float(point[0]),float(point[1]);pt=Point(x,y)
+        matches=[]
         for block in w.reconstruction_overlay.between_views.values():
             layer=block['ref'][0]
             if not w.visible_boxes.get(layer) or not w.visible_boxes[layer].isChecked() or not selectable(layer):continue
@@ -118,8 +119,14 @@ class GeometrySelection:
             if g is None or g.is_empty:continue
             b=g.bounds
             if b[0]<=x<=b[2] and b[1]<=y<=b[3] and g.covers(pt):
-                return block
-        return None
+                matches.append(block)
+        if not matches:return None
+        if len(matches)==1:return matches[0]
+        # Prioritise interior hits and the top visible layer. Specific local
+        # blocks take precedence over a larger reference-frame core.
+        order={layer:i for i,layer in enumerate(w.ordered_layers())}
+        return min(matches,key=lambda b: (not b['geometry'].contains(pt),order.get(b['ref'][0],0),
+                                          bool(b.get('locked')),b['geometry'].area,b['id']))
 
     def apply_hits(self,hits,mode):
         self.selected_between=None

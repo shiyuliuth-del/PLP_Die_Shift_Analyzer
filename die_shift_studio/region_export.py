@@ -77,31 +77,46 @@ def partition_ring(ring,masks):
     good=length2>0;starts=xy[:-1][good];ends=xy[1:][good];vectors=vectors[good];length2=length2[good]
     segments=shapely.linestrings(np.stack([starts,ends],axis=1));breaks=[[0.,1.] for _ in segments]
     epsilon=max(1e-10,np.spacing(max(1.,float(np.max(abs(xy)))))*8)
+    edge_tree=shapely.STRtree(segments)
+
+    def add_breaks(i,points):
+        values=np.clip((points-starts[i])@vectors[i]/length2[i],0,1)
+        edge_epsilon=epsilon/np.sqrt(length2[i])
+        values[values<edge_epsilon]=0.;values[values>1-edge_epsilon]=1.
+        breaks[i].extend(values.tolist())
+
     for kind in 'AC':
         mask=masks[kind]
         if mask.is_empty:continue
         shapely.prepare(mask)
-        hit=shapely.intersects(segments,mask)
-        if not np.any(hit):continue
-        hit_idx=np.flatnonzero(hit)
+        hit_idx=np.flatnonzero(shapely.intersects(segments,mask))
         # Segments fully covered by mask never cross its boundary and need no split.
         partial=hit_idx[~shapely.covers(mask,segments[hit_idx])]
-        if not len(partial):continue
         intersections=shapely.intersection(segments[partial],mask)
         for i,g in zip(partial,intersections):
-            points=shapely.get_coordinates(g)
-            values=np.clip((points-starts[i])@vectors[i]/length2[i],0,1)
-            edge_epsilon=epsilon/np.sqrt(length2[i])
-            values[values<edge_epsilon]=0.;values[values>1-edge_epsilon]=1.
-            breaks[i].extend(values.tolist())
+            add_breaks(i,shapely.get_coordinates(g))
+        # An overlay can round the two material seam endpoints to the outside
+        # of a long source edge. Intersect then sees only part of that edge,
+        # or none of it. Project nearby endpoints onto the original edge,
+        # without buffering the outline or emitting any interior line.
+        nodes=shapely.get_coordinates(mask)
+        point_ids,edge_ids=edge_tree.query(shapely.points(nodes),predicate='dwithin',distance=epsilon)
+        if len(edge_ids):
+            order=np.argsort(edge_ids)
+            edges,starts_at=np.unique(edge_ids[order],return_index=True)
+            for edge,first,last in zip(edges,starts_at,np.r_[starts_at[1:],len(order)]):
+                add_breaks(edge,nodes[point_ids[order[first:last]]])
     records=[];centers=[]
     for p,q,v,ts in zip(starts,ends,vectors,breaks):
-        ts=np.unique(ts);pts=p+ts[:,None]*v;pts[0]=p;pts[-1]=q
+        ts=np.unique(ts)
+        ts=ts[np.r_[True,np.diff(ts)*np.linalg.norm(v)>epsilon]]
+        pts=p+ts[:,None]*v;pts[0]=p
+        if len(pts)==1:pts=np.array([p,q])
+        else:pts[-1]=q
         for a,b in zip(pts[:-1],pts[1:]):
             if np.array_equal(a,b):continue
             records.append((a,b));centers.append((a+b)/2)
     points=shapely.points(centers);kinds=np.full(len(records),'B')
-    epsilon=max(1e-10,np.spacing(max(1.,float(np.max(abs(xy)))))*8)
     for kind in 'CA':
         if not masks[kind].is_empty:
             shapely.prepare(masks[kind])
@@ -157,6 +172,10 @@ def layer_contours(task):
         moving=shapely.union_all([block['nominal'] for block in between if block['mode']=='max' or block['moves']])
         # Internal C is the moving side, written to public DXF layer _A.
         masks['C']=shapely.union_all([masks['C'].difference(middle),moving])
+    # A transition face owns all its material. Remove coincident motion masks
+    # before projecting seams into the compensation collar.
+    if not masks['A'].is_empty and not masks['C'].is_empty:
+        masks['C']=masks['C'].difference(masks['A'])
     if amount>0 and polygons:
         from .output_compensation import extended_masks
         masks=extended_masks(nominal,shapely.union_all(polygons),masks,amount,dbu)

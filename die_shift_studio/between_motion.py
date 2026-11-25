@@ -42,26 +42,32 @@ def anchor_of(geometry):
 
 def lookup_mode(settings, ref, geometry, tol=1e-3):
     """Resolve effective between-zone motion mode for one rigid intermediate block."""
+    return component_modes(settings, ref, {0: geometry}, tol)[0]
+
+
+def component_modes(settings, ref, components, tol=1e-3):
+    """Assign each saved nominal anchor to at most one physical copper block."""
     default = getattr(settings, 'reconstruction_between_motion', 'max')
     if default not in MODES:
         default = 'max'
-    overrides = getattr(settings, 'reconstruction_between_overrides', ())
-    if not overrides or geometry is None or geometry.is_empty:
-        return default, False
-    best = None
+    result = dict.fromkeys(components, (default, False))
+    overrides = [q for q in getattr(settings, 'reconstruction_between_overrides', ()) if q[:2] == ref]
+    if not overrides:
+        return result
+    candidates = [(i, g, g.representative_point()) for i, g in components.items()
+                  if g is not None and not g.is_empty]
     margin = max(tol * 8, 1e-2)
+    chosen = {}
     for layer, index, ax, ay, mode in overrides:
-        if (layer, index) != ref:
-            continue
         pt = shapely.Point(ax, ay)
-        if geometry.covers(pt):
-            return mode, True
-        dist = float(geometry.distance(pt))
-        if dist <= margin and (best is None or dist < best[0]):
-            best = (dist, mode)
-    if best is not None:
-        return best[1], True
-    return default, False
+        matches = [(not g.contains(pt), g.distance(pt), anchor.distance(pt), i)
+                   for i, g, anchor in candidates if g.dwithin(pt, margin)]
+        if matches:
+            *rank, i = min(matches)
+            if i not in chosen or rank < chosen[i]:
+                chosen[i] = rank
+                result[i] = (mode, True)
+    return result
 
 
 def solve_serial_weights(modes):

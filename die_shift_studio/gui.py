@@ -8,6 +8,7 @@ from dataclasses import asdict, replace
 from pathlib import Path
 
 import numpy as np
+import shapely
 from .qt_compat import QtCore, QtGui, QtWidgets as W, Signal, HORIZONTAL, VERTICAL, Qt, TOOLTIP
 from .style import STYLE
 from .core import Parameters, ROLES, read_gds, build_case, evaluate, fmt
@@ -201,6 +202,7 @@ class MainWindow(W.QMainWindow):
         self.preview_page=0;self._initial_extreme_page=0;self.page_items=[];self._extreme_paint={};self.state_result=None;self.issue_artists=[];self.shift_artist=None
         self.rendered_layers={};self.layer_artists={};self._layer_keys=[];self.geometry_cache=None;self.connections=None
         self.preview_worker=None;self.preview_workers=[];self.preview_pending=None;self.preview_ticket=0;self.engine=None;self.current_frame=None;self.shown_states=None
+        self._reconstruction_edit=None
         self.die_labels=[];self._default_view=None;self._artist_frame=None;self._reordering=False
         self.space_data=None;self.space_artists=[];self.space_stamp=None;self.space_colorbar=None;self._resizing=False
         self._issue_table_stamp=None;self.dirty=False;self.manual_states=None;self.evaluation_motions={};self.probability_data=None;self.probability_artists=[];self.probability_stamp=None;self.legend=None;self.zone_artists=[];self.invalid_artists=[]
@@ -1232,6 +1234,7 @@ class MainWindow(W.QMainWindow):
         self._staged_deletions=None;self.pending_layout_ops=[];self._staged_restored_edits=None
         self._staged_node_edits=None;self.pending_node_shapes={}
         self.reconstruction_pending=False;self._reconstruction_apply_once=False;self._applied_preview_settings=None
+        self._reconstruction_edit=None
         self.exit_region_mode()
         from .session_cache import logical_fingerprint
         project=normalize_project(project) if project else {}
@@ -1590,7 +1593,12 @@ class MainWindow(W.QMainWindow):
         try:
             self.reconstruction_overlay.stage()
             self.reconstruction_overlay.draw();self.selection.draw(redraw=False);self.render_scene()
-        except Exception as exc:self.log_bus.emit(f'待计算动区预览未生成：{exc}')
+        except (ValueError,shapely.errors.GEOSException):
+            self.log_bus.emit('待计算动区预览未生成：\n'+traceback.format_exc(),'WARNING')
+        except Exception:
+            if not self.rollback_reconstruction_edit(traceback.format_exc()):
+                self.log_bus.emit('待计算动区预览未生成：\n'+traceback.format_exc(),'ERROR')
+            return
         self.statusBar().showMessage('重构修改待应用；已标记调整图形，点击“重构计算”统一计算。')
 
     def _effective_deleted_shapes(self):
@@ -1700,6 +1708,7 @@ class MainWindow(W.QMainWindow):
                 extreme=self.active_preview
                 self.apply_layout_edit(project,commit=lambda:None,pose=pose,extreme=extreme,force_reconstruct=True)
                 return
+        self.begin_reconstruction_edit(self.view_settings,'重构计算')
         self._clear_pending_layout_markers()
         self.reconstruction_pending=False;self._reconstruction_apply_once=True
         if hasattr(self,'reconstruction_overlay'):
@@ -1707,7 +1716,82 @@ class MainWindow(W.QMainWindow):
             self.reconstruction_overlay.draft_frame=self.reconstruction_overlay.draft_data=self.reconstruction_overlay.draft_key=None
         if not self.reconstruction_toggle.isChecked():
             self.reconstruction_toggle.blockSignals(True);self.reconstruction_toggle.setChecked(True);self.reconstruction_toggle.blockSignals(False)
-        self.invalidate_reconstruction_edit();self.request_preview()
+        try:
+            self.invalidate_reconstruction_edit();self.request_preview()
+        except Exception:
+            if not self.rollback_reconstruction_edit(traceback.format_exc()):raise
+
+    def begin_reconstruction_edit(self,settings,operation):
+        previous=self._reconstruction_edit
+        if previous is None or previous['data'] is not self.data or previous['key']!=self.view_settings.reconstruction_key():
+            previous=dict(data=self.data,settings=self.view_settings,applied=self._applied_preview_settings,
+                          pending=self.reconstruction_pending,frame=self.current_frame,engine=self.engine,
+                          history=tuple(tuple(stack) for stack in self.edit_history.stacks))
+        self._reconstruction_edit=dict(previous,key=settings.reconstruction_key(),operation=operation)
+
+    def finish_reconstruction_edit(self,key,frame):
+        edit=self._reconstruction_edit
+        if edit is None or edit['data'] is not self.data or key!=edit['key']:return
+        self._reconstruction_edit=None
+        reconstruction=(frame or {}).get('reconstruction') or {}
+        if reconstruction.get('configuration')!=key:return
+        conflicts={}
+        for q in reconstruction.get('pieces',()):
+            if q.get('box_invalid') or q.get('branch_conflict') is not None:
+                conflicts[(q['layer'],q['index'])]=q.get('warning') or '没有可用的动区截面'
+        blocks={}
+        for b in reconstruction.get('between_blocks',()):blocks.setdefault(b['ref'],[]).append(b)
+        for layer,index,x,y,mode in self.view_settings.reconstruction_between_overrides:
+            ref=(layer,index)
+            point=shapely.Point(x,y)
+            nearby=[b for b in blocks.get(ref,()) if b['nominal'].dwithin(point,.01)]
+            if not any(not b.get('locked') and b['mode']==mode for b in nearby):
+                conflicts.setdefault(ref,'随动锚点未匹配可编辑的名义铜段；请检查动区边界或端孔约束')
+        for (layer,index),reason in conflicts.items():
+            self.log_bus.emit(f"{edit['operation']} · {layer} #{index+1} · {reason}",'WARNING')
+
+    def rollback_reconstruction_edit(self,details,key=None,*,cancelled=False):
+        edit=self._reconstruction_edit
+        if edit is None or edit['data'] is not self.data or (key is not None and key!=edit['key']):
+            return False
+        self._reconstruction_edit=None
+        from .edit_history import RECONSTRUCTION_FIELDS
+        self.view_settings=replace(self.view_settings,**{name:getattr(edit['settings'],name) for name in RECONSTRUCTION_FIELDS})
+        self._applied_preview_settings=edit['applied']
+        self.reconstruction_pending=edit['pending'];self._reconstruction_apply_once=False
+        self.current_frame=edit['frame'];self.engine=edit['engine']
+        self.cancel_previews();self.stop_animation()
+        self.preview_ticket+=1;self.preview_pending=None
+        for stack,saved in zip(self.edit_history.stacks,edit['history']):stack[:]=saved
+        self.edit_history.refresh()
+        overlay=self.reconstruction_overlay
+        overlay._cancel_stage_worker();overlay.draft_frame=overlay.draft_data=overlay.draft_key=None
+        overlay.staged_overlay=None;overlay.stamp=None
+        if not cancelled:self.log_bus.emit(f"{edit['operation']}已回撤\n{details}",'ERROR')
+        try:
+            if self.reconstruction_pending:overlay.stage()
+            self.plot_layout(preserve=True)
+        except Exception:
+            self.log_bus.emit('恢复画布失败：\n'+traceback.format_exc(),'ERROR')
+        if not cancelled:self.error(f"{edit['operation']}未完成，已恢复操作前状态。详情见运行信息。")
+        return True
+
+    def apply_reconstruction_edit(self,updated,operation):
+        auto=self.view_settings.reconstruction_auto
+        previous=self.view_settings
+        self.begin_reconstruction_edit(updated,operation)
+        try:
+            self.edit_history.record()
+            self.view_settings=updated
+            self.invalidate_reconstruction_edit()
+            self.request_preview(quiet=True)
+        except Exception:
+            self.rollback_reconstruction_edit(traceback.format_exc(),updated.reconstruction_key())
+            return False
+        overlay=self.reconstruction_overlay
+        if not auto and overlay._stage_worker is None and overlay._stage_pending is None:
+            self.finish_reconstruction_edit(updated.reconstruction_key(),{'reconstruction':overlay.draft_data})
+        return self.view_settings!=previous
 
     def change_moving_pad_mode(self,updated):
         # Apply this control immediately while preserving unrelated staged edits.
@@ -2279,7 +2363,9 @@ class MainWindow(W.QMainWindow):
         if state is None and not overlays and not animate_back:
             self.preview_pending=None;self.present_frame(None);return
         try:p=self.params();roles=self.roles();case=self.case or build_case(self.data,roles,layer_order=self.ordered_layers())
-        except ValueError as exc:self.error(exc);return
+        except ValueError as exc:
+            if not self.rollback_reconstruction_edit(traceback.format_exc(),settings.reconstruction_key()):self.error(exc)
+            return
         origin=self.shown_states.copy() if self.shown_states is not None else np.zeros((len(case['dies']),3))
         show_frame=state is not None
         state=np.zeros_like(origin) if state is None else np.array(state,float,copy=True)
@@ -2315,7 +2401,9 @@ class MainWindow(W.QMainWindow):
                 _,_,duration,steps,requested,_,packet=motion_packet(view,origin,state,settings,max(np.ptp(self.ax.get_xlim()),np.ptp(self.ax.get_ylim())),self.cache_group.motions)
                 if packet and packet['complete']:
                     motion=dict(prepared=True,streamed=False,frames=packet['frames'],duration=duration,steps=steps,requested_steps=requested,cached=True,count=len(packet['frames']))
-                    self._prepared_motion=motion;self.preview_pending=None;self.play_prepared_motion(target,motion);return
+                    self._prepared_motion=motion;self.preview_pending=None;self.play_prepared_motion(target,motion)
+                    self.finish_reconstruction_edit(settings.reconstruction_key(),cached)
+                    return
                 self.statusBar().showMessage('目标状态已缓存，正在准备首次过渡动画。')
             else:
                 self.preview_pending=None
@@ -2323,6 +2411,7 @@ class MainWindow(W.QMainWindow):
                     self._interpolated_states=None;self.current_frame=target;self.plot_layout(preserve=True)
                     self.update_state_table(state);self.update_histograms();self.show_frame_status(target)
                 else:self.present_frame(target)
+                self.finish_reconstruction_edit(settings.reconstruction_key(),cached)
                 return
         self.preview_pending=(self.revision,settings,ticket,state.copy(),self.motions(),roles,p,self.result,case,self.geometry_cache,self.connections,self.ordered_layers(),show_frame,self.probability_toggle.isChecked(),self.space_toggle.isChecked())
         self.preview_pending+=(False,True,direct,settle,origin,self.width_toggle.isChecked(),self.reconstruction_toggle.isChecked(),self.footprint_toggle.isChecked())
@@ -2434,15 +2523,25 @@ class MainWindow(W.QMainWindow):
             self.case=case
             if frame and frame.get('global_deformation') and self.result:
                 self.result['adaptive_preview']=frame['global_deformation']
-            if self._prepared_motion and (self._prepared_motion.get('streamed') or self._prepared_motion.get('direct')):
-                self._interpolated_states=None;self.current_frame=frame;self.plot_layout(preserve=True);self.update_histograms();self.show_frame_status(frame);self.log_bus.emit('交互帧已更新' if self._prepared_motion.get('direct') else '型变流式帧完成：'+str(self._prepared_motion['count']))
-            elif self._prepared_motion and self._prepared_motion.get('prepared'):
-                self.play_prepared_motion(frame,self._prepared_motion)
-            else:self.present_frame(frame)
-            if self.current_frame is not None and not self.transition.timer.isActive():self.update_state_table(self.current_frame['states'])
+            try:
+                if self._prepared_motion and (self._prepared_motion.get('streamed') or self._prepared_motion.get('direct')):
+                    self._interpolated_states=None;self.current_frame=frame;self.plot_layout(preserve=True);self.update_histograms();self.show_frame_status(frame);self.log_bus.emit('交互帧已更新' if self._prepared_motion.get('direct') else '型变流式帧完成：'+str(self._prepared_motion['count']))
+                elif self._prepared_motion and self._prepared_motion.get('prepared'):
+                    self.play_prepared_motion(frame,self._prepared_motion)
+                else:self.present_frame(frame)
+                if self.current_frame is not None and not self.transition.timer.isActive():self.update_state_table(self.current_frame['states'])
+            except Exception:
+                details=traceback.format_exc()
+                if not self.rollback_reconstruction_edit(details,settings.reconstruction_key()):
+                    self.log_bus.emit('无法显示已计算的预演：\n'+details,'ERROR')
+                    self.error('预演无法显示。详情见运行信息。')
+                return
+            self.finish_reconstruction_edit(settings.reconstruction_key(),frame)
         def rejected(message):
-            if worker.view_ticket!=self.preview_ticket:return
-            self.statusBar().showMessage('预演未应用：'+message.split('Traceback')[0]);self.error(message)
+            if revision!=self.revision or data is not self.data or worker.view_ticket!=self.preview_ticket or self._closing:return
+            if self.rollback_reconstruction_edit(message,settings.reconstruction_key()):return
+            self.statusBar().showMessage('预演未应用')
+            self.error('预演未完成。详情见运行信息。')
         worker.done.connect(accepted);worker.failed.connect(rejected)
         def finished():
             if actual is not None:actual.busy=False
@@ -3073,23 +3172,33 @@ class MainWindow(W.QMainWindow):
         if mode is not None and mode not in MODES:return
         layer,index,ax,ay=block_id
         layer=str(layer);index=int(index);ax=round(float(ax),4);ay=round(float(ay),4)
-        # Replace any existing override on the same nominal block (matching exact anchor or within nominal geometry).
-        block_geom=None
-        if getattr(self,'selection',None) and self.selection.selected_between and self.selection.selected_between.get('id')==block_id:
-            block_geom=self.selection.selected_between.get('nominal')
+        # Resolve the action against the current preview. A menu can remain
+        # open while a newer pose or draft finishes rendering.
+        blocks=self.reconstruction_overlay.between_views
+        block=blocks.get(block_id)
+        if block is None:
+            point=shapely.Point(ax,ay)
+            matches=[b for b in blocks.values() if b['ref']==(layer,index) and b['nominal'].contains(point)]
+            if len(matches)==1:block=matches[0]
+        if block is None or block.get('locked'):
+            reason='端孔或归属接缝锁定了该段铜' if block is not None else '当前姿态找不到原名义铜段'
+            self.log_bus.emit(f'未修改动区间随动 · {layer} #{index+1} · {reason}','WARNING')
+            self.statusBar().showMessage(reason)
+            return
+        _,_,ax,ay=block['id']
+        block_geom=block['nominal']
         rows=[]
         for row in self.view_settings.reconstruction_between_overrides:
             if (row[0],row[1])==(layer,index):
                 if (row[2],row[3])==(ax,ay):continue
-                if block_geom is not None and not block_geom.is_empty and block_geom.covers(shapely.Point(row[2],row[3])):continue
+                if block_geom.covers(shapely.Point(row[2],row[3])):continue
             rows.append(row)
         if mode is not None:
             rows.append((layer,index,ax,ay,mode))
         rows=tuple(sorted(set(rows)))
         if rows==self.view_settings.reconstruction_between_overrides:return
-        self.edit_history.record()
-        self.view_settings=replace(self.view_settings,reconstruction_between_overrides=rows)
-        self.invalidate_reconstruction_edit();self.request_preview(quiet=True)
+        updated=replace(self.view_settings,reconstruction_between_overrides=rows)
+        if not self.apply_reconstruction_edit(updated,'修改动区间随动'):return
         label=LABELS[mode] if mode is not None else '默认（'+LABELS[self.view_settings.reconstruction_between_motion]+'）'
         if getattr(self,'reconstruction_pending',False):
             self.statusBar().showMessage(f'已暂存动区间随动逻辑：{label}（点击“重构计算”统一计算）')

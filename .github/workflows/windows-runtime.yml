@@ -43,6 +43,7 @@ on:
       - 'tests/test_v71.py'
       - 'tests/test_v72.py'
       - 'tests/test_v73.py'
+      - 'tests/test_v74.py'
       - 'tests/gui_v64_editing.py'
       - 'tests/gui_v59.py'
       - 'tests/test_v51.py'
@@ -347,7 +348,7 @@ jobs:
         shell: cmd
         run: |
           set PYTHONPATH=.;tests
-          "%DIE_SHIFT_PYTHON%" -m unittest test_v59 test_v61 test_v62 test_v64 test_v66 test_v67 test_v68 test_v69 test_v70 test_v71 test_v72 test_v73 test_v30 -v
+          "%DIE_SHIFT_PYTHON%" -m unittest test_v59 test_v61 test_v62 test_v64 test_v66 test_v67 test_v68 test_v69 test_v70 test_v71 test_v72 test_v73 test_v74 test_v30 -v
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" tests/gui_v64_editing.py
           if errorlevel 1 exit /b 1
@@ -397,7 +398,7 @@ jobs:
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" tests/gui_v39.py
           if errorlevel 1 exit /b 1
-          "%DIE_SHIFT_PYTHON%" -m unittest test_v67 test_v68 test_v69 test_v70 test_v71 test_v72 test_v73 -v
+          "%DIE_SHIFT_PYTHON%" -m unittest test_v67 test_v68 test_v69 test_v70 test_v71 test_v72 test_v73 test_v74 -v
           if errorlevel 1 exit /b 1
           "%DIE_SHIFT_PYTHON%" tests/gui_v64_editing.py
           if errorlevel 1 exit /b 1
