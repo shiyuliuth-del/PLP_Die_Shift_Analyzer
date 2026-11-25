@@ -1,3 +1,7 @@
+# V78 界面缩放
+
+`ViewSettings.ui_scale_percent` 使用 schema5 可选字段。`interface_scale.InterfaceScale` 从窗口原始 Qt 样式、控件约束和表格行高应用比例，可往返恢复；动态表格列和工具栏图标沿用同一比例。大字号时可滚动访问超出窗口的界面。`settings_changed` 直接处理缩放，不进入数值更新，`project_results.identity` 排除该字段。[V78 使用说明](V78_使用说明.md)
+
 # V77 静止区样式与固定过孔随动
 
 `ReconstructionOverlay` 从最终铜裁剪静止动区间，再用同一轮廓裁剪画布灰色菱形点阵。点距以屏幕尺度生成，跟随图层显隐和姿态更新。导出仍使用名义铜，`region_export.layer_contours` 从运动与过渡掩膜中排除静止区，使原轮廓及补偿后轮廓归 `_B`。`ViewSettings.links_fixed_vias` 统一固定孔联动门禁。保留旧 `global` 值，新增 `global_static`。见 [V77 使用说明](V77_使用说明.md)。

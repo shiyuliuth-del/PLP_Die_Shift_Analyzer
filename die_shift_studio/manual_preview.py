@@ -28,7 +28,11 @@ class ManualPreview(W.QDialog):
                 spin.setDecimals(4);spin.setKeyboardTracking(False);self.table.setCellWidget(i,column,spin);fields.append(spin)
             pivot=PivotEditor();self.table.setCellWidget(i,4,pivot);pivot.valueChanged.connect(self.table.resizeRowsToContents)
             self.rows.append((*fields,pivot))
-        for i,size in enumerate((60,115,115,100,290)):self.table.setColumnWidth(i,size)
+        self.scale_columns()
+
+    def scale_columns(self):
+        for i,size in enumerate((60,115,115,100,290)):
+            self.table.setColumnWidth(i,self.w.ui_pixels(size))
 
     def sync(self,states=None):
         self.rebuild();w=self.w

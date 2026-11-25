@@ -95,8 +95,13 @@ class MouseDieMode:
     def update_text(self):
         w=self.w
         if not hasattr(self,'text'):
-            self.text=W.QLabel(w.canvas);self.text.setStyleSheet('color:#3b5773;background:rgba(255,255,255,215);font-size:11px;padding:1px 3px;')
+            self.text=W.QLabel(w.canvas)
             self.text.setAttribute(getattr(Qt,'WidgetAttribute',Qt).WA_TransparentForMouseEvents)
+        percent=w.view_settings.ui_scale_percent
+        if getattr(self,'text_scale',None)!=percent:
+            from .interface_scale import stylesheet
+            self.text.setStyleSheet(stylesheet('color:#3b5773;background:rgba(255,255,255,215);font-size:11px;padding:1px 3px;',percent))
+            self.text_scale=percent
         self.text.setVisible(self.owner is not None)
         if self.owner is not None:
             z=w.shown_states[self.owner] if w.shown_states is not None else np.zeros(3)
