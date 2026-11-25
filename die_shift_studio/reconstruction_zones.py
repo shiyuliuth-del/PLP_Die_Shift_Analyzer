@@ -12,7 +12,7 @@ from .reconstruction_edits import key
 
 def expand(r,entries):
     from hashlib import sha256
-    from .between_motion import anchor_of,lookup_mode,solve_serial_weights
+    from .between_motion import anchor_of,component_modes,solve_serial_weights
     from .manual_regions import aligned_partition,route_box_spans,usable_partition
     from .reconstruction_edits import apply_angles
     attached=defaultdict(list);seeded={};result=[]
@@ -126,8 +126,9 @@ def expand(r,entries):
             blocks.append(block)
             occupied=shapely.union_all([occupied,part['A'],part['C']])
         between_modes=[];between_meta=[]
-        for block in blocks[1:]:
-            mode,custom=lookup_mode(r.settings,ref,block,r.tol)
+        modes=component_modes(r.settings,ref,dict(enumerate(blocks[1:])),r.tol)
+        for i,block in enumerate(blocks[1:]):
+            mode,custom=modes[i]
             between_modes.append(mode);between_meta.append((block,mode,custom))
         weights=solve_serial_weights(between_modes)
         for j,e in enumerate(usable):

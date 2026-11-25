@@ -302,7 +302,7 @@ class ViewSettings:
 
     def reconstruction_key(self):
         """Everything the reconstruction result depends on besides the pose."""
-        return (True,'nominal-route-continuity-v73',self.reconstruction_die_mode,self.reconstruction_fixed_via_mode,self.reconstruction_fixed_via_follows,self.reconstruction_between_motion,self.reconstruction_between_overrides,self.reconstruction_box_excluded,self.drc_checks,self.evaluation_scope,self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_allow_moving_pad,self.reconstruction_pad_trigger_um,self.reconstruction_ignored,self.reconstruction_following,self.drc_tolerance_um,self.drc_min_angle_deg,
+        return (True,'nominal-route-continuity-v74',self.reconstruction_die_mode,self.reconstruction_fixed_via_mode,self.reconstruction_fixed_via_follows,self.reconstruction_between_motion,self.reconstruction_between_overrides,self.reconstruction_box_excluded,self.drc_checks,self.evaluation_scope,self.reconstruction_style,self.reconstruction_boundary_mode,self.reconstruction_allow_moving_pad,self.reconstruction_pad_trigger_um,self.reconstruction_ignored,self.reconstruction_following,self.drc_tolerance_um,self.drc_min_angle_deg,
                 tuple(self.reconstruction_intervals),
                 self.reconstruction_forced,self.reconstruction_angles,self.reconstruction_deleted,self.reconstruction_added,
                 tuple(self.reconstruction_regions),tuple(self.reconstruction_boxes),tuple(self.reconstruction_angle_boxes),self.reconstruction_box_order,self.reconstruction_box_starts,tuple(self.reconstruction_cuts),

@@ -198,7 +198,8 @@ def assemble(r,source,rows,states):
     # Real terminal regions provide Dirichlet conditions even in whole-pad mode.
     for g,v in ((moving,1.),(fixed,0.)):
         known[len(rigid)]=v;rigid.append(g)
-    neighbours=[];edges={}
+    neighbours=[];edges={};memberships={};contacts=[]
+    rigid_edges=[g.boundary.buffer(r.tol*2) for g in rigid[:physical_count]]
     rigid_non_empty=[(i,g) for i,g in enumerate(rigid) if not g.is_empty]
     rigid_tree=shapely.STRtree([g for _,g in rigid_non_empty]) if rigid_non_empty else None
     for domain in domains:
@@ -208,15 +209,17 @@ def assemble(r,source,rows,states):
         else:
             ids=[]
         neighbours.append(ids)
+        contour=domain.boundary
+        touching=[i for i in ids if i<physical_count and contour.intersection(rigid_edges[i]).length>r.tol*8]
+        contacts.append(touching)
+        for i in touching:memberships[i]=memberships.get(i,0)+1
         for ix,i in enumerate(ids):
             for j in ids[ix+1:]:edges[i,j]=edges.get((i,j),0.)+1/max(r._rule_width,rigid[i].distance(rigid[j]))
     unknown=[i for i in range(physical_count) if i not in known]
-    from .between_motion import anchor_of,lookup_mode,solve_graph_weights
+    from .between_motion import anchor_of,component_modes,solve_graph_weights
     ref=(rows[0]['layer'],rows[0]['index'])
-    between_modes={};between_meta={}
-    for i in unknown:
-        mode_i,custom_i=lookup_mode(r.settings,ref,rigid[i],r.tol)
-        between_modes[i]=mode_i;between_meta[i]=(mode_i,custom_i)
+    between_meta=component_modes(r.settings,ref,dict(enumerate(rigid[:physical_count])),r.tol)
+    between_modes={i:between_meta[i][0] for i in unknown}
     values=solve_graph_weights(physical_count,known,edges,between_modes)
     mobile=[i for i in range(physical_count) if values[i]>1e-12];static=[i for i in range(physical_count) if i not in mobile]
     c=_fast_union([rigid[i] for i in mobile]);b=_fast_union([rigid[i] for i in static])
@@ -242,7 +245,7 @@ def assemble(r,source,rows,states):
             v=xy-center;angles=pose[2]*fraction;co=np.cos(angles);si=np.sin(angles)
             return np.column_stack([co*v[:,0]-si*v[:,1],si*v[:,0]+co*v[:,1]])+center+fraction[:,None]*pose[:2]
         return shapely.transform(dense,coordinates)
-    result=[];memberships={}
+    result=[];visible_memberships={};static_domains=[]
     from shapely.ops import substring
     paths=[]
     for q,part in zip(rows,sections):
@@ -250,7 +253,7 @@ def assemble(r,source,rows,states):
         paths.append((q,part,substring(q['route_plan'].route,left+trim,right-trim)))
     path_tree=shapely.STRtree([line for _,_,line in paths]) if paths else None
     strict_rows=[(idx,q,part) for idx,(q,part,_) in enumerate(paths) if q.get('strict_box') is not None]
-    for domain_index,(group,ids) in enumerate(zip(domains,neighbours)):
+    for domain_index,(group,ids,touching) in enumerate(zip(domains,neighbours,contacts)):
         cand_idx=set(int(k) for k in path_tree.query(group,predicate='intersects')) if path_tree is not None else set()
         cand_idx.update(idx for idx,_,_ in strict_rows)
         contributors=[(paths[idx][0],paths[idx][1]) for idx in sorted(cand_idx)
@@ -262,8 +265,12 @@ def assemble(r,source,rows,states):
         q=dict(members[0]);posed=None;flow_steps=0
         q.pop('serial_between_block',None)
         high=max((values[i] for i in ids),default=0.);low=min((values[i] for i in ids),default=0.)
-        if high<=1e-10 and not any(m.get('boxed') for m in members):
-            continue  # Do not automatically create a transition between fixed sides.
+        if high<=1e-10 and not any(m.get('boxed') for m in members) and not any(
+                memberships[i]>1 and i not in known for i in touching):
+            # A fixed-only isolated cut is not a transition. Its material
+            # still belongs to the feature when another domain is emitted.
+            static_domains.append(group)
+            continue
         guides=[_fast_union([part[name] for _,part in contributors if part is not None]) for name in ('near','far')]
         def face(weight,side):
             # Difference/union can leave ulp-different seam coordinates. A
@@ -335,9 +342,7 @@ def assemble(r,source,rows,states):
         valid=valid and not invalid_box and not missing_face and bool(ids)
         if not valid:posed=shapely.Polygon()
         warning=q['warning'] if valid else ('框选动区缺少有效的分支连接截面' if missing_face or invalid_box else '分叉动区型变折叠，已取消连接段')
-        for i in ids:
-            if i<physical_count and group.boundary.intersection(rigid[i].boundary.buffer(r.tol*2)).length>r.tol*8:
-                memberships[i]=memberships.get(i,0)+1
+        for i in touching:visible_memberships[i]=visible_memberships.get(i,0)+1
         q.update(regions=dict(A=posed,B=b,C=cposed),nominal_regions=dict(A=group,B=b,C=c),
                  bridge=posed,movable=c,moved=cposed,fixed=b,immovable=b,span=group,
                  moved_cut=transform(nearcut,center,pose*high),cut=nearcut,extra_cut=transform(farcut,center,pose*low),endpoint_weights=(high,low),
@@ -349,15 +354,23 @@ def assemble(r,source,rows,states):
                  via_refs=tuple(sorted({ref for v in members for ref in v['via_refs']})))
         result.append(q)
     if result:
+        # All domains report the same complete rigid material, including
+        # fixed-only cuts that follow no moving terminal.
+        if static_domains:
+            b=_fast_union([b,*static_domains])
+            for q in result:
+                for name in ('regions','nominal_regions','fallback_regions'):
+                    q[name]['B']=b
+                q.update(fixed=b,immovable=b,fixed_area_um2=b.area)
         between_blocks=[]
-        for i,count in sorted(memberships.items()):
+        for i,count in sorted(visible_memberships.items()):
             if count<2 or rigid[i].area<=r.tol**2:continue
             ax,ay=anchor_of(rigid[i])
-            mode,custom=between_meta.get(i,('average',False))
+            mode,custom=('average',False) if i in known else between_meta[i]
             between_blocks.append(dict(ref=ref,id=(*ref,ax,ay),nominal=rigid[i],geometry=posed_rigid[i],
                                        mode=mode,custom=custom,weight=values[i],locked=i in known))
         result[0]['between_blocks']=tuple(between_blocks)
-        result[0]['branch_rigid']=tuple(zip(rigid[:physical_count],posed_rigid))
+        result[0]['branch_rigid']=(*zip(rigid[:physical_count],posed_rigid),*((g,g) for g in static_domains))
     return result
 
 

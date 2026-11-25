@@ -179,6 +179,8 @@ class V73Tests(unittest.TestCase):
         from matplotlib.backend_bases import MouseEvent
         from die_shift_studio.gui import MainWindow, W
         from die_shift_studio.reconstruction_edits import key
+        from die_shift_studio.shape_menu import show_shape_menu
+        from unittest.mock import patch
         from qt_shutdown import close_window
 
         app = W.QApplication.instance() or W.QApplication([])
@@ -244,6 +246,38 @@ class V73Tests(unittest.TestCase):
                 MouseEvent('button_release_event', w.canvas, x, y, button=1)._process()
                 self.assertEqual(w.selection.selected_between['id'], block['id'])
                 self.assertIsNone(w.cut_drag.state)
+                # Right click on the strip without prior selection while the
+                # near/far handle halos still cover the pointer.
+                w.selection.clear()
+                menu = []
+                right = MouseEvent('button_press_event', w.canvas, x, y, button=3)
+                with patch.object(W.QMenu, 'popup', lambda widget, *_: menu.append(widget)):
+                    show_shape_menu(w, right, (point.x, point.y))
+                action, = [a for a in menu[0].actions() if a.text().endswith('两侧平均')]
+                action.trigger()
+                wait()
+                self.assertEqual(w.selection.selected_between['mode'], 'average')
+                self.assertEqual(w.view_settings.reconstruction_between_overrides, ((*block['id'], 'average'),))
+
+                # A worker exception must not keep the new override or its undo
+                # entry, and the popup must not expose the full traceback.
+                committed = w.current_frame
+                previous = w.view_settings.reconstruction_between_overrides
+                undo = tuple(tuple(s) for s in w.edit_history.stacks)
+                from die_shift_studio.fast_preview import PreviewEngine
+                with patch.object(PreviewEngine, 'frame', side_effect=RuntimeError('injected reconstruction failure')):
+                    w.change_between_motion(block['id'], 'min')
+                    end = time.monotonic()+30
+                    while not errors and time.monotonic()<end:
+                        app.processEvents()
+                        time.sleep(.01)
+                self.assertEqual(w.view_settings.reconstruction_between_overrides, previous)
+                self.assertIs(w.current_frame, committed)
+                self.assertEqual(tuple(tuple(s) for s in w.edit_history.stacks), undo)
+                self.assertEqual(errors, ['修改动区间随动未完成，已恢复操作前状态。详情见运行信息。'])
+                log = w.log_bus.path.read_text(encoding='utf-8')
+                self.assertIn('RuntimeError: injected reconstruction failure', log)
+                menu[0].deleteLater()
             finally:
                 close_window(app, w)
 

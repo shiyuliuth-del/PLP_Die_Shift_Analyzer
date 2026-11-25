@@ -134,7 +134,7 @@ class ReconstructionOverlay:
                     ref=(str(row[0]),int(row[1]));via_refs.add(ref)
                     tag(ref,'固定过孔随动' if row in cur else '固定过孔静止')
                 elif name=='between_overrides':
-                    ref=(str(row[0]),int(row[1]));between_refs.add(ref)
+                    ref=(str(row[0]),int(row[1]));between_refs.add(ref);rdl_refs.add(ref)
                     tag(ref,'动区间随动')
                 else:
                     ref=(str(row[0]),int(row[1]));rdl_refs.add(ref)
@@ -190,7 +190,7 @@ class ReconstructionOverlay:
                 self.draft_data=dict(self.draft_data,draft_refs=draft_refs)
             else:
                 piece_count=sum(1 for q in data['pieces'] if (q['layer'],q['index']) in dirty_refs)
-                if (piece_count>8 or drag.worker is not None or after_failed_drag) and not getattr(w,'_closing',False):
+                if (piece_count>8 or between_refs.intersection(dirty_refs) or drag.worker is not None or after_failed_drag) and not getattr(w,'_closing',False):
                     # Heavy multi-zone polygon: paint staged markers immediately on the main
                     # thread and compute the local draft asynchronously so the UI never hangs.
                     self._stage_pending=(frame,base_frame,solver,cfg,dirty_refs,new_sigs,draft_refs,key)
@@ -240,7 +240,12 @@ class ReconstructionOverlay:
             if self.w.view_settings.reconstruction_key()!=key:return
             self.draft_frame=frame;self.draft_key=key;self._stage_ref_keys=new_sigs
             self.draft_data=dict(local['reconstruction'],draft_refs=draft_refs)
-            self.stamp=None;self.draw();self.w.selection.draw(redraw=False);self.w.render_scene()
+            try:
+                self.stamp=None;self.draw();self.w.selection.draw(redraw=False);self.w.render_scene()
+            except Exception:
+                from traceback import format_exc
+                rejected(format_exc());return
+            self.w.finish_reconstruction_edit(key,local)
         def finished():
             if self._stage_worker is worker:self._stage_worker=None
             worker.deleteLater()
@@ -249,7 +254,11 @@ class ReconstructionOverlay:
             elif self._stage_pending is not None:
                 self._start_stage_worker()
         worker.done.connect(accepted)
-        worker.failed.connect(lambda msg:self.w.log_bus.emit(f'待计算动区预览未生成：{msg}'))
+        def rejected(message):
+            if worker.cancelled.is_set() or self.w.current_frame is not frame or self.w.view_settings.reconstruction_key()!=key:return
+            if not self.w.rollback_reconstruction_edit(message,key):
+                self.w.log_bus.emit('待计算动区预览未生成：\n'+message,'ERROR')
+        worker.failed.connect(rejected)
         worker.finished.connect(finished)
         worker.start()
 
@@ -1170,8 +1179,7 @@ class RegionSelect:
                  'reconstruction_box_excluded':removed,'reconstruction_following':unfollowed}
         updated=replace(settings,**changes)
         if updated==settings:return
-        record(self.w);self.w.view_settings=updated
-        self.w.invalidate_reconstruction_edit();self.w.request_preview(quiet=True)
+        if not self.w.apply_reconstruction_edit(updated,'框选动区'):return
         if self.w.view_settings.reconstruction_auto:
             self.w.statusBar().showMessage('已提交框选动区；必要时在原选框周围延伸至可用边界')
         else:

@@ -37,6 +37,7 @@ class TaskControl(QtCore.QObject):
         from .gui import Worker
         for worker in w.findChildren(Worker):
             worker.cancelled.set()
+        w.rollback_reconstruction_edit('',cancelled=True)
         if self.snapshot and self.snapshot[0] is w.data:
             _,frame,result,shown,probability,space,footprints,engine,case,connections=self.snapshot
             w.current_frame=frame;w.result=result;w.shown_states=shown;w.engine=engine;w.case=case;w.connections=connections
