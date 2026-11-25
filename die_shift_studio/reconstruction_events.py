@@ -286,7 +286,7 @@ def scan(r,grid,progress=lambda *_:None,source_cache=None):
                 cancel_check();z=np.zeros((count,3));d=dict(zip(scope,digits))
                 for o,value in d.items():z[o]=grid.locals[o][value]
                 g,ps=table[tuple(d[o] for o in axes)]
-                via_owner=linked_owners(r,z)[0].get(ref,owner) if r.settings.reconstruction_fixed_via_mode!='off' else owner
+                via_owner=linked_owners(r,z)[0].get(ref,owner) if r.settings.links_fixed_vias else owner
                 missing=r.model.moved(required,via_owner,z).difference(g)
                 if missing.area<=r.tol*r.tol:continue
                 placed=tuple(dict(q,moving_terminals=r.model.moved(templates[zone_key(q)],q['die'],z)) for q in ps)

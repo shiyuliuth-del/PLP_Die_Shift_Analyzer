@@ -71,13 +71,18 @@ class StationaryBetweenTests(unittest.TestCase):
                 self.assertTrue(any(b['moves'] for b in nominal['between_blocks']))
                 with TemporaryDirectory() as tmp:
                     path=Path(tmp)/'regions.dxf'
-                    write_regions(snapshot(model.data,model.cache),nominal,model.roles,path)
-                    outlines=read(path)['2/0']
-                    x=fixed['nominal'].centroid.x
-                    for y in (fixed['nominal'].bounds[1],fixed['nominal'].bounds[3]):
-                        probe=shapely.Point(x,y)
-                        self.assertLess(min(g.distance(probe) for g in outlines['B']),1e-7)
-                        self.assertGreater(min(g.distance(probe) for g in outlines['A']),1e-3)
+                    source=snapshot(model.data,model.cache)
+                    for amount in (0.,1.5,-1.5):
+                        with self.subTest(compensation=amount):
+                            write_regions(source,nominal,model.roles,path,compensation={'2/0':amount})
+                            outlines=read(path)['2/0']
+                            x=fixed['nominal'].centroid.x
+                            lo,hi=fixed['nominal'].bounds[1],fixed['nominal'].bounds[3]
+                            for y in (lo-amount,hi+amount):
+                                probe=shapely.Point(x,y)
+                                self.assertLess(min(g.distance(probe) for g in outlines['B']),1e-7)
+                                for kind in ('A','C'):
+                                    self.assertGreater(min(g.distance(probe) for g in outlines[kind]),1e-3)
             finally:
                 solver.close()
         finally:

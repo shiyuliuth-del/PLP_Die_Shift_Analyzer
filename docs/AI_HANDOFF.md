@@ -1,3 +1,7 @@
+# V77 静止区样式与固定过孔随动
+
+`ReconstructionOverlay` 从最终铜裁剪静止动区间，再用同一轮廓裁剪画布灰色菱形点阵。点距以屏幕尺度生成，跟随图层显隐和姿态更新。导出仍使用名义铜，`region_export.layer_contours` 从运动与过渡掩膜中排除静止区，使原轮廓及补偿后轮廓归 `_B`。`ViewSettings.links_fixed_vias` 统一固定孔联动门禁。保留旧 `global` 值，新增 `global_static`。见 [V77 使用说明](V77_使用说明.md)。
+
 # V76 图纸坐标静止的动区间
 
 `between_motion.STATIONARY` 是全局默认选项与按区段覆盖使用的同一个策略值。中段在图纸坐标中固定。串联求解以零姿态为约束，分叉图的已固定节点不参与随动迭代。若参考端也随 DIE 运动，`PairFrame.local_pose` 先把零姿态换到参考系再求几何。最终电连接修补不得移除该段铜，动静区 DXF 归于 `_B`。旧工程的随动选项保持原值。详见 [V76 使用说明](V76_使用说明.md)。

@@ -55,10 +55,14 @@ class V55Tests(unittest.TestCase):
             cfg = ViewSettings(reconstruction_ignored=(('5/0', 0),), reconstruction_following=(('5/0', 0),))
             via = engine.contact.nodes[engine.contact.ids['6/0', 0]]['poly']
             expected = engine.contact.moved(via, 0, state)
+            self.assertEqual(ViewSettings.from_dict({'reconstruction_link_fixed_vias': True}).reconstruction_fixed_via_mode,'global')
+            self.assertEqual(ViewSettings.from_dict().reconstruction_fixed_via_mode,'off')
             for mode, manual, moving in [('off', (), False), ('global', (), True),
+                                         ('global_static', (('6/0', 0),), False),
                                          ('individual', (), False), ('individual', (('6/0', 0),), True)]:
                 selected = replace(cfg, reconstruction_fixed_via_mode=mode, reconstruction_fixed_via_follows=manual)
                 settings = ViewSettings.from_dict(asdict(selected))
+                self.assertEqual(settings.reconstruction_fixed_via_mode,mode)
                 engine.configure_reconstruction(True, settings)
                 frame = engine.frame(state)
                 rows = frame['reconstruction']['replacements'].get('6/0', ())

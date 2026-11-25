@@ -6,9 +6,13 @@ import math
 import numpy as np
 import shapely
 from .moving_pair import boundary_pose,relative_pose
-from matplotlib.collections import LineCollection,PatchCollection
+from .between_motion import LABELS,STATIONARY,lookup_mode
+from matplotlib.collections import LineCollection,PatchCollection,PathCollection
 from matplotlib.lines import Line2D
+from matplotlib.markers import MarkerStyle
 from matplotlib.patches import Rectangle
+from matplotlib.path import Path
+from matplotlib.transforms import IdentityTransform
 from .reconstruction import normalize_via_refs,transform
 from .qt_compat import Qt,QtCore,QtWidgets as W
 from .reconstruction_events import zone_key,active_region,color_for,PALETTE,RANK
@@ -62,6 +66,7 @@ def display_material(data,visible_layers):
 
 
 def between_color(rgb,mode):
+    if mode==STATIONARY:return tuple(c*.69 for c in rgb)
     if mode=='min':return tuple(c*.87 for c in rgb)
     if mode=='max':return tuple(c+(1-c)*.25 for c in rgb)
     return rgb
@@ -71,7 +76,7 @@ class ReconstructionOverlay:
     def __init__(self,window):
         self.draft_frame=self.draft_data=self.draft_key=None;self.staged_overlay=None;self._stage_worker=None;self._stage_pending=None;self._stage_ref_keys={}
         self._stage_frame=None;self.between_views={}
-        self.w=window;self.artists={};self.cuts=None;self.stamp=self.table_stamp=None
+        self.w=window;self.artists={};self.stationary_artists={};self.cuts=None;self.stamp=self.table_stamp=None
         self.selected=self.selected_kind=None;self.hover=None;self.hover_key=None
         self.end_artists=[];self.region_artists=[];self.arrow_artists=[];self.path_cache={};self.handles={};self.union_cache={};self.labels=[];self.staged_tags=[];self.text_sizes={};self.zone_views={};self.zone_low={};self.zone_clips={}
         self.pulse_timer=QtCore.QTimer(window);self.pulse_timer.setInterval(33);self.pulse_timer.timeout.connect(self.pulse)
@@ -364,10 +369,37 @@ class ReconstructionOverlay:
         return bool(ReconstructionOverlay.original_handles(q,kind,edit))
 
     def risk_bank(self):return getattr(getattr(self.w,'reconstruction_yield',None),'evidence',None)
+
+    def draw_stationary_pattern(self,clips,viewport):
+        ax=self.w.ax
+        if clips:
+            width,height,dpi=viewport
+            pitch=14*dpi/72
+            xs,ys=np.meshgrid(np.arange(pitch/4,width+pitch,pitch),np.arange(pitch/2,height,pitch/2))
+            xs[1::2]+=pitch/2
+            offsets=np.column_stack((xs.ravel()/width,ys.ravel()/height))
+        for layer,paths in clips.items():
+            artist=self.stationary_artists.get(layer)
+            if artist is None:
+                diamond=MarkerStyle('D')
+                marker=diamond.get_path().transformed(diamond.get_transform())
+                artist=PathCollection([marker],sizes=[5.],offset_transform=ax.transAxes,
+                                      facecolors='#696d73',edgecolors='none',alpha=.68)
+                artist.set_transform(IdentityTransform())
+                ax.add_collection(artist,autolim=False)
+                artist.set_clip_box(ax.bbox)
+                self.stationary_artists[layer]=artist
+            artist.set_offsets(offsets)
+            artist.set_clip_path(Path.make_compound_path(*paths),ax.transData)
+            artist.set_zorder(self.artists[layer,'C'].get_zorder()+.0005)
+            artist.set_visible(True)
+        for layer,artist in self.stationary_artists.items():
+            if layer not in clips:artist.set_visible(False)
+
     def draw(self):
         w=self.w
         if self.cuts is None or self.cuts.axes is not w.ax:
-            self.artists={}
+            self.artists={};self.stationary_artists={}
             self.staged=PatchCollection([],facecolor='#5992b62a',edgecolor='#44698c',linestyles='--',linewidths=1.3,zorder=10);w.ax.add_collection(self.staged)
             self.warning=PatchCollection([],facecolor='none',edgecolor=WARNING_COLOR,linestyles='--',linewidths=.8,zorder=9.4);w.ax.add_collection(self.warning)
             self.problems=LineCollection([],colors='#b92d39',alpha=.7,linestyles='--',linewidths=.9,zorder=9.7);w.ax.add_collection(self.problems)
@@ -399,7 +431,8 @@ class ReconstructionOverlay:
         waiver_stamp=(id(bank),cleared,tuple(sorted(catalogue_waivers.items())))
         if getattr(self,'waiver_stamp',None)!=waiver_stamp:
             self.waiver_stamp=waiver_stamp;self._nominal_waiver_cache={}
-        stamp=(id(data),id(bank),vis,w.view_bounds,order,nominal,pose_low,threshold,edit_stamp,repr(w.layer_styles),id(staged_info),allow_pad,tuple(sorted(deleted)) if deleted else (),tuple(sorted(restored)) if restored else (),id(nodes),waiver_stamp)
+        viewport=(max(1.,w.ax.bbox.width),max(1.,w.ax.bbox.height),w.ax.figure.dpi)
+        stamp=(id(data),id(bank),vis,w.view_bounds,order,nominal,pose_low,threshold,edit_stamp,repr(w.layer_styles),id(staged_info),allow_pad,tuple(sorted(deleted)) if deleted else (),tuple(sorted(restored)) if restored else (),id(nodes),waiver_stamp,viewport)
         if stamp==self.stamp:self.draw_labels();return
         if self.stamp is not None and self.stamp[0]!=id(data) and edit is None:
             if self.hover is not None:self.hover.set_visible(False)
@@ -490,7 +523,6 @@ class ReconstructionOverlay:
                 if face.geom_type=='Point':(far_dots if kind=='extra' else dots).append(face.coords[0])
                 else:(second if kind=='extra' else first).extend(_lines(face))
         self.hit_geometry=shapely.STRtree([g for _,_,g in self.hit_items])
-        from .between_motion import LABELS,lookup_mode
         paint_by_ref=defaultdict(list);staged_between=[]
         previous=(staged_info or {}).get('previous')
         for block in (data or {}).get('between_blocks',()):
@@ -516,6 +548,7 @@ class ReconstructionOverlay:
             if middle:g=g.difference(shapely.union_all(middle))
             if not g.is_empty:
                 region_groups[layer,index,'B','following' if (layer,index) in following else '']={id(g):g}
+        stationary_clips=defaultdict(list)
         for (layer,index,kind,status),values in sorted(region_groups.items(),key=lambda item:RANK.get(item[0][3].removeprefix('low_'),-1)):
             geos=tuple(values.values());cache_key=(layer,index,kind,status,tuple(values));previous=old_unions.get(cache_key)
             g=previous[1] if previous is not None and all(a is b for a,b in zip(previous[0],geos)) else (geos[0] if len(geos)==1 else shapely.union_all(geos))
@@ -528,7 +561,9 @@ class ReconstructionOverlay:
                 color=FOLLOW_COLOR if status=='following' else w.style_for(layer)['color']
                 alpha=FOLLOW_ALPHA if status=='following' else w.style_for(layer)['alpha']
                 if kind=='C':color=between_color(to_rgba(color)[:3],status)
-            self.union_cache[cache_key]=(geos,g);paths.setdefault((layer,kind),[]).append(patch(g));colors.setdefault((layer,kind),[]).append(to_rgba(color,alpha))
+            shape=patch(g)
+            if kind=='C' and status==STATIONARY:stationary_clips[layer].append(shape.get_path())
+            self.union_cache[cache_key]=(geos,g);paths.setdefault((layer,kind),[]).append(shape);colors.setdefault((layer,kind),[]).append(to_rgba(color,alpha))
         for key in paths:
             if key not in self.artists:
                 artist=PatchCollection([],linewidths=0);w.ax.add_collection(artist);self.artists[key]=artist
@@ -536,6 +571,7 @@ class ReconstructionOverlay:
             shapes=paths.get((layer,k),[]);artist.set_paths(shapes);artist.set_visible(bool(shapes));artist.set_facecolors(colors.get((layer,k),[]));artist.set_edgecolors('none')
             artist.set_alpha(None)
             artist.set_zorder(2+(order.index(layer) if layer in order else 0)/max(1,len(order))+.001*('BCA'.index(k)+1))
+        self.draw_stationary_pattern(stationary_clips,viewport)
         from matplotlib.colors import to_rgba
         staged=[];staged_faces=[];staged_edges=[];tag_items=[]
         staged_refs=set((data or {}).get('draft_refs',()))
@@ -728,7 +764,7 @@ class ReconstructionOverlay:
         self.w.cut_drag.retained=None
         self.staged_overlay=None;self._stage_frame=None;self.between_views={}
         self.clear_hover();self.stamp=None;self.handles={};self.zone_views={};self.zone_clips={};self.hit_items=[];self.hit_geometry=None
-        for artist in [*self.artists.values(),*self.labels,*self.staged_tags,*self.end_artists,*self.region_artists,*self.arrow_artists,*[getattr(self,n,None) for n in ('staged','warning','problems','low_problems','cuts','second_cuts','points','second_points')]]:
+        for artist in [*self.artists.values(),*self.stationary_artists.values(),*self.labels,*self.staged_tags,*self.end_artists,*self.region_artists,*self.arrow_artists,*[getattr(self,n,None) for n in ('staged','warning','problems','low_problems','cuts','second_cuts','points','second_points')]]:
             if artist is not None:artist.set_visible(False)
         self.w.scene_renderer.external_draw(None)
 

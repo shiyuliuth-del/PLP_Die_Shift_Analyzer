@@ -484,7 +484,7 @@ jobs:
       - run: >-
           python -m unittest -v test_v76
           test_v73.V73Tests.test_qt_short_between_strip_wins_a_stationary_click
-          test_v71.V71Tests.test_req2_and_req3_between_motion_math_serial_and_two_die
+          test_v55.V55Tests.test_fixed_via_modes_carry_correct_geometry_to_export
 
   v52-scope-followup:
     if: ${{ inputs.resume_v52 == true }}
