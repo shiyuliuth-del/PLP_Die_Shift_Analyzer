@@ -12,7 +12,7 @@ import gdstk
 import numpy as np
 import shapely
 
-from die_shift_studio.between_motion import solve_serial_weights
+from die_shift_studio.between_motion import solve_graph_weights, solve_serial_weights
 from die_shift_studio.contact import ContactModel
 from die_shift_studio.core import Parameters, build_case, read_gds
 from die_shift_studio.fast_preview import GeometryCache
@@ -30,7 +30,10 @@ ROOT = Path(__file__).resolve().parents[1]
 class V75Tests(unittest.TestCase):
     def test_serial_transitions_share_motion_between_policy_anchors(self):
         self.assertEqual(solve_serial_weights(['min', 'average', 'average', 'max']),
-                         [1., 0., 1./3., 2./3., 1., 0.])
+                         [1., .5, .5, .5, .5, 0.])
+        self.assertEqual(solve_serial_weights(['min', 'max']), [1., .5, .5, 0.])
+        self.assertEqual(solve_graph_weights(4, {0:1.,3:0.}, {(0,1):1.,(1,2):1.,(2,3):1.},
+                                             {1:'min',2:'max'}), {0:1.,1:.5,2:.5,3:0.})
         self.assertEqual(solve_serial_weights(['min', 'average', 'max'], moving_is_larger=False),
                          [1., 1., .5, 0., 0.])
         np.testing.assert_allclose(np.diff(solve_serial_weights(['average']*199)), -.005, atol=1e-12)

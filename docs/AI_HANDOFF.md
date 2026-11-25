@@ -1,6 +1,6 @@
 # V75 串联型变与框选联动
 
-`between_motion.solve_serial_weights` 在明确随动锚点之间按有效过渡数线性分配型变量，`motion_order` 处理双运动端参考系里的大小侧互换。分叉装配按材料邻接处理，固定过孔和静止归属接缝保留各自的运动约束。
+`between_motion.solve_serial_weights` 先以 max/min 与 average 约束确定同动边界，再将端到端差量分配给其余有效过渡，`motion_order` 处理双运动端参考系里的大小侧互换。分叉装配按材料邻接处理，固定过孔和静止归属接缝保留各自的运动约束。
 
 `manual_regions.ordered_boxes_by_source` 为每次框选提供顺序来源。重构区、分支和合并结果保存该来源，`CutDrag` 同时编辑关联控制柄并在后台重算受影响源图形。自由模式保持已有的直线边界方向。计算完成后以实际合并结果作为下一次拖动的起点。拆分绑定记录存于 `reconstruction_unlinked_boxes`，类型为原框选顺序编号列表。旧工程缺省仍绑定，原有 schema 5、撤销和 DXF 元数据均可读取。
 

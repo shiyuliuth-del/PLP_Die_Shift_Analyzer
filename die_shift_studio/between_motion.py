@@ -71,15 +71,28 @@ def component_modes(settings, ref, components, tol=1e-3):
 
 
 def solve_serial_weights(modes, *, moving_is_larger=True):
-    """Interpolate equally per transition between explicit terminal choices."""
-    high, low = (1., 0.) if moving_is_larger else (0., 1.)
-    n = len(modes)+1
-    fixed = [(0, 1.), *((i, high if mode=='max' else low)
-                       for i,mode in enumerate(modes,1) if mode!='average'), (n, 0.)]
-    weights = [0.]*(n+1)
-    for (start,a),(end,b) in zip(fixed,fixed[1:]):
-        for i in range(start,end):
-            weights[i]=a+(b-a)*(i-start)/(end-start)
+    """Share the end-to-end change over the cuts left free by local policies."""
+    # The cumulative fraction decreases from the local terminal (1) to the
+    # reference terminal (0). A max/min choice makes exactly one neighbouring
+    # cut rigid. Average ties the magnitudes of its two neighbouring cuts.
+    locked=set()
+    group_ends=[]
+    for i,mode in enumerate(modes,1):
+        if mode=='average':continue
+        follows_left=(mode=='max')==moving_is_larger
+        locked.add(i-1 if follows_left else i)
+        group_ends.append(i)
+    groups=[];start=0
+    for end in (*group_ends,len(modes)+1):
+        groups.append((end-start,not any(i in locked for i in range(start,end))))
+        start=end
+    active=sum(count for count,free in groups if free)
+    if not active:raise ValueError('串联随动约束锁住了全部过渡区')
+    weights=[1.];steps=0
+    for count,free in groups:
+        for _ in range(count):
+            steps+=int(free)
+            weights.append((active-steps)/active)
     return weights
 
 
@@ -91,8 +104,33 @@ def motion_order(point, center, pose, reference):
         float(np.linalg.norm(base-point)),abs(float(reference.base[2])))
 
 
+def _anchored_chains(known, edges, modes):
+    """Use the same equal split on unbranched material inside the graph."""
+    neighbours={}
+    for (a,b),weight in edges.items():
+        neighbours.setdefault(a,{})[b]=weight
+        neighbours.setdefault(b,{})[a]=weight
+    solved={}
+    for start,start_weight in known.items():
+        for first,edge_weight in neighbours.get(start,{}).items():
+            prior,current=start,first
+            path=[]
+            while current not in known:
+                adjacent=neighbours[current]
+                if len(adjacent)!=2 or any(weight!=edge_weight for weight in adjacent.values()):break
+                path.append(current)
+                prior,current=current,next(node for node in adjacent if node!=prior)
+            if path and current in known and current>start:
+                end_weight=known[current]
+                shares=solve_serial_weights([modes.get(i,'max') for i in path],
+                                            moving_is_larger=start_weight>=end_weight)
+                solved.update((i,end_weight+(start_weight-end_weight)*share) for i,share in zip(path,shares[1:]))
+    return solved
+
+
 def solve_graph_weights(physical_count, known, edges, modes):
     """Solve motion weights for floating rigid cells in branched/plane copper."""
+    known={**known,**_anchored_chains(known,edges,modes)}
     unknown = [i for i in range(physical_count) if i not in known]
     values = dict(known)
     if not unknown:
