@@ -293,8 +293,13 @@ def resolve(r,replacements,pieces,states,progress=None):
             protected[ref].append(private(r.model.moved(landing.protected,owner,states)))
     manual_masks={ref:shapely.union_all([q['regions']['A'] for q in rows]) for ref,rows in by_ref.items() if any(q.get('strict_box') is not None for q in rows)}
     manual_before={ref:objects[ref] for ref in manual_masks}
+    stationary={ref:shapely.union_all([q['stationary_regions'] for q in rows if 'stationary_regions' in q])
+                for ref,rows in by_ref.items() if any('stationary_regions' in q for q in rows)}
     def preserves_box(ref,g):
         return ref not in manual_masks or g.symmetric_difference(manual_before[ref]).difference(manual_masks[ref].buffer(r.tol*2)).area<=r.tol*r.tol
+    def preserves_stationary(ref,g):
+        fixed=stationary.get(ref)
+        return fixed is None or g.covers(fixed) or fixed.difference(g.buffer(r.tol)).area<=r.tol*r.tol
     changed=set();repairs={};blocked=list(link_failures);external={};immutable={}
     for ref,values in ports.items():
         external.setdefault(nets[ref][0],[]).extend((nets[ref],g) for g in values)
@@ -318,7 +323,7 @@ def resolve(r,replacements,pieces,states,progress=None):
     def enters_keepout(g):return not r.rules.keepout.is_empty and shapely.relate_pattern(g,r.rules.keepout,'T********')
     def acceptable(ref,candidate):
         branch=branches.get(ref)
-        return (preserves_box(ref,candidate) and not foreign_hits(ref,candidate) and
+        return (preserves_box(ref,candidate) and preserves_stationary(ref,candidate) and not foreign_hits(ref,candidate) and
                 (branch is None or preserves_branch_contacts(candidate,*branch,r.tol)) and
                 same_connections(original[ref],candidate,[g for _,_,g in terminals[ref]],ports[ref],r.tol))
     def attempt(ref,reason,*,pad_only=False):
@@ -432,6 +437,8 @@ def resolve(r,replacements,pieces,states,progress=None):
             if percent!=previous_percent:progress(percent,f'最终连接核验 {number+1}/{len(objects)}');previous_percent=percent
         if any(q.get('box_invalid') for q in by_ref.get(ref,())):blocked.append((ref,'框选动区没有切断运动—固定连接路径，严格区域不能完成适配'))
         if ref in branch_failed:blocked.append((ref,BRANCH_CONTACT))
+        if ref in stationary and not preserves_stationary(ref,objects[ref]):
+            blocked.append((ref,'无法保持指定的静止动区间铜段'))
         if not checked[ref][0]:blocked.append((ref,'无法获得包含全部过孔且保持原拓扑的连通铜'))
         if checked[ref][1]:blocked.append((ref,'固定RDL进入禁布区，无法在保持电连接的同时避让'))
         if foreign_hits(ref,objects[ref]):blocked.append((ref,'固定RDL仍接触其他网络的实际过孔或同层金属'))

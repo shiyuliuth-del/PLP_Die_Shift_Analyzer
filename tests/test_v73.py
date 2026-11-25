@@ -221,6 +221,9 @@ class V73Tests(unittest.TestCase):
             try:
                 w.load_project(job)
                 wait()
+                modes=w.setting_fields['reconstruction_between_motion']
+                self.assertEqual(modes.itemText(0),'静止不动')
+                self.assertEqual(modes.currentData(),'max')
                 trigger = w.setting_fields['reconstruction_pad_trigger_um']
                 accuracy = w.setting_fields['reconstruction_grid_nodes']
                 self.assertEqual(trigger.accessibleName(), '孔盘整体触发')
@@ -253,6 +256,22 @@ class V73Tests(unittest.TestCase):
                 right = MouseEvent('button_press_event', w.canvas, x, y, button=3)
                 with patch.object(W.QMenu, 'popup', lambda widget, *_: menu.append(widget)):
                     show_shape_menu(w, right, (point.x, point.y))
+                summary,stationary,*_=menu[0].actions()
+                self.assertFalse(summary.isEnabled())
+                self.assertTrue(stationary.isEnabled())
+                self.assertEqual(stationary.text(),'动区间随动：静止不动')
+                menu[0].resize(menu[0].sizeHint())
+                screen=menu[0].grab()
+                image=screen.toImage();ratio=screen.devicePixelRatio()
+                def row_color(action):
+                    rect=menu[0].actionGeometry(action)
+                    return image.pixelColor(round((rect.right()-5)*ratio),round(rect.center().y()*ratio)).name()
+                self.assertEqual(row_color(summary),'#e8ebef')
+                self.assertNotEqual(row_color(stationary),row_color(summary))
+                stationary.trigger()
+                wait()
+                self.assertEqual(w.selection.selected_between['mode'],'static')
+                self.assertEqual(w.view_settings.reconstruction_between_overrides,((*block['id'],'static'),))
                 action, = [a for a in menu[0].actions() if a.text().endswith('两侧平均')]
                 action.trigger()
                 wait()

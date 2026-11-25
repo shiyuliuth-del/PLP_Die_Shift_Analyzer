@@ -626,7 +626,8 @@ class MainWindow(W.QMainWindow):
         choices['reconstruction_box_mode']=[('自由','free'),('符合边界角度','aligned')]
         choice(recon,'reconstruction_box_mode','框选边界')
         choices['reconstruction_fixed_via_mode']=[('关闭','off'),('全局模式','global'),('分别处理','individual')]
-        choices['reconstruction_between_motion']=[('跟随幅度大的一侧','max'),('跟随幅度小的一侧','min'),('两侧平均','average')]
+        from .between_motion import LABELS,MODES
+        choices['reconstruction_between_motion']=[(LABELS[mode],mode) for mode in MODES]
         follow_row=W.QWidget();follow_layout=W.QHBoxLayout(follow_row);follow_layout.setContentsMargins(0,0,0,0)
         fixed_via_box=W.QComboBox()
         for text,value in choices['reconstruction_fixed_via_mode']:fixed_via_box.addItem(text,value)

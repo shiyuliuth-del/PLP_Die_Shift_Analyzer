@@ -28,8 +28,13 @@ class PairFrame:
         return cls(center, base, np.r_[xy, state[2] - base[2]])
 
     def boundary_state(self, fraction):
-        return np.r_[self.base[:2] + rotate(self.relative[:2] * fraction, self.base[2]),
-                     self.base[2] + self.relative[2] * fraction]
+        return self.world_pose(self.relative*fraction)
+
+    def world_pose(self,state):
+        return np.r_[self.base[:2]+rotate(state[:2],self.base[2]),self.base[2]+state[2]]
+
+    def local_pose(self,state):
+        return np.r_[rotate(state[:2]-self.base[:2],-self.base[2]),state[2]-self.base[2]]
 
 
 @dataclass(frozen=True)
@@ -102,6 +107,14 @@ def _move_branch_evidence(piece,center,state):
         piece['branch_conflict']=transform(piece['branch_conflict'],center,state)
 
 
+def _record_boundary_states(piece,owner_frame):
+    local=piece.get('local_boundary_states')
+    piece['boundary_states']=(tuple(owner_frame.world_pose(state) for state in local) if local is not None
+                              else tuple(owner_frame.boundary_state(weight) for weight in piece.get('endpoint_weights',(1.,0.))))
+    piece['relative_pose']=owner_frame.relative
+    piece['base_pose']=owner_frame.base
+
+
 def repose(pieces, geometry, pose):
     """Map the assembled local copper and visible before/after witnesses to world XY."""
     from .reconstruction import transform
@@ -111,10 +124,7 @@ def repose(pieces, geometry, pose):
         for q in pieces:
             owner_frame = pose.per_owner.get(q['die'])
             if owner_frame is not None:
-                weights = q.get('endpoint_weights', (1., 0.))
-                q['boundary_states'] = tuple(owner_frame.boundary_state(weight) for weight in weights)
-                q['relative_pose'] = owner_frame.relative
-                q['base_pose'] = owner_frame.base
+                _record_boundary_states(q,owner_frame)
             if not np.any(pose.base):
                 continue
             _move_branch_evidence(q,pose.center,pose.base)
@@ -133,10 +143,7 @@ def repose(pieces, geometry, pose):
     if np.any(pose.base):
         geometry = transform(geometry, pose.center, pose.base)
     for q in pieces:
-        weights = q.get('endpoint_weights', (1., 0.))
-        q['boundary_states'] = tuple(pose.boundary_state(weight) for weight in weights)
-        q['relative_pose'] = pose.relative
-        q['base_pose'] = pose.base
+        _record_boundary_states(q,pose)
         if not np.any(pose.base):
             continue
         _move_branch_evidence(q,pose.center,pose.base)

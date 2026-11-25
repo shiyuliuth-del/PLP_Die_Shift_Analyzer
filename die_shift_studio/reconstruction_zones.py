@@ -287,24 +287,29 @@ def expand(r,entries):
 def serial_render(r,entry,part,center,pose):
     from .reconstruction import transform
     from .reconstruction_route import warp
-    left,right=entry['serial_left'],entry['serial_right']
+    from .moving_pair import PairFrame
+    left,right=serial_boundary_states(entry,pose)
     adjusted=dict(part,C=entry['serial_block'],B=entry['serial_fixed'])
-    if abs(left-right)<=1e-12 or not np.any(pose):
-        active=transform(part['A'],center,pose*right)
-        regions=dict(A=active,C=transform(entry['serial_block'],center,pose*left),B=entry['serial_fixed'])
+    moved=transform(entry['serial_block'],center,left)
+    if np.max(abs(left-right))<=1e-12:
+        active=transform(part['A'],center,right)
+        regions=dict(A=active,C=moved,B=entry['serial_fixed'])
         return adjusted,regions,None
-    theta=right*pose[2];co,si=np.cos(theta),np.sin(theta)
-    translation=np.array([[co,si],[-si,co]])@((left-right)*pose[:2])
-    relative=np.r_[translation,(left-right)*pose[2]]
+    relative=PairFrame.from_endpoints(center,left,center,right).relative
     geos,error=warp(part,entry['plan'],center,relative,r.settings.reconstruction_style)
     if error:return adjusted,None,error
-    active=transform(geos['A'],center,pose*right)
-    seams=shapely.union_all([transform(part['C'],center,pose*left).boundary,transform(part['B'],center,pose*right).boundary])
+    active=transform(geos['A'],center,right)
+    seams=shapely.union_all([transform(part['C'],center,left).boundary,transform(part['B'],center,right).boundary])
     # Native candidate coordinates may have been rounded by one DBU. Restore
     # shared source endpoints AFTER composing partial rigid rotations.
     active=shapely.snap(active,seams,r.tol*2)
-    regions=dict(A=active,C=transform(entry['serial_block'],center,pose*left),B=entry['serial_fixed'])
+    regions=dict(A=active,C=moved,B=entry['serial_fixed'])
     return adjusted,regions,None
+
+
+def serial_boundary_states(entry,pose):
+    if 'serial_local_states' in entry:return entry['serial_local_states']
+    return (pose*entry.get('serial_left',1.),pose*entry.get('serial_right',0.))
 
 
 def live_serial(original,settings,old,ref,draft=False):

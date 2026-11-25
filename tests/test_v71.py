@@ -306,7 +306,7 @@ class V71Tests(unittest.TestCase):
                 self.assertEqual(between_combo.currentData(), 'max')
                 self.assertEqual(
                     [between_combo.itemText(i) for i in range(between_combo.count())],
-                    ['跟随幅度大的一侧', '跟随幅度小的一侧', '两侧平均'],
+                    ['静止不动', '跟随幅度大的一侧', '跟随幅度小的一侧', '两侧平均'],
                 )
                 row_parent = fixed_combo.parentWidget()
                 self.assertIs(row_parent, between_combo.parentWidget())

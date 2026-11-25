@@ -1,4 +1,6 @@
-# Die Shift Analyze V75
+# Die Shift Analyze V76
+
+V76 新增「静止不动」动区间随动策略，纯信息菜单行用灰色背景显示。见 [V76 使用说明](docs/V76_使用说明.md)。
 
 V75 按两侧随动关系识别需要型变的串联动区，再均分型变量，支持绑定动区联动预览与拆分，修复 SH22 自动边界缺段和跨归属铜段点选。见 [V75 使用说明](docs/V75_使用说明.md)。
 
@@ -51,7 +53,7 @@ V50：芯片对重点组合、分叉边界修正、当前姿态GDS/OAS与旋转E
 软件分析Die-first封装的DIE平移与旋转，提供三方案初筛、实体覆盖与极端足迹、通道宽度风险、重构动区编辑、规则/联合模型良率、工程结果保存、GDS/OAS导入、实测IPC及批量OAS输出。长度均为μm，GDS/OAS只读，工程节点可编辑。
 
 - [实测IPC接口与注意事项](docs/MEASURED_OUTPUT_API.md) · [GD55-1105独立验证脚本](tools/verify_measured_gd55.py)
-- [用户操作](docs/V75_使用说明.md)
+- [用户操作](docs/V76_使用说明.md)
 - [AI交接：主要功能、代码地图、算法和后续重点](docs/AI_HANDOFF.md)
 - [现行设计合同](docs/DESIGN_REQUIREMENTS.md)
 - [已知边界](docs/KNOWN_ISSUES.md)

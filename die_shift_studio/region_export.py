@@ -168,10 +168,15 @@ def layer_contours(task):
     resolved=[q for q in rows if not q.get('box_invalid')]
     masks={k:shapely.union_all([q['regions'][k] for q in resolved]) for k in 'AC'}
     if between:
+        from .between_motion import STATIONARY
         middle=shapely.union_all([block['nominal'] for block in between])
-        moving=shapely.union_all([block['nominal'] for block in between if block['mode']=='max' or block['moves']])
+        stationary=shapely.union_all([block['nominal'] for block in between if block['mode']==STATIONARY])
+        moving=shapely.union_all([block['nominal'] for block in between
+                                  if block['mode']!=STATIONARY and (block['mode']=='max' or block['moves'])])
         # Internal C is the moving side, written to public DXF layer _A.
         masks['C']=shapely.union_all([masks['C'].difference(middle),moving])
+        if not stationary.is_empty:
+            for k in 'AC':masks[k]=masks[k].difference(stationary)
     # A transition face owns all its material. Remove coincident motion masks
     # before projecting seams into the compensation collar.
     if not masks['A'].is_empty and not masks['C'].is_empty:
