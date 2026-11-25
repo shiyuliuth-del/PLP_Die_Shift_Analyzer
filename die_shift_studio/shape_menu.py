@@ -19,7 +19,7 @@ def show_shape_menu(window,event,point):
     picked=None;between=None
     if window.reconstruction_toggle.isChecked():
         picked=window.reconstruction_overlay.pick(*point,window.cut_drag._tolerance())
-        current=selection.selected_between
+        current=getattr(selection,'selected_between',None)
         if current is not None and current['geometry'].contains(Point(point)):
             # Give the selected strip its own menu even if it is narrower than
             # the two adjacent boundary handles' pointer tolerance.
