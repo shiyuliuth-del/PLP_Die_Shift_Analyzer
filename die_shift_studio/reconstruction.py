@@ -788,7 +788,8 @@ class Reconstructor:
         entries=[q for q in entries if (selected is None or (q['layer'],q['index']) in selected) and (q['layer'],q['index']) not in retained_refs]
         from .moving_pair import MultiPairFrame,frames as paired_frames,repose
         references=paired_frames(entries,self.model.bound.centers,states,settings=self.settings,interval_fn=lambda e:self.interval(e))
-        local_states={}
+        local_states={};orders={}
+        from .between_motion import motion_order,solve_serial_weights
         for entry in entries:
             ref=entry['layer'],entry['index']
             if ref in references:
@@ -799,13 +800,33 @@ class Reconstructor:
                     if owner_frame is not None:local_states[ref][entry['owner']]=owner_frame.relative
                 else:
                     local_states[ref][entry['owner']]=ref_pose.relative
+                owner=entry['owner']
+                if (ref,owner) not in orders:
+                    relative=ref_pose.per_owner.get(owner) if isinstance(ref_pose,MultiPairFrame) else ref_pose
+                    if relative is not None:
+                        point=entry['source'].representative_point().coords[0]
+                        orders[ref,owner]=motion_order(point,self.model.bound.centers[owner],states[owner],ref_pose)
+        adjusted=[]
+        shares={}
+        for entry in entries:
+            ref=(entry['layer'],entry['index']);owner=entry['owner']
+            if orders.get((ref,owner),True):
+                adjusted.append(entry);continue
+            values={'motion_reversed':True}
+            if 'serial_left' in entry:
+                modes=entry['serial_modes'];i=entry['serial_position']
+                if modes not in shares:shares[modes]=solve_serial_weights(modes,moving_is_larger=False)
+                weights=shares[modes];values.update(serial_left=weights[i],serial_right=weights[i+1])
+            # Keep stable base-entry identity for nominal interval memoization.
+            adjusted.append(dict(entry,**values,nominal_entry=entry))
+        entries=adjusted
         # Independent source features share no mutable geometry. GEOS releases
         # the GIL for warp/validation, so larger frames use the existing hardware
         # admission policy rather than serially processing every route.
         def render(entry):
             if selected is not None and (entry['layer'],entry['index']) not in selected:return None
             ref=entry['layer'],entry['index'];pose=local_states.get(ref,states)[entry['owner']]
-            token=(id(entry),pose.tobytes())
+            token=(id(entry.get('nominal_entry',entry)),pose.tobytes(),entry.get('motion_reversed',False))
             if render_cache is not None and token in render_cache:
                 part,manual,regions,error,warning=render_cache[token]
                 return part,manual,None if regions is None else dict(regions),error,warning
@@ -881,7 +902,7 @@ class Reconstructor:
             shift=float(np.linalg.norm(self.model.moved(shapely.Point(entry['mine'][0]['center']),owner,states).coords[0]-entry['mine'][0]['center']))
             feature=features.setdefault((layer,index),dict(source=source,pieces=[],net=entry['net']))
             piece=dict(ownership_seam=entry.get('ownership_seam',EMPTY),strict_box=part.get('strict_box'),box_invalid=part.get('box_invalid',False),graph_branch=entry.get('graph_branch',False) or part.get('box_complex',False),moving_nominal=entry.get('moving_nominal') if not part.get('box_complex') else plan.land,fixed_nominal=entry.get('fixed_nominal') if not part.get('box_complex') else shapely.union_all(plan.anchors),ignored=entry.get('ignored',False),ignored_following=entry.get('following',False),follow_owners=entry.get('follow_owners',(owner,)),die=owner,layer=layer,index=index,net=entry['net'],via_refs=entry['refs'],vias=[v[1] for v in entry['refs']],
-                       boxed=entry.get('boxed',False),
+                       boxed=entry.get('boxed',False),box_groups=entry.get('box_groups',()),
                        fallback_regions=fallback if part.get('near') is not None else None,connection_failed=bool(error) or not valid,
                        missing_region=part['A'] if part.get('strict_box') is not None or getattr(plan,'plane_domain',False) else missing_area(part,plan,self.model.bound.centers[owner],pose) if plan is not None and part.get('near') is not None else (regions['C'] if entry.get('ignored') and entry.get('following') and not regions['C'].is_empty else source),
                        moving_handle_endpoint=(transform(shapely.Point(plan.route.coords[0]),self.model.bound.centers[owner],pose) if plan is not None else None),
@@ -890,6 +911,7 @@ class Reconstructor:
                        nominal_regions={k:part[k] for k in 'ABC'},regions=regions,
                        movable=part['C'],moved=regions['C'],fixed=regions['B'],immovable=regions['B'],bridge=regions['A'],
                        cut=near,moved_cut=moved_cut,extra_cut=far,span=part['A'],frame_seam=False,
+                       manual_angles=part.get('manual_angles',(False,False)),
                        whole_landing=bool(plan and a==0),whole_fixed_landing=bool(far is not None and far.geom_type=='Point'),chain_ends=[entry['mine'][0]['center'].tolist(),entry['anchors'][0].centroid.coords[0] if entry['anchors'] else entry['mine'][0]['center'].tolist()],
                        chain_anchor=None,seam=[None if near is None else list(near.centroid.coords[0]),None if moved_cut is None else list(moved_cut.centroid.coords[0])],
                        movable_area_um2=part['C'].area,moved_area_um2=regions['C'].area,fixed_area_um2=regions['B'].area,
@@ -899,13 +921,14 @@ class Reconstructor:
                        cut_clamped=False,cut_window=None,orphan=entry['orphan'],follows=entry.get('following',entry['orphan']),warning=warning,valid=valid,priority_failure_mass=self.manual_masses.get((plan.key,plan.identity,a,b),entry.get('priority_failure_mass')) if plan else None)
             if piece['graph_branch']:
                 piece['branch_section']=part if part.get('strict_box') is not None else entry.get('merged_part') if piece['boxed'] else None
+                piece['motion_reversed']=entry.get('motion_reversed',False)
             if 'serial_between' in entry:
                 blk,mode_b,custom_b,anchor_b=entry['serial_between']
                 if anchor_b is not None and not blk.is_empty:
                     posed_blk=transform(blk,self.model.bound.centers[owner],pose*entry['serial_left']) if np.any(pose) and entry['serial_left'] else blk
                     piece['serial_between_block']=dict(ref=(layer,index),id=(layer,index,*anchor_b),nominal=blk,geometry=posed_blk,mode=mode_b,custom=custom_b,weight=entry['serial_left'])
             pieces.append(piece);feature['pieces'].append(piece)
-        from .branch_regions import consolidate
+        from .branch_regions import consolidate,fixed_between_owners
         pieces=consolidate(self,pieces,states,local_states)
         features={}
         for q in pieces:
@@ -914,6 +937,7 @@ class Reconstructor:
         from .between_motion import anchor_of
         for (layer,index),feature in features.items():
             ps=feature['pieces'];source=feature['source']
+            between_start=len(between_blocks)
             owners=sorted({q['die'] for q in ps}|{v['owner'] for v in self.vias_by_target.get((layer,index),()) if v['owner']>=0})
             ref_between_overrides=tuple(o for o in getattr(self.settings,'reconstruction_between_overrides',()) if (o[0],o[1])==(layer,index))
             compose_key=('composed-continuity-v73',self.rules.identity,layer,index,quick,self.settings.reconstruction_style,self.settings.reconstruction_boundary_mode,self.settings.reconstruction_allow_moving_pad,
@@ -955,6 +979,8 @@ class Reconstructor:
                     weight=block['weight']
                     item['moves']=bool((q['die'] in self.active_dies and weight>1e-10) or (base_moves and weight<1.-1e-10))
                     between_blocks.append(item)
+            if ref_pose is None:
+                between_blocks.extend(fixed_between_owners(source,ps,between_blocks[between_start:],(layer,index),self.tol))
             out.setdefault(layer,[]).append(dict(indices=(index,),geometry=geometry,net=feature['net'],movable=occupied,moved=shapely.union_all([q['moved'] for q in ps])))
         for layer,rows in retained.items():out.setdefault(layer,[]).extend(rows)
         pieces.extend(retained_pieces)

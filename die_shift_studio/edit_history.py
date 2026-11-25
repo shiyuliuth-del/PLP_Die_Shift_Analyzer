@@ -9,7 +9,7 @@ from .area_filter import remap_project
 
 DRC_FIELDS=('drc_waived_refs','drc_retained_refs')
 RECONSTRUCTION_FIELDS=tuple('reconstruction_'+name for name in (
-    'regions','boxes','angle_boxes','box_order','box_starts','box_excluded','fixed_via_follows','between_overrides','cuts','extra_cuts',
+    'regions','boxes','angle_boxes','box_order','box_starts','unlinked_boxes','box_excluded','fixed_via_follows','between_overrides','cuts','extra_cuts',
     'second_cuts','dropped_cuts','ignored','following','forced','angles','deleted','added','intervals'))
 EDIT_FIELDS=RECONSTRUCTION_FIELDS+DRC_FIELDS
 

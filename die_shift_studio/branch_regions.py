@@ -147,6 +147,49 @@ def merge_rigid_cells(cells,tol):
     return [group[0] if len(group)==1 else shapely.union_all(group) for group in groups.values()]
 
 
+def display_blade(selected, interfaces, guides, tol):
+    """Recover a full straight section when nearly coincident cuts split its ink."""
+    if selected.geom_type!='LineString' or selected.is_empty:return selected
+    candidates=[]
+    for guide in guides:
+        if guide.geom_type!='LineString' or guide.length<=selected.length+tol:continue
+        # A shared branch may give two cuts a slightly different tilt. Require
+        # support along the whole guide, so nearby unrelated branches cannot
+        # extend a short, legitimate section.
+        corridor=max(tol*8,guide.length*.005)
+        if not guide.buffer(corridor).covers(selected):continue
+        support=guide.intersection(interfaces.buffer(corridor)).length
+        if support>=guide.length-tol*16:candidates.append(guide)
+    return min(candidates,key=lambda g:(g.distance(selected),-g.length),default=selected)
+
+
+def fixed_between_owners(source, rows, blocks, ref, tol):
+    """Expose stationary copper between cuts on opposite sides of an owner seam."""
+    if len({q['die'] for q in rows})<2:return ()
+    zones=[(q['die'],q['nominal_regions']['A']) for q in rows
+           if not q.get('box_invalid') and not q['nominal_regions']['A'].is_empty]
+    if len({owner for owner,_ in zones})<2:return ()
+    from .between_motion import anchor_of
+    fixed=_fast_union([q['nominal_regions']['B'] for q in rows])
+    moving=_fast_union([q['nominal_regions']['C'] for q in rows])
+    covered=_fast_union([b['nominal'] for b in blocks])
+    cells=source.difference(_fast_union([g for _,g in zones]))
+    tree=shapely.STRtree([g.boundary for _,g in zones])
+    result=[]
+    for cell in parts(cells):
+        delta=max(tol**2,cell.length*tol)
+        if cell.area<=delta or (not covered.is_empty and cell.difference(covered).area<=delta):continue
+        if cell.difference(fixed).area>delta or cell.intersection(moving).area>delta:continue
+        contact=cell.boundary.buffer(tol*2)
+        owners={zones[i][0] for i in tree.query(contact,predicate='intersects')
+                if tree.geometries[i].intersection(contact).length>tol*8}
+        if len(owners)<2:continue
+        ax,ay=anchor_of(cell)
+        result.append(dict(ref=ref,id=(*ref,ax,ay),nominal=cell,geometry=cell,mode='average',custom=False,
+                           moves=False,locked=True))
+    return tuple(result)
+
+
 def assemble(r,source,rows,states):
     from .reconstruction import transform
     from .straight_controls import leaves,representative
@@ -214,12 +257,14 @@ def assemble(r,source,rows,states):
         contacts.append(touching)
         for i in touching:memberships[i]=memberships.get(i,0)+1
         for ix,i in enumerate(ids):
-            for j in ids[ix+1:]:edges[i,j]=edges.get((i,j),0.)+1/max(r._rule_width,rigid[i].distance(rigid[j]))
+            for j in ids[ix+1:]:edges[i,j]=edges.get((i,j),0.)+1.
     unknown=[i for i in range(physical_count) if i not in known]
     from .between_motion import anchor_of,component_modes,solve_graph_weights
     ref=(rows[0]['layer'],rows[0]['index'])
     between_meta=component_modes(r.settings,ref,dict(enumerate(rigid[:physical_count])),r.tol)
     between_modes={i:between_meta[i][0] for i in unknown}
+    if rows[0].get('motion_reversed'):
+        between_modes={i:{'max':'min','min':'max'}.get(mode,mode) for i,mode in between_modes.items()}
     values=solve_graph_weights(physical_count,known,edges,between_modes)
     mobile=[i for i in range(physical_count) if values[i]>1e-12];static=[i for i in range(physical_count) if i not in mobile]
     c=_fast_union([rigid[i] for i in mobile]);b=_fast_union([rigid[i] for i in static])
@@ -336,6 +381,8 @@ def assemble(r,source,rows,states):
         # Each side follows its material section and its own source route.
         remaining=[g for g in leaves(far_original,r.tol) if nearcut.is_empty or g.hausdorff_distance(nearcut)>r.tol*8]
         farcut=representative(shapely.GeometryCollection(remaining),nearcut,r.tol,focus=guides[1] if not guides[1].is_empty else None)
+        nearcut=display_blade(nearcut,near_original,[p['near'] for _,p in contributors if p is not None],r.tol)
+        farcut=display_blade(farcut,shapely.union_all(remaining),[p['far'] for _,p in contributors if p is not None],r.tol)
         if nearcut.geom_type in ('Point','MultiPoint'):high=1.
         missing_face=farcut.is_empty or nearcut.is_empty
         if missing_face and not any(m.get('boxed') for m in members):continue
@@ -348,6 +395,7 @@ def assemble(r,source,rows,states):
                  moved_cut=transform(nearcut,center,pose*high),cut=nearcut,extra_cut=transform(farcut,center,pose*low),endpoint_weights=(high,low),
                  fallback_regions=dict(A=shapely.Polygon(),B=b,C=cposed),connection_failed=not valid,valid=valid,missing_region=group,
                  warning=warning,box_invalid=invalid_box or missing_face,
+                 box_groups=tuple(sorted({g for member in members for g in member.get('box_groups',())})),
                  graph_members=tuple(members),route_identity='graph:'+':'.join(sorted(v['route_identity'] for v in members))+'@'+str(domain_index),
                  source_scope_complete=False,flow_steps=flow_steps,bridge_area_um2=posed.area,movable_area_um2=c.area,moved_area_um2=cposed.area,fixed_area_um2=b.area,
                  whole_landing=nearcut.geom_type in ('Point','MultiPoint'),whole_fixed_landing=farcut.geom_type in ('Point','MultiPoint'),
@@ -384,10 +432,11 @@ def consolidate(r,pieces,states,local_states=None):
         posed=(local_states or {}).get((rows[0]['layer'],rows[0]['index']),states)
         ref=(rows[0]['layer'],rows[0]['index'])
         ref_overrides=tuple(o for o in getattr(r.settings,'reconstruction_between_overrides',()) if (o[0],o[1])==ref)
-        cache_key=('branch-assembly-local-intervals-v73',r.rules.identity,r.settings.reconstruction_style,
+        cache_key=('branch-assembly-local-intervals-v75',r.rules.identity,r.settings.reconstruction_style,
                    getattr(r.settings,'reconstruction_between_motion','max'),ref_overrides,
                    tuple(r.model.bound.centers[rows[0]['die']]),posed[rows[0]['die']].tobytes(),
-                   tuple((q['route_identity'],q['interval'],q['boundary_angles'],q.get('boxed'),tuple(q['nominal_regions'][k].wkb for k in 'ABC')) for q in rows))
+                   tuple((q['route_identity'],q['interval'],q['boundary_angles'],q.get('boxed'),q.get('box_groups'),
+                          q.get('motion_reversed'),tuple(q['nominal_regions'][k].wkb for k in 'ABC')) for q in rows))
         cached=r.geometry_pool.get(cache_key)
         if cached is not None:
             other.extend(dict(q,regions=dict(q['regions'])) for q in cached);continue
@@ -456,4 +505,5 @@ def editable_piece(piece,point,kind=None):
             return dict(row,interval=(a,plan.length) if side else (0.,b),
                         **{name:nearest,**({} if side else {'cut':origin})})
         member=at_terminal(member);companions=[at_terminal(row) for row in companions]
-    return dict(member,graph_edit=True,endpoint_weights=piece['endpoint_weights'],drag_members=tuple(companions))
+    pose={name:piece[name] for name in ('endpoint_weights','boundary_states','boundary_center','relative_pose') if name in piece}
+    return dict(member,**pose,graph_edit=True,drag_members=tuple(dict(row,**pose) for row in companions))
