@@ -59,7 +59,9 @@ def decode(x):
 
 def identity(w):
     from dataclasses import asdict
-    return logical_fingerprint((__version__,w.data.geometry_id,w.data.top_name,w.roles(),w.ordered_layers(),w.motions(),asdict(w.params()),asdict(w.view_settings)))
+    settings=asdict(w.view_settings)
+    settings.pop('ui_scale_percent')
+    return logical_fingerprint((__version__,w.data.geometry_id,w.data.top_name,w.roles(),w.ordered_layers(),w.motions(),asdict(w.params()),settings))
 
 
 def portable_path(target,base):

@@ -9,6 +9,7 @@ ELEMENTS={'固定RDL':'原始固定 RDL 线路','运动RDL':'原始运动 RDL �
           '标注':'文字和箭头','边距':'封装边缘与禁布区违规'}
 DEFAULTS={k:'dim' if k in ('固定RDL','运动RDL') else 'show' for k in ELEMENTS}
 FIXED_VIA_MODES=(('关闭','off'),('全局随动','global'),('全局静止','global_static'),('分别处理','individual'))
+UI_SCALE_LEVELS=tuple(range(10,301,10))
 
 
 def normalize_display(values):
@@ -21,6 +22,7 @@ def normalize_display(values):
 @dataclass(frozen=True)
 class ViewSettings:
     max_undo_steps:int=10
+    ui_scale_percent:int=100
     space_export_interval_um:float=100.
     from .drc_policy import ALL
     drc_checks:tuple=ALL
@@ -254,6 +256,7 @@ class ViewSettings:
         known={f.name for f in fields(cls)};q=cls(**{k:v for k,v in (values or {}).items() if k in known})
         if not isinstance(q.result_cache_directory,str):raise ValueError('结果临时文件目录必须为文本')
         choices={'reconstruction_boundary_mode':('perpendicular','wide','balanced'),'reconstruction_style':('linear','c1','c2','arc'),'width_yield_method':('importance','grid'),'yield_method':('monte_carlo','partition'),'acceleration':('auto','cpu','cuda'),'probability_method':('sobol','monte_carlo','quadrature'),
+                 'ui_scale_percent':UI_SCALE_LEVELS,
                  'space_cmap':('pastel','YlGnBu','BuPu','viridis','cividis'),
                  'space_interpolation':('nearest','bilinear','bicubic'),
                  'probability_interpolation':('nearest','bilinear','bicubic'),
@@ -267,7 +270,7 @@ class ViewSettings:
                 'footprint_samples':(1,8),'space_resolution':(31,401),
                 'animation_fps':(10,120),'animation_speed':(1,5),'camera_speed':(1,5),'contact_box_budget':(128,32768),'animation_duration_ms':(80,3000),'animation_steps':(2,60),'probability_alpha':(.05,.95),'space_alpha':(.05,.95),'intrusion_alpha':(.05,.85)}
         integers={'width_yield_decimals','width_label_decimals','animation_fps','animation_speed','camera_speed','contact_box_budget','sample_exponent','random_seed','quadrature_order','angle_bins','footprint_samples','space_resolution','animation_duration_ms','animation_steps'}
-        integers.update(('max_threads','max_memory_mb','table_page_limit'))
+        integers.update(('max_threads','max_memory_mb','table_page_limit','ui_scale_percent'))
         limits.update(table_page_limit=(2,2000),max_threads=(0,1024),max_memory_mb=(0,16777216))
         limits['max_undo_steps']=(0,1000);integers.add('max_undo_steps')
         limits['space_export_interval_um']=(.001,10000.)

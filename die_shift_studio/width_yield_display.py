@@ -12,7 +12,8 @@ class YieldLabel(W.QLabel):
     """Keep both numbers on the toolbar row without changing the plot height."""
     def __init__(self,parent):
         super().__init__(parent)
-        self.parts=None;self.pixel_size=12;self.width_active=False;self.width_text="";self.extra_text="";self.width_tip="";self.extra_tip=""
+        self.parts=None;self.pixel_size=12;self.preferred_font_px=12;self.minimum_font_px=8
+        self.width_active=False;self.width_text="";self.extra_text="";self.width_tip="";self.extra_tip=""
         self.setAlignment(ALIGN_CENTER);self.setContentsMargins(4,0,4,0)
         self.setStyleSheet('font-size:12px');self.ensurePolished()
         self.setMinimumWidth(0)
@@ -38,18 +39,21 @@ class YieldLabel(W.QLabel):
     def resizeEvent(self,event):
         super().resizeEvent(event);self.reflow()
 
+    def set_font_sizes(self,preferred,minimum):
+        self.preferred_font_px=preferred;self.minimum_font_px=minimum;self.reflow()
+
     def reflow(self):
         prefix,labels,suffix=self.parts or (self.width_text,[],"")
         width=max(1,self.width()-self.contentsMargins().right()-self.contentsMargins().left())
-        font=QtGui.QFont(self.font());font.setPixelSize(12)
+        font=QtGui.QFont(self.font());font.setPixelSize(self.preferred_font_px)
         metrics=QtGui.QFontMetrics(font)
         base=prefix+'  ·  '.join(labels)+suffix
         whole='  ·  '.join(t for t in (base if self.width_active else '',self.extra_text) if t)
         self.setVisible(self.width_active or bool(self.extra_text))
         super().setToolTip('\n\n'.join(t for t in (self.width_tip if self.width_active else '',self.extra_tip) if t))
         text=whole
-        size=12
-        while size>8 and max((metrics.horizontalAdvance(line) for line in text.splitlines()),default=0)>width:
+        size=self.preferred_font_px
+        while size>self.minimum_font_px and max((metrics.horizontalAdvance(line) for line in text.splitlines()),default=0)>width:
             size-=1;font.setPixelSize(size);metrics=QtGui.QFontMetrics(font)
         if size!=self.pixel_size:self.pixel_size=size;self.setStyleSheet(f'font-size:{size}px')
         if metrics.horizontalAdvance(text)>width:

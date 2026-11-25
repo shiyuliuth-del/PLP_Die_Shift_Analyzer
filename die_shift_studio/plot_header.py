@@ -13,11 +13,17 @@ class PlotHeader(W.QWidget):
         self.coordinates.setStyleSheet('font-size:11px')
         toolbar.locLabel=self.coordinates
         toolbar.setParent(self);label.setParent(self)
-        toolbar.setIconSize(QtCore.QSize(18,18))
         toolbar.setStyleSheet('QToolButton {padding:3px; margin:0;}')
-        self.setFixedHeight(max(32,toolbar.sizeHint().height()))
         self.label.setAlignment(ALIGN_CENTER)
-        self.label.hide();self.label.installEventFilter(self);self.layout_items()
+        self.label.hide();self.label.installEventFilter(self);self.scale_interface(int)
+
+    def scale_interface(self, pixels):
+        self.pixels=pixels
+        icon=pixels(18)
+        self.toolbar.setIconSize(QtCore.QSize(icon,icon))
+        self.setFixedHeight(max(pixels(32),self.toolbar.sizeHint().height()))
+        self.label.set_font_sizes(pixels(12),pixels(8))
+        self.layout_items()
 
     def eventFilter(self,obj,event):
         kinds=getattr(QtCore.QEvent,'Type',QtCore.QEvent)
@@ -30,11 +36,11 @@ class PlotHeader(W.QWidget):
     def layout_items(self):
         width=self.width();height=self.height()
         if self.label.isHidden():
-            gutter=min(180,width//3)
+            gutter=min(self.pixels(180),width//3)
             self.toolbar.setGeometry(0,0,width-gutter-4,height)
             self.coordinates.setGeometry(width-gutter,0,gutter,height);return
         ideal=self.toolbar.sizeHint().width()
-        gutter=min(ideal,max(140,(width-480)//2),max(0,width//3))
+        gutter=min(ideal,max(self.pixels(140),(width-self.pixels(480))//2),max(0,width//3))
         self.toolbar.setGeometry(0,0,gutter,height)
         self.coordinates.setGeometry(width-gutter,0,gutter,height)
         self.label.setGeometry(gutter+4,0,max(0,width-2*gutter-8),height)

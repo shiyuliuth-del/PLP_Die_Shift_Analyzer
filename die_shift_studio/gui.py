@@ -30,7 +30,8 @@ from matplotlib.transforms import Affine2D
 from matplotlib import patheffects
 from .plot_geometry import geometry_path
 from .safe_range_plot import draw_safe_ranges
-from .settings import FIXED_VIA_MODES, ViewSettings
+from .settings import FIXED_VIA_MODES, UI_SCALE_LEVELS, ViewSettings
+from .interface_scale import InterfaceScale, pixels
 from .pivots import rotation_centers
 from .setting_widgets import PivotEditor,ColorButton,RangeEditor
 from .animation import Transition
@@ -110,6 +111,12 @@ QWidget {font-size: 11px;}
 QHeaderView::section {padding: 2px 3px;}
 QPushButton, QComboBox, QLineEdit, QDoubleSpinBox {padding: 1px 4px; min-height: 16px;}
 '''
+
+TABLE_WIDTHS={
+    'layer_table':(38,38,80,128,98), 'per_die_table':(72,72,72,72,190),
+    'issue_table':(142,76,90,100,100), 'extreme_table':(99,94,94,81),
+    'scheme_table':(230,120,65),
+}
 
 
 class ExtremeRowDelegate(W.QStyledItemDelegate):
@@ -216,6 +223,11 @@ class MainWindow(W.QMainWindow):
         self._build()
         from .analysis_ui import ResultAnalysis
         self.analysis=ResultAnalysis(self)
+        self.interface_scale=InterfaceScale(self,(
+            self.progress,self.task_control.button,self.job_combo,self.save_button,self.runtime_toggle,
+            self.gds_label,self.page_edit,self.grid_mode,self.page_prev,self.page_next,self.runtime_view,
+            self.per_die_table,self.scheme_table,
+        ))
         shortcut=QtGui.QShortcut if hasattr(QtGui,'QShortcut') else W.QShortcut
         self.properties_shortcut=shortcut(QtGui.QKeySequence('Q'),self.canvas)
         self.properties_shortcut.setContext(getattr(Qt,'ShortcutContext',Qt).WidgetWithChildrenShortcut)
@@ -285,7 +297,9 @@ class MainWindow(W.QMainWindow):
         header.toggled.connect(expand);parent.addWidget(header);parent.addWidget(body);registry[title]=header
         return header,body,form
     def _build(self):
-        central=W.QWidget();root=W.QVBoxLayout(central);self.setCentralWidget(central)
+        central=W.QWidget();root=W.QVBoxLayout(central)
+        viewport=W.QScrollArea();viewport.setFrameShape(getattr(W.QFrame,'Shape',W.QFrame).NoFrame)
+        viewport.setWidgetResizable(True);viewport.setWidget(central);self.setCentralWidget(viewport)
         root.setContentsMargins(6,4,6,4);root.setSpacing(4)
         self.header_widget=W.QWidget();header=W.QHBoxLayout(self.header_widget);header.setContentsMargins(0,0,0,0);header.setSpacing(4)
         self.progress=W.QProgressBar();self.progress.setMinimumWidth(90);self.progress.setMaximumWidth(200);self.progress.setMaximumHeight(23);self.progress.setTextVisible(True)
@@ -414,7 +428,7 @@ class MainWindow(W.QMainWindow):
         self.issue_page=0
         self.issue_prev.clicked.connect(lambda:self.show_issue_page(self.issue_page-1));self.issue_next.clicked.connect(lambda:self.show_issue_page(self.issue_page+1))
         self.issue_table=table(['规则问题','图层','要求','实际','X / μm','Y / μm']);self.issue_table.verticalHeader().setVisible(True);iv.addWidget(self.issue_table)
-        for col,width in enumerate((142,76,90,100,100)):self.issue_table.setColumnWidth(col,width)
+        self.scale_table_columns('issue_table')
         self.issue_table.horizontalHeader().setStretchLastSection(True)
         self.issue_table.currentCellChanged.connect(self.issue_row_changed);self.issue_table.cellClicked.connect(lambda *_:self.issue_navigation.start())
         self.issue_table.setContextMenuPolicy(getattr(getattr(Qt,'ContextMenuPolicy',Qt),'CustomContextMenu'))
@@ -436,6 +450,7 @@ class MainWindow(W.QMainWindow):
         page=W.QWidget();v=W.QVBoxLayout(page)
         self.analysis_page=page;upper=W.QWidget();uv=W.QVBoxLayout(upper);uv.setContentsMargins(0,0,0,0);uv.addWidget(self.scheme_canvas,1)
         self.scheme_table=table(['方案','状态','U','选择理由']);self.scheme_table.setMaximumHeight(160);uv.addWidget(self.scheme_table)
+        self.scheme_table.setMinimumHeight(64)
         self.analysis_split=W.QSplitter(VERTICAL);self.analysis_split.addWidget(upper);v.addWidget(self.analysis_split,1);self.tabs.addTab(page,'结果分析')
         safe_page=W.QWidget();sv=W.QVBoxLayout(safe_page);sv.setContentsMargins(0,0,0,0)
         self.safe_range_figure=Figure(figsize=(10,3.6));self.safe_range_canvas=FigureCanvasQTAgg(self.safe_range_figure)
@@ -453,6 +468,14 @@ class MainWindow(W.QMainWindow):
         self.runtime_toggle.setEnabled(self.log_bus.enabled)
         self.log_bus.emit('启动 '+__version__+'；硬件资源 '+str(resource_profile()))
         self.plot_layout()
+    def ui_pixels(self,value):
+        return pixels(value,self.view_settings.ui_scale_percent)
+    def scale_table_columns(self,name=None):
+        for table_name in (TABLE_WIDTHS if name is None else (name,)):
+            grid=getattr(self,table_name)
+            for column,width in enumerate(TABLE_WIDTHS[table_name]):
+                grid.setColumnWidth(column,self.ui_pixels(width))
+        if name is None:self.manual_preview.scale_columns()
     def refresh_runtime(self):
         if not self.runtime_toggle.isChecked() or not self.log_bus.enabled:return
         self.runtime_sequence,lines=self.log_bus.read_after(self.runtime_sequence)
@@ -471,6 +494,12 @@ class MainWindow(W.QMainWindow):
         def group(title):
             return self.collapsible(page,title,self.setting_sections)[2]
         general=group('通用')
+        scale=W.QComboBox()
+        for percent in UI_SCALE_LEVELS:scale.addItem(f'{percent}%',percent)
+        scale.setAccessibleName('界面缩放级别')
+        scale.setToolTip('调整控件与字号，版图仍用原坐标单位。')
+        self.setting_fields['ui_scale_percent']=scale;general.addRow('界面缩放级别',scale)
+        scale.currentIndexChanged.connect(self.settings_changed)
         summary=label('方案1：动静区之间局部重构RDL。\n方案2：RDL整体随动，固定RDL窗口捕获。\n方案3：预制运动RDL，动静接口适配。');summary.setObjectName('Notice');general.addRow(summary)
         self.shortcut_label=label('快捷键（鼠标位于图中）：F 恢复视图，M 手动偏移，K 两次单击测量（吸附图形；Ctrl八方向、Shift水平垂直；Shift/Ctrl+K清空），Shift＋点选/框选追加，Ctrl＋点选/框选扣除，Q 查看或编辑选中图形节点，ESC 退出/取消选择。\n画布获得焦点后：方向键平移当前视野的20%；测量时中键仍可平移。\n普通模式：滚轮缩放，中键平移，右键单击查看选中图形、拖框缩放。\n手动偏移：右键拖动芯片，滚轮旋转，Ctrl＋滚轮缩放。');general.addRow(self.shortcut_label)
         biases=group('系统偏差与相关性')
@@ -723,6 +752,7 @@ class MainWindow(W.QMainWindow):
             widget.blockSignals(False)
         if hasattr(self,'show_issues'):
             self.show_issues.blockSignals(True);self.show_issues.setChecked(self.view_settings.show_contact_markers);self.show_issues.blockSignals(False)
+        if hasattr(self,'interface_scale'):self.interface_scale.apply(self.view_settings.ui_scale_percent)
         self.enable_settings()
     def enable_settings(self):
         self.setting_fields['reconstruction_pad_trigger_um'].setEnabled(self.view_settings.reconstruction_allow_moving_pad)
@@ -759,6 +789,10 @@ class MainWindow(W.QMainWindow):
             blocked=field.blockSignals(True);field.setValue(value);field.blockSignals(blocked)
             values[key]=value
         updated=ViewSettings.from_dict(dict(asdict(self.view_settings),**values))
+        if updated.ui_scale_percent!=self.view_settings.ui_scale_percent:
+            self.view_settings=updated
+            self.interface_scale.apply(updated.ui_scale_percent)
+            return
         waiver_fields=('reconstruction_auto_waive_drc','reconstruction_waiver_mantissa','reconstruction_waiver_exponent')
         if any(getattr(updated,key)!=getattr(self.view_settings,key) for key in waiver_fields):
             switching=updated.reconstruction_auto_waive_drc!=self.view_settings.reconstruction_auto_waive_drc
@@ -945,8 +979,7 @@ class MainWindow(W.QMainWindow):
                 spin=W.QDoubleSpinBox();spin.setRange(0,180 if j==2 else 10000);spin.setDecimals(4 if j==2 else 3);spin.setValue(value);spin.setKeyboardTracking(False)
                 spin.valueChanged.connect(lambda value,i=i,j=j:self.set_die_bound(i,j,value));self.per_die_table.setCellWidget(i,j+1,spin)
             pivot=PivotEditor();pivot.setValue(self.per_die_pivots[i]);pivot.valueChanged.connect(lambda i=i,w=pivot:self.set_die_pivot(i,w.value()));self.per_die_table.setCellWidget(i,4,pivot)
-        for j in range(4):self.per_die_table.setColumnWidth(j,72)
-        self.per_die_table.setColumnWidth(4,190);self.per_die_table.resizeRowsToContents()
+        self.scale_table_columns('per_die_table');self.per_die_table.resizeRowsToContents()
     def set_die_pivot(self,i,value):
         self.per_die_pivots[i]=value;self.per_die_table.resizeRowsToContents()
         if not self.loading:self.invalidate()
@@ -1194,10 +1227,11 @@ class MainWindow(W.QMainWindow):
     def load_gds(self,path,top=None,project=None,project_path=None):
         from .resources import progress_slice,cancel_check
         self.exit_region_mode();current_area=self.fields['minimum_area_um2'].value();current_edge=self.fields['minimum_edge_um'].value()
+        ui_scale=self.view_settings.ui_scale_percent
         def read_and_prepare(progress):
             data=read_gds(path,top,progress_slice(progress,0,.7))
             if isinstance(data,dict):return data
-            settings=project if project and (not project.get('sha256') or project['sha256']==data.sha256) else {'schema_version':5,'parameters':{'minimum_area_um2':current_area,'minimum_edge_um':current_edge},'settings':{'reconstruction_auto':False}}
+            settings=project if project and (not project.get('sha256') or project['sha256']==data.sha256) else {'schema_version':5,'parameters':{'minimum_area_um2':current_area,'minimum_edge_um':current_edge},'settings':{'reconstruction_auto':False,'ui_scale_percent':ui_scale}}
             from .gds_merge import restore_project_geometry
             data,settings=restore_project_geometry(data,settings);data.restored_project=settings
             roles=settings.get('roles',data.auto_roles)
@@ -1312,7 +1346,7 @@ class MainWindow(W.QMainWindow):
                 compensation.setToolTip('输出层轮廓补偿 / μm。负值内缩，正值外扩。')
                 self.compensation_boxes[key]=compensation;self.layer_table.setCellWidget(i,4,compensation)
                 for widget in (check,sel,box,compensation):self.layer_drag.watch_context(widget)
-            for j,width in enumerate([38,38,80,128,98]):self.layer_table.setColumnWidth(j,width)
+            self.scale_table_columns('layer_table')
             self.layer_table.horizontalHeader().setStretchLastSection(True)
             for key,w in self.fields.items():w.setValue(getattr(pars,key))
             self.reference_nsigma=pars.reference_nsigma;self.per_die_pivots=[list(v) for v in pars.die_pivots];self.pivot_editor.setValue([pars.rotation_center,pars.rotation_x_um,pars.rotation_y_um])
@@ -2675,7 +2709,7 @@ class MainWindow(W.QMainWindow):
             for j,v in enumerate([f"{s['scheme']} {s['name']}",s['status'],fmt(s['gamma']),'; '.join(s['reasons'])]):self.scheme_table.setItem(i,j,W.QTableWidgetItem(str(v)))
             if s['scheme']==rec.get('scheme'):
                 for j in range(self.scheme_table.columnCount()):self.scheme_table.item(i,j).setBackground(QtGui.QColor('#fff0d9'))
-        self.scheme_table.setColumnWidth(0,230);self.scheme_table.setColumnWidth(1,120);self.scheme_table.setColumnWidth(2,65);self.scheme_table.horizontalHeader().setStretchLastSection(True);self.scheme_table.resizeRowsToContents();self.scheme_table.setMinimumHeight(64)
+        self.scale_table_columns('scheme_table');self.scheme_table.horizontalHeader().setStretchLastSection(True);self.scheme_table.resizeRowsToContents()
         self.scheme_figure.clear();ax=self.scheme_figure.add_subplot(111);values=[s['gamma'] for s in r['schemes']];finite=[x for x in values if math.isfinite(x)]
         cap=max(1.4,min(8,max(finite or [1])*1.2));display=[min(x,cap) for x in values];ax.barh([0,1,2],display,color=['#a8c5de','#accfbd','#d6bedf'],height=.48)
         ax.axvline(1,color='#708395',ls='--',lw=1);ax.set_yticks([0,1,2],['方案1','方案2','方案3']);ax.invert_yaxis();ax.set_xlim(0,cap*1.15)
@@ -2837,7 +2871,7 @@ class MainWindow(W.QMainWindow):
         self.extreme_table.setVerticalHeaderLabels(['0',*[str(page*size+i) for i in range(1,len(self.page_items)+1)]])
         row=next((j for j,(index,_) in enumerate(self.page_items,1) if index==active),0)
         self.extreme_table.setCurrentCell(row if row or active is None else -1,0);self.extreme_table.blockSignals(False)
-        for j,width in enumerate([99,94,94,81]):self.extreme_table.setColumnWidth(j,width)
+        self.scale_table_columns('extreme_table')
         self.extreme_table.horizontalHeader().setStretchLastSection(True)
         if not keep_pose:self.state_table.setRowCount(0)
         self.refresh_extreme_colors()
