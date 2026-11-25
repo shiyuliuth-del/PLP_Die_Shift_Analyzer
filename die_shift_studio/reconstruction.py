@@ -61,6 +61,28 @@ def _compose_feature(source,ps,tolerance,moving):
                     material=shapely.set_precision(q['regions'][tag],tolerance)
                     q['regions'][tag]=q[geometry_key]=material
                     q[area_key]=material.area
+            from .topology_checks import BRANCH_CONTACT,branch_cells,branch_contacts
+            contacts=branch_contacts(branch_cells(ps),tolerance)
+            if contacts:
+                contact_regions={}
+                rigid_collision=False
+                for i,j,witness in contacts:
+                    if i is None and j is None:
+                        rigid_collision=True
+                        i=min(range(len(ps)),key=lambda k:ps[k]['nominal_regions']['A'].distance(witness))
+                    for row in (i,j):
+                        if row is not None:contact_regions.setdefault(row,[]).append(witness)
+                for row,witnesses in contact_regions.items():
+                    q=ps[row];witness=shapely.union_all(witnesses)
+                    q.update(branch_conflict=witness,connection_failed=True,valid=False,warning=BRANCH_CONTACT,
+                             bridge=EMPTY,bridge_area_um2=0.)
+                    q['regions']['A']=EMPTY
+                if rigid_collision:
+                    # The incompatible rigid pieces cannot both be drawn as
+                    # final copper. Keep the nominal source for diagnosis only.
+                    for q in ps:q.update(regions=dict(A=EMPTY,B=source,C=EMPTY),bridge=EMPTY,moved=EMPTY,fixed=source,
+                                         bridge_area_um2=0.,moved_area_um2=0.,fixed_area_um2=source.area,branch_rigid_unresolved=True)
+                    return source,occupied
         for q in ps:q['fixed']=fixed;q['regions']['B']=fixed;q['fixed_area_um2']=fixed.area
         geometry=shapely.union_all([fixed,*[q['regions'][k] for q in ps for k in 'AC']],grid_size=tolerance if moving else None)
     # With no material motion and a source-preserving style, partition overlay
@@ -814,6 +836,7 @@ class Reconstructor:
                 part,regions,error=serial_render(self,entry,part,self.model.bound.centers[entry['owner']],pose)
             else:part,regions,error,quality=solve(self,entry['plan'],part,self.model.bound.centers[entry['owner']],pose,quick=quick,native_check=False)
             warning=self._manual_warning(entry,part) if not getattr(entry['plan'],'plane_domain',False) and manual and diagnostics and 'serial_left' not in entry and self.settings.reconstruction_boundary_mode=='perpendicular' else entry['warning']
+            if part.get('box_refitted'):warning='已在选框命中的路径补齐截面'+('；'+warning if warning else '')
             self.geometry_pool.put(local_key,(part,manual,None if regions is None else dict(regions),error,warning))
             if render_cache is not None:render_cache[token]=(part,manual,None if regions is None else dict(regions),error,warning)
             return part,manual,regions,error,warning
@@ -874,6 +897,8 @@ class Reconstructor:
                        bridge_length_um=0 if near is None else near.length,bridge_area_um2=regions['A'].area,bridge_span_um=b-a,
                        clearance_um=None,conflict=False,conflict_net=None,conflict_link=None,manual=manual,manual_lost=False,
                        cut_clamped=False,cut_window=None,orphan=entry['orphan'],follows=entry.get('following',entry['orphan']),warning=warning,valid=valid,priority_failure_mass=self.manual_masses.get((plan.key,plan.identity,a,b),entry.get('priority_failure_mass')) if plan else None)
+            if piece['graph_branch']:
+                piece['branch_section']=part if part.get('strict_box') is not None else entry.get('merged_part') if piece['boxed'] else None
             if 'serial_between' in entry:
                 blk,mode_b,custom_b,anchor_b=entry['serial_between']
                 if anchor_b is not None and not blk.is_empty:
@@ -891,7 +916,7 @@ class Reconstructor:
             ps=feature['pieces'];source=feature['source']
             owners=sorted({q['die'] for q in ps}|{v['owner'] for v in self.vias_by_target.get((layer,index),()) if v['owner']>=0})
             ref_between_overrides=tuple(o for o in getattr(self.settings,'reconstruction_between_overrides',()) if (o[0],o[1])==(layer,index))
-            compose_key=('composed-continuity-v71',self.rules.identity,layer,index,quick,self.settings.reconstruction_style,self.settings.reconstruction_boundary_mode,self.settings.reconstruction_allow_moving_pad,
+            compose_key=('composed-continuity-v73',self.rules.identity,layer,index,quick,self.settings.reconstruction_style,self.settings.reconstruction_boundary_mode,self.settings.reconstruction_allow_moving_pad,
                          getattr(self.settings,'reconstruction_between_motion','max'),ref_between_overrides,
                          tuple((owner,states[owner].tobytes(),self.model.bound.centers[owner].tobytes()) for owner in owners),
                          tuple((q['route_identity'],q['interval'],q['boundary_angles'],q.get('ignored'),q.get('ignored_following'),q['endpoint_weights'],q['strict_box'].wkb if q.get('strict_box') is not None else None) for q in ps))
@@ -899,7 +924,7 @@ class Reconstructor:
             if saved is None:
                 pose_states=local_states.get((layer,index),states)
                 geometry,occupied=compose_feature(source,ps,self.tol,feature_moves(ps,pose_states,self.settings.reconstruction_style))
-                names=('regions','bridge','fixed','moved','connection_failed','valid','warning','seam_repair_area_um2','bridge_area_um2','fixed_area_um2','moved_area_um2')
+                names=('regions','bridge','fixed','moved','branch_conflict','branch_rigid_unresolved','connection_failed','valid','warning','seam_repair_area_um2','bridge_area_um2','fixed_area_um2','moved_area_um2')
                 updates=tuple({k:(dict(q[k]) if k=='regions' else q[k]) for k in names if k in q} for q in ps)
                 self.geometry_pool.put(compose_key,(geometry,occupied,updates))
             else:
@@ -918,6 +943,7 @@ class Reconstructor:
                     posed_core=transform(ref_pose.nominal_core,ref_pose.center,ref_pose.base) if np.any(ref_pose.base) else ref_pose.nominal_core
                     between_blocks.append(dict(ref=(layer,index),id=(layer,index,ax,ay),nominal=ref_pose.nominal_core,geometry=posed_core,mode=ref_pose.mode,custom=ref_pose.custom,moves=middle_moves))
             for q in ps:
+                if q.get('branch_rigid_unresolved'):continue
                 blocks=q.get('between_blocks',())
                 if 'serial_between_block' in q:blocks=(*blocks,q['serial_between_block'])
                 base_owners=paired_owners-{q['die']} if len(paired_owners)>1 else paired_owners

@@ -148,7 +148,10 @@ def layer_contours(task):
 
     polygons=list(shapely.get_parts(shapely.union_all(polygons)))
     base='L'+key.replace('/','_D');groups=[]
-    masks={k:shapely.union_all([q['regions'][k] for q in rows]) for k in 'AC'}
+    # Unresolved rectangles are diagnostic artwork. They cannot define a _C
+    # slice or leave a foreign-classification fragment on the source ring.
+    resolved=[q for q in rows if not q.get('box_invalid')]
+    masks={k:shapely.union_all([q['regions'][k] for q in resolved]) for k in 'AC'}
     if between:
         middle=shapely.union_all([block['nominal'] for block in between])
         moving=shapely.union_all([block['nominal'] for block in between if block['mode']=='max' or block['moves']])

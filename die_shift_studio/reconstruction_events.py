@@ -110,7 +110,7 @@ def color_for(q,bank,nominal,*,checked=True):
 
 
 def _compact(q):
-    names=('layer','index','die','net','via_refs','route_identity','regions','nominal_regions','missing_region','moving_terminals','moved_cut','extra_cut','connection_failed','valid','warning','interval','boundary_angles','ignored','ignored_following','orphan','strict_box','box_invalid','relative_pose')
+    names=('layer','index','die','net','via_refs','route_identity','regions','nominal_regions','missing_region','moving_terminals','moved_cut','extra_cut','connection_failed','valid','warning','interval','boundary_angles','ignored','ignored_following','orphan','strict_box','box_invalid','relative_pose','branch_rigid','branch_conflict')
     return {**{k:q[k] for k in names if k in q},'route_available':q.get('route_plan') is not None}
 
 

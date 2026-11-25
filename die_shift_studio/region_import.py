@@ -40,11 +40,12 @@ def edit_fields():
         'reconstruction_fixed_via_follows','reconstruction_box_order','reconstruction_box_starts'))
 
 
-def context_id(data,roles,order,parameters,settings,legacy=False):
+def context_id(data,roles,order,parameters,settings,version=73):
     from .session_cache import logical_fingerprint
     empty=replace(settings,**dict.fromkeys((*edit_fields(),'reconstruction_box_order','reconstruction_box_starts'),()))
     key=empty.reconstruction_key()
-    if legacy:key=(key[0],'nominal-route-continuity-v59',*key[2:-6],*key[-4:])
+    if version==71:key=(key[0],'nominal-route-continuity-v59',*key[2:-6],*key[-4:])
+    elif version==72:key=(key[0],'nominal-route-continuity-v72',*key[2:])
     return logical_fingerprint((data.geometry_id,data.top_name,roles,order,asdict(parameters),key))
 
 
@@ -134,7 +135,7 @@ def resolve_stackup(contours,record,data,current_roles,current_order,current_com
 def recover_metadata(record,contours,data,roles,order,parameters,settings):
     if not isinstance(record,dict):return None
     context=record.get('context')
-    if context!=context_id(data,roles,order,parameters,settings) and context!=context_id(data,roles,order,parameters,settings,legacy=True):return None
+    if not any(context==context_id(data,roles,order,parameters,settings,version) for version in (73,72,71)):return None
     layers=set(contours)
     saved_layers=record.get('layers',())
     if not isinstance(saved_layers,list) or any(not isinstance(k,str) for k in saved_layers) or set(saved_layers)!=layers:return None

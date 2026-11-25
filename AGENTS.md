@@ -1,8 +1,10 @@
 # Agent 自动入口
 
-源码、GitHub与发布只在本规范检出工作。先读 [Agent.md](Agent.md)、[AI交接](docs/AI_HANDOFF.md)、[现行合同](docs/DESIGN_REQUIREMENTS.md)、[已知问题](docs/KNOWN_ISSUES.md) 和 [轮次记录](docs/Agents.md)。当前说明见 [V72 使用说明](docs/V72_使用说明.md)。
+源码、GitHub与发布只在本规范检出工作。先读 [Agent.md](Agent.md)、[AI交接](docs/AI_HANDOFF.md)、[现行合同](docs/DESIGN_REQUIREMENTS.md)、[已知问题](docs/KNOWN_ISSUES.md) 和 [轮次记录](docs/Agents.md)。当前说明见 [V73 使用说明](docs/V73_使用说明.md)。
 
 唯一长期主线是main；最新用户要求优先。保留其他Agent的在途分支，不重写历史tag，不把研究目录整体提交。每轮同步主线、补有意义的回归、记录工程兼容与实际验收，通过PR提交GitHub。正式Release仅源码与校验值，根目录保留 BUILD.bat、DieShiftAnalyze_RUN.bat 和 RealDataAnalyze_RUN.bat。
+
+V73 框选按路径的局部穿越分配，分支在合并铜前检查非名义接触，并把见证带入离散图和电连接门禁。动区间鼠标短按可点选；结构无效的动区不参与 DXF 分类。
 
 V72 草稿按框选顺序应用，单图形重框保留其他图形的旧框。选中用名义锚点追踪当前姿态，动区间策略着色独立于 DRC。动静区 DXF 用工程配置的两侧幅度分类。
 

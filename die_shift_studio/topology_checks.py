@@ -5,6 +5,51 @@ import shapely
 from .resources import parallel_map,resource_profile
 
 
+BRANCH_CONTACT='同网不同支路在型变后产生非名义接触'
+
+
+def branch_cells(rows):
+    """Return the nominal and posed copper before the net is unioned."""
+    cells=[]
+    for i,row in enumerate(rows):
+        a=row['nominal_regions']['A'];b=row['regions']['A']
+        if not a.is_empty and not b.is_empty:cells.append((i,a,b))
+        cells.extend((None,a,b) for a,b in row.get('branch_rigid',()) if not a.is_empty and not b.is_empty)
+    return cells
+
+
+def branch_contacts(cells,tol):
+    """Detect new joins between physical pieces of a single nominal conductor."""
+    if len(cells)<2:return []
+    posed=[shapely.set_precision(b,tol) for _,_,b in cells]
+    left,right=shapely.STRtree(posed).query(posed,predicate='intersects')
+    found=[]
+    for i,j in zip(left,right):
+        if i>=j:continue
+        owner_a,a,_=cells[i];owner_b,b,_=cells[j]
+        if a is b or a.equals(b):continue
+        contact=posed[i].intersection(posed[j])
+        if a.distance(b)<=tol*4:
+            # The existing junction belongs to both pieces. Its grid-wide
+            # seam is permitted, but an overlap away from it is a fold.
+            seam=a.boundary.intersection(b.boundary.buffer(tol*4)).length
+            if contact.area<=a.intersection(b).area+tol*8*max(seam,tol):continue
+        found.append((owner_a,owner_b,contact))
+    return found
+
+
+def preserves_branch_contacts(candidate,baseline,cells,tol):
+    """A subsequent copper repair may not bridge nonincident branch cells."""
+    if len(cells)<2:return True
+    from .reconstruction_route import parts
+    added=parts(candidate.difference(baseline.buffer(tol*2)))
+    for g in added:
+        touches=[nominal for _,nominal,posed in cells if g.dwithin(posed,tol*4)]
+        for i,a in enumerate(touches):
+            if any(a.distance(b)>tol*4 for b in touches[i+1:]):return False
+    return True
+
+
 def same_connections(source,copper,nominal_ports,ports,tol):
     """Keep terminal groups and hole count on each original copper island."""
     from .topology_routing import covers_ports

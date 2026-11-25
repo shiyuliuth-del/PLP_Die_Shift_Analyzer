@@ -94,6 +94,14 @@ def relative_pose(piece, frame):
     return frame['rotation_centers'][owner], piece.get('relative_pose', frame['states'][owner])
 
 
+def _move_branch_evidence(piece,center,state):
+    from .reconstruction import transform
+    if piece.get('branch_rigid'):
+        piece['branch_rigid']=tuple((a,transform(b,center,state)) for a,b in piece['branch_rigid'])
+    if piece.get('branch_conflict') is not None:
+        piece['branch_conflict']=transform(piece['branch_conflict'],center,state)
+
+
 def repose(pieces, geometry, pose):
     """Map the assembled local copper and visible before/after witnesses to world XY."""
     from .reconstruction import transform
@@ -109,6 +117,7 @@ def repose(pieces, geometry, pose):
                 q['base_pose'] = owner_frame.base
             if not np.any(pose.base):
                 continue
+            _move_branch_evidence(q,pose.center,pose.base)
             q['regions'] = {key: transform(g, pose.center, pose.base) for key, g in q['regions'].items()}
             q['bridge'], q['fixed'], q['moved'] = (q['regions'][key] for key in 'ABC')
             q['immovable'] = q['fixed']
@@ -130,6 +139,7 @@ def repose(pieces, geometry, pose):
         q['base_pose'] = pose.base
         if not np.any(pose.base):
             continue
+        _move_branch_evidence(q,pose.center,pose.base)
         q['regions'] = {key: transform(g, pose.center, pose.base) for key, g in q['regions'].items()}
         q['bridge'], q['fixed'], q['moved'] = (q['regions'][key] for key in 'ABC')
         q['immovable'] = q['fixed']

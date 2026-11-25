@@ -1,3 +1,9 @@
+# V73 网内独立分支、短段点选与 DXF 分层
+
+`manual_regions.route_box_spans` 保留平行及回绕路线的各次通过选框的区间。自由框在归属接缝或分支缺少完整截面时，用该路段中可用的局部截面补齐。无有效自由或沿线截面时，受影响的动区输出诊断，继续处理同网络的其他路段。 `branch_regions.assemble` 保存真实刚性邻接关系及动区间铜，手工动区的数量不因短间隔自动压缩。连接固定或运动端点的段可以选中，运动仍由端点约束。
+
+`topology_checks.branch_contacts` 在铜合并前检测名义不相邻的支路新接触及超出名义接缝的明显重叠。 `topology_routing.resolve` 延续失败并限制候选修补，`reconstruction_events._compact` 保留实际见证用于逐姿态核验。DXF 只按可用分区分类源轮廓。回归覆盖 SH22 两个实际坐标、同网两支边缘接触、失效诊断与 DXF 回读，以及真实 Qt 短段点选，见 `tests/test_v73.py`。
+
 # V72 动区草稿、姿态选择与 DXF 随动分层
 
 `manual_regions.ordered_boxes_by_source` 按工程记录的框选顺序索引两类选框，`reconstruction_box_starts` 表示单个源图形重新框选后忽略旧框的起点。字段进入源索引映射、撤销、缓存和 DXF 记录。相向追溯同一条路径只给一个入口分配同一个框，分叉保留真正穿过选框的路线。斜线若穿过框角，先扩展至真实接口可由两个直线截面表达。首个手动范围可接管重叠的自动范围。

@@ -1,4 +1,6 @@
-# Die Shift Analyze V72
+# Die Shift Analyze V73
+
+V73 按实际通过选框的路径分别建立分支动区，核验同网新接触，恢复短动区间点选，并从动静区 DXF 排除无效动区的分类。见 [V73 使用说明](docs/V73_使用说明.md)。
 
 V72 修复关闭自动计算时的动区草稿和姿态切换时的图形选中。动区间按随动策略着色，动静区 DXF 按两侧可达偏移或静止状态归类。SH22 三处铜区用于复现跨 DIE 重复、分叉被旧动区吞并和框选无反应。见 [V72 使用说明](docs/V72_使用说明.md)。
 
@@ -45,7 +47,7 @@ V50：芯片对重点组合、分叉边界修正、当前姿态GDS/OAS与旋转E
 软件分析Die-first封装的DIE平移与旋转，提供三方案初筛、实体覆盖与极端足迹、通道宽度风险、重构动区编辑、规则/联合模型良率、工程结果保存、GDS/OAS导入、实测IPC及批量OAS输出。长度均为μm，GDS/OAS只读，工程节点可编辑。
 
 - [实测IPC接口与注意事项](docs/MEASURED_OUTPUT_API.md) · [GD55-1105独立验证脚本](tools/verify_measured_gd55.py)
-- [用户操作](docs/V72_使用说明.md)
+- [用户操作](docs/V73_使用说明.md)
 - [AI交接：主要功能、代码地图、算法和后续重点](docs/AI_HANDOFF.md)
 - [现行设计合同](docs/DESIGN_REQUIREMENTS.md)
 - [已知边界](docs/KNOWN_ISSUES.md)

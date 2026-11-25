@@ -13,7 +13,7 @@ from .reconstruction_edits import key
 def expand(r,entries):
     from hashlib import sha256
     from .between_motion import anchor_of,lookup_mode,solve_serial_weights
-    from .manual_regions import aligned_partition,usable_partition
+    from .manual_regions import aligned_partition,route_box_spans,usable_partition
     from .reconstruction_edits import apply_angles
     attached=defaultdict(list);seeded={};result=[]
     for row in r.settings.reconstruction_added:
@@ -44,9 +44,19 @@ def expand(r,entries):
     box_parts={}
     crossed_routes={}
 
-    def part_for(plan,is_free,polygon):
-        apply=usable_partition if is_free else aligned_partition
-        return apply(plan,polygon)
+    def parts_for(entry,plan,is_free,polygon):
+        seam=entry.get('ownership_seam')
+        spans=route_box_spans(plan,polygon)
+        for span in spans or (None,):
+            part=usable_partition(plan,polygon,span) if is_free else aligned_partition(plan,polygon,span)
+            if is_free and (entry.get('graph_branch') or (seam is not None and not seam.is_empty)):
+                if part is None or part.get('box_invalid') or part.get('box_complex'):
+                    fitted=aligned_partition(plan,polygon,span)
+                    if fitted is not None:
+                        # Fit only this visited branch when the free rectangle
+                        # cannot form two faces at a fork or an ownership seam.
+                        part=dict(fitted,box_refitted=True)
+            if part is not None:yield part
 
     def assigned_boxes(entry,plan,ref):
         peers=mirrored.get(ref)
@@ -60,23 +70,22 @@ def expand(r,entries):
                                                    if peer['plan'].route.intersection(polygon).length>r.tol}
                     crossed=crossed_routes[cache_key]
                     if crossed and id(entry) not in crossed:continue
-                part=part_for(plan,is_free,polygon)
-                if part is not None:yield is_free,polygon,part
+                for part in parts_for(entry,plan,is_free,polygon):yield is_free,polygon,part
                 continue
             cache_key=(ref,box_idx)
             if cache_key not in box_parts:
                 candidates=[]
                 for peer in peers:
                     route=peer['plan']
-                    part=part_for(route,is_free,polygon)
-                    if part is None:continue
+                    parts=tuple(parts_for(peer,route,is_free,polygon))
+                    if not parts:continue
                     domain=getattr(route,'ownership_domain',route.source)
-                    area=domain.intersection(part['A']).area
-                    candidates.append(((not part.get('box_invalid',False),area,key(route)),peer,part))
-                box_parts[cache_key]=max(candidates,key=lambda c:c[0])[1:] if candidates else (None,None)
-            peer,part=box_parts[cache_key]
+                    area=sum(domain.intersection(part['A']).area for part in parts)
+                    candidates.append(((sum(not p.get('box_invalid',False) for p in parts),area,key(route)),peer,parts))
+                box_parts[cache_key]=max(candidates,key=lambda c:c[0])[1:] if candidates else (None,())
+            peer,parts=box_parts[cache_key]
             if peer is entry:
-                yield is_free,polygon,part
+                for part in parts:yield is_free,polygon,part
 
     def _clone_child(plan,identity,a,b):
         child=copy.copy(plan);child.cache={};child.pose_memo=OrderedDict();child.memo_bytes=0
@@ -84,8 +93,8 @@ def expand(r,entries):
         return child
 
     def _finish_serial(rows,entry):
-        usable=[e for e in rows if e['plan'] is not None]
-        invalid=[e for e in rows if e['plan'] is None]
+        usable=[e for e in rows if e.get('serial_part') is not None]
+        invalid=[e for e in rows if e.get('serial_part') is None]
         usable.sort(key=lambda e:e['serial_part']['a'])
         merged=[]
         for e in usable:
@@ -157,7 +166,7 @@ def expand(r,entries):
                     if part is not None:
                         local=dict(entry,serial_part=part,merged_part=part,serial_explicit=manual)
                         rows.append(local)
-                    else:
+                    elif not applicable_boxes:
                         rows.append(entry)
             else:
                 base,_=r._interval_without_boxes(entry)
@@ -203,7 +212,7 @@ def expand(r,entries):
                 lead=rows[overlapping[0]]
                 new_a=min(ba,*(rows[i]['serial_part']['a'] for i in overlapping))
                 new_b=max(bb,*(rows[i]['serial_part']['b'] for i in overlapping))
-                if is_free:
+                if is_free and not bpart.get('box_refitted'):
                     combined=shapely.union_all([*(rows[i]['serial_part']['A'] for i in overlapping),bp])
                     expanded=usable_partition(lead['plan'],combined)
                     if expanded is None:
