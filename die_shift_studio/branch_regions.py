@@ -190,7 +190,7 @@ def fixed_between_owners(source, rows, blocks, ref, tol):
     return tuple(result)
 
 
-def assemble(r,source,rows,states):
+def assemble(r,source,rows,states,reference=None):
     from .reconstruction import transform
     from .straight_controls import leaves,representative
     owner=rows[0]['die'];pose=states[owner];center=r.model.bound.centers[owner];shifted=bool(np.any(pose))
@@ -215,11 +215,14 @@ def assemble(r,source,rows,states):
     # transition domains of the same owner (e.g. close parallel branch cuts on
     # a shared copper neck) so they form one clean, wider transition zone.
     if len(domains)>1 and not any(q.get('strict_box') is not None or q.get('boxed') for q in rows):
+        from .between_motion import STATIONARY,component_modes
+        ref=(rows[0]['layer'],rows[0]['index'])
+        policies=component_modes(r.settings,ref,dict(enumerate(rigid)),r.tol)
         gap_limit=max(r._rule_width*2.5,50.)
         absorbed=set()
         domain_tree=shapely.STRtree(domains)
         for i,g in enumerate(rigid):
-            if i in known:continue
+            if i in known or policies[i][0]==STATIONARY:continue
             hit_ids=domain_tree.query(g,predicate='dwithin',distance=r.tol*4*(1+1e-6))
             if len(hit_ids)<2:continue
             touching=[domains[int(idx)] for idx in hit_ids if domains[int(idx)].distance(g)<=r.tol*4]
@@ -259,17 +262,29 @@ def assemble(r,source,rows,states):
         for ix,i in enumerate(ids):
             for j in ids[ix+1:]:edges[i,j]=edges.get((i,j),0.)+1.
     unknown=[i for i in range(physical_count) if i not in known]
-    from .between_motion import anchor_of,component_modes,solve_graph_weights
+    from .between_motion import STATIONARY,anchor_of,component_modes,graph_poses,solve_graph_weights
     ref=(rows[0]['layer'],rows[0]['index'])
     between_meta=component_modes(r.settings,ref,dict(enumerate(rigid[:physical_count])),r.tol)
     between_modes={i:between_meta[i][0] for i in unknown}
+    stationary={i for i in unknown if between_modes[i]==STATIONARY and memberships.get(i,0)>1}
+    between_modes={i:mode if i in stationary or mode!=STATIONARY else 'max' for i,mode in between_modes.items()}
+    complex_motion=stationary and reference is not None and np.any(reference.base)
+    absolute_modes=between_modes
     if rows[0].get('motion_reversed'):
         between_modes={i:{'max':'min','min':'max'}.get(mode,mode) for i,mode in between_modes.items()}
     values=solve_graph_weights(physical_count,known,edges,between_modes)
-    mobile=[i for i in range(physical_count) if values[i]>1e-12];static=[i for i in range(physical_count) if i not in mobile]
+    motions={i:pose*weight for i,weight in values.items()}
+    if complex_motion:
+        anchors={i:reference.boundary_state(weight) for i,weight in known.items()}
+        point=source.representative_point().coords[0]
+        absolute=graph_poses(physical_count,anchors,edges,absolute_modes,center,point)
+        motions={i:reference.local_pose(state) for i,state in absolute.items()}
+        shifted=shifted or any(np.any(s) for s in motions.values())
+    mobile=[i for i in range(physical_count) if values[i]>1e-12 or (complex_motion and np.any(motions[i]))]
+    static=[i for i in range(physical_count) if i not in mobile]
     c=_fast_union([rigid[i] for i in mobile]);b=_fast_union([rigid[i] for i in static])
-    posed_rigid=[clean_overlay(transform(g,center,pose*values[i]),r.tol)
-                 if values[i]>1e-12 and shifted else g for i,g in enumerate(rigid[:physical_count])]
+    posed_rigid=[clean_overlay(transform(g,center,motions[i]),r.tol)
+                 if shifted and np.any(motions[i]) else g for i,g in enumerate(rigid[:physical_count])]
     cposed=_fast_union([posed_rigid[i] for i in mobile]);style=r.settings.reconstruction_style
     source_exterior=source.boundary.buffer(r.tol*4)
     def deform(g,ids):
@@ -279,16 +294,15 @@ def assemble(r,source,rows,states):
             points=shapely.points(xy);distances=np.asarray([shapely.distance(points,rigid[i]) for i in ids])
             power={'linear':1,'c1':2,'c2':3,'arc':2}[style]
             weights=np.maximum(distances,r.tol*1e-6)**(-power);weights/=weights.sum(axis=0)
-            motions=np.asarray([values[i] for i in ids])
-            fraction=motions@weights
+            states=np.asarray([motions[i] for i in ids])
+            interpolated=weights.T@states
             nearest=np.argmin(distances,axis=0)
             on_seam=np.min(distances,axis=0)<=r.tol*.05
-            fraction[on_seam]=motions[nearest[on_seam]]
-            from .preview import rigid_transform
+            interpolated[on_seam]=states[nearest[on_seam]]
             # Interpolated angle and translation match each floating rigid block
             # exactly at its boundary; smoothing order sets the endpoint slope.
-            v=xy-center;angles=pose[2]*fraction;co=np.cos(angles);si=np.sin(angles)
-            return np.column_stack([co*v[:,0]-si*v[:,1],si*v[:,0]+co*v[:,1]])+center+fraction[:,None]*pose[:2]
+            v=xy-center;angles=interpolated[:,2];co=np.cos(angles);si=np.sin(angles)
+            return np.column_stack([co*v[:,0]-si*v[:,1],si*v[:,0]+co*v[:,1]])+center+interpolated[:,:2]
         return shapely.transform(dense,coordinates)
     result=[];visible_memberships={};static_domains=[]
     from shapely.ops import substring
@@ -309,8 +323,9 @@ def assemble(r,source,rows,states):
         if not ids and not any(m.get('boxed') for m in members):continue
         q=dict(members[0]);posed=None;flow_steps=0
         q.pop('serial_between_block',None)
+        q.pop('local_boundary_states',None)
         high=max((values[i] for i in ids),default=0.);low=min((values[i] for i in ids),default=0.)
-        if high<=1e-10 and not any(m.get('boxed') for m in members) and not any(
+        if not complex_motion and high<=1e-10 and not any(m.get('boxed') for m in members) and not any(
                 memberships[i]>1 and i not in known for i in touching):
             # A fixed-only isolated cut is not a transition. Its material
             # still belongs to the feature when another domain is emitted.
@@ -350,7 +365,7 @@ def assemble(r,source,rows,states):
         # A common trunk with exactly two material seams is a normal strip,
         # even if several terminal paths share it. Use endpoint-matched curves
         # instead of a distance field which can pinch its two sides inward.
-        if shifted and style in ('linear','arc') and nearcut.geom_type=='LineString' and farcut.geom_type=='LineString' and high>1-1e-10 and low<1e-10 and not any(m.get('strict_box') is not None for m in members):
+        if not complex_motion and shifted and style in ('linear','arc') and nearcut.geom_type=='LineString' and farcut.geom_type=='LineString' and high>1-1e-10 and low<1e-10 and not any(m.get('strict_box') is not None for m in members):
             from .connection_curves import endpoint_active
             plan=q['route_plan'];part=dict(A=group,B=b,C=c,near=full_blade(nearcut,'near'),far=full_blade(farcut,'far'),a=q['interval'][0],b=q['interval'][1],angles=q.get('boundary_angles',(0.,0.)))
             try:
@@ -360,18 +375,19 @@ def assemble(r,source,rows,states):
                 if candidate.is_valid and candidate.geom_type=='Polygon' and not candidate.is_empty:posed=candidate
             except (ValueError,shapely.errors.GEOSException):pass
         if posed is None:
-            posed=transform(group,center,pose*high) if high-low<=1e-10 else deform(group,ids)
+            first=motions[ids[0]] if ids else np.zeros(3)
+            posed=transform(group,center,first) if all(np.max(abs(motions[i]-first))<=1e-10 for i in ids) else deform(group,ids)
         valid=posed.is_valid and posed.geom_type=='Polygon'
         if not valid:
-            from .continuous_warp import domain
-            alternative,flow_steps=domain(group,[rigid[i] for i in ids],[values[i] for i in ids],center,pose,r._rule_width,r.tol)
+            from .continuous_warp import domain_poses
+            alternative,flow_steps=domain_poses(group,[rigid[i] for i in ids],[motions[i] for i in ids],center,r._rule_width,r.tol)
             if alternative is None:
                 # Large common copper can contain overlapping moving/fixed
                 # landing reservations. Those overlapping virtual reservations
                 # cannot both be rigid. Preserve the real material interfaces;
                 # terminal coverage is checked on the resulting physical net.
                 physical=[i for i in ids if i<physical_count]
-                if physical:alternative,flow_steps=domain(group,[rigid[i] for i in physical],[values[i] for i in physical],center,pose,r._rule_width,r.tol)
+                if physical:alternative,flow_steps=domain_poses(group,[rigid[i] for i in physical],[motions[i] for i in physical],center,r._rule_width,r.tol)
             if alternative is not None:posed=alternative;valid=True
         invalid_box=any(q.get('box_invalid') for q in members)
         # Whole-pad controls are physical terminal locations. Floating material
@@ -384,6 +400,12 @@ def assemble(r,source,rows,states):
         nearcut=display_blade(nearcut,near_original,[p['near'] for _,p in contributors if p is not None],r.tol)
         farcut=display_blade(farcut,shapely.union_all(remaining),[p['far'] for _,p in contributors if p is not None],r.tol)
         if nearcut.geom_type in ('Point','MultiPoint'):high=1.
+        def state_at(cut,weight):
+            if not complex_motion or cut.is_empty or cut.geom_type in ('Point','MultiPoint'):return pose*weight
+            around=cut.buffer(r.tol*8)
+            contact=[(rigid[i].boundary.intersection(around).length,i) for i in touching]
+            return motions[max(contact)[1]] if contact else pose*weight
+        left,right=state_at(nearcut,high),state_at(farcut,low)
         missing_face=farcut.is_empty or nearcut.is_empty
         if missing_face and not any(m.get('boxed') for m in members):continue
         valid=valid and not invalid_box and not missing_face and bool(ids)
@@ -392,7 +414,7 @@ def assemble(r,source,rows,states):
         for i in touching:visible_memberships[i]=visible_memberships.get(i,0)+1
         q.update(regions=dict(A=posed,B=b,C=cposed),nominal_regions=dict(A=group,B=b,C=c),
                  bridge=posed,movable=c,moved=cposed,fixed=b,immovable=b,span=group,
-                 moved_cut=transform(nearcut,center,pose*high),cut=nearcut,extra_cut=transform(farcut,center,pose*low),endpoint_weights=(high,low),
+                 moved_cut=transform(nearcut,center,left),cut=nearcut,extra_cut=transform(farcut,center,right),endpoint_weights=(high,low),
                  fallback_regions=dict(A=shapely.Polygon(),B=b,C=cposed),connection_failed=not valid,valid=valid,missing_region=group,
                  warning=warning,box_invalid=invalid_box or missing_face,
                  box_groups=tuple(sorted({g for member in members for g in member.get('box_groups',())})),
@@ -401,6 +423,7 @@ def assemble(r,source,rows,states):
                  whole_landing=nearcut.geom_type in ('Point','MultiPoint'),whole_fixed_landing=farcut.geom_type in ('Point','MultiPoint'),
                  via_refs=tuple(sorted({ref for v in members for ref in v['via_refs']})))
         result.append(q)
+        if complex_motion:q['local_boundary_states']=(left,right)
     if result:
         # All domains report the same complete rigid material, including
         # fixed-only cuts that follow no moving terminal.
@@ -422,7 +445,7 @@ def assemble(r,source,rows,states):
     return result
 
 
-def consolidate(r,pieces,states,local_states=None):
+def consolidate(r,pieces,states,local_states=None,owner_frames=None):
     groups={};other=[]
     for q in pieces:
         if q.get('graph_branch') and q.get('route_plan') is not None:groups.setdefault((q['layer'],q['index'],q['die'],q['route_plan'].source.wkb),[]).append(q)
@@ -432,16 +455,18 @@ def consolidate(r,pieces,states,local_states=None):
         posed=(local_states or {}).get((rows[0]['layer'],rows[0]['index']),states)
         ref=(rows[0]['layer'],rows[0]['index'])
         ref_overrides=tuple(o for o in getattr(r.settings,'reconstruction_between_overrides',()) if (o[0],o[1])==ref)
-        cache_key=('branch-assembly-local-intervals-v75',r.rules.identity,r.settings.reconstruction_style,
+        reference=(owner_frames or {}).get((ref,rows[0]['die']))
+        cache_key=('branch-assembly-local-intervals-v76',r.rules.identity,r.settings.reconstruction_style,
                    getattr(r.settings,'reconstruction_between_motion','max'),ref_overrides,
                    tuple(r.model.bound.centers[rows[0]['die']]),posed[rows[0]['die']].tobytes(),
+                   None if reference is None else reference.base.tobytes(),
                    tuple((q['route_identity'],q['interval'],q['boundary_angles'],q.get('boxed'),q.get('box_groups'),
                           q.get('motion_reversed'),tuple(q['nominal_regions'][k].wkb for k in 'ABC')) for q in rows))
         cached=r.geometry_pool.get(cache_key)
         if cached is not None:
             other.extend(dict(q,regions=dict(q['regions'])) for q in cached);continue
         try:
-            assembled=assemble(r,source,rows,posed)
+            assembled=assemble(r,source,rows,posed,reference)
             r.geometry_pool.put(cache_key,tuple(dict(q,regions=dict(q['regions'])) for q in assembled))
             other.extend(assembled)
         except shapely.errors.GEOSException as exc:

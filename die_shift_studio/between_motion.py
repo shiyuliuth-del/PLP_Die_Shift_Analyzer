@@ -1,11 +1,13 @@
-"""Between-zone rigid copper motion policies (max / min / average)."""
+"""Between-zone rigid copper motion, including layout-fixed anchors."""
 import math
 import numpy as np
 import shapely
 from .preview import rigid_transform
 
-MODES = ('max', 'min', 'average')
+STATIONARY = 'static'
+MODES = (STATIONARY, 'max', 'min', 'average')
 LABELS = {
+    STATIONARY: '静止不动',
     'max': '跟随幅度大的一侧',
     'min': '跟随幅度小的一侧',
     'average': '两侧平均',
@@ -75,6 +77,11 @@ def solve_serial_weights(modes, *, moving_is_larger=True):
     # The cumulative fraction decreases from the local terminal (1) to the
     # reference terminal (0). A max/min choice makes exactly one neighbouring
     # cut rigid. Average ties the magnitudes of its two neighbouring cuts.
+    if STATIONARY in modes:
+        # In this scalar solver the reference terminal is already stationary.
+        first=modes.index(STATIONARY)
+        return [*solve_serial_weights(modes[:first],moving_is_larger=moving_is_larger),
+                *([0.]*(len(modes)-first))]
     locked=set()
     group_ends=[]
     for i,mode in enumerate(modes,1):
@@ -104,13 +111,30 @@ def motion_order(point, center, pose, reference):
         float(np.linalg.norm(base-point)),abs(float(reference.base[2])))
 
 
-def _anchored_chains(known, edges, modes):
+def serial_poses(modes, start, end, center, point):
+    """Interpolate two absolute terminal poses with optional zero-pose knots."""
+    last=len(modes)+1
+    knots=[(0,start),*((i,np.zeros(3)) for i,mode in enumerate(modes,1) if mode==STATIONARY),(last,end)]
+    out=np.empty((last+1,3))
+    for (a,left),(b,right) in zip(knots,knots[1:]):
+        amplitudes=_amplitudes([left,right],center,point)
+        weights=solve_serial_weights(modes[a:b-1],moving_is_larger=amplitudes[0]>=amplitudes[1])
+        out[a:b+1]=right+np.asarray(weights)[:,None]*(left-right)
+    return out
+
+
+def _amplitudes(states, center, point):
+    point=np.asarray(point)
+    return [(float(np.linalg.norm(rigid_transform(point[None,:],center,s)[0]-point)),abs(float(s[2])))
+            for s in states]
+
+
+def _anchored_chains(known, edges):
     """Use the same equal split on unbranched material inside the graph."""
     neighbours={}
     for (a,b),weight in edges.items():
         neighbours.setdefault(a,{})[b]=weight
         neighbours.setdefault(b,{})[a]=weight
-    solved={}
     for start,start_weight in known.items():
         for first,edge_weight in neighbours.get(start,{}).items():
             prior,current=start,first
@@ -121,16 +145,15 @@ def _anchored_chains(known, edges, modes):
                 path.append(current)
                 prior,current=current,next(node for node in adjacent if node!=prior)
             if path and current in known and current>start:
-                end_weight=known[current]
-                shares=solve_serial_weights([modes.get(i,'max') for i in path],
-                                            moving_is_larger=start_weight>=end_weight)
-                solved.update((i,end_weight+(start_weight-end_weight)*share) for i,share in zip(path,shares[1:]))
-    return solved
+                yield path,start_weight,known[current]
 
 
 def solve_graph_weights(physical_count, known, edges, modes):
     """Solve motion weights for floating rigid cells in branched/plane copper."""
-    known={**known,**_anchored_chains(known,edges,modes)}
+    known={**known,**{i:0. for i,mode in modes.items() if mode==STATIONARY and i not in known}}
+    for path,start,end in list(_anchored_chains(known,edges)):
+        shares=solve_serial_weights([modes.get(i,'max') for i in path],moving_is_larger=start>=end)
+        known.update((i,end+(start-end)*share) for i,share in zip(path,shares[1:]))
     unknown = [i for i in range(physical_count) if i not in known]
     values = dict(known)
     if not unknown:
@@ -185,6 +208,35 @@ def solve_graph_weights(physical_count, known, edges, modes):
     return values
 
 
+def graph_poses(physical_count, anchors, edges, modes, center, point):
+    """Solve a branch with a stationary anchor and two moving terminals."""
+    known={**anchors,**{i:np.zeros(3) for i,mode in modes.items() if mode==STATIONARY and i not in anchors}}
+    for path,start,end in list(_anchored_chains(known,edges)):
+        shares=serial_poses([modes.get(i,'max') for i in path],start,end,center,point)
+        known.update(zip(path,shares[1:-1]))
+    unknown={i:[] for i in range(physical_count) if i not in known}
+    for (i,j),weight in edges.items():
+        if i in unknown:unknown[i].append((j,weight))
+        if j in unknown:unknown[j].append((i,weight))
+    values={**dict.fromkeys(unknown,np.zeros(3)),**known}
+    for _ in range(128):
+        delta=0.
+        for i,adjacent in unknown.items():
+            if not adjacent:continue
+            motions,weights=zip(*[(values[j],weight) for j,weight in adjacent])
+            mode=modes.get(i,'max')
+            if mode=='average':
+                target=np.average(motions,axis=0,weights=weights)
+            else:
+                amplitude=_amplitudes(motions,center,point)
+                select=max if mode=='max' else min
+                target=motions[select(range(len(motions)),key=amplitude.__getitem__)]
+            delta=max(delta,float(np.max(abs(target-values[i]))))
+            values[i]=target
+        if delta<=1e-11:break
+    return values
+
+
 def pair_middle_pose(geometry, center_a, state_a, center_b, state_b, mode):
     """Compute rigid (center, state) for a middle core between two moving DIEs."""
     center_a = np.asarray(center_a, float)
@@ -192,6 +244,8 @@ def pair_middle_pose(geometry, center_a, state_a, center_b, state_b, mode):
     state_a = np.asarray(state_a, float)
     state_b = np.asarray(state_b, float)
     p = np.asarray(geometry.centroid.coords[0], float) if geometry is not None and not geometry.is_empty else 0.5 * (center_a + center_b)
+    if mode==STATIONARY:
+        return p,np.zeros(3)
     pa = rigid_transform(p[None, :], center_a, state_a)[0]
     pb = rigid_transform(p[None, :], center_b, state_b)[0]
     da = pa - p
