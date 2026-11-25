@@ -70,26 +70,25 @@ def component_modes(settings, ref, components, tol=1e-3):
     return result
 
 
-def solve_serial_weights(modes):
-    """Solve motion weights [1.0, w_1, ..., w_{K-1}, 0.0] for K-1 intermediate blocks."""
-    m = len(modes)
-    if m == 0:
-        return [1.0, 0.0]
-    w = [1.0] + [1.0 - (i + 1) / (m + 1) for i in range(m)] + [0.0]
-    for _ in range(64):
-        delta = 0.0
-        for i, mode in enumerate(modes, 1):
-            if mode == 'max':
-                nxt = max(w[i - 1], w[i + 1])
-            elif mode == 'min':
-                nxt = min(w[i - 1], w[i + 1])
-            else:
-                nxt = 0.5 * (w[i - 1] + w[i + 1])
-            delta = max(delta, abs(nxt - w[i]))
-            w[i] = nxt
-        if delta <= 1e-12:
-            break
-    return w
+def solve_serial_weights(modes, *, moving_is_larger=True):
+    """Interpolate equally per transition between explicit terminal choices."""
+    high, low = (1., 0.) if moving_is_larger else (0., 1.)
+    n = len(modes)+1
+    fixed = [(0, 1.), *((i, high if mode=='max' else low)
+                       for i,mode in enumerate(modes,1) if mode!='average'), (n, 0.)]
+    weights = [0.]*(n+1)
+    for (start,a),(end,b) in zip(fixed,fixed[1:]):
+        for i in range(start,end):
+            weights[i]=a+(b-a)*(i-start)/(end-start)
+    return weights
+
+
+def motion_order(point, center, pose, reference):
+    """Compare each terminal's actual displacement at the common copper."""
+    placed=rigid_transform(np.asarray([point]),center,pose)[0]
+    base=rigid_transform(np.asarray([point]),reference.center,reference.base)[0]
+    return (float(np.linalg.norm(placed-point)),abs(float(pose[2]))) >= (
+        float(np.linalg.norm(base-point)),abs(float(reference.base[2])))
 
 
 def solve_graph_weights(physical_count, known, edges, modes):

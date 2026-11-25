@@ -37,13 +37,14 @@ def outline_id(contours):
 def edit_fields():
     from .edit_history import RECONSTRUCTION_FIELDS
     return tuple(k for k in RECONSTRUCTION_FIELDS if k not in (
-        'reconstruction_fixed_via_follows','reconstruction_box_order','reconstruction_box_starts'))
+        'reconstruction_fixed_via_follows','reconstruction_box_order','reconstruction_box_starts','reconstruction_unlinked_boxes'))
 
 
-def context_id(data,roles,order,parameters,settings,version=73):
+def context_id(data,roles,order,parameters,settings,version=75):
     from .session_cache import logical_fingerprint
-    empty=replace(settings,**dict.fromkeys((*edit_fields(),'reconstruction_box_order','reconstruction_box_starts'),()))
+    empty=replace(settings,**dict.fromkeys((*edit_fields(),'reconstruction_box_order','reconstruction_box_starts','reconstruction_unlinked_boxes'),()))
     key=empty.reconstruction_key()
+    if version<75:key=(key[0],f'nominal-route-continuity-v{version}',*key[2:-1])
     if version==71:key=(key[0],'nominal-route-continuity-v59',*key[2:-6],*key[-4:])
     elif version==72:key=(key[0],'nominal-route-continuity-v72',*key[2:])
     return logical_fingerprint((data.geometry_id,data.top_name,roles,order,asdict(parameters),key))
@@ -54,8 +55,10 @@ def _box_history(settings,layers):
     from bisect import bisect_left
     seq=[(idx,mode) for idx,(mode,layer,_) in enumerate(ordered_boxes(settings)) if layer in layers]
     indices=[idx for idx,_ in seq]
+    unlinked=set(settings.reconstruction_unlinked_boxes)
     return (tuple(mode for _,mode in seq),
-            tuple((layer,index,bisect_left(indices,start)) for layer,index,start in settings.reconstruction_box_starts if layer in layers))
+            tuple((layer,index,bisect_left(indices,start)) for layer,index,start in settings.reconstruction_box_starts if layer in layers),
+            tuple(i for i,old in enumerate(indices) if old in unlinked))
 
 
 def prepared_outline_id(groups):
@@ -81,7 +84,7 @@ def metadata_for(data,roles,order,parameters,settings,layers,dxf,compensation):
     references=tuple(sorted(k for k in layers if roles.get(k) in REFERENCE_LAYERS))
     layers=tuple(sorted(k for k in layers if roles.get(k)=='固定RDL'))
     edits={k:tuple(row for row in getattr(settings,k) if row[0] in layers) for k in edit_fields()}
-    history=_box_history(settings,layers) if settings.reconstruction_box_order or settings.reconstruction_box_starts else None
+    history=_box_history(settings,layers) if settings.reconstruction_box_order or settings.reconstruction_box_starts or settings.reconstruction_unlinked_boxes else None
     return dict(context=context_id(data,roles,order,parameters,settings),layers=layers,edits=edits,
                 roles=dict(roles),layer_order=list(order),
                 references=references,dxf=asdict(dxf),compensation=compensation,box_history=history)
@@ -135,7 +138,7 @@ def resolve_stackup(contours,record,data,current_roles,current_order,current_com
 def recover_metadata(record,contours,data,roles,order,parameters,settings):
     if not isinstance(record,dict):return None
     context=record.get('context')
-    if not any(context==context_id(data,roles,order,parameters,settings,version) for version in (73,72,71)):return None
+    if not any(context==context_id(data,roles,order,parameters,settings,version) for version in (75,74,73,72,71)):return None
     layers=set(contours)
     saved_layers=record.get('layers',())
     if not isinstance(saved_layers,list) or any(not isinstance(k,str) for k in saved_layers) or set(saved_layers)!=layers:return None
@@ -148,16 +151,17 @@ def recover_metadata(record,contours,data,roles,order,parameters,settings):
            for rows in edits.values()):return None
     changes={k:(*[row for row in getattr(settings,k) if row[0] not in layers],*rows) for k,rows in edits.items()}
     history=record.get('box_history')
-    if history is not None and (not isinstance(history,list) or len(history)!=2):return None
+    if history is not None and (not isinstance(history,list) or len(history) not in (2,3)):return None
     try:
-        if history is not None or settings.reconstruction_box_order or settings.reconstruction_box_starts:
+        if history is not None or settings.reconstruction_box_order or settings.reconstruction_box_starts or settings.reconstruction_unlinked_boxes:
             from .manual_regions import box_order
             local=ViewSettings.from_dict({k:edits[k] for k in ('reconstruction_boxes','reconstruction_angle_boxes')}
-                                         | (dict(zip(('reconstruction_box_order','reconstruction_box_starts'),history)) if history is not None else {}))
+                                         | (dict(zip(('reconstruction_box_order','reconstruction_box_starts','reconstruction_unlinked_boxes'),history)) if history is not None else {}))
             if any(layer not in layers for layer,_,_ in local.reconstruction_box_starts):return None
-            remaining,starts=_box_history(settings,{k for k in roles if k not in layers})
+            remaining,starts,unlinked=_box_history(settings,{k for k in roles if k not in layers})
             changes['reconstruction_box_order']=(*remaining,*box_order(local))
             changes['reconstruction_box_starts']=(*starts, *((k,i,s+len(remaining)) for k,i,s in local.reconstruction_box_starts))
+            changes['reconstruction_unlinked_boxes']=(*unlinked,*(i+len(remaining) for i in local.reconstruction_unlinked_boxes))
         return ViewSettings.from_dict(dict(asdict(settings),**changes))
     except ValueError:return None
 
@@ -408,7 +412,7 @@ def configure(model,parameters,settings,domains,progress=None):
 
     affected=set(domains);imported={ref for ref,(kind,_,_) in domains.items() if kind=='C'}
     fields={name:tuple(row for row in getattr(settings,name) if row[:2] not in affected)
-            for name in RECONSTRUCTION_FIELDS if name not in ('reconstruction_regions','reconstruction_boxes','reconstruction_angle_boxes','reconstruction_box_order','reconstruction_fixed_via_follows')}
+            for name in RECONSTRUCTION_FIELDS if name not in ('reconstruction_regions','reconstruction_boxes','reconstruction_angle_boxes','reconstruction_box_order','reconstruction_unlinked_boxes','reconstruction_fixed_via_follows')}
     fields['reconstruction_regions']=tuple(row for row in settings.reconstruction_regions if row[0] not in {k for k,_ in affected})
     fields['reconstruction_box_excluded']=tuple(sorted(set(settings.reconstruction_box_excluded)|affected))
     fields['reconstruction_forced']=tuple(sorted(set(fields['reconstruction_forced'])|imported))

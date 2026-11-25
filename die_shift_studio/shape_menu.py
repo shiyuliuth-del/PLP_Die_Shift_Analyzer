@@ -100,6 +100,18 @@ def show_shape_menu(window,event,point):
                 from .branch_regions import editable_piece
                 member=editable_piece(piece,point,kind)
                 menu.addAction('撤销旋转',lambda:edit_zone('rotate_reset',piece=member,side=1 if kind=='extra' else 0))
+            overlay=getattr(window,'reconstruction_overlay',None)
+            if piece.get('box_groups') and hasattr(overlay,'linked_regions'):
+                linked,groups=overlay.linked_regions(piece)
+                if len(linked)>1:
+                    def unlink():
+                        if (window.data is not source_data or window.cache_group is not source_group
+                                or window.remote_locked or not window.reconstruction_toggle.isChecked()):return
+                        from dataclasses import replace
+                        cfg=window.view_settings
+                        ids=tuple(sorted(set(cfg.reconstruction_unlinked_boxes)|groups))
+                        window.apply_reconstruction_edit(replace(cfg,reconstruction_unlinked_boxes=ids),'拆分绑定动区')
+                    menu.addAction('拆分绑定动区',unlink)
             menu.addAction('删除动区',lambda:edit_zone('delete',piece=piece))
         delete_all={(picked[0]['layer'],picked[0]['index'])} if picked else selected&zoned
         if delete_all:

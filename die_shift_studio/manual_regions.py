@@ -3,7 +3,7 @@ import math
 import numpy as np
 import shapely
 
-BOX_HISTORY_FIELDS=('reconstruction_boxes','reconstruction_angle_boxes','reconstruction_box_order')
+BOX_HISTORY_FIELDS=('reconstruction_boxes','reconstruction_angle_boxes','reconstruction_box_order','reconstruction_unlinked_boxes')
 
 
 def normalize(rows):
@@ -141,6 +141,22 @@ def move_side(settings,plan,press,cursor,visible_box=None):
     return (cfg,part) if part is not None else None
 
 
+def translated_station(plan, origin, displacement, angle, hint):
+    """Project a moved straight blade onto the selected visit of its route."""
+    axis=np.array([math.cos(angle),math.sin(angle)])
+    normal=np.array([-axis[1],axis[0]])
+    center=origin+(displacement@normal)*normal
+    width=plan.length+np.linalg.norm(center-origin)+plan.tolerance
+    blade=shapely.LineString((center-axis*width,center+axis*width))
+    crossing=shapely.get_coordinates(plan.route.intersection(blade))
+    if not len(crossing):return hint
+    marks=shapely.line_locate_point(plan.route,shapely.points(crossing))
+    best=float(marks[np.argmin(np.abs(marks-hint))])
+    # On a return loop, prefer the current station to snapping to another arm
+    # when the displaced line no longer cuts this visit.
+    return best if abs(best-hint)<=max(np.linalg.norm(displacement)*3,plan.guard) else hint
+
+
 def box_list_by_source(model, rows):
     """Return disjoint connected box polygons per intersected source ref."""
     from .reconstruction_route import parts
@@ -158,13 +174,6 @@ def box_list_by_source(model, rows):
     return {ref:tuple(parts(shapely.union_all(areas))) for ref,areas in result.items()}
 
 def ordered_boxes_by_source(model,settings):
-    # Preserve the legacy pre-merge for jobs that never recorded mixed ordering.
-    if not settings.reconstruction_box_order and not settings.reconstruction_box_starts:
-        found={}
-        for is_free,rows in ((True,settings.reconstruction_boxes),(False,settings.reconstruction_angle_boxes)):
-            for ref,boxes in box_list_by_source(model,rows).items():
-                found.setdefault(ref,[]).extend((is_free,b) for b in boxes)
-        return found
     from collections import defaultdict
     by_layer=defaultdict(list);found=defaultdict(list)
     starts={(layer,i):start for layer,i,start in settings.reconstruction_box_starts}
@@ -176,7 +185,18 @@ def ordered_boxes_by_source(model,settings):
         i,j=tree.query([p for _,_,p in rows],predicate='intersects')
         for box_idx,source_idx in zip(i,j):
             ref=(layer,int(source_idx));sequence,is_free,polygon=rows[box_idx]
-            if sequence>=starts.get(ref,0):found[ref].append((is_free,polygon))
+            if sequence>=starts.get(ref,0):found[ref].append((is_free,polygon,sequence))
+    if not settings.reconstruction_box_order and not settings.reconstruction_box_starts:
+        # Preserve the original local box/route identities of older Jobs.
+        from .reconstruction_route import parts
+        for ref,rows in found.items():
+            merged=[]
+            for free in (True,False):
+                same=[(polygon,seq) for mode,polygon,seq in rows if mode==free]
+                for component in parts(shapely.union_all([p for p,_ in same])):
+                    sequence=next(seq for polygon,seq in same if component.intersects(polygon))
+                    merged.append((free,component,sequence))
+            found[ref]=merged
     return found
 
 

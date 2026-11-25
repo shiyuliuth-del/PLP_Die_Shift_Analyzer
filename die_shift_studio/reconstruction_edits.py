@@ -220,13 +220,27 @@ def normalize_edits(values):
     return {k:tuple(v) for k,v in result.items()}
 
 
-def commit_merges(settings,frame,ref=None):
+def commit_merges(settings,frame,ref=None,*,refs=None):
     """Absorbed serial zones must not reappear on later edits or Job reload."""
-    rows=list(settings.reconstruction_intervals);deleted=set(settings.reconstruction_deleted)
+    rows={row[:5]:row for row in settings.reconstruction_intervals};deleted=set(settings.reconstruction_deleted)
+    angles={(row[:5],row[5]):row for row in settings.reconstruction_angles}
     for q in (frame or {}).get('reconstruction',{}).get('pieces',()):
-        if ref is not None and (q['layer'],q['index'])!=ref:continue
-        plan=q.get('route_plan')
-        if plan is None or not getattr(plan,'merged_keys',()):continue
-        deleted.update(plan.merged_keys)
-        rows=[r for r in rows if r[:5]!=key(plan)];rows.append((*key(plan),*q['interval']))
-    return replace(settings,reconstruction_intervals=tuple(rows),reconstruction_deleted=tuple(sorted(deleted)))
+        source=(q['layer'],q['index'])
+        if (ref is not None and source!=ref) or (refs is not None and source not in refs):continue
+        for member in q.get('graph_members',(q,)):
+            plan=member.get('route_plan')
+            if plan is None or not getattr(plan,'merged_keys',()):continue
+            identity=key(plan)
+            absorbed=set(plan.merged_keys)-{identity}
+            deleted.update(absorbed)
+            for old in absorbed:
+                rows.pop(old,None)
+                for side in (0,1):angles.pop((old,side),None)
+            rows[identity]=(*identity,*member['interval'])
+            for side,manual in enumerate(member.get('manual_angles',(False,False))):
+                if manual:
+                    tangent=plan.tangent(member['interval'][side])
+                    absolute=math.atan2(tangent[1],tangent[0])+math.pi/2+member['boundary_angles'][side]
+                    angles[identity,side]=(*identity,side,absolute)
+    return replace(settings,reconstruction_intervals=tuple(rows.values()),reconstruction_angles=tuple(angles.values()),
+                   reconstruction_deleted=tuple(sorted(deleted)))

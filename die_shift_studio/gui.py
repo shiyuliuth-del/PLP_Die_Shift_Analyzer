@@ -1854,7 +1854,7 @@ class MainWindow(W.QMainWindow):
         # every hand edit of the cut lines.
         self.edit_history.record()
         self.view_settings=replace(self.view_settings,reconstruction_cuts=(),
-                                   reconstruction_extra_cuts=(),reconstruction_second_cuts=(),reconstruction_dropped_cuts=(),reconstruction_intervals=(),reconstruction_angles=(),reconstruction_deleted=(),reconstruction_added=(),reconstruction_forced=(),reconstruction_boxes=(),reconstruction_angle_boxes=(),reconstruction_box_order=(),reconstruction_box_starts=(),reconstruction_box_excluded=(),reconstruction_between_overrides=())
+                                   reconstruction_extra_cuts=(),reconstruction_second_cuts=(),reconstruction_dropped_cuts=(),reconstruction_intervals=(),reconstruction_angles=(),reconstruction_deleted=(),reconstruction_added=(),reconstruction_forced=(),reconstruction_boxes=(),reconstruction_angle_boxes=(),reconstruction_box_order=(),reconstruction_box_starts=(),reconstruction_unlinked_boxes=(),reconstruction_box_excluded=(),reconstruction_between_overrides=())
         self.invalidate_reconstruction_edit()
         self.statusBar().showMessage('已清除全部手动切口，并恢复被删除的自动切口')
         self.request_preview()
