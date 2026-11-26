@@ -81,7 +81,10 @@ def focused_width(analyzer,p,progress):
         from .width_yield import packed_events
         from .width_risk_probability import enrich
         from .extreme_filter import PoseClause
+        from .reconstruction_probability import extreme_weights
         grid,indices=focused_catalog(model,p,scope=scope);weights,error,logmass=conditional_weights(grid,p,indices)
+        uncond_local,_=extreme_weights(grid,p)
+        uncond_weights=np.array([math.prod(float(uncond_local[o][d]) for o,d in enumerate(digits_for(grid,int(idx)))) for idx in indices],float)
         lines={};witnesses={};channels={};channel_witnesses={};red_factors=[];channel_factors=[]
         red=[];yellow=[];sites={};chunks=[];site_chunks=[];has_edge=False
         previous=analyzer.probability;analyzer.probability=None
@@ -116,7 +119,7 @@ def focused_width(analyzer,p,progress):
                      channel_witnesses=channel_witnesses,channel_factors=channel_factors,has_edge_risk=has_edge,
                      grid_key=tuple(v.tobytes() for v in grid.locals),package_states=len(indices),
                      selected_indices=indices,local_checks=len(indices),complete=True,scope=scope)
-        bank=enrich(dict(method=scope,chunks=tuple(chunks),site_chunks=tuple(site_chunks),
+        bank=enrich(dict(method=scope,chunks=tuple(chunks),site_chunks=tuple(site_chunks),unconditional_weights=uncond_weights,
                          total=len(indices),scale_nsigma=p.scale_nsigma,mass_error=error,scope_log_mass=logmass,selected_indices=indices,grid_key=tuple(v.tobytes() for v in grid.locals)))
         return summary,bank
     return group.values.get_or_compute(key,compute) if group is not None else compute()

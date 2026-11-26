@@ -9,6 +9,7 @@ import numpy as np
 import shapely
 from .width_grid import WidthGrid,weighted_pair
 from .extreme_filter import ProblemIndex,PoseClause
+from .resources import cancel_check
 
 
 def independent_components(book,entries,p,style):
@@ -74,6 +75,7 @@ def measure_reconstruction_yield(reconstructor,p,cfg,progress,local_cache=None,p
     local_total=sum(math.prod(len(choices[o]) for o in owners[k]) for k in keys)
     always_failed=None
     for key in keys:
+        cancel_check()
         deps=owners[key];rows={};render_cache={}
         targets=book.nets[key]
         from .session_cache import logical_fingerprint
@@ -92,6 +94,7 @@ def measure_reconstruction_yield(reconstructor,p,cfg,progress,local_cache=None,p
             for digits,(geo,bad) in rows.items():
                 if bad:clauses.add(clause(deps,digits))
         for digits in (() if hit is not None else product(*(choices[o] for o in deps))):
+            cancel_check()
             states=np.zeros((grid.count,3))
             for owner,digit in zip(deps,digits):states[owner]=grid.locals[owner][digit]
             frame=r.frame(states,targets=targets,diagnostics=False,render_cache=render_cache,_raw=True)

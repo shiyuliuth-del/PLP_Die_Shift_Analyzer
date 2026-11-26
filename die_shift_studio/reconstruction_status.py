@@ -12,16 +12,20 @@ class ReconstructionYieldDisplay:
         self.geometry_pool=EphemeralCache(budget=64*1024**2,max_entries=4096)
         self.factor_pool=EphemeralCache(budget=min(128*1024**2,int(resource_profile()['available_memory_mb']*1024**2*.06)),max_entries=512)
         self.timer=QtCore.QTimer(w);self.timer.setSingleShot(True);self.timer.setInterval(220);self.timer.timeout.connect(self.start)
-    def reset(self):
+    def reset(self,keep_label=False):
         self.key=None;self.bank=None;self.evidence=None;self.pending=None;self.timer.stop()
         if self.worker:self.worker.cancelled.set()
-        self.w.width_yield.label.set_extra('')
+        if not keep_label:self.w.width_yield.label.set_extra('')
         if self.w.result is not None:self.w.result.pop('reconstruction_yield',None)
     def refresh(self,settings=None):
         w=self.w
-        if w.loading or w._closing or getattr(w,'remote_locked',False) or getattr(w,'reconstruction_pending',False):return
+        if w.loading or w._closing or getattr(w,'remote_locked',False):return
         if w.result is None or getattr(w,'_restoring_project',False):self.reset();return
         if not w.reconstruction_toggle.isChecked() or w.data is None:self.reset();return
+        if getattr(w,'reconstruction_pending',False):
+            self.reset(keep_label=True)
+            w.width_yield.label.set_extra('重构良率 · 计算中…','已暂存重构编辑；点击“重构计算”后在后台计算重构良率。')
+            return
         try:p=replace(w.params(),target_nsigma=0)
         except ValueError:self.reset();return
         cfg=settings or w.view_settings
@@ -29,7 +33,7 @@ class ReconstructionYieldDisplay:
         token=('reconstruction-analysis-continuity',logical_fingerprint((w.data.geometry_id,w.data.top_name,w.roles(),w.ordered_layers(),asdict(p),cfg.reconstruction_key(),needs_events(cfg),cfg.reconstruction_auto_waive_drc,cfg.reconstruction_grid_nodes if cfg.evaluation_scope=='all' else 0)))
         key=(id(w.cache_group),token)
         if key==self.key:self.render();return
-        self.reset();self.key=key
+        self.reset(keep_label=True);self.key=key
         self.pending=(key,w.data,p,cfg,w.roles(),w.ordered_layers(),w.geometry_cache,w.cache_group)
         w.width_yield.label.set_extra('重构良率 · 计算中…','按完整输入偏移分布检查最终固定RDL；结果未完成。')
         self.timer.start()
@@ -90,7 +94,8 @@ class ReconstructionYieldDisplay:
                     self.w.reconstruction_overlay.draw();self.w.drc_overlay.draw();self.w.render_scene()
             if 'yield' in value:self.bank=value['yield'];self.render()
         def failed(text):
-            if self.key==key and not worker.cancelled.is_set():self.w.width_yield.label.set_extra('重构良率 · 无法计算',text.split('Traceback')[0])
+            if worker.cancelled.is_set() or '已取消' in text or 'CancelledError' in text:return
+            if self.key==key:self.w.width_yield.label.set_extra('重构良率 · 无法计算',text.split('Traceback')[0])
         def finish():
             self.worker=None;worker.deleteLater()
             if self.pending and not self.w._closing:self.timer.start()

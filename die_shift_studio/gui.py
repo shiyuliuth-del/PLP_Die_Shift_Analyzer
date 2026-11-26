@@ -1712,7 +1712,7 @@ class MainWindow(W.QMainWindow):
         self.reconstruction_pending=True;self.stop_animation();self.cancel_previews()
         self.preview_ticket+=1;self.preview_pending=None
         self.constraint_feedback.cancel()
-        if hasattr(self,'reconstruction_yield'):self.reconstruction_yield.reset()
+        if hasattr(self,'reconstruction_yield'):self.reconstruction_yield.refresh()
         try:
             self.reconstruction_overlay.stage()
             self.reconstruction_overlay.draw();self.selection.draw(redraw=False);self.render_scene()

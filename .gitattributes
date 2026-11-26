@@ -21,6 +21,10 @@ Jobs/GD55_1119/** -export-ignore
 Jobs/SH22 -export-ignore
 Jobs/SH22/** -export-ignore
 Jobs/SH22/**/*.csv -text
+Jobs/XD46_SC9211 -export-ignore
+Jobs/XD46_SC9211/** -export-ignore
+Jobs/XD46_SC58512 -export-ignore
+Jobs/XD46_SC58512/** -export-ignore
 docs export-ignore
 examples export-ignore
 figures export-ignore

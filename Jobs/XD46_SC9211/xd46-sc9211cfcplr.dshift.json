@@ -1,0 +1,1266 @@
+{
+  "schema_version": 5,
+  "app_version": "V76",
+  "rulers": [],
+  "sha256": "df1c423bf7efb251b4a4d0d23d7bf0703d91e7c5a8577a511730a820592dff29",
+  "top_cell": "TOP",
+  "roles": {
+    "11/0": "芯片边框",
+    "12/0": "运动过孔",
+    "13/0": "固定过孔",
+    "14/0": "不参与",
+    "15/0": "固定RDL",
+    "16/0": "封装边框"
+  },
+  "parameters": {
+    "panel_layers": 1,
+    "wafer_layers": 0,
+    "line_width_um": 15.0,
+    "line_space_um": 15.0,
+    "wafer_line_width_um": 15.0,
+    "wafer_line_space_um": 15.0,
+    "via_diameter_um": 110.57976062553585,
+    "annulus_um": 15.0,
+    "moving_annulus_um": 15.0,
+    "residual_budget_um": 5.0,
+    "transition_length_um": 200.0,
+    "max_route_angle_deg": 30.0,
+    "package_clearance_um": 10.0,
+    "minimum_area_um2": 0.5,
+    "minimum_edge_um": 0.01,
+    "routing_edge_keepout_um": 40.0,
+    "min_die_gap_um": 20.0,
+    "min_package_clearance_um": 20.0,
+    "single_bound_x_um": 25.0,
+    "single_bound_y_um": 25.0,
+    "multi_bound_x_um": 15.0,
+    "multi_bound_y_um": 15.0,
+    "bound_angle_deg": 1.0,
+    "per_die_enabled": false,
+    "die_bounds": [],
+    "rotation_center": "center",
+    "rotation_x_um": 0.0,
+    "rotation_y_um": 0.0,
+    "die_pivots": [
+      [
+        "center",
+        0.0,
+        0.0
+      ],
+      [
+        "center",
+        0.0,
+        0.0
+      ]
+    ],
+    "input_nsigma": 6.0,
+    "target_nsigma": 6.0,
+    "reference_nsigma": 6.0,
+    "mean_x_um": 0.0,
+    "mean_y_um": 0.0,
+    "mean_angle_deg": 0.0,
+    "rho_xy": 0.0,
+    "interdie": "unknown",
+    "fixed_via_assignment": "all"
+  },
+  "settings": {
+    "max_undo_steps": 10,
+    "space_export_interval_um": 100.0,
+    "drc_checks": [
+      "width",
+      "space",
+      "enclosure",
+      "angle",
+      "board",
+      "die_gap",
+      "die_edge",
+      "keepout"
+    ],
+    "drc_visible": [
+      "width",
+      "space",
+      "enclosure",
+      "angle",
+      "board",
+      "die_gap",
+      "die_edge",
+      "keepout"
+    ],
+    "table_page_limit": 500,
+    "max_threads": 0,
+    "max_memory_mb": 0,
+    "reconstruction_pad_trigger_um": 5.0,
+    "reconstruction_node_snap_um": 0.0,
+    "drc_waived_refs": [],
+    "drc_retained_refs": [],
+    "reconstruction_node_snap_strength": 0.4,
+    "save_project_results": true,
+    "result_cache_directory": "",
+    "width_display": {
+      "固定RDL": "dim",
+      "运动RDL": "dim",
+      "固定过孔": "show",
+      "运动过孔": "show",
+      "封装边框": "show",
+      "芯片边框": "show",
+      "其他": "show",
+      "运动过孔孔盘": "show",
+      "固定过孔孔盘": "show",
+      "固定障碍": "show",
+      "禁布区": "show",
+      "截面": "show",
+      "描边": "show",
+      "标注": "show",
+      "边距": "show"
+    },
+    "width_label_font_pt": 8.0,
+    "width_label_decimals": 2,
+    "width_yield_decimals": 6,
+    "width_yield_method": "grid",
+    "width_show_probability": true,
+    "width_yield_exponent": 12,
+    "width_yield_seed": 510,
+    "width_grid_nodes": 5,
+    "show_contact_markers": true,
+    "show_low_contact": false,
+    "show_low_width": true,
+    "cache_max_entries": 2000,
+    "acceleration": "cuda",
+    "drc_min_angle_deg": 90.0,
+    "drc_tolerance_um": 0.1,
+    "probability_method": "sobol",
+    "sample_exponent": 12,
+    "random_seed": 510,
+    "quadrature_order": 25,
+    "tail_sigma": 8.0,
+    "probability_cell_um": 0.0,
+    "angle_bins": 24,
+    "footprint_samples": 4,
+    "probability_alpha": 0.42,
+    "probability_show_ranges": false,
+    "probability_ranges": [],
+    "probability_target_color": "#bf526d",
+    "show_annulus_range": true,
+    "show_spacing_range": true,
+    "contact_marker_color": "#bc243e",
+    "contact_marker_size": 5.0,
+    "contact_marker_absolute": false,
+    "unadapted_marker_color": "#ba7628",
+    "unadapted_marker_size": 7.0,
+    "unadapted_marker_absolute": false,
+    "space_resolution": 101,
+    "space_cmap": "pastel",
+    "space_interpolation": "bilinear",
+    "space_alpha": 0.65,
+    "intrusion_alpha": 0.52,
+    "probability_cmap": "blue",
+    "probability_gamma": 0.35,
+    "probability_interpolation": "nearest",
+    "space_scope": "moving",
+    "animation_enabled": false,
+    "animation_return_zero": true,
+    "animation_strategy": "prepared",
+    "evaluation_scope": "risk",
+    "reconstruction_die_mode": "follow",
+    "animation_duration_ms": 1000,
+    "animation_steps": 12,
+    "animation_fps": 30,
+    "animation_speed": 3,
+    "camera_speed": 4,
+    "contact_box_budget": 2048,
+    "reconstruction_regions": [],
+    "reconstruction_boxes": [],
+    "reconstruction_angle_boxes": [
+      [
+        "15/0",
+        [
+          [
+            6642.274900823441,
+            4077.5195011190026
+          ],
+          [
+            6759.391406535814,
+            4145.136747218589
+          ],
+          [
+            6812.4421628259,
+            4053.250141944206
+          ],
+          [
+            6695.325657113527,
+            3985.6328958446193
+          ]
+        ]
+      ],
+      [
+        "15/0",
+        [
+          [
+            6456.588734028712,
+            5462.476258784021
+          ],
+          [
+            6514.116865090508,
+            5445.9803326507235
+          ],
+          [
+            6407.887077992261,
+            5075.513038758151
+          ],
+          [
+            6350.358946930464,
+            5092.008964891449
+          ]
+        ]
+      ],
+      [
+        "15/0",
+        [
+          [
+            7015.753167460197,
+            4401.343792038491
+          ],
+          [
+            7068.047778514647,
+            4401.343792038491
+          ],
+          [
+            7068.047778514647,
+            4257.533611638756
+          ],
+          [
+            7015.753167460197,
+            4257.533611638756
+          ]
+        ]
+      ],
+      [
+        "15/0",
+        [
+          [
+            6188.439601109594,
+            4134.01383891749
+          ],
+          [
+            6677.917160579242,
+            4134.01383891749
+          ],
+          [
+            6677.917160579242,
+            3988.1118740755755
+          ],
+          [
+            6188.439601109594,
+            3988.1118740755755
+          ]
+        ]
+      ],
+      [
+        "15/0",
+        [
+          [
+            6200.79324553282,
+            4134.49325824797
+          ],
+          [
+            6669.265802895599,
+            4134.49325824797
+          ],
+          [
+            6669.265802895599,
+            4021.006689119389
+          ],
+          [
+            6200.79324553282,
+            4021.006689119389
+          ]
+        ]
+      ],
+      [
+        "15/0",
+        [
+          [
+            6197.161675320706,
+            4144.480076331284
+          ],
+          [
+            6683.792083744058,
+            4144.480076331284
+          ],
+          [
+            6683.792083744058,
+            3986.5067721043006
+          ],
+          [
+            6197.161675320706,
+            3986.5067721043006
+          ]
+        ]
+      ]
+    ],
+    "reconstruction_box_order": [
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned"
+    ],
+    "reconstruction_box_starts": [
+      [
+        "15/0",
+        16,
+        5
+      ],
+      [
+        "15/0",
+        18,
+        2
+      ],
+      [
+        "15/0",
+        28,
+        1
+      ]
+    ],
+    "reconstruction_unlinked_boxes": [],
+    "reconstruction_box_mode": "aligned",
+    "reconstruction_fixed_via_mode": "off",
+    "reconstruction_fixed_via_follows": [],
+    "reconstruction_between_motion": "max",
+    "reconstruction_between_overrides": [
+      [
+        "15/0",
+        23,
+        6453.2862,
+        4865.9455,
+        "static"
+      ],
+      [
+        "15/0",
+        24,
+        6571.7228,
+        4803.118,
+        "static"
+      ],
+      [
+        "15/0",
+        27,
+        6489.7423,
+        5048.125,
+        "static"
+      ]
+    ],
+    "reconstruction_box_excluded": [],
+    "reconstruction_cuts": [],
+    "reconstruction_extra_cuts": [],
+    "reconstruction_second_cuts": [],
+    "reconstruction_dropped_cuts": [],
+    "reconstruction_enabled": false,
+    "reconstruction_auto": false,
+    "reconstruction_live": true,
+    "reconstruction_allow_moving_pad": false,
+    "reconstruction_style": "linear",
+    "reconstruction_boundary_mode": "perpendicular",
+    "reconstruction_ignored": [
+      [
+        "15/0",
+        16
+      ],
+      [
+        "15/0",
+        18
+      ]
+    ],
+    "reconstruction_following": [],
+    "reconstruction_forced": [
+      [
+        "15/0",
+        9
+      ],
+      [
+        "15/0",
+        11
+      ],
+      [
+        "15/0",
+        13
+      ],
+      [
+        "15/0",
+        19
+      ],
+      [
+        "15/0",
+        23
+      ],
+      [
+        "15/0",
+        24
+      ],
+      [
+        "15/0",
+        27
+      ],
+      [
+        "15/0",
+        28
+      ]
+    ],
+    "reconstruction_angles": [],
+    "reconstruction_deleted": [
+      [
+        "15/0",
+        9,
+        1,
+        [
+          [
+            "12/0",
+            35
+          ]
+        ],
+        "fa2e1db4c9c50b0fb938"
+      ],
+      [
+        "15/0",
+        13,
+        1,
+        [
+          [
+            "12/0",
+            11
+          ]
+        ],
+        "898f10d9dde70aa641f2"
+      ],
+      [
+        "15/0",
+        13,
+        1,
+        [
+          [
+            "12/0",
+            17
+          ]
+        ],
+        "8fa41a183dde78a1b77d"
+      ],
+      [
+        "15/0",
+        13,
+        1,
+        [
+          [
+            "12/0",
+            22
+          ]
+        ],
+        "6996c0d6bbe72eb8383e"
+      ],
+      [
+        "15/0",
+        13,
+        1,
+        [
+          [
+            "12/0",
+            28
+          ]
+        ],
+        "eff57ecd962a1b7aa898"
+      ],
+      [
+        "15/0",
+        13,
+        1,
+        [
+          [
+            "12/0",
+            34
+          ]
+        ],
+        "9c53fbff599a0aa9931a"
+      ],
+      [
+        "15/0",
+        16,
+        1,
+        [
+          [
+            "12/0",
+            40
+          ]
+        ],
+        "d502c3e143241eee3319~box1496a55410"
+      ],
+      [
+        "15/0",
+        28,
+        1,
+        [
+          [
+            "12/0",
+            56
+          ]
+        ],
+        "b3355fbd59546c18e137~3caa7d69a6de"
+      ]
+    ],
+    "reconstruction_added": [
+      [
+        "15/0",
+        11,
+        6676.420279750187,
+        3840.8064145251124,
+        "6795c688dc54",
+        "seed"
+      ],
+      [
+        "15/0",
+        19,
+        6761.513654837434,
+        4792.726067111,
+        "84780cbcc3ba",
+        "seed"
+      ],
+      [
+        "15/0",
+        28,
+        6346.440910003283,
+        5180.102260867051,
+        "c8aeac8536de",
+        "seed"
+      ],
+      [
+        "15/0",
+        9,
+        6789.471543994555,
+        3638.2259730184146,
+        "e164fcd79a66",
+        "fa2e1db4c9c50b0fb938",
+        41.81045266137673,
+        729.6943715033349
+      ],
+      [
+        "15/0",
+        24,
+        6743.124882765367,
+        5044.649138307634,
+        "b912fef20c28",
+        "5e53a925a56589371e1d",
+        99.54084415656962,
+        1558.021544670656
+      ],
+      [
+        "15/0",
+        23,
+        6622.911910504641,
+        5010.051698887421,
+        "51fcac9fa700",
+        "a2b8458cdbdbd7c037f7",
+        139.7691708392702,
+        1394.330956274836
+      ],
+      [
+        "15/0",
+        27,
+        6521.497886643238,
+        5085.078482042629,
+        "35b6831bff19",
+        "f3febcd34dc867fbb185",
+        67.32570323517156,
+        464.95706613010606
+      ],
+      [
+        "15/0",
+        13,
+        5776.5579499892565,
+        3556.3538885795074,
+        "7b25376c3b03",
+        "seed"
+      ]
+    ],
+    "reconstruction_grid_nodes": 3,
+    "reconstruction_intervals": [
+      [
+        "15/0",
+        11,
+        1,
+        [
+          [
+            "12/0",
+            14
+          ]
+        ],
+        "72fbefb5cd1ffecbd819~6795c688dc54",
+        837.1553127779256,
+        858.5684056059218
+      ],
+      [
+        "15/0",
+        11,
+        1,
+        [
+          [
+            "12/0",
+            18
+          ]
+        ],
+        "92f97e41c638388f972b",
+        804.9167470786202,
+        817.1443276828479
+      ],
+      [
+        "15/0",
+        11,
+        1,
+        [
+          [
+            "12/0",
+            33
+          ]
+        ],
+        "5a4f75e55686fedc5522",
+        485.9610741807996,
+        498.18865478502727
+      ],
+      [
+        "15/0",
+        11,
+        1,
+        [
+          [
+            "12/0",
+            37
+          ]
+        ],
+        "9b89b8873c05b50b3ef0",
+        378.2911560121264,
+        390.5103734888695
+      ],
+      [
+        "15/0",
+        11,
+        1,
+        [
+          [
+            "12/0",
+            41
+          ]
+        ],
+        "0e465ffea1338014b54a",
+        349.1956116338941,
+        361.42319223812177
+      ],
+      [
+        "15/0",
+        19,
+        1,
+        [
+          [
+            "12/0",
+            50
+          ]
+        ],
+        "60c6c691874f38786979",
+        140.5912421896808,
+        203.7726757365143
+      ],
+      [
+        "15/0",
+        19,
+        1,
+        [
+          [
+            "12/0",
+            48
+          ]
+        ],
+        "6a8638a721b02af3ab98~84780cbcc3ba",
+        218.5805582710927,
+        297.311049834091
+      ],
+      [
+        "15/0",
+        28,
+        1,
+        [
+          [
+            "12/0",
+            56
+          ]
+        ],
+        "b3355fbd59546c18e137~3caa7d69a6de",
+        30.00799999999727,
+        59.17594878528153
+      ],
+      [
+        "15/0",
+        28,
+        1,
+        [
+          [
+            "12/0",
+            56
+          ]
+        ],
+        "b3355fbd59546c18e137~c8aeac8536de",
+        40.664115955204856,
+        60.82452536633832
+      ],
+      [
+        "15/0",
+        26,
+        1,
+        [
+          [
+            "12/0",
+            62
+          ]
+        ],
+        "f6a56a1609d0a186cc59",
+        35.01160777363063,
+        37.239700468296974
+      ],
+      [
+        "15/0",
+        30,
+        1,
+        [
+          [
+            "12/0",
+            61
+          ]
+        ],
+        "c201c24d4d9463f8b58c",
+        30.008780944747592,
+        39.92677140646758
+      ],
+      [
+        "15/0",
+        5,
+        1,
+        [
+          [
+            "12/0",
+            15
+          ]
+        ],
+        "ce0c84a5690adf6b12ff",
+        58.61155828577921,
+        116.94773192037394
+      ],
+      [
+        "15/0",
+        4,
+        1,
+        [
+          [
+            "12/0",
+            19
+          ]
+        ],
+        "80bbbb8b5a13888c5bca",
+        404.19095438103346,
+        552.9489928184273
+      ],
+      [
+        "15/0",
+        21,
+        1,
+        [
+          [
+            "12/0",
+            53
+          ]
+        ],
+        "2f29fd532cfcefacdbb0",
+        35.02044697387685,
+        102.1457011522309
+      ],
+      [
+        "15/0",
+        22,
+        1,
+        [
+          [
+            "12/0",
+            54
+          ]
+        ],
+        "05af5063f326e7ad9afa",
+        40.02481356931723,
+        252.74513854119633
+      ],
+      [
+        "15/0",
+        9,
+        1,
+        [
+          [
+            "12/0",
+            21
+          ]
+        ],
+        "5e404688b50a92985d2f",
+        152.05829377509363,
+        383.78626827555206
+      ],
+      [
+        "15/0",
+        9,
+        1,
+        [
+          [
+            "12/0",
+            31
+          ]
+        ],
+        "652933c61a2b9cf98ac1",
+        473.89728365015816,
+        616.4950353923587
+      ],
+      [
+        "15/0",
+        9,
+        1,
+        [
+          [
+            "12/0",
+            16
+          ]
+        ],
+        "0abd5748ce0b0591080b",
+        154.97035396509474,
+        298.5834735337031
+      ],
+      [
+        "15/0",
+        9,
+        1,
+        [
+          [
+            "12/0",
+            35
+          ]
+        ],
+        "fa2e1db4c9c50b0fb938~e164fcd79a66",
+        41.81045266137673,
+        881.2429625904745
+      ],
+      [
+        "15/0",
+        15,
+        1,
+        [
+          [
+            "12/0",
+            44
+          ]
+        ],
+        "de68ceddfe1497805dbf",
+        87.7741890737519,
+        189.35020564997114
+      ],
+      [
+        "15/0",
+        18,
+        1,
+        [
+          [
+            "12/0",
+            47
+          ]
+        ],
+        "0a6f32dd27f3007d413a~boxf4cfa7e20f",
+        106.78567043078625,
+        106.80167060376712
+      ],
+      [
+        "15/0",
+        18,
+        1,
+        [
+          [
+            "12/0",
+            49
+          ]
+        ],
+        "cefa1f23e079620d13e3~box25f1dffba5",
+        266.42508511913644,
+        266.4410851734024
+      ],
+      [
+        "15/0",
+        20,
+        1,
+        [
+          [
+            "12/0",
+            52
+          ]
+        ],
+        "d7c49bab12f2563357c8",
+        50.20386344269264,
+        90.17837868454191
+      ],
+      [
+        "15/0",
+        24,
+        1,
+        [
+          [
+            "12/0",
+            59
+          ]
+        ],
+        "5e53a925a56589371e1d",
+        836.0288735922487,
+        1558.021544670656
+      ],
+      [
+        "15/0",
+        24,
+        1,
+        [
+          [
+            "12/0",
+            59
+          ]
+        ],
+        "5e53a925a56589371e1d~b912fef20c28",
+        99.54084415656962,
+        176.42106611923418
+      ],
+      [
+        "15/0",
+        23,
+        1,
+        [
+          [
+            "12/0",
+            58
+          ]
+        ],
+        "a2b8458cdbdbd7c037f7",
+        483.3623723571242,
+        1394.330956274836
+      ],
+      [
+        "15/0",
+        23,
+        1,
+        [
+          [
+            "12/0",
+            58
+          ]
+        ],
+        "a2b8458cdbdbd7c037f7~51fcac9fa700",
+        50.054743273383906,
+        139.76405721497943
+      ],
+      [
+        "15/0",
+        27,
+        1,
+        [
+          [
+            "12/0",
+            57
+          ]
+        ],
+        "f3febcd34dc867fbb185",
+        174.23474932787173,
+        464.95706613010606
+      ],
+      [
+        "15/0",
+        27,
+        1,
+        [
+          [
+            "12/0",
+            57
+          ]
+        ],
+        "f3febcd34dc867fbb185~35b6831bff19",
+        35.562529191306375,
+        80.50296114062525
+      ],
+      [
+        "15/0",
+        13,
+        1,
+        [
+          [
+            "12/0",
+            26
+          ]
+        ],
+        "2f19312a174240c2ab35~7b25376c3b03",
+        156.43037412638188,
+        376.06246555735805
+      ],
+      [
+        "15/0",
+        10,
+        1,
+        [
+          [
+            "12/0",
+            20
+          ]
+        ],
+        "23a09af46eafe89a19fd",
+        133.921843516835,
+        186.2151623512509
+      ],
+      [
+        "15/0",
+        10,
+        1,
+        [
+          [
+            "12/0",
+            30
+          ]
+        ],
+        "0adc47674c4fcacc57e4",
+        355.76184351683605,
+        355.76984351683603
+      ],
+      [
+        "15/0",
+        10,
+        1,
+        [
+          [
+            "12/0",
+            38
+          ]
+        ],
+        "4d77eac213016e622fc8",
+        561.4818435168372,
+        561.4898435168373
+      ],
+      [
+        "15/0",
+        10,
+        0,
+        [
+          [
+            "12/0",
+            7
+          ]
+        ],
+        "d561724f8312b242a4ee",
+        74.41576603221868,
+        166.2375762613091
+      ],
+      [
+        "15/0",
+        10,
+        0,
+        [
+          [
+            "12/0",
+            8
+          ]
+        ],
+        "e5329c0e8b778b4bfb8b",
+        74.11690139809207,
+        179.68240235559142
+      ],
+      [
+        "15/0",
+        10,
+        0,
+        [
+          [
+            "12/0",
+            6
+          ]
+        ],
+        "305bd97177ba86c5c1d4",
+        149.11690139809207,
+        241.42482662093116
+      ],
+      [
+        "15/0",
+        10,
+        0,
+        [
+          [
+            "12/0",
+            5
+          ]
+        ],
+        "10cf491dd3f1e81994ad",
+        191.6515586047567,
+        203.73166723480273
+      ],
+      [
+        "15/0",
+        18,
+        1,
+        [
+          [
+            "12/0",
+            47
+          ]
+        ],
+        "fcbb12df3c7015ba026f",
+        30.00794000218568,
+        36.61131122533284
+      ]
+    ],
+    "reconstruction_auto_waive_drc": false,
+    "reconstruction_waiver_mantissa": 1,
+    "reconstruction_waiver_exponent": -6,
+    "yield_method": "monte_carlo",
+    "yield_sample_exponent": 12,
+    "yield_box_budget": 4096,
+    "yield_tolerance": 0.001,
+    "safe_box_precision": 0.01,
+    "safe_box_budget": 512,
+    "safe_box_starts": 3,
+    "safe_box_passes": 2
+  },
+  "node_edits": [],
+  "deleted_shapes": [],
+  "geometry_indexing": "merged-v39",
+  "legacy_node_edits": [],
+  "layout_output": {
+    "directory": "",
+    "layer_scope": "all",
+    "merge_layers": true,
+    "dbu_um": 0.0,
+    "max_points": 8190
+  },
+  "dxf_directory": "",
+  "dxf_options": {
+    "merge_layers": true,
+    "layer_scope": "all",
+    "polygon_mode": "outline",
+    "scale": 1.0,
+    "separate_holes": false,
+    "show_fill": false,
+    "region_auto_join": true
+  },
+  "measured_output": {
+    "output_directory": "",
+    "max_memory_mb": 0,
+    "max_threads": 0
+  },
+  "apd_export": {},
+  "layer_compensation": {
+    "15/0": 1.5
+  },
+  "ignored_drc": {},
+  "ignored_reconstruction": {
+    "sha256": "df1c423bf7efb251b4a4d0d23d7bf0703d91e7c5a8577a511730a820592dff29",
+    "top_cell": "TOP",
+    "refs": [
+      [
+        "15/0",
+        16
+      ],
+      [
+        "15/0",
+        18
+      ]
+    ]
+  },
+  "ignored_width_lines": {
+    "sha256": "df1c423bf7efb251b4a4d0d23d7bf0703d91e7c5a8577a511730a820592dff29",
+    "top_cell": "TOP",
+    "refs": []
+  },
+  "extreme_view": {
+    "filter_mode": "drc",
+    "filter_problems": true,
+    "mode": "risk",
+    "page_size": 499,
+    "page": 1
+  },
+  "layer_table_height": 303,
+  "expanded_settings": [
+    "硬件与计算资源",
+    "重构预演"
+  ],
+  "expanded_process": [
+    "线宽线距",
+    "过孔包围量",
+    "芯片距离",
+    "其他"
+  ],
+  "manual_preview": {
+    "values": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0
+      ]
+    ],
+    "pivots": [
+      [
+        "center",
+        0.0,
+        0.0
+      ],
+      [
+        "center",
+        0.0,
+        0.0
+      ]
+    ]
+  },
+  "overlays": {
+    "drc": true,
+    "space": false,
+    "width": false,
+    "width_sufficient": false,
+    "reconstruction": true,
+    "footprint": false
+  },
+  "layer_styles": {},
+  "visibility": {
+    "11/0": true,
+    "12/0": true,
+    "13/0": true,
+    "14/0": false,
+    "15/0": true,
+    "16/0": true
+  },
+  "selectability": {
+    "11/0": false,
+    "12/0": false,
+    "13/0": false,
+    "14/0": false,
+    "15/0": true,
+    "16/0": false
+  },
+  "motions": {
+    "11/0": "auto",
+    "12/0": "auto",
+    "13/0": "fixed",
+    "14/0": "fixed",
+    "15/0": "fixed",
+    "16/0": "fixed"
+  },
+  "layer_order": [
+    "11/0",
+    "12/0",
+    "13/0",
+    "14/0",
+    "15/0",
+    "16/0"
+  ],
+  "gds_path": "PDS-XD46-SC9211CFCPLR-A0_.gds"
+}

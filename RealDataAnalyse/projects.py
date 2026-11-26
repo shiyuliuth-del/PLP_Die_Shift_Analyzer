@@ -21,6 +21,8 @@ GD55_1119_INPUTS = ('GD55_1119.gds', 'GD55_1119.dshift.json')
 SH22_INPUTS = ('sh22.gds', 'SH22.dshift.json', f'{REALDATA_DIRECTORY}/{SETTINGS}',
                *(f'{REALDATA_DIRECTORY}/Excel/{die}/Measurements_{part}.csv'
                  for die in ('101', '102') for part in (1, 2)))
+XD46_SC9211_INPUTS = ('PDS-XD46-SC9211CFCPLR-A0_.gds', 'xd46-sc9211cfcplr.dshift.json')
+XD46_SC58512_INPUTS = ('PDS-XD46-SCT85330CPLR-A0.gds', 'xd46-sc58512acplr.dshift.json')
 
 
 def inside(folder, value):
@@ -203,7 +205,8 @@ def install_case(destination):
     root_jobs = Path(__file__).resolve().parents[1] / 'Jobs'
     jobs = Path(destination).resolve() / 'Jobs'
     jobs.mkdir(parents=True, exist_ok=True)
-    for folder, inputs in (('GD55', GD55_INPUTS), ('GD55_1119', GD55_1119_INPUTS), ('SH22', SH22_INPUTS)):
+    for folder, inputs in (('GD55', GD55_INPUTS), ('GD55_1119', GD55_1119_INPUTS), ('SH22', SH22_INPUTS),
+                           ('XD46_SC9211', XD46_SC9211_INPUTS), ('XD46_SC58512', XD46_SC58512_INPUTS)):
         source = root_jobs / folder
         target = jobs / folder
         if target.exists() or not source.is_dir():

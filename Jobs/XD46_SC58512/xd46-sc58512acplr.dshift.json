@@ -1,0 +1,724 @@
+{
+  "schema_version": 5,
+  "app_version": "V76",
+  "rulers": [],
+  "sha256": "de9fe0c6d4493085f01c2a1e29c7f6e9937389e8c768d383f5a91ef2075b2c23",
+  "top_cell": "TOP",
+  "roles": {
+    "8/0": "芯片边框",
+    "9/0": "不参与",
+    "10/0": "不参与",
+    "12/0": "运动过孔",
+    "4/0": "封装边框",
+    "6/0": "不参与",
+    "7/0": "不参与",
+    "11/0": "固定过孔",
+    "14/0": "固定RDL"
+  },
+  "parameters": {
+    "panel_layers": 1,
+    "wafer_layers": 0,
+    "line_width_um": 15.0,
+    "line_space_um": 15.0,
+    "wafer_line_width_um": 15.0,
+    "wafer_line_space_um": 15.0,
+    "via_diameter_um": 30.01577671826463,
+    "annulus_um": 15.0,
+    "moving_annulus_um": 15.0,
+    "residual_budget_um": 5.0,
+    "transition_length_um": 200.0,
+    "max_route_angle_deg": 30.0,
+    "package_clearance_um": 10.0,
+    "minimum_area_um2": 0.5,
+    "minimum_edge_um": 0.01,
+    "routing_edge_keepout_um": 40.0,
+    "min_die_gap_um": 20.0,
+    "min_package_clearance_um": 20.0,
+    "single_bound_x_um": 15.0,
+    "single_bound_y_um": 15.0,
+    "multi_bound_x_um": 35.0,
+    "multi_bound_y_um": 35.0,
+    "bound_angle_deg": 1.0,
+    "per_die_enabled": false,
+    "die_bounds": [],
+    "rotation_center": "center",
+    "rotation_x_um": 0.0,
+    "rotation_y_um": 0.0,
+    "die_pivots": [
+      [
+        "center",
+        0.0,
+        0.0
+      ]
+    ],
+    "input_nsigma": 6.0,
+    "target_nsigma": 6.0,
+    "reference_nsigma": 6.0,
+    "mean_x_um": 0.0,
+    "mean_y_um": 0.0,
+    "mean_angle_deg": 0.0,
+    "rho_xy": 0.0,
+    "interdie": "unknown",
+    "fixed_via_assignment": "all"
+  },
+  "settings": {
+    "max_undo_steps": 10,
+    "space_export_interval_um": 100.0,
+    "drc_checks": [
+      "width",
+      "space",
+      "enclosure",
+      "angle",
+      "board",
+      "die_gap",
+      "die_edge",
+      "keepout"
+    ],
+    "drc_visible": [
+      "width",
+      "space",
+      "enclosure",
+      "angle",
+      "board",
+      "die_gap",
+      "die_edge",
+      "keepout"
+    ],
+    "table_page_limit": 500,
+    "max_threads": 0,
+    "max_memory_mb": 0,
+    "reconstruction_pad_trigger_um": 5.0,
+    "reconstruction_node_snap_um": 0.0,
+    "drc_waived_refs": [],
+    "drc_retained_refs": [],
+    "reconstruction_node_snap_strength": 0.4,
+    "save_project_results": true,
+    "result_cache_directory": "",
+    "width_display": {
+      "固定RDL": "dim",
+      "运动RDL": "dim",
+      "固定过孔": "show",
+      "运动过孔": "show",
+      "封装边框": "show",
+      "芯片边框": "show",
+      "其他": "show",
+      "运动过孔孔盘": "show",
+      "固定过孔孔盘": "show",
+      "固定障碍": "show",
+      "禁布区": "show",
+      "截面": "show",
+      "描边": "show",
+      "标注": "show",
+      "边距": "show"
+    },
+    "width_label_font_pt": 8.0,
+    "width_label_decimals": 2,
+    "width_yield_decimals": 6,
+    "width_yield_method": "grid",
+    "width_show_probability": true,
+    "width_yield_exponent": 12,
+    "width_yield_seed": 510,
+    "width_grid_nodes": 5,
+    "show_contact_markers": true,
+    "show_low_contact": false,
+    "show_low_width": true,
+    "cache_max_entries": 2000,
+    "acceleration": "cuda",
+    "drc_min_angle_deg": 90.0,
+    "drc_tolerance_um": 0.1,
+    "probability_method": "sobol",
+    "sample_exponent": 12,
+    "random_seed": 510,
+    "quadrature_order": 25,
+    "tail_sigma": 8.0,
+    "probability_cell_um": 0.0,
+    "angle_bins": 24,
+    "footprint_samples": 4,
+    "probability_alpha": 0.42,
+    "probability_show_ranges": false,
+    "probability_ranges": [],
+    "probability_target_color": "#bf526d",
+    "show_annulus_range": true,
+    "show_spacing_range": true,
+    "contact_marker_color": "#bc243e",
+    "contact_marker_size": 5.0,
+    "contact_marker_absolute": false,
+    "unadapted_marker_color": "#ba7628",
+    "unadapted_marker_size": 7.0,
+    "unadapted_marker_absolute": false,
+    "space_resolution": 101,
+    "space_cmap": "pastel",
+    "space_interpolation": "bilinear",
+    "space_alpha": 0.65,
+    "intrusion_alpha": 0.52,
+    "probability_cmap": "blue",
+    "probability_gamma": 0.35,
+    "probability_interpolation": "nearest",
+    "space_scope": "moving",
+    "animation_enabled": false,
+    "animation_return_zero": true,
+    "animation_strategy": "prepared",
+    "evaluation_scope": "risk",
+    "reconstruction_die_mode": "follow",
+    "animation_duration_ms": 1000,
+    "animation_steps": 12,
+    "animation_fps": 30,
+    "animation_speed": 3,
+    "camera_speed": 4,
+    "contact_box_budget": 2048,
+    "reconstruction_regions": [],
+    "reconstruction_boxes": [],
+    "reconstruction_angle_boxes": [
+      [
+        "14/0",
+        [
+          [
+            4232.30404546847,
+            1888.233586047132
+          ],
+          [
+            4278.091549588769,
+            1888.233586047132
+          ],
+          [
+            4278.091549588769,
+            1837.3585814690211
+          ],
+          [
+            4232.30404546847,
+            1837.3585814690211
+          ]
+        ]
+      ],
+      [
+        "14/0",
+        [
+          [
+            4619.174215599379,
+            1856.3527240512713
+          ],
+          [
+            4648.447531725673,
+            1856.3527240512713
+          ],
+          [
+            4648.447531725673,
+            1808.40505108579
+          ],
+          [
+            4619.174215599379,
+            1808.40505108579
+          ]
+        ]
+      ],
+      [
+        "14/0",
+        [
+          [
+            4278.952489609352,
+            1724.4199794879362
+          ],
+          [
+            4361.079282714016,
+            1724.4199794879362
+          ],
+          [
+            4361.079282714016,
+            1703.3431918770045
+          ],
+          [
+            4278.952489609352,
+            1703.3431918770045
+          ]
+        ]
+      ],
+      [
+        "14/0",
+        [
+          [
+            4392.192461252869,
+            1571.243017371855
+          ],
+          [
+            4419.9789784549375,
+            1564.3150605318958
+          ],
+          [
+            4394.16838569162,
+            1460.7944271935228
+          ],
+          [
+            4366.381868489551,
+            1467.722384033482
+          ]
+        ]
+      ],
+      [
+        "14/0",
+        [
+          [
+            4295.59018596368,
+            1703.9464434550987
+          ],
+          [
+            4362.454477694911,
+            1703.9464434550987
+          ],
+          [
+            4362.454477694911,
+            1609.4642920957501
+          ],
+          [
+            4295.59018596368,
+            1609.4642920957501
+          ]
+        ]
+      ],
+      [
+        "14/0",
+        [
+          [
+            4626.568430033273,
+            1446.2282059779836
+          ],
+          [
+            4733.405939647306,
+            1446.2282059779836
+          ],
+          [
+            4733.405939647306,
+            1395.353201399873
+          ],
+          [
+            4626.568430033273,
+            1395.353201399873
+          ]
+        ]
+      ],
+      [
+        "14/0",
+        [
+          [
+            4291.148071278231,
+            1707.7955009443228
+          ],
+          [
+            4351.325933836339,
+            1707.7955009443228
+          ],
+          [
+            4351.325933836339,
+            1624.9419220599711
+          ],
+          [
+            4291.148071278231,
+            1624.9419220599711
+          ]
+        ]
+      ],
+      [
+        "14/0",
+        [
+          [
+            4652.215246626879,
+            1451.385477870645
+          ],
+          [
+            4767.338114129346,
+            1451.385477870645
+          ],
+          [
+            4767.338114129346,
+            1390.3354723769123
+          ],
+          [
+            4652.215246626879,
+            1390.3354723769123
+          ]
+        ]
+      ],
+      [
+        "14/0",
+        [
+          [
+            5050.232211014828,
+            1442.693119945585
+          ],
+          [
+            5130.17864678043,
+            1442.693119945585
+          ],
+          [
+            5130.17864678043,
+            1396.178830045598
+          ],
+          [
+            5050.232211014828,
+            1396.178830045598
+          ]
+        ]
+      ],
+      [
+        "14/0",
+        [
+          [
+            5196.3646051172855,
+            1497.565446311976
+          ],
+          [
+            5281.834612808511,
+            1497.565446311976
+          ],
+          [
+            5281.834612808511,
+            1439.1318696251174
+          ],
+          [
+            5196.3646051172855,
+            1439.1318696251174
+          ]
+        ]
+      ],
+      [
+        "14/0",
+        [
+          [
+            4775.1195672105305,
+            1575.1861675825792
+          ],
+          [
+            4855.3567172880075,
+            1575.1861675825792
+          ],
+          [
+            4855.3567172880075,
+            1515.0083050244712
+          ],
+          [
+            4775.1195672105305,
+            1515.0083050244712
+          ]
+        ]
+      ],
+      [
+        "14/0",
+        [
+          [
+            5004.759686160967,
+            1508.9535399081897
+          ],
+          [
+            5117.789410617935,
+            1508.9535399081897
+          ],
+          [
+            5117.789410617935,
+            1383.364957178225
+          ],
+          [
+            5004.759686160967,
+            1383.364957178225
+          ]
+        ]
+      ]
+    ],
+    "reconstruction_box_order": [
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned"
+    ],
+    "reconstruction_box_starts": [
+      [
+        "14/0",
+        6,
+        11
+      ]
+    ],
+    "reconstruction_unlinked_boxes": [],
+    "reconstruction_box_mode": "aligned",
+    "reconstruction_fixed_via_mode": "off",
+    "reconstruction_fixed_via_follows": [],
+    "reconstruction_between_motion": "max",
+    "reconstruction_between_overrides": [],
+    "reconstruction_box_excluded": [
+      [
+        "14/0",
+        5
+      ],
+      [
+        "14/0",
+        18
+      ],
+      [
+        "14/0",
+        19
+      ],
+      [
+        "14/0",
+        20
+      ],
+      [
+        "14/0",
+        21
+      ],
+      [
+        "14/0",
+        22
+      ]
+    ],
+    "reconstruction_cuts": [],
+    "reconstruction_extra_cuts": [],
+    "reconstruction_second_cuts": [],
+    "reconstruction_dropped_cuts": [],
+    "reconstruction_enabled": false,
+    "reconstruction_auto": false,
+    "reconstruction_live": true,
+    "reconstruction_allow_moving_pad": false,
+    "reconstruction_style": "linear",
+    "reconstruction_boundary_mode": "perpendicular",
+    "reconstruction_ignored": [
+      [
+        "14/0",
+        5
+      ],
+      [
+        "14/0",
+        6
+      ],
+      [
+        "14/0",
+        9
+      ],
+      [
+        "14/0",
+        18
+      ],
+      [
+        "14/0",
+        19
+      ],
+      [
+        "14/0",
+        20
+      ],
+      [
+        "14/0",
+        21
+      ],
+      [
+        "14/0",
+        22
+      ]
+    ],
+    "reconstruction_following": [
+      [
+        "14/0",
+        5
+      ],
+      [
+        "14/0",
+        18
+      ],
+      [
+        "14/0",
+        19
+      ],
+      [
+        "14/0",
+        20
+      ],
+      [
+        "14/0",
+        22
+      ]
+    ],
+    "reconstruction_forced": [],
+    "reconstruction_angles": [],
+    "reconstruction_deleted": [],
+    "reconstruction_added": [],
+    "reconstruction_grid_nodes": 3,
+    "reconstruction_intervals": [],
+    "reconstruction_auto_waive_drc": false,
+    "reconstruction_waiver_mantissa": 1,
+    "reconstruction_waiver_exponent": -6,
+    "yield_method": "monte_carlo",
+    "yield_sample_exponent": 12,
+    "yield_box_budget": 4096,
+    "yield_tolerance": 0.001,
+    "safe_box_precision": 0.01,
+    "safe_box_budget": 512,
+    "safe_box_starts": 3,
+    "safe_box_passes": 2
+  },
+  "node_edits": [],
+  "deleted_shapes": [],
+  "geometry_indexing": "merged-v39",
+  "legacy_node_edits": [],
+  "layout_output": {
+    "directory": "",
+    "layer_scope": "all",
+    "merge_layers": true,
+    "dbu_um": 0.0,
+    "max_points": 8190
+  },
+  "dxf_directory": "",
+  "dxf_options": {
+    "merge_layers": true,
+    "layer_scope": "all",
+    "polygon_mode": "outline",
+    "scale": 1.0,
+    "separate_holes": false,
+    "show_fill": false,
+    "region_auto_join": true
+  },
+  "measured_output": {
+    "output_directory": "",
+    "max_memory_mb": 0,
+    "max_threads": 0
+  },
+  "apd_export": {},
+  "layer_compensation": {
+    "14/0": 1.5
+  },
+  "ignored_drc": {},
+  "ignored_reconstruction": {
+    "sha256": "de9fe0c6d4493085f01c2a1e29c7f6e9937389e8c768d383f5a91ef2075b2c23",
+    "top_cell": "TOP",
+    "refs": [
+      [
+        "14/0",
+        5
+      ],
+      [
+        "14/0",
+        6
+      ],
+      [
+        "14/0",
+        9
+      ],
+      [
+        "14/0",
+        18
+      ],
+      [
+        "14/0",
+        19
+      ],
+      [
+        "14/0",
+        20
+      ],
+      [
+        "14/0",
+        21
+      ],
+      [
+        "14/0",
+        22
+      ]
+    ]
+  },
+  "ignored_width_lines": {
+    "sha256": "de9fe0c6d4493085f01c2a1e29c7f6e9937389e8c768d383f5a91ef2075b2c23",
+    "top_cell": "TOP",
+    "refs": []
+  },
+  "extreme_view": {
+    "filter_mode": "drc",
+    "filter_problems": true,
+    "mode": "risk",
+    "page_size": 499,
+    "page": 1
+  },
+  "layer_table_height": 297,
+  "expanded_settings": [
+    "硬件与计算资源",
+    "重构预演"
+  ],
+  "expanded_process": [
+    "线宽线距",
+    "过孔包围量",
+    "芯片距离",
+    "其他"
+  ],
+  "manual_preview": {
+    "values": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ]
+    ],
+    "pivots": [
+      [
+        "center",
+        0.0,
+        0.0
+      ]
+    ]
+  },
+  "overlays": {
+    "drc": true,
+    "space": false,
+    "width": false,
+    "width_sufficient": false,
+    "reconstruction": true,
+    "footprint": false
+  },
+  "layer_styles": {},
+  "visibility": {
+    "8/0": true,
+    "9/0": false,
+    "10/0": false,
+    "12/0": true,
+    "4/0": true,
+    "6/0": false,
+    "7/0": false,
+    "11/0": true,
+    "14/0": true
+  },
+  "selectability": {
+    "8/0": false,
+    "9/0": false,
+    "10/0": false,
+    "12/0": false,
+    "4/0": false,
+    "6/0": false,
+    "7/0": false,
+    "11/0": false,
+    "14/0": true
+  },
+  "motions": {
+    "8/0": "auto",
+    "9/0": "fixed",
+    "10/0": "fixed",
+    "12/0": "auto",
+    "4/0": "fixed",
+    "6/0": "fixed",
+    "7/0": "fixed",
+    "11/0": "fixed",
+    "14/0": "fixed"
+  },
+  "layer_order": [
+    "8/0",
+    "9/0",
+    "10/0",
+    "12/0",
+    "4/0",
+    "6/0",
+    "7/0",
+    "11/0",
+    "14/0"
+  ],
+  "gds_path": "PDS-XD46-SCT85330CPLR-A0.gds"
+}

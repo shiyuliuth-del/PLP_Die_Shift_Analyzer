@@ -220,7 +220,7 @@ def expand(r,entries):
         split_extras=[ex for ex in extras if ex not in local_extras]
         # Step 1: Collect existing zones on this plan (unless ref was ignored before boxes).
         rows=[]
-        had_only_boxes=(ref in ignored_set and bool(applicable_boxes)) or (ref in seeded_refs and not seed and not local_extras and not split_extras)
+        had_only_boxes=(ref in ignored_set and ref in r.box_refs and ref not in box_excluded) or (ref in seeded_refs and not seed and not local_extras and not split_extras)
         if not had_only_boxes:
             if not split_extras:
                 if key(plan) not in deleted_set:
