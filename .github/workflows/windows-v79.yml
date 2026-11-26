@@ -1,5 +1,5 @@
 name: V79 Windows offline licensing and interface
-on: workflow_dispatch
+on: workflow_call
 permissions:
   contents: read
 jobs:
