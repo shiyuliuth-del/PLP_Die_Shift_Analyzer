@@ -5,8 +5,8 @@ import math
 import numpy as np
 from scipy.special import ndtr,ndtri
 from scipy.stats import beta,qmc
-from .distribution import bounded_poses,normal_interval,normalization
-from .statistics import mean_and_bounds
+from .distribution import bounded_poses,normal_interval,normalization_axes
+from .statistics import mean_and_bounds,std_devs
 from .width_analysis import WidthAnalyzer
 from .width_yield_geometry import WidthEvents
 
@@ -45,17 +45,24 @@ def joint_batches(params,count,cfg):
         unit=integrator.random(BATCH).reshape(BATCH,count,3)+.5/n
         weights=np.ones(BATCH);states=np.zeros_like(unit)
         for i,(p,(mu,b)) in enumerate(zip(laws,bounds)):
-            k=p.scale_nsigma;rho=p.rho_xy
-            z=_truncated_quantile(unit[:,i],-k,k)
-            if b[0] and b[1] and rho:
-                if abs(rho)==1:z[:,1]=rho*z[:,0]
+            sig=np.where(b>0,std_devs(p),0.);rho=p.rho_xy
+            active=(b>0)&(sig>0)
+            ks=np.array([float(b[j]/sig[j]) if active[j] else 0. for j in range(3)])
+            z=np.zeros((BATCH,3))
+            for j in range(3):
+                if active[j]:z[:,j]=_truncated_quantile(unit[:,i,j],-ks[j],ks[j])
+            if active[0] and active[1] and rho:
+                if abs(rho)==1:
+                    k_eff=min(ks[0],ks[1])
+                    z[:,0]=_truncated_quantile(unit[:,i,0],-k_eff,k_eff)
+                    z[:,1]=rho*z[:,0]
                 else:
                     s=math.sqrt((1-rho)*(1+rho));center=rho*z[:,0]
-                    lo=(-k-center)/s;hi=(k-center)/s
+                    lo=(-ks[1]-center)/s;hi=(ks[1]-center)/s
                     z[:,1]=center+s*_truncated_quantile(unit[:,i,1],lo,hi)
-                    mass=normalization(k,rho,True,True,False)[0]
-                    weights*=normal_interval(-k,k)*normal_interval(lo,hi)/mass
-            states[:,i]=mu+z*(b/k)
+                    mass=normalization_axes(ks[0],ks[1],math.inf,rho,True,True,False)[0]
+                    weights*=normal_interval(-ks[0],ks[0])*normal_interval(lo,hi)/mass
+            states[:,i]=mu+z*sig
         yield states,weights,'cubature',n
 
 

@@ -379,6 +379,14 @@ class RoutePlan:
         eps=max(self.tolerance**2,land_area*1e-7)
         candidates=[g for g in pieces if self._bounds_overlap(g.bounds,land_bounds) and (g.covers(self.land) or g.intersection(self.land).area>=land_area-eps)]
         candidates=[g for g in candidates if all(not self._bounds_overlap(g.bounds,ab) or not g.intersects(a) or g.intersection(a).area<=eps for a,ab in zip(self.anchors,anchor_bounds))]
+        extra_fixed=getattr(self,'cluster_fixed',None)
+        if candidates and extra_fixed is not None and not extra_fixed.is_empty:
+            feps=max(self.tolerance**2,1e-8)
+            candidates=[g for g in candidates if g.intersection(extra_fixed).area<=feps]
+        extra_moving=getattr(self,'cluster_moving',None)
+        if candidates and extra_moving is not None and not extra_moving.is_empty:
+            meps=max(self.tolerance**2,1e-8)
+            candidates=[g for g in candidates if extra_moving.difference(g).area<=meps]
         if len(pieces)<2 or len(candidates)!=1:result=None
         else:result=candidates[0],face,shapely.union_all([g for g in pieces if g is not candidates[0]])
         if len(self.cache)>4096:
@@ -449,6 +457,10 @@ class RoutePlan:
             land_area,land_bounds=self._land_info()
             epsilon=max(self.tolerance**2,land_area*1e-7)
             movable=[g for g in pieces if self._bounds_overlap(g.bounds,land_bounds) and (g.covers(self.land) or g.intersection(self.land).area>=land_area-epsilon)]
+            extra_moving=getattr(self,'cluster_moving',None)
+            if len(movable)==1 and extra_moving is not None and not extra_moving.is_empty:
+                meps=max(self.tolerance**2,1e-8)
+                if extra_moving.difference(movable[0]).area>meps:movable=[]
             if len(movable)!=1 or len(pieces)<2:return None
             c=movable[0];a_shape=shapely.union_all([g for g in pieces if g is not c])
         if a_shape.is_empty:return None

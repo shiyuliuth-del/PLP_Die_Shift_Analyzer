@@ -1,3 +1,10 @@
+# V82 正态标准差、授权默认目录、性能与重构边界修复
+
+- `Parameters` 新增 `sigma_x_um=3.0`、`sigma_y_um=3.0`、`sigma_angle_deg=0.02`、`per_die_sigma_enabled=False`、`die_sigmas=[]`，与硬范围 `bounds` 及 `target_nsigma` 解耦；`statistics.statistical_state`、`distribution`、`model_yield`、`width_probability`、`width_yield`、`width_sampling`、`contact_probability`、`probability_overlay`、`reconstruction_probability`、`result_analysis` 统一通过 `Parameters.for_die()` 消费该标准差。旧工程默认 `3.0 / 3.0 / 0.02`，均值默认 `0`。
+- `LicenseManager/main.py` 将 `home`、`data`、`output`（`licenses/`）、`universal_dir` 及 `default_key_dir()`（`keys/`）全部指向 `admin_directory()`（冻结为 `.exe` 所在目录）；`license_core.build_public_key_path` 新增 `dist_admin/keys/public_key.pem` 与 `dist_admin/public_key.pem` 查找路径，保留 `admin_key_directory()` 兼容既有接口。
+- 性能与交互：`fast_preview.compiled_polygons` 缓存源多边形对象并在 `gds_merge.merge_import`、`area_filter.apply`、`stack.Connections` 与 `GeometryCache` 间复用；`stack.Connections` 批量查询固定过孔相交；`project_results.preload` 支持后台预解码；`MainWindow.save_project` 通过 `progress` 回调驱动界面进度条；`gui.py` 将「两侧运动的动区生成数量」更名为「两侧运动动区数量」。
+- 重构边界：`reconstruction_incremental.source_settings` 补入 `reconstruction_two_moving_zones`，`ReconstructionOverlay.stage` 同步标记双侧动区数量变化，`moving_pair.frames` 与 `reconstruction_zones` 清理零面积碎片；`reconstruction.py` 在 `paired` 检查目标 RDL 网络 `ref_net`，候选筛选先保留可达锚点路径再筛选对齐路径，`branch_regions.assemble` 吸收跨越窄缝的非端孔微片，并在两侧均存在聚集多过孔簇且满足单侧 MST 铜内直连或短弧长条件时仅保留受最近 `(va, vb)` 制约的单中间动区。回归见 `tests/test_v82.py`。
+
 # V81 共享离线授权
 
 `license_core` 保持 V80 的 Windows UUID 与本机 IPv4 机器码算法。启动按两个 EXE 所在目录扫描 `.lic`，再回退到用户目录。错误许可不会遮盖有效许可。Die Shift Analyze 的 GUI、诊断、CLI 与 RealDataAnalyse 的 GUI、CLI 共用授权验证和内置公钥。独立启动授权窗口即使缺少公钥也会尝试显示 Machine ID。

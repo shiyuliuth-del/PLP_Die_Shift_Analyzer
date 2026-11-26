@@ -20,7 +20,7 @@ from test_v21 import example
 
 class SamplingTests(unittest.TestCase):
     def test_rare_tail_mass_independent_dies_and_shared_state(self):
-        p=replace(Parameters(),multi_bound_x_um=6,multi_bound_y_um=0,bound_angle_deg=0,target_nsigma=6)
+        p=replace(Parameters(),multi_bound_x_um=6,multi_bound_y_um=0,bound_angle_deg=0,target_nsigma=6,sigma_x_um=1)
         cfg=replace(ViewSettings(),width_yield_exponent=16)
         batches=list(mixture_batches(p,2,cfg))
         states=np.concatenate([x[0] for x in batches]);w=np.concatenate([x[1] for x in batches])
@@ -38,7 +38,7 @@ class SamplingTests(unittest.TestCase):
         from scipy.integrate import quad
         k=2.;q=ndtr(k)-ndtr(-k)
         for rho in (.7,1.,-1.):
-            p=replace(Parameters(),single_bound_x_um=2,single_bound_y_um=2,bound_angle_deg=0,target_nsigma=k,rho_xy=rho)
+            p=replace(Parameters(),single_bound_x_um=2,single_bound_y_um=2,bound_angle_deg=0,target_nsigma=k,rho_xy=rho,sigma_x_um=1,sigma_y_um=1)
             z=[];weights=[]
             for states,w,bound,_ in mixture_batches(p,1,replace(ViewSettings(),width_yield_exponent=15)):
                 z.extend(states[:,0]);weights.extend(w)
@@ -123,7 +123,7 @@ class GridTests(unittest.TestCase):
         finally:e.close()
 
     def test_grid_probability_weights_and_old_settings(self):
-        p=replace(Parameters(),per_die_enabled=True,die_bounds=[[6,0,0],[0,0,0]],target_nsigma=6,mean_x_um=2)
+        p=replace(Parameters(),per_die_enabled=True,die_bounds=[[6,0,0],[0,0,0]],target_nsigma=6,mean_x_um=2,sigma_x_um=1)
         g=WidthGrid(p,2,5)
         self.assertEqual(g.combinations,5)
         self.assertEqual(g.radices[1],1)

@@ -3,8 +3,8 @@ import math
 import numpy as np
 import shapely
 from scipy.special import ndtr
-from .distribution import normal_interval,normalization
-from .statistics import mean_and_bounds
+from .distribution import normal_interval,normalization_axes
+from .statistics import mean_and_bounds,std_devs
 from .preview import rigid_transform
 
 
@@ -27,8 +27,10 @@ class ChannelProbability:
         for i in range(len(self.centers)):
             p=params.for_die(i)
             mu,b=mean_and_bounds(p,len(self.centers))
-            sigma=b/p.scale_nsigma
-            z,err=normalization(p.scale_nsigma,p.rho_xy,*map(bool,b[:2]),False)
+            sigma=np.where(b>0,std_devs(p),0.)
+            kx=float(b[0]/sigma[0]) if b[0]>0 and sigma[0]>0 else math.inf
+            ky=float(b[1]/sigma[1]) if b[1]>0 and sigma[1]>0 else math.inf
+            z,err=normalization_axes(kx,ky,math.inf,p.rho_xy,bool(b[0] and sigma[0]),bool(b[1] and sigma[1]),False)
             self.laws.append((mu,b,sigma,p.rho_xy,z-err))
         self.wall_data={};self.results={};self.edge_shapes={};self.edge_results={}
         self.masses={};self.params=params;self.box_masses={}
@@ -65,14 +67,14 @@ class ChannelProbability:
         v=xy-center
         a=v@axis;perp=v@np.array([axis[1],-axis[0]])
         # Minimum of a*cos(t)+perp*sin(t), including extrema inside the slice.
-        edges=mu[2]+np.linspace(-b[2],b[2],bins+1) if b[2] else np.array([mu[2],mu[2]])
+        edges=mu[2]+np.linspace(-b[2],b[2],bins+1) if (b[2] and sigma[2]) else np.array([mu[2],mu[2]])
         left,right=edges[:-1,None],edges[1:,None]
         values=np.minimum(a*np.cos(left)+perp*np.sin(left),a*np.cos(right)+perp*np.sin(right))
         phase=np.arctan2(perp,a)+math.pi
         includes=np.mod(phase-left,2*math.pi)<=right-left+1e-14
         lower=np.where(includes,-np.hypot(a,perp),values).min(axis=1)+(center+mu[:2])@axis
         weights=(normal_interval((edges[:-1]-mu[2])/sigma[2],(edges[1:]-mu[2])/sigma[2])/
-                 float(normal_interval(-b[2]/sigma[2],b[2]/sigma[2]))) if b[2] else np.ones(1)
+                 float(normal_interval(-b[2]/sigma[2],b[2]/sigma[2]))) if (b[2] and sigma[2]) else np.ones(1)
         sx,sy=sigma[:2]*axis
         variance=(sx+rho*sy)**2+sy**2*max(0.,1-rho*rho)
         return lower,weights,variance,float(np.abs(axis)@b[:2]),z

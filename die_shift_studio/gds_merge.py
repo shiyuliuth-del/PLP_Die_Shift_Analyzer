@@ -51,13 +51,13 @@ def winding_outline(poly):
 
 def merge_import(data):
     if getattr(data,'geometry_indexing',None)=='merged-v39':return data
-    from .fast_preview import polygons_from_arrays
+    from .fast_preview import compiled_polygons
     raw=copy.copy(data);raw.layers={k:list(v) for k,v in data.layers.items()};raw.shape_info={k:list(v) for k,v in data.shape_info.items()}
-    out=copy.copy(data);out.layers={};out.shape_info={};out.merge_sources={};out.raw_to_merged={};out.merge_notes=[]
+    out=copy.copy(data);out.layers={};out.shape_info={};out.merge_sources={};out.raw_to_merged={};out.merge_notes=[];out._poly_cache={}
     from .resources import parallel_iter,resource_profile,cancel_check
     def merge_layer(item):
         key,arrays=item
-        geos=polygons_from_arrays(arrays);parent=list(range(len(geos)))
+        geos=compiled_polygons(data,key,arrays);parent=list(range(len(geos)))
         def root(i):
             while parent[i]!=i:parent[i]=parent[parent[i]];i=parent[i]
             return i
@@ -78,7 +78,7 @@ def merge_import(data):
                     if a!=b:parent[max(a,b)]=min(a,b)
         groups=defaultdict(list)
         for i in range(len(geos)):groups[root(i)].append(i)
-        result=[];metadata=[];sources=[];source=raw.shape_info.get(key,())
+        result=[];metadata=[];sources=[];compiled=[];source=raw.shape_info.get(key,())
         ordered=sorted(groups.values(),key=lambda v:v[0])
         pairs=np.asarray([ids for ids in ordered if len(ids)==2],dtype=int).reshape(-1,2)
         unions=shapely.union(geos[pairs[:,0]],geos[pairs[:,1]])
@@ -91,24 +91,25 @@ def merge_import(data):
         offsets=np.r_[0,np.cumsum(counts)]
         holes=shapely.get_num_interior_rings(unions);pair_index=0
         for ids in ordered:
-            if len(ids)==1:points=arrays[ids[0]];meta=source[ids[0]] if ids[0]<len(source) else None
+            if len(ids)==1:points=arrays[ids[0]];meta=source[ids[0]] if ids[0]<len(source) else None;geom=geos[ids[0]]
             else:
                 if len(ids)==2:
-                    rings=holes[pair_index]
-                    points=(winding_outline(unions[pair_index]) if rings else coordinates[offsets[pair_index]:offsets[pair_index+1]-1].copy())
+                    geom=unions[pair_index];rings=holes[pair_index]
+                    points=(winding_outline(geom) if rings else coordinates[offsets[pair_index]:offsets[pair_index+1]-1].copy())
                     pair_index+=1
                 else:
-                    g=shapely.union_all(geos[ids])
-                    if g.geom_type!='Polygon':raise ValueError(f'图层 {key} 的连接碎片未形成唯一面')
-                    rings=len(g.interiors)
-                    points=winding_outline(g) if rings else np.asarray(orient(g,sign=1.).exterior.coords)[:-1].copy()
+                    geom=shapely.union_all(geos[ids])
+                    if geom.geom_type!='Polygon':raise ValueError(f'图层 {key} 的连接碎片未形成唯一面')
+                    rings=len(geom.interiors)
+                    points=winding_outline(geom) if rings else np.asarray(orient(geom,sign=1.).exterior.coords)[:-1].copy()
                 meta=dict(kind='polygon',winding=True,nodes=points.copy()) if rings else None
-            result.append(points);metadata.append(meta);sources.append(tuple(ids))
-        return key,result,metadata,sources
+            result.append(points);metadata.append(meta);sources.append(tuple(ids));compiled.append(geom)
+        return key,result,metadata,sources,np.asarray(compiled,object)
     profile=resource_profile()
     if sum(map(len,raw.layers.values()))<2000:profile=dict(profile,workers=1)
-    for key,result,metadata,sources in parallel_iter(merge_layer,raw.layers.items(),profile):
+    for key,result,metadata,sources,compiled in parallel_iter(merge_layer,raw.layers.items(),profile):
         out.layers[key]=result;out.shape_info[key]=metadata;out.merge_sources[key]=sources
+        out._poly_cache[(key,id(result),len(result))]=compiled
         out.raw_to_merged.update(((key,old),index) for index,ids in enumerate(sources) for old in ids)
         count=len(raw.layers[key])
         if len(result)<count:out.merge_notes.append(f'图层 {key}：{count} 个源片 Merge 为 {len(result)} 个完整图形（点接触不合并）。')

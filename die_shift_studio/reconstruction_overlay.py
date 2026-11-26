@@ -148,6 +148,10 @@ class ReconstructionOverlay:
                     elif name=='angles':tag(ref,'旋转边界')
                     elif name in ('intervals','cuts','extra_cuts','second_cuts'):tag(ref,'调整动区')
                     elif name=='box_excluded' and row in cur:tag(ref,'删除动区')
+        if cfg.reconstruction_two_moving_zones!=previous.reconstruction_two_moving_zones and solver is not None:
+            for ref,vias in solver.vias_by_target.items():
+                if len(vias)==2:
+                    rdl_refs.add(ref);tag(ref,'调整动区')
         all_refs=rdl_refs|via_refs
         self.staged_overlay=dict(refs=all_refs,between_refs=between_refs,boxes=tuple(staged_boxes),actions={k:tuple(v) for k,v in actions.items()},key=key,previous=previous)
         if frame and frame.get('reconstruction') and solver is not None and rdl_refs and not getattr(w,'_in_animation',False):

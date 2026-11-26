@@ -10,7 +10,7 @@ def calculate(model,p,settings=None,cache=None,progress=lambda *_:None,contact=N
     cfg=settings or ViewSettings();data=model.data;roles=model.roles;order=model.connections.order
     if contact is None or contact.get('mode')=='pending':contact=model.screen(p,settings=cfg,progress=progress)
     geometric=asdict(p)
-    for key in ('input_nsigma','target_nsigma','reference_nsigma','rho_xy'):geometric.pop(key,None)
+    for key in ('input_nsigma','target_nsigma','reference_nsigma','rho_xy','sigma_x_um','sigma_y_um','sigma_angle_deg','per_die_sigma_enabled','die_sigmas'):geometric.pop(key,None)
     range_key=('continuous-safe-box',logical_fingerprint((data.geometry_id,data.top_name,roles,order,geometric,
                cfg.safe_box_precision,cfg.safe_box_budget,cfg.safe_box_starts,cfg.safe_box_passes)))
     progress(75,'结果分析 · 连续安全范围')

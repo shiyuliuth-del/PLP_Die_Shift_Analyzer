@@ -20,7 +20,7 @@ def fixture(two=False):
 
 class V16Tests(unittest.TestCase):
     def test_all_input_probability_matches_analytic_wall_and_shared_die_event(self):
-        p=Parameters(single_bound_x_um=10,single_bound_y_um=0,bound_angle_deg=0,target_nsigma=2,annulus_um=1,line_space_um=1)
+        p=Parameters(single_bound_x_um=10,single_bound_y_um=0,bound_angle_deg=0,target_nsigma=2,sigma_x_um=5,annulus_um=1,line_space_um=1)
         expected=(ndtr(3/5)-ndtr(-2))/(ndtr(2)-ndtr(-2)) # touch starts at X=3
         cfg=ViewSettings(yield_box_budget=2048,yield_tolerance=.0001)
         result=integrate_die(fixture(),p,cfg,0);duplicated=integrate_die(fixture(True),p,cfg,0)
@@ -53,7 +53,7 @@ class V16Tests(unittest.TestCase):
         with self.assertRaises(ValueError):p.validate()
 
     def test_monte_carlo_joint_event_interval_and_vectorized_geometry(self):
-        p=Parameters(single_bound_x_um=10,single_bound_y_um=0,bound_angle_deg=0,target_nsigma=2,annulus_um=1,line_space_um=1)
+        p=Parameters(single_bound_x_um=10,single_bound_y_um=0,bound_angle_deg=0,target_nsigma=2,sigma_x_um=5,annulus_um=1,line_space_um=1)
         m=fixture(True);event=DieEvent(m,p,0)
         states=np.array([[-10,0,0],[2.9,0,0],[3,0,0],[7,0,.2]])
         np.testing.assert_array_equal(event.no_contact(states),[event.classify(q,q)[0]==1 for q in states])

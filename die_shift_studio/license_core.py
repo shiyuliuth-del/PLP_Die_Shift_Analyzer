@@ -190,8 +190,16 @@ def build_public_key_path(root):
     override = os.environ.get('DIE_SHIFT_LICENSE_PUBLIC_KEY')
     if override:
         return Path(override).expanduser()
-    bundled = Path(root)/'public_key.pem'
-    return bundled if bundled.exists() else admin_key_directory()/'public_key.pem'
+    root = Path(root)
+    for candidate in (
+        root/'public_key.pem',
+        root/'dist_admin'/'keys'/'public_key.pem',
+        root/'dist_admin'/'public_key.pem',
+        admin_key_directory()/'public_key.pem',
+    ):
+        if candidate.exists():
+            return candidate
+    return admin_key_directory()/'public_key.pem'
 
 
 def build_public_key(root):

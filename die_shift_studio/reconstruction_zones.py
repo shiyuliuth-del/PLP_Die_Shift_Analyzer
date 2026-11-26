@@ -159,6 +159,10 @@ def expand(r,entries):
         for e in usable:
             part=e['serial_part']
             block=part['C'].difference(occupied)
+            if not block.is_empty and block.geom_type!='Polygon':
+                from .reconstruction_route import parts
+                kept_b=[g for g in parts(block) if g.area>r.tol**2]
+                block=kept_b[0] if len(kept_b)==1 else shapely.MultiPolygon(kept_b) if kept_b else shapely.Polygon()
             blocks.append(block)
             occupied=shapely.union_all([occupied,part['A'],part['C']])
         between_modes=[];between_meta=[]

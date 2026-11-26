@@ -10,8 +10,8 @@ import numpy as np
 import shapely
 from scipy.special import ndtri,ndtr,roots_legendre
 from .acceleration import convolve
-from .statistics import statistical_state,mean_and_bounds
-from .distribution import normal_interval,normalization,bounded_poses
+from .statistics import statistical_state,mean_and_bounds,std_devs
+from .distribution import normal_interval,normalization_axes,bounded_poses
 from .settings import ViewSettings
 from .resources import parallel_map
 
@@ -34,12 +34,13 @@ def input_envelope(poly,center,p,count):
 def _translation_kernel(cov,cell,tail,order,hard_k=None):
     """Deterministic Gaussian rectangle probabilities on a zero-centred lattice."""
     sx,sy=np.sqrt(np.maximum(np.diag(cov)[:2],0))
-    if (2*tail*sx/cell+3)*(2*tail*sy/cell+3)>4_000_000:raise ValueError('平移概率网格超过400万格，请增大概率网格尺寸')
-    nx=int(math.ceil(tail*sx/cell));ny=int(math.ceil(tail*sy/cell))
+    tx,ty=(tail if isinstance(tail,(tuple,list)) else (tail,tail))
+    hkx,hky=(hard_k if isinstance(hard_k,(tuple,list)) else (hard_k,hard_k)) if hard_k is not None else (None,None)
+    if (2*tx*sx/cell+3)*(2*ty*sy/cell+3)>4_000_000:raise ValueError('平移概率网格超过400万格，请增大概率网格尺寸')
+    nx=int(math.ceil(tx*sx/cell));ny=int(math.ceil(ty*sy/cell))
     xe=(np.arange(-nx,nx+2)-.5)*cell;ye=(np.arange(-ny,ny+2)-.5)*cell
-    if hard_k is not None:
-        if sx:xe=np.clip(xe,-hard_k*sx,hard_k*sx)
-        if sy:ye=np.clip(ye,-hard_k*sy,hard_k*sy)
+    if hkx is not None and sx:xe=np.clip(xe,-hkx*sx,hkx*sx)
+    if hky is not None and sy:ye=np.clip(ye,-hky*sy,hky*sy)
     if sx==0 or sy==0:
         x=normal_interval(xe[:-1]/sx,xe[1:]/sx) if sx else np.array([1.])
         y=normal_interval(ye[:-1]/sy,ye[1:]/sy) if sy else np.array([1.])
@@ -124,7 +125,7 @@ def probability_maps(cache,bound,roles,p,exponent=12,masks=None,settings=None,pr
     if settings and settings.probability_show_ranges:
         from dataclasses import replace
         p=replace(p,target_nsigma=0)
-    if p.per_die_enabled:
+    if p.per_die_enabled or p.per_die_sigma_enabled:
         values=[];maps=[]
         for owner in range(len(bound.centers)):
             progress(round(100*owner/len(bound.centers)),f'概率云 DIE {owner+1}/{len(bound.centers)}')
@@ -151,18 +152,21 @@ def _probability_maps(cache,bound,roles,p,exponent=12,masks=None,settings=None,p
     _,hard=mean_and_bounds(p,len(bound.centers))
     reach=max(hard[0],hard[1],max(radii or [0])*min(math.pi,hard[2]))
     cell=cfg.probability_cell_um or max(cache.data.dbu_um,min(max(reach/32,.05),min(sizes or [1])/12),max(sizes or [0])/128,.05)
-    deterministic=cfg.probability_method=='quadrature' or not np.any(hard);sigma_angle=math.sqrt(cov[2,2]);samples=0;angle_error=0.
+    deterministic=cfg.probability_method=='quadrature' or not np.any(hard) or not np.any(np.diag(cov)>0);sigma_angle=math.sqrt(cov[2,2]);samples=0;angle_error=0.
     if deterministic:
-        if sigma_angle:
+        if sigma_angle and hard[2]:
+            kt=float(hard[2]/sigma_angle)
             nodes,weights=roots_legendre(cfg.quadrature_order)
             # Integrate in conditional CDF coordinates: positive weights sum to
             # one even at low order / 12 sigma, avoiding area inflation.
-            u=ndtr(-p.scale_nsigma)+(nodes+1)/2*float(normal_interval(-p.scale_nsigma,p.scale_nsigma))
+            u=ndtr(-kt)+(nodes+1)/2*float(normal_interval(-kt,kt))
             angles=mu[2]+sigma_angle*ndtri(u);weights=weights/2
         else:angles=np.array([mu[2]]);weights=np.array([1.])
-        limit=p.scale_nsigma if math.isfinite(p.scale_nsigma) else 0.
-        translation=_translation_kernel(cov,cell,limit,cfg.quadrature_order,hard_k=limit)
-        zxy,_=normalization(p.scale_nsigma,p.rho_xy,cov[0,0]>0,cov[1,1]>0,False);translation/=zxy
+        sx,sy=math.sqrt(cov[0,0]),math.sqrt(cov[1,1])
+        kx=float(hard[0]/sx) if sx>0 and hard[0]>0 else 0.
+        ky=float(hard[1]/sy) if sy>0 and hard[1]>0 else 0.
+        translation=_translation_kernel(cov,cell,(kx,ky),cfg.quadrature_order,hard_k=(kx,ky))
+        zxy,_=normalization_axes(kx,ky,math.inf,p.rho_xy,cov[0,0]>0 and hard[0]>0,cov[1,1]>0 and hard[1]>0,False);translation/=zxy
         offsets=np.array([translation.shape[1]//2,translation.shape[0]//2])*cell
         groups=[(float(angle),float(weight)) for angle,weight in zip(angles,weights)]
         cosine,sine=np.cos(angles),np.sin(angles)
@@ -246,8 +250,8 @@ def coverage_envelope(poly,center,p,count,level):
         return poly
     if level==0:return input_envelope(poly,center,p,count)
     _,bounds=mean_and_bounds(p,count)
-    scale=p.reference_nsigma if math.isinf(p.scale_nsigma) else p.scale_nsigma
-    limit=bounds*min(1.,level/scale)
-    q=replace(p,per_die_enabled=False,single_bound_x_um=limit[0],multi_bound_x_um=limit[0],
+    sig=np.where(bounds>0,std_devs(p),0.)
+    limit=np.minimum(bounds,level*sig)
+    q=replace(p,per_die_enabled=False,per_die_sigma_enabled=False,single_bound_x_um=limit[0],multi_bound_x_um=limit[0],
               single_bound_y_um=limit[1],multi_bound_y_um=limit[1],bound_angle_deg=math.degrees(limit[2]))
     return input_envelope(poly,center,q,count)

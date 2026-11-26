@@ -203,10 +203,20 @@ def assemble(r,source,rows,states,reference=None):
     fixed=shapely.union_all([fixed,seam])
     physical_moving=shapely.union_all([g for q in rows for g in getattr(q['route_plan'],'terminal_vias',((moving,),(fixed,)))[0]])
     physical_fixed=shapely.union_all([seam,*[g for q in rows for g in getattr(q['route_plan'],'terminal_vias',((moving,),(fixed,)))[1]]])
-    for g in merge_rigid_cells(rigid_cells,r.tol):
+    merged_rigid=merge_rigid_cells(rigid_cells,r.tol)
+    # Absorb tiny non-terminal crossing-cut slivers into the adjacent active
+    # domain or neighbouring rigid cell so they never steal display blades.
+    sliver_area=max(r.tol**2*64,source.area*1e-6)
+    sliver_width=max(r._rule_width*.5,5.)
+    kept_rigid=[]
+    for g in merged_rigid:
+        m=g.intersection(physical_moving).area>r.tol*r.tol;f=g.intersection(physical_fixed).area>r.tol*r.tol
+        if not m and not f and g.area<=sliver_area and 2.*g.area/max(g.length,1e-6)<=sliver_width and active.boundary.intersection(g.boundary.buffer(r.tol*.1)).length>r.tol*4:
+            active=shapely.union_all([active,g]);continue
+        kept_rigid.append((g,m,f))
+    for g,m,f in kept_rigid:
         # Enclosure masks may overlap a cut by a sub-DBU sliver. Only actual
         # terminal bodies decide ownership; those masks cannot swallow a fork.
-        m=g.intersection(physical_moving).area>r.tol*r.tol;f=g.intersection(physical_fixed).area>r.tol*r.tol
         if m and f and not any(q.get('strict_box') is not None for q in rows):active=shapely.union_all([active,g]);continue
         index=len(rigid);rigid.append(g)
         if m or f:known[index]=float(m)

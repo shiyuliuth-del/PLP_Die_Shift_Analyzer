@@ -60,6 +60,8 @@ SPECS={
  'mean_x_um':('平均 X 偏移 / μm',-10000,10000,3),
  'mean_y_um':('平均 Y 偏移 / μm',-10000,10000,3),'mean_angle_deg':('平均转角 / °',-180,180,4),
  'rho_xy':('X/Y相关系数',-1,1,3),
+ 'sigma_x_um':('X 偏移标准差 / μm',0,10000,3),'sigma_y_um':('Y 偏移标准差 / μm',0,10000,3),
+ 'sigma_angle_deg':('角度标准差 / °',0,180,4),
 }
 
 
@@ -114,6 +116,7 @@ QPushButton, QComboBox, QLineEdit, QDoubleSpinBox {padding: 1px 4px; min-height:
 
 TABLE_WIDTHS={
     'layer_table':(38,38,80,128,98), 'per_die_table':(72,72,72,72,190),
+    'per_die_sigma_table':(72,82,82,82),
     'issue_table':(142,76,90,100,100), 'extreme_table':(99,94,94,81),
     'scheme_table':(230,120,65),
 }
@@ -201,6 +204,7 @@ class MainWindow(W.QMainWindow):
         self.log_bus=LogBus(self.jobs_dir.parent/'logs'/'runtime.log',enabled=not measured)
         self.runtime_capture=RuntimeCapture(self.log_bus);self._tasks={};self._closing=False
         self.per_die_values=[];self.per_die_pivots=[];self.reference_nsigma=6.;self._per_die_initialized=False;self.hardware_worker=None
+        self.per_die_sigma_values=[];self._per_die_sigma_initialized=False
         from .session_cache import ProjectCacheRegistry
         self.cache_registry=ProjectCacheRegistry();self.cache_project_key="empty";self.cache_group=self.cache_registry.get("empty")
         from .session_cache import EphemeralCache
@@ -228,7 +232,7 @@ class MainWindow(W.QMainWindow):
         self.interface_scale=InterfaceScale(self,(
             self.progress,self.task_control.button,self.job_combo,self.save_button,self.runtime_toggle,
             self.gds_label,self.page_edit,self.grid_mode,self.page_prev,self.page_next,self.runtime_view,
-            self.per_die_table,self.scheme_table,
+            self.per_die_table,self.per_die_sigma_table,self.scheme_table,
         ))
         shortcut=QtGui.QShortcut if hasattr(QtGui,'QShortcut') else W.QShortcut
         self.properties_shortcut=shortcut(QtGui.QKeySequence('Q'),self.canvas)
@@ -515,11 +519,14 @@ class MainWindow(W.QMainWindow):
         summary=label('方案1：动静区之间局部重构RDL。\n方案2：RDL整体随动，固定RDL窗口捕获。\n方案3：预制运动RDL，动静接口适配。');summary.setObjectName('Notice');general.addRow(summary)
         self.shortcut_label=label('快捷键（鼠标位于图中）：F 恢复视图，M 手动偏移，K 两次单击测量（吸附图形；Ctrl八方向、Shift水平垂直；Shift/Ctrl+K清空），Shift＋点选/框选追加，Ctrl＋点选/框选扣除，Q 查看或编辑选中图形节点，ESC 退出/取消选择。\n画布获得焦点后：方向键平移当前视野的20%；测量时中键仍可平移。\n普通模式：滚轮缩放，中键平移，右键单击查看选中图形、拖框缩放。\n手动偏移：右键拖动芯片，滚轮旋转，Ctrl＋滚轮缩放。');general.addRow(self.shortcut_label)
         biases=group('系统偏差与相关性')
-        for key in ('mean_x_um','mean_y_um','mean_angle_deg','rho_xy'):
+        for key in ('mean_x_um','mean_y_um','mean_angle_deg','rho_xy','sigma_x_um','sigma_y_um','sigma_angle_deg'):
             name,low,high,decimals=SPECS[key]
             widget=W.QDoubleSpinBox();widget.setRange(low,high);widget.setDecimals(decimals)
             widget.setValue(getattr(Parameters(),key));widget.setKeyboardTracking(False)
             widget.valueChanged.connect(self.invalidate);biases.addRow(name,widget);self.fields[key]=widget
+        self.per_die_sigma_toggle=W.QCheckBox('按芯片分别设置标准差');biases.addRow(self.per_die_sigma_toggle)
+        self.per_die_sigma_table=table(['芯片','σX / μm','σY / μm','σO / °']);self.per_die_sigma_table.setMaximumHeight(215);biases.addRow(self.per_die_sigma_table);self.per_die_sigma_table.hide()
+        self.per_die_sigma_toggle.toggled.connect(self.per_die_sigma_changed)
         hardware=group('硬件与计算资源')
         saved=W.QCheckBox('保存工程时保存计算结果');self.setting_fields['save_project_results']=saved;hardware.addRow(saved);saved.toggled.connect(self.settings_changed)
         hardware.addRow(label('计算结果与运行缓存：当前项目文件夹 / Cache'))
@@ -684,7 +691,7 @@ class MainWindow(W.QMainWindow):
 
         choices['reconstruction_style']=[('直线','linear'),('一阶','c1'),('二阶','c2'),('圆弧','arc')]
         choice(recon,'reconstruction_style','连接样式')
-        count=spin(recon,'reconstruction_two_moving_zones','两侧运动的动区生成数量',0,3)
+        count=spin(recon,'reconstruction_two_moving_zones','两侧运动动区数量',0,3)
         count.setToolTip('两端均连接运动过孔时自动生成的动区数量。0 关闭该类自动生成，手动动区仍可应用。')
         choices['reconstruction_boundary_mode']=[('垂直','perpendicular'),('重构区优先','wide'),('两侧平均','balanced')]
         choice(recon,'reconstruction_boundary_mode','边界角度')
@@ -979,8 +986,31 @@ class MainWindow(W.QMainWindow):
         data['target_nsigma']=math.inf if self.target_sigma.currentText() in ('∞','无穷大','Infinity') else float(self.target_sigma.currentText())
         if 0<data['target_nsigma']<math.inf:self.reference_nsigma=data['target_nsigma']
         mode,x,y=self.pivot_editor.value()
-        data.update(reference_nsigma=self.reference_nsigma,rotation_center=mode,rotation_x_um=x,rotation_y_um=y,die_pivots=self.per_die_pivots,per_die_enabled=self.per_die_toggle.isChecked(),die_bounds=self.per_die_values if self._per_die_initialized else [])
+        data.update(reference_nsigma=self.reference_nsigma,rotation_center=mode,rotation_x_um=x,rotation_y_um=y,die_pivots=self.per_die_pivots,per_die_enabled=self.per_die_toggle.isChecked(),die_bounds=self.per_die_values if self._per_die_initialized else [],
+                    per_die_sigma_enabled=self.per_die_sigma_toggle.isChecked(),die_sigmas=self.per_die_sigma_values if self._per_die_sigma_initialized else [])
         data.update(input_nsigma=data['target_nsigma'],fixed_via_assignment=self.fixed_assignment);return Parameters.from_dict(data,require_rdl=False)
+    def per_die_sigma_changed(self,*_):
+        if self.per_die_sigma_toggle.isChecked() and not self._per_die_sigma_initialized and not self.loading:
+            self.per_die_sigma_values=[];self.per_die_sigma_table.setRowCount(0);self._per_die_sigma_initialized=True
+        self.per_die_sigma_table.setVisible(self.per_die_sigma_toggle.isChecked());self.sync_per_die_sigma()
+        for key in ('sigma_x_um','sigma_y_um','sigma_angle_deg'):
+            self.fields[key].setEnabled(not self.per_die_sigma_toggle.isChecked())
+        if not self.loading:self.invalidate()
+    def sync_per_die_sigma(self):
+        count=len(self.case['dies']) if self.case else 0
+        default=[self.fields['sigma_x_um'].value(),self.fields['sigma_y_um'].value(),self.fields['sigma_angle_deg'].value()]
+        self.per_die_sigma_values=(self.per_die_sigma_values+[default.copy() for _ in range(count)])[:count]
+        if self.per_die_sigma_table.rowCount()==count and getattr(self,'_die_sigma_table_source',None)==id(self.data):return
+        self._die_sigma_table_source=id(self.data);self.per_die_sigma_table.setRowCount(count)
+        for i,values in enumerate(self.per_die_sigma_values):
+            self.per_die_sigma_table.setItem(i,0,W.QTableWidgetItem(f'DIE {i+1}'))
+            for j,value in enumerate(values):
+                spin=W.QDoubleSpinBox();spin.setRange(0,180 if j==2 else 10000);spin.setDecimals(4 if j==2 else 3);spin.setValue(value);spin.setKeyboardTracking(False)
+                spin.valueChanged.connect(lambda value,i=i,j=j:self.set_die_sigma(i,j,value));self.per_die_sigma_table.setCellWidget(i,j+1,spin)
+        self.scale_table_columns('per_die_sigma_table');self.per_die_sigma_table.resizeRowsToContents()
+    def set_die_sigma(self,i,j,value):
+        self.per_die_sigma_values[i][j]=value
+        if not self.loading:self.invalidate()
     def per_die_changed(self,*_):
         if self.per_die_toggle.isChecked() and not self._per_die_initialized and not self.loading:
             self.per_die_values=[];self.per_die_pivots=[];self.per_die_table.setRowCount(0);self._per_die_initialized=True
@@ -1201,12 +1231,14 @@ class MainWindow(W.QMainWindow):
         if self.data and (self.active_preview is not None or self.manual_states is not None or self.probability_toggle.isChecked() or self.space_toggle.isChecked() or False or self.show_issues.isChecked() or self.width_toggle.isChecked() or self.reconstruction_toggle.isChecked()):
             try:self.request_preview()
             except ValueError:pass
-    def drop_result(self):
+    def drop_result(self,*,redraw=True):
         if hasattr(self,'analysis'):self.analysis.cancel()
         self.result=None;self.clear_preview();self.manual_states=None;self.dirty=False;self.probability_data=None;self.footprint_data=None;self.space_data=None
         self.scheme_table.setRowCount(0)
         self.safe_range_plot_data=draw_safe_ranges(self.safe_range_figure,{});self.safe_range_canvas.setMinimumHeight(240);self.safe_range_canvas.draw_idle()
-        self.scheme_figure.clear();self.scheme_canvas.draw_idle();self.plot_layout(preserve=True);self.update_histograms()
+        self.scheme_figure.clear();self.scheme_canvas.draw_idle()
+        if redraw:self.plot_layout(preserve=True)
+        self.update_histograms()
     def error(self,text):
         if getattr(self,'remote_locked',False):
             self.log_bus.emit(str(text),'ERROR');self.measured_output.fail_transition(str(text));return
@@ -1271,6 +1303,10 @@ class MainWindow(W.QMainWindow):
                     data.prepared_case=build_case(data,roles,connections=connections)
                 else:data.prepared_case=None
             except ValueError:data.prepared_case=None
+            data.preloaded_results=None
+            if project and project_path is not None and settings.get('saved_results'):
+                from .project_results import preload
+                data.preloaded_results=preload(settings,project_path,progress=progress)
             if progress:progress(100,'导入完成')
             return data
         def accepted(data):
@@ -1352,44 +1388,49 @@ class MainWindow(W.QMainWindow):
             self.layer_drag.end_drag()
             self.role_boxes={};self.visible_boxes={};self.selectable_boxes={};self.compensation_boxes={}
             self._layer_keys=stack_order(data,selected_roles,project.get('layer_order'))
-            self.layer_table.setRowCount(0);self.layer_table.setRowCount(len(self._layer_keys))
-            header=self.layer_table.verticalHeader()
-            for i in range(header.count()):header.moveSection(header.visualIndex(i),i)
-            saved_sel=project.get('selectability',{})
-            from .output_compensation import default_amount
-            saved_compensation=project.get('layer_compensation',{})
-            for i,key in enumerate(self._layer_keys):
-                role=selected_roles.get(key,'不参与');check=LayerCheckBox();check.setChecked(project.get('visibility',{}).get(key,role not in NON_PARTICIPATING))
-                check.toggled.connect(lambda checked,k=key:self.visibility_changed(k));self.visible_boxes[key]=check;self.layer_table.setCellWidget(i,0,check)
-                sel=LayerCheckBox();sel.setChecked(saved_sel.get(key,role=='固定RDL'))
-                sel.toggled.connect(lambda checked,k=key:self.selectability_changed(k));self.selectable_boxes[key]=sel;self.layer_table.setCellWidget(i,1,sel)
-                layer_item=W.QTableWidgetItem(key)
-                layer_item.setToolTip(self.dxf_layer_names.get(key,key))
-                self.layer_table.setItem(i,2,layer_item)
-                box=W.QComboBox();box.addItems(ROLES);box.setCurrentText(role)
-                self.role_boxes[key]=box;self.layer_table.setCellWidget(i,3,box)
-                box.currentTextChanged.connect(lambda _,k=key:self.role_changed(k))
-                compensation=W.QDoubleSpinBox()
-                compensation.setDecimals(3);compensation.setRange(-1000,1000);compensation.setKeyboardTracking(False)
-                compensation.setFocusPolicy(getattr(Qt,'FocusPolicy',Qt).ClickFocus)
-                default=0. if project else default_amount(role)
-                compensation.setValue(saved_compensation.get(key,default))
-                compensation.setToolTip('输出层轮廓补偿 / μm。负值内缩，正值外扩。')
-                self.compensation_boxes[key]=compensation;self.layer_table.setCellWidget(i,4,compensation)
-                for widget in (check,sel,box,compensation):self.layer_drag.watch_context(widget)
-            self.scale_table_columns('layer_table')
-            self.layer_table.horizontalHeader().setStretchLastSection(True)
+            self.layer_table.setUpdatesEnabled(False)
+            try:
+                self.layer_table.setRowCount(0);self.layer_table.setRowCount(len(self._layer_keys))
+                header=self.layer_table.verticalHeader()
+                for i in range(header.count()):header.moveSection(header.visualIndex(i),i)
+                saved_sel=project.get('selectability',{})
+                from .output_compensation import default_amount
+                saved_compensation=project.get('layer_compensation',{})
+                for i,key in enumerate(self._layer_keys):
+                    role=selected_roles.get(key,'不参与');check=LayerCheckBox();check.setChecked(project.get('visibility',{}).get(key,role not in NON_PARTICIPATING))
+                    check.toggled.connect(lambda checked,k=key:self.visibility_changed(k));self.visible_boxes[key]=check;self.layer_table.setCellWidget(i,0,check)
+                    sel=LayerCheckBox();sel.setChecked(saved_sel.get(key,role=='固定RDL'))
+                    sel.toggled.connect(lambda checked,k=key:self.selectability_changed(k));self.selectable_boxes[key]=sel;self.layer_table.setCellWidget(i,1,sel)
+                    layer_item=W.QTableWidgetItem(key)
+                    layer_item.setToolTip(self.dxf_layer_names.get(key,key))
+                    self.layer_table.setItem(i,2,layer_item)
+                    box=W.QComboBox();box.addItems(ROLES);box.setCurrentText(role)
+                    self.role_boxes[key]=box;self.layer_table.setCellWidget(i,3,box)
+                    box.currentTextChanged.connect(lambda _,k=key:self.role_changed(k))
+                    compensation=W.QDoubleSpinBox()
+                    compensation.setDecimals(3);compensation.setRange(-1000,1000);compensation.setKeyboardTracking(False)
+                    compensation.setFocusPolicy(getattr(Qt,'FocusPolicy',Qt).ClickFocus)
+                    default=0. if project else default_amount(role)
+                    compensation.setValue(saved_compensation.get(key,default))
+                    compensation.setToolTip('输出层轮廓补偿 / μm。负值内缩，正值外扩。')
+                    self.compensation_boxes[key]=compensation;self.layer_table.setCellWidget(i,4,compensation)
+                    for widget in (check,sel,box,compensation):self.layer_drag.watch_context(widget)
+                self.scale_table_columns('layer_table')
+                self.layer_table.horizontalHeader().setStretchLastSection(True)
+            finally:
+                self.layer_table.setUpdatesEnabled(True)
             for key,w in self.fields.items():w.setValue(getattr(pars,key))
             self.reference_nsigma=pars.reference_nsigma;self.per_die_pivots=[list(v) for v in pars.die_pivots];self.pivot_editor.setValue([pars.rotation_center,pars.rotation_x_um,pars.rotation_y_um])
             self.target_sigma.setCurrentText('∞' if math.isinf(pars.target_nsigma) else f'{pars.target_nsigma:g}')
             self.fixed_assignment=pars.fixed_via_assignment
             self.per_die_values=[list(v) for v in pars.die_bounds];self._per_die_initialized=bool(pars.die_bounds);self.per_die_table.setRowCount(0);self.per_die_toggle.blockSignals(True);self.per_die_toggle.setChecked(pars.per_die_enabled);self.per_die_toggle.blockSignals(False)
+            self.per_die_sigma_values=[list(v) for v in pars.die_sigmas];self._per_die_sigma_initialized=bool(pars.die_sigmas);self.per_die_sigma_table.setRowCount(0);self.per_die_sigma_toggle.blockSignals(True);self.per_die_sigma_toggle.setChecked(pars.per_die_sigma_enabled);self.per_die_sigma_toggle.blockSignals(False)
             if getattr(data,'prepared_roles',None)==self.roles() and getattr(data,'prepared_case',None) and data.prepared_case['connections'].order==self.ordered_layers():self.case=data.prepared_case
             else:
                 try:self.case=build_case(data,self.roles(),layer_order=self.ordered_layers())
                 except ValueError:pass
             if hasattr(self,'rulers'):self.rulers.restore(project.get('rulers',[]))
-            self.enable_settings();self.apply_automatic();self.per_die_changed();self.manual_preview.restore_fields(project.get('manual_preview'))
+            self.enable_settings();self.apply_automatic();self.per_die_changed();self.per_die_sigma_changed();self.manual_preview.restore_fields(project.get('manual_preview'))
         finally:self.loading=False
         if self.remote_locked or getattr(self,'requested_measured',False):
             self.measured_output.startup_overlays={name:self.overlay_widget(name).isChecked() for name in ('reconstruction','width','drc','space','probability')} if not self.remote_locked else None
@@ -1397,11 +1438,14 @@ class MainWindow(W.QMainWindow):
                 widget=self.overlay_widget(name);widget.blockSignals(True);widget.setChecked(False);widget.blockSignals(False)
             self.drop_result();self.dirty=True;self.plot_layout();return
         self._restoring_project=True
-        self.drop_result();self.invalidate();self.plot_layout()
+        self.drop_result(redraw=False);self.invalidate()
         from .project_results import restore
-        try:restored=restore(self,project,project_path)
-        finally:self._restoring_project=False
+        try:restored=restore(self,project,project_path,preloaded=getattr(data,'preloaded_results',None))
+        finally:
+            self._restoring_project=False
+            if hasattr(data,'preloaded_results'):data.preloaded_results=None
         if restored:return
+        self.plot_layout()
         remembered=self.cache_group.last_assessment
         if remembered is None:
             last_key=self.session_values.get('parked-assessment-key')
@@ -1455,7 +1499,7 @@ class MainWindow(W.QMainWindow):
             if label_widget:label_widget.setVisible(visible)
         count=len(self.case['dies']) if self.case else sum(len(v) for k,v in self.data.layers.items() if self.roles().get(k)=='芯片边框')
         self.manual_preview.rebuild()
-        self.sync_per_die()
+        self.sync_per_die();self.sync_per_die_sigma()
         profile=resource_profile()
         skipped=len(getattr(self.data,'ignored_geometry',[]));repaired=len(getattr(self.data,'repaired_geometry',[]))
         self.statusBar().showMessage(f'{Path(self.data.path).name}；{self.data.count:,}个有效图形；修复{repaired}个，忽略{skipped}个异常图形；{profile["cpu"]}逻辑CPU → 最多{profile["workers"]}工作线程')
@@ -3238,6 +3282,8 @@ class MainWindow(W.QMainWindow):
             self.pivot_editor.setValue([parameters.rotation_center,parameters.rotation_x_um,parameters.rotation_y_um])
             self.per_die_values=[];self.per_die_pivots=[];self._per_die_initialized=False
             self.per_die_toggle.setChecked(False);self.per_die_changed()
+            self.per_die_sigma_values=[];self._per_die_sigma_initialized=False
+            self.per_die_sigma_toggle.setChecked(False);self.per_die_sigma_changed()
             self.manual_preview.hide();self.manual_preview.restore_fields(None)
             self.grid_mode.setCurrentIndex(self.grid_mode.findData(defaults.evaluation_scope))
             self.problem_filter.setCurrentIndex(1)
@@ -3266,8 +3312,20 @@ class MainWindow(W.QMainWindow):
                 if path.exists():raise ValueError('同名工程已存在，请从下拉菜单打开后保存，或使用不同名称')
             except ValueError as exc:self.error(exc);return
         if Path(path).parent.resolve()==self.jobs_dir.resolve():path=job_path(self.jobs_dir,Path(path).name.removesuffix('.json').removesuffix('.dshift'))
-        try:self.write_project(path);self.refresh_jobs();self.statusBar().showMessage('工程已保存：'+Path(path).stem)
+        def report(n,text):
+            if not self.progress_enabled():return
+            self.progress.show();self.progress.setRange(0,100);self.progress.setValue(n);self.progress.setFormat(f'{n}% · '+text[:36])
+            self.statusBar().showMessage(text)
+            app=W.QApplication.instance()
+            if app is not None:app.processEvents()
+        self.save_button.setEnabled(False)
+        try:
+            self.write_project(path,progress=report);self.refresh_jobs()
+            self.statusBar().showMessage('工程已保存：'+Path(path).stem)
         except Exception as exc:self.error(exc)
+        finally:
+            self.save_button.setEnabled(True)
+            if not self._tasks:self.progress.hide()
     def project_settings(self):
         from .reconstruction_edits import retire_pad_intervals
         solver=None if getattr(self.engine,'busy',False) else getattr(self.engine,'reconstructor',None)
@@ -3534,7 +3592,8 @@ class MainWindow(W.QMainWindow):
             self.log_bus.emit('工程图形、连通和分析缓存已更新。')
         self.start_worker(prepare,accepted)
 
-    def write_project(self,path):
+    def write_project(self,path,progress=None):
+        if progress:progress(5,'准备工程目录与源文件')
         path=Path(path).resolve();gds=Path(self.data.path).resolve()
         from .jobs import local_source,provision_project
         # A named Jobs project owns its client workspace. Also provision any
@@ -3542,6 +3601,7 @@ class MainWindow(W.QMainWindow):
         if not path.exists() or path.parent.parent==self.jobs_dir.resolve():
             provision_project(path.parent)
         source=local_source(path,gds)
+        if progress:progress(15,'整理工程参数与几何记录')
         from .area_filter import canonical_project
         project=dict(canonical_project(self.data,self.project_settings()),gds_path=source)
         project=self._merge_staged_restored_edits(project)
@@ -3561,9 +3621,11 @@ class MainWindow(W.QMainWindow):
                 if all(old.get(k)==clean.get(k) for k in keys) and old.get('saved_results'):project['saved_results']=old['saved_results']
             except (OSError,ValueError):pass
         else:
-            try:project['saved_results']=save(self,path)
+            try:project['saved_results']=save(self,path,progress=progress)
             except (ValueError,TypeError,OSError) as exc:self.log_bus.emit('结果未保存：'+str(exc),'WARNING')
+        if progress:progress(88,'写入工程配置文件')
         atomic_save(path,clean_json(project));self.project_path=path
+        if progress:progress(95,'更新工程缓存路径')
         self._project_cache_root=path.parent/'Cache'/'runtime';self.cache_group.relocate(self._project_cache_root)
         from .session_cache import logical_fingerprint
         cache_id=logical_fingerprint((str(path),self.data.sha256,self.data.top_name))
@@ -3575,6 +3637,7 @@ class MainWindow(W.QMainWindow):
             self.cache_registry.rekey(old_cache_key,cache_id);self.cache_project_key=cache_id
             self.edit_history.rekey(old_cache_key,cache_id)
             self.cleanup_retired_sessions();self.refresh_cache_status()
+        if progress:progress(100,'工程保存完成')
     def load_project(self,path):
         try:
             from .jobs import resolve_project_path

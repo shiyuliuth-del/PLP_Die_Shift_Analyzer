@@ -4,10 +4,14 @@ import sys
 from pathlib import Path
 
 from die_shift_studio import __version__
-from die_shift_studio.license_core import LicenseError, PRODUCT, admin_key_directory, load_public_key, local_directory
+from die_shift_studio.license_core import LicenseError, PRODUCT, load_public_key
 from die_shift_studio.qt_compat import QtCore, QtGui, QtWidgets as W, run_dialog
 from die_shift_studio.style import STYLE
 from LicenseManager.manager import History, FIELDS, fingerprint, generate, load_private, new_file, public_bytes
+
+
+def admin_directory():
+    return Path(sys.executable if getattr(sys,'frozen',False) else __file__).resolve().parent
 
 
 class Manager(W.QWidget):
@@ -16,13 +20,12 @@ class Manager(W.QWidget):
         self.setWindowTitle(f'Die Shift Analyze {__version__} · License Manager')
         self.setStyleSheet(STYLE)
         self.resize(740, 510)
-        self.home = local_directory('DieShiftLicenseManager')
+        self.home = admin_directory()
         self.key = None
         self.key_status = W.QLineEdit('未加载私钥',readOnly=True)
         self.key_status.setToolTip('加载后显示 Ed25519 公钥 SHA-256 指纹。')
         self.data = W.QLineEdit(str(self.home))
-        admin_folder = Path(sys.executable if getattr(sys,'frozen',False) else __file__).resolve().parent
-        self.universal_dir = admin_folder
+        self.universal_dir = self.home
         self.output = W.QLineEdit(str(self.home/'licenses'))
         self.machine = W.QLineEdit()
         layout = W.QFormLayout(self)
@@ -62,8 +65,12 @@ class Manager(W.QWidget):
         self.key = key
         self.key_status.setText(fingerprint(key))
 
+    def default_key_dir(self):
+        base = Path(self.data.text().strip() or str(self.home))
+        return base/'keys'
+
     def generate_key(self):
-        default = admin_key_directory()
+        default = self.default_key_dir()
         default.mkdir(parents=True,exist_ok=True)
         folder = W.QFileDialog.getExistingDirectory(self,'选择新密钥保存目录',str(default))
         if not folder:
@@ -84,7 +91,11 @@ class Manager(W.QWidget):
             self.status.setText(f'密钥已保存在 {folder}。管理员通用许可：{path}')
 
     def open_key(self):
-        path, _ = W.QFileDialog.getOpenFileName(self,'加载加密私钥',str(admin_key_directory()/'private_key.pem'),'PEM (*.pem)')
+        key_dir = self.default_key_dir()
+        default = key_dir/'private_key.pem'
+        if not default.exists() and (self.home/'private_key.pem').exists():
+            default = self.home/'private_key.pem'
+        path, _ = W.QFileDialog.getOpenFileName(self,'加载加密私钥',str(default),'PEM (*.pem)')
         if path:
             password, ok = self.ask_password('解锁私钥')
             if ok:
@@ -97,13 +108,17 @@ class Manager(W.QWidget):
 
     def export_key(self):
         key = self.require_key()
-        path, _ = W.QFileDialog.getSaveFileName(self,'导出公钥',str(Path(self.data.text())/'public_key.pem'),'PEM (*.pem)')
+        key_dir = self.default_key_dir()
+        target = key_dir if key_dir.is_dir() else Path(self.data.text().strip() or str(self.home))
+        path, _ = W.QFileDialog.getSaveFileName(self,'导出公钥',str(target/'public_key.pem'),'PEM (*.pem)')
         if path:
             new_file(path, public_bytes(key))
 
     def check_key(self):
         key = self.require_key()
-        path, _ = W.QFileDialog.getOpenFileName(self,'校验公钥',self.data.text(),'PEM (*.pem)')
+        key_dir = self.default_key_dir()
+        target = key_dir if key_dir.is_dir() else Path(self.data.text().strip() or str(self.home))
+        path, _ = W.QFileDialog.getOpenFileName(self,'校验公钥',str(target),'PEM (*.pem)')
         if path:
             from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
             supplied=load_public_key(Path(path).read_bytes()).public_bytes(Encoding.Raw,PublicFormat.Raw)

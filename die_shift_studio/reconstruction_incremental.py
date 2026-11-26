@@ -3,7 +3,7 @@
 
 def source_settings(settings,ref):
     values=vars(settings)
-    names=('reconstruction_die_mode','evaluation_scope','reconstruction_style','reconstruction_boundary_mode','reconstruction_allow_moving_pad','reconstruction_pad_trigger_um','drc_tolerance_um','reconstruction_between_motion')
+    names=('reconstruction_die_mode','evaluation_scope','reconstruction_style','reconstruction_boundary_mode','reconstruction_allow_moving_pad','reconstruction_pad_trigger_um','drc_tolerance_um','reconstruction_between_motion','reconstruction_two_moving_zones')
     out={k:values[k] for k in names}
     for key in ('reconstruction_box_excluded','reconstruction_box_starts','reconstruction_forced','reconstruction_ignored','reconstruction_following','reconstruction_angles','reconstruction_deleted','reconstruction_added','reconstruction_intervals','reconstruction_cuts','reconstruction_extra_cuts','reconstruction_second_cuts','reconstruction_dropped_cuts','reconstruction_between_overrides'):
         out[key]=tuple(row for row in values[key] if tuple(row[:2])==ref)

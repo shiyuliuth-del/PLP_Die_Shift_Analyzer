@@ -1,4 +1,6 @@
-# Die Shift Analyze V81
+# Die Shift Analyze V82
+
+V82 在「系统偏差与相关性」新增 X/Y 偏移与角度正态分布标准差参数（支持全局与逐 DIE，默认 `3.0 / 3.0 μm`、`0.02°`，均值默认 `0`）并贯通全部概率算法；将 `LicenseManager` 默认工作/密钥/签发目录统一为 `.exe` 同目录；优化图纸加载速度并新增保存工程进度条；将「两侧运动的动区生成数量」更名为「两侧运动动区数量」；修复双侧多动区中间区段刷新选中以及双侧聚类过孔与拐角/分叉窄缝的重构边界问题。见 [V82 使用说明](docs/V82_使用说明.md)。
 
 V81 增加独立的 `LicenseManager_BUILD.bat`。Die Shift Analyze 和 RealDataAnalyse 从同目录自动读取共享的 `.lic`，沿用 V80 的 Windows Machine ID。见 [V81 使用说明](docs/V81_使用说明.md)。
 
@@ -61,7 +63,7 @@ V50：芯片对重点组合、分叉边界修正、当前姿态GDS/OAS与旋转E
 软件分析Die-first封装的DIE平移与旋转，提供三方案初筛、实体覆盖与极端足迹、通道宽度风险、重构动区编辑、规则/联合模型良率、工程结果保存、GDS/OAS导入、实测IPC及批量OAS输出。长度均为μm，GDS/OAS只读，工程节点可编辑。
 
 - [实测IPC接口与注意事项](docs/MEASURED_OUTPUT_API.md) · [GD55-1105独立验证脚本](tools/verify_measured_gd55.py)
-- [用户操作](docs/V81_使用说明.md)
+- [用户操作](docs/V82_使用说明.md)
 - [AI交接：主要功能、代码地图、算法和后续重点](docs/AI_HANDOFF.md)
 - [现行设计合同](docs/DESIGN_REQUIREMENTS.md)
 - [已知边界](docs/KNOWN_ISSUES.md)

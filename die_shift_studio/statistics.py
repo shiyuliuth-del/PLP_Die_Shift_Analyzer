@@ -4,6 +4,9 @@ import math
 import numpy as np
 from scipy.stats import chi2,norm
 
+def std_devs(p):
+    return np.array([p.sigma_x_um,p.sigma_y_um,math.radians(p.sigma_angle_deg)],float)
+
 def mean_and_bounds(p,count):
     mu=np.array([p.mean_x_um,p.mean_y_um,math.radians(p.mean_angle_deg)])
     bounds=np.array([p.single_bound_x_um if count==1 else p.multi_bound_x_um,
@@ -14,8 +17,8 @@ def mean_and_bounds(p,count):
 def statistical_state(p,count):
     mu,bounds=mean_and_bounds(p,count)
     if math.isinf(p.target_nsigma):return np.zeros(3),np.zeros((3,3)),0.
-    sx,sy,st=bounds/p.scale_nsigma
-    cov=np.array([[sx*sx,p.rho_xy*sx*sy,0],[p.rho_xy*sx*sy,sy*sy,0],[0,0,st*st]])
+    sx,sy,st=np.where(bounds>0,std_devs(p),0.)
+    cov=np.array([[sx*sx,p.rho_xy*sx*sy,0.],[p.rho_xy*sx*sy,sy*sy,0.],[0.,0.,st*st]])
     from .distribution import normalizer
     k=math.inf if p.target_nsigma==0 else math.sqrt(chi2.isf(2*norm.sf(p.target_nsigma)*normalizer(p,count)[0]/count,3))
     return mu,cov,k

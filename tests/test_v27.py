@@ -34,7 +34,7 @@ class YieldDisplayTests(unittest.TestCase):
         model,p=contact_fixture();direct=model.current([[34.,0,0]],p)
         self.assertTrue(any(r['target_index']==1 for r in direct['issues']))
         for k,rare in ((2,True),(6,False)):
-            result=model.screen(replace(p,target_nsigma=k));locations={r['target_index']:r for r in result['locations']}
+            result=model.screen(replace(p,target_nsigma=k,sigma_x_um=35/k));locations={r['target_index']:r for r in result['locations']}
             far=locations[1];expected=analytic_tail(30,k)
             self.assertLessEqual(far['lower'],expected+1e-12);self.assertGreaterEqual(far['upper'],expected-1e-12)
             self.assertEqual(far['low'],rare);self.assertFalse(locations[2]['low'])
@@ -91,7 +91,7 @@ class YieldDisplayTests(unittest.TestCase):
         left=Wall('L','运动过孔孔盘',box(-5,-5,5,5),(),0);right=Wall('R','固定过孔孔盘',box(65,-5,75,5),())
         row=dict(status=NARROW,locked=0,split=False,unresolved=False,nominal_witness_um=[[5,0],[65,0]],nominal_gap_um=60,minimum_um=25,keep_um=29)
         for k,low in ((2,True),(6,False)):
-            risk=ChannelProbability(model,replace(p,target_nsigma=k),board,1.e-8)
+            risk=ChannelProbability(model,replace(p,target_nsigma=k,sigma_x_um=35/k),board,1.e-8)
             q=risk.classify(row,[left,right]);expected=analytic_tail(31,k)
             self.assertGreaterEqual(q['upper'],expected-1e-12);self.assertEqual(q['low'],low)
             self.assertIs(risk.classify(row,[left,right]),q)
@@ -114,7 +114,8 @@ class YieldDisplayTests(unittest.TestCase):
             geos.append(shapely.polygons([rigid_transform(xy,model.bound.centers[wall.owner],z) for z in states]))
         event=risk.bound(a,b,np.array([1.,0]),55.,8)
         self.assertLessEqual(np.mean(shapely.distance(*geos)<55),event+.02)
-        _,base=contact_fixture();edge=ChannelProbability(SimpleNamespace(bound=SimpleNamespace(centers=np.zeros((1,2)))),base,box(-100,-100,100,100),1.e-8)
+        _,base=contact_fixture();base=replace(base,sigma_x_um=35/2)
+        edge=ChannelProbability(SimpleNamespace(bound=SimpleNamespace(centers=np.zeros((1,2)))),base,box(-100,-100,100,100),1.e-8)
         e=edge.edge('3/0',1,box(45,-2,54,2),0,15.)
         self.assertGreaterEqual(e['upper'],analytic_tail(31,2)-1.e-12);self.assertTrue(e['low'])
         self.assertFalse(edge.edge('5/0',0,box(84,0,90,3),-1,15.)['low'])
@@ -128,11 +129,11 @@ class YieldDisplayTests(unittest.TestCase):
         from die_shift_studio.width_analysis import WidthAnalyzer
         _,_,_,base,engine=example('示例O_运动网络三线路通道')
         registry=ProjectCacheRegistry();group=registry.get('test')
-        p=replace(base,line_width_um=9,line_space_um=13,per_die_enabled=True,die_bounds=[[35,0,0],[0,0,0]])
+        p=replace(base,line_width_um=9,line_space_um=13,per_die_enabled=True,die_bounds=[[35,0,0],[0,0,0]],sigma_x_um=35/2)
         z=np.array([[35.,0,0],[0.,0,0]]);results=[];analyzers=[]
         try:
             for k in (2,6):
-                a=WidthAnalyzer(engine.contact,replace(p,target_nsigma=k),ViewSettings(),group);analyzers.append(a)
+                a=WidthAnalyzer(engine.contact,replace(p,target_nsigma=k,sigma_x_um=35/k),ViewSettings(),group);analyzers.append(a)
                 if k==6:
                     with patch.object(a,'_catalogue',side_effect=AssertionError('catalogue rebuilt for k')):
                         data=a.frame({'states':z})

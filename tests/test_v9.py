@@ -25,21 +25,24 @@ class V9Tests(unittest.TestCase):
                 self.assertLess(np.max(abs(np.mean(a-mu,axis=0)[:2])),1.)
                 if abs(rho)==1:np.testing.assert_allclose(a[:,1],rho*(a[:,0]-2),atol=1e-12)
     def test_only_target_controls_parent_sigma(self):
-        p=Parameters(target_nsigma=3,input_nsigma=12)
+        p=Parameters(target_nsigma=3,input_nsigma=12,sigma_x_um=25/3)
         _,cov,_=statistical_state(p,1);self.assertAlmostEqual(cov[0,0],(25/3)**2)
+        p2=Parameters(target_nsigma=6,sigma_x_um=4.5,sigma_y_um=2.5,sigma_angle_deg=.1)
+        _,cov2,_=statistical_state(p2,1)
+        self.assertAlmostEqual(cov2[0,0],4.5**2);self.assertAlmostEqual(cov2[1,1],2.5**2)
         for bad in (-1,5.5,13):
             with self.assertRaises(ValueError):replace(p,target_nsigma=bad).validate()
     def test_probability_bounds_contain_analytic_truncated_event(self):
         *_,m,p=fixture()
         for k in (1,3,6,12):
             for b in (25,35,70):
-                q=replace(p,target_nsigma=k,single_bound_x_um=b)
+                q=replace(p,target_nsigma=k,single_bound_x_um=b,sigma_x_um=b/k)
                 result=contact_probability(m,m.records[0],q)
                 truth=float(normal_interval(30/(b/k),min(k,90/(b/k)))/normal_interval(-k,k)) if b>=30 else 0.
                 self.assertLessEqual(result['lower'],truth+1e-14);self.assertGreaterEqual(result['upper']+1e-35,truth)
                 self.assertEqual(result['verdict'],'窗口不足' if truth>result['threshold'] else '通过')
     def test_exhausted_integration_does_not_fabricate_failure_or_pass(self):
-        *_,m,p=fixture();q=replace(p,single_bound_x_um=35,single_bound_y_um=35,bound_angle_deg=10)
+        *_,m,p=fixture();q=replace(p,single_bound_x_um=35,single_bound_y_um=35,bound_angle_deg=10,sigma_x_um=35/6,sigma_y_um=35/6,sigma_angle_deg=10/6)
         value=contact_probability(m,m.records[0],q,budget=1)
         self.assertEqual(value['verdict'],'概率待细化');self.assertEqual(value['lower'],0);self.assertGreater(value['upper'],value['threshold'])
     def test_infinity_is_nominal_binary_and_preview_is_always_binary(self):
@@ -50,7 +53,7 @@ class V9Tests(unittest.TestCase):
         # A nominally violating fixture must flag all three schemes.
         p=replace(p,annulus_um=46);self.assertEqual({q['scheme'] for q in m.screen(p)['issues']},{1,2,3})
     def test_truncated_area_probability_matches_analytic_and_all_methods(self):
-        *_,m,p=fixture();p=replace(p,target_nsigma=1,single_bound_x_um=30,single_bound_y_um=30)
+        *_,m,p=fixture();p=replace(p,target_nsigma=1,single_bound_x_um=30,single_bound_y_um=30,sigma_x_um=30,sigma_y_um=30)
         expected=float((normal_interval(-5/30,5/30)/normal_interval(-1,1))**2)
         for method in ('quadrature','sobol','monte_carlo'):
             cfg=ViewSettings(probability_method=method,sample_exponent=16,probability_cell_um=.5)

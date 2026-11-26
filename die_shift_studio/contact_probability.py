@@ -116,8 +116,18 @@ def contact_probability(model,record,p,budget=2048,candidates=None,obstacles=Non
     else:
         tail_z=float(norm.isf(alpha/(16*len(active))))
         lo=np.full(len(active),-tail_z);hi=-lo
-        # Union bound avoids cancellation at very small acceptance budgets.
-        tail=min(1.,float(2*len(active)*norm.sf(tail_z)))
+        # Clamp latent axes directly bounded by hard_bounds (X always; Y when rho==0; theta always).
+        tail=0.
+        for m,col in enumerate(active):
+            if col==0 or col==2 or rho==0:
+                k_hard=float(hard_bounds[col]/root[col,m])
+                if tail_z>=k_hard:
+                    lo[m],hi[m]=-k_hard,k_hard
+                else:
+                    tail+=float(2*norm.sf(tail_z))
+            else:
+                tail+=float(2*norm.sf(tail_z))
+        tail=min(1.,tail)
     queue=[];lower=0.;unknown=0.;counter=0;witness=None;boxes=0;positive_contact=False
     def push_many(candidates):
         nonlocal lower,unknown,counter,witness,boxes,positive_contact

@@ -76,7 +76,7 @@ class V14Tests(unittest.TestCase):
         self.assertEqual(result['lower'],0.);self.assertGreater(result['upper'],0.)
 
     def test_range_envelopes_nested_same_distribution_and_not_clipped(self):
-        d,r,c,cache,m,p=traced_fixture();p=replace(p,rotation_center='top_left');m.configure_parameters(p)
+        d,r,c,cache,m,p=traced_fixture();p=replace(p,rotation_center='top_left',sigma_x_um=35/6,sigma_y_um=35/6,sigma_angle_deg=1/6);m.configure_parameters(p)
         cfg=ViewSettings(sample_exponent=9,probability_show_ranges=True,probability_ranges=((1,'#003344'),(3,'#335577')))
         maps=probability_maps(cache,m.bound,r,p,masks=m.interface_masks,settings=cfg)
         full=probability_maps(cache,m.bound,r,replace(p,target_nsigma=0),masks=m.interface_masks,settings=replace(cfg,probability_show_ranges=False))
