@@ -102,6 +102,7 @@ class SharedLicenseTests(unittest.TestCase):
         config.write_text('{}',encoding='utf8')
         result=self.folder/'result.json'
         with patch.object(sys,'argv',['RealDataAnalyse','--import-data',str(config),'--result',str(result)]), \
+             patch.object(sys,'frozen',True,create=True), \
              patch('RealDataAnalyse.storage.configure_logging'), patch('RealDataAnalyse.excel.import_files') as work, \
              patch.object(license,'embedded_public_key',return_value=self.key.public_key()), \
              patch.object(license,'installation_root',return_value=self.root), \

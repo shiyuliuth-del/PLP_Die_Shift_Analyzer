@@ -24,7 +24,8 @@ class SourceEntryTests(unittest.TestCase):
         core=types.ModuleType('die_shift_studio.license_core');core.LicenseError=LicenseError
         core.installed_authorization=Mock(return_value=True,side_effect=None if authorized else LicenseError('No license'))
         modules={m.__name__:m for m in (frozen,deps,gui,gpu,gate,core)}
-        with patch.dict(sys.modules,modules),patch.object(sys,'argv',[str(ROOT/'main.py'),*args]):
+        with patch.dict(sys.modules,modules),patch.object(sys,'argv',[str(ROOT/'main.py'),*args]), \
+             patch.object(sys,'frozen',True,create=True):
             with self.assertRaises(SystemExit) as result:runpy.run_path(str(ROOT/'main.py'),run_name='__main__')
         self.assertEqual(result.exception.code,0 if authorized else 'No license' if ('--smoke-test' in args or '--gpu-info' in args) else 1)
         return frozen,gui

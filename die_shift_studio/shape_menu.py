@@ -1,7 +1,53 @@
 """Non-modal canvas menu. The source selection owns the identity across previews."""
 from shapely.geometry import Point
 from .gds_shapes import shape_nodes
-from .qt_compat import QtWidgets as W,QtCore
+from .qt_compat import QtWidgets as W,QtCore,QtGui,Qt
+
+_EVENT_TYPE=getattr(QtCore.QEvent,'Type',QtCore.QEvent)
+_KEY_TYPE=getattr(Qt,'Key',Qt)
+_MOD_TYPE=getattr(Qt,'KeyboardModifier',Qt)
+
+
+class _MenuWheelFilter(QtCore.QObject):
+    def eventFilter(self,obj,event):
+        if event.type()==_EVENT_TYPE.Wheel:
+            delta=event.angleDelta().y() if hasattr(event,'angleDelta') else 0
+            if delta:
+                key=_KEY_TYPE.Key_Up if delta>0 else _KEY_TYPE.Key_Down
+                steps=max(1,min(4,abs(delta)//60))
+                for _ in range(steps):
+                    ev=QtGui.QKeyEvent(_EVENT_TYPE.KeyPress,key,_MOD_TYPE.NoModifier)
+                    W.QApplication.sendEvent(obj,ev)
+                event.accept()
+                return True
+        return False
+
+
+def _configure_scrollable_menu(menu,anchor,global_pos=None):
+    hint=menu.sizeHint() if hasattr(menu,'sizeHint') else None
+    hint_h=hint.height() if hint is not None and hasattr(hint,'height') else None
+    if not isinstance(hint_h,int):return
+    screen=None
+    if global_pos is not None and hasattr(W.QApplication,'screenAt'):
+        screen=W.QApplication.screenAt(global_pos)
+    if screen is None and anchor is not None and hasattr(anchor,'window'):
+        win=anchor.window()
+        handle=win.windowHandle() if win is not None and hasattr(win,'windowHandle') else None
+        if handle is not None:screen=handle.screen()
+    if screen is None and hasattr(W.QApplication,'primaryScreen'):
+        screen=W.QApplication.primaryScreen()
+    avail_h=screen.availableGeometry().height() if screen is not None else 720
+    max_h=max(220,int(avail_h*0.72))
+    if hint_h>max_h:
+        menu.setMaximumHeight(max_h)
+        menu.setStyleSheet('QMenu { menu-scrollable: 1; }')
+        flt=_MenuWheelFilter(menu)
+        menu._wheel_filter=flt
+        menu.installEventFilter(flt)
+    for act in menu.actions():
+        sub=act.menu() if hasattr(act,'menu') else None
+        if sub is not None:
+            _configure_scrollable_menu(sub,anchor,global_pos)
 
 
 def issue_refs(window):
@@ -20,8 +66,9 @@ def show_shape_menu(window,event,point):
     if window.reconstruction_toggle.isChecked():
         picked=window.reconstruction_overlay.pick(*point,window.cut_drag._tolerance())
         current=getattr(selection,'selected_between',None)
-        candidate=(selection.find_between_block(point)
-                   if hasattr(selection,'find_between_block') else None)
+        candidate=(selection.find_subregion(point)
+                   if hasattr(selection,'find_subregion') else (selection.find_between_block(point)
+                   if hasattr(selection,'find_between_block') else None))
         if candidate is not None and candidate['geometry'].contains(Point(point)):
             # The interior is the copper's menu even when both handle hit
             # circles overlap it. The actual boundary still has its own menu.
@@ -43,24 +90,49 @@ def show_shape_menu(window,event,point):
     refs=tuple(selection.selected) if between is None else (between['ref'],)
     menu=W.QMenu(window.canvas)
     if between is not None:
-        from .between_motion import LABELS,MODES
+        from .between_motion import ENDPOINT_LABELS,ENDPOINT_MODES,LABELS,SPECIAL_MODES,STATIONARY,die_mode,mode_label
         ref=between['ref'];cur_mode=between['mode']
-        policy='由端点约束' if between.get('locked') else LABELS.get(cur_mode,cur_mode)
-        summary=f"动区间图形 · {ref[0]} #{ref[1]+1} · 当前：{policy}"
-        menu.addAction(summary).setEnabled(False)
-        if between.get('locked'):
-            menu.addAction('该段铜与端孔或归属接缝相连，随动由连接约束决定').setEnabled(False)
-        if not getattr(window,'remote_locked',False) and not between.get('locked'):
-            source_data=window.data;source_group=window.cache_group;block_id=between['id']
-            def set_between(mode):
-                if window.data is source_data and window.cache_group is source_group and window.reconstruction_toggle.isChecked():
-                    window.change_between_motion(block_id,mode)
-            for mode in MODES:
-                prefix='✓ ' if cur_mode==mode else ''
-                menu.addAction(f'{prefix}动区间随动：{LABELS[mode]}',lambda *_,m=mode:set_between(m))
-            if between.get('custom'):
-                menu.addAction('恢复默认动区间随动逻辑',lambda:set_between(None))
-            menu.addSeparator()
+        if 'kind' in between:
+            kind_label='固定端铜区' if between['kind']=='fixed' else '运动端铜区'
+            policy=ENDPOINT_LABELS.get(cur_mode,cur_mode)+('（强制）' if between.get('custom') else '（默认）')
+            menu.addAction(f"{kind_label} · {ref[0]} #{ref[1]+1} · 当前：{policy}").setEnabled(False)
+            if not getattr(window,'remote_locked',False):
+                source_data=window.data;source_group=window.cache_group;block_id=between['id']
+                def set_endpoint(mode):
+                    if window.data is source_data and window.cache_group is source_group and window.reconstruction_toggle.isChecked():
+                        window.change_endpoint_motion(block_id,mode)
+                for mode in ENDPOINT_MODES:
+                    prefix='✓ ' if cur_mode==mode else ''
+                    menu.addAction(f'{prefix}端点随动：{ENDPOINT_LABELS[mode]}',lambda *_,m=mode:set_endpoint(m))
+                if between.get('custom'):
+                    menu.addAction('恢复默认端点随动（随对应过孔）',lambda:set_endpoint(None))
+                menu.addSeparator()
+        else:
+            policy='由端点约束' if between.get('locked') else mode_label(cur_mode)
+            summary=f"动区间图形 · {ref[0]} #{ref[1]+1} · 当前：{policy}"
+            menu.addAction(summary).setEnabled(False)
+            if between.get('locked'):
+                menu.addAction('该段铜与端孔或归属接缝相连，随动由连接约束决定').setEnabled(False)
+            if not getattr(window,'remote_locked',False) and not between.get('locked'):
+                source_data=window.data;source_group=window.cache_group;block_id=between['id']
+                def set_between(mode):
+                    if window.data is source_data and window.cache_group is source_group and window.reconstruction_toggle.isChecked():
+                        window.change_between_motion(block_id,mode)
+                prefix='✓ ' if cur_mode==STATIONARY else ''
+                menu.addAction(f'{prefix}动区间随动：{LABELS[STATIONARY]}',lambda *_:set_between(STATIONARY))
+                die_count=len((getattr(window,'case',None) or {}).get('dies',())) or len(getattr(getattr(getattr(window,'engine',None),'bound',None),'centers',()))
+                for d in range(die_count):
+                    dm=die_mode(d)
+                    dprefix='✓ ' if cur_mode==dm else ''
+                    menu.addAction(f'{dprefix}动区间随动：{mode_label(dm)}',lambda *_,m=dm:set_between(m))
+                special_prefix='✓ ' if cur_mode in SPECIAL_MODES else ''
+                special=menu.addMenu(f'{special_prefix}特殊随动跟随')
+                for mode in SPECIAL_MODES:
+                    sprefix='✓ ' if cur_mode==mode else ''
+                    special.addAction(f'{sprefix}动区间随动：{LABELS[mode]}',lambda *_,m=mode:set_between(m))
+                if between.get('custom'):
+                    menu.addAction('恢复默认动区间随动逻辑',lambda:set_between(None))
+                menu.addSeparator()
     elif len(refs)==1:
         key,i=refs[0];kind,xy,_=shape_nodes(window.data,key,i)
         summary=f'{key} #{i+1} · {kind} · {len(xy)} 个名义节点'
@@ -164,5 +236,7 @@ def show_shape_menu(window,event,point):
             menu.addAction('取消忽略DRC',lambda:change_figure_drc(waived.intersection(refs),False))
     ratio=window.canvas.devicePixelRatioF()
     pos=QtCore.QPoint(round(event.x/ratio),round(window.canvas.height()-event.y/ratio))
+    global_pos=window.canvas.mapToGlobal(pos)
+    _configure_scrollable_menu(menu,window.canvas,global_pos)
     menu.aboutToHide.connect(menu.deleteLater)
-    menu.popup(window.canvas.mapToGlobal(pos))
+    menu.popup(global_pos)

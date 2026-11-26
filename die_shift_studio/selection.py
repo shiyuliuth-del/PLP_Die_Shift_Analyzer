@@ -15,14 +15,15 @@ def inverse_geometry(shape,center,state):
 
 class GeometrySelection:
     def __init__(self,window):
-        self.w=window;self.selected=[];self.selected_between=None;self.index_stamp=None;self.groups={};self.press=None;self.last_pixel=None;self.cycle=[];self.cycle_index=-1
+        self.w=window;self.selected=[];self._between_id=None;self._between_kind='between';self.selected_between=None;self.index_stamp=None;self.groups={};self.press=None;self.last_pixel=None;self.cycle=[];self.cycle_index=-1
         self.artist=None;self.deformed_artist=None;self.rubber=None;self.background=None
         for name,fn in [('button_press_event',self.down),('motion_notify_event',self.move),('button_release_event',self.up)]:window.canvas.mpl_connect(name,fn)
 
     @property
     def selected_between(self):
         if self._between_id is None:return None
-        blocks=self.w.reconstruction_overlay.between_views
+        overlay=self.w.reconstruction_overlay
+        blocks=(getattr(overlay,'endpoint_views',{}) if self._between_kind=='endpoint' else overlay.between_views)
         current=blocks.get(self._between_id)
         if current is not None:return current
         # An edit can change the nominal component's representative point.
@@ -33,7 +34,11 @@ class GeometrySelection:
 
     @selected_between.setter
     def selected_between(self,block):
-        self._between_id=None if block is None else block['id']
+        if block is None:
+            self._between_id=None;self._between_kind='between'
+        else:
+            self._between_id=block['id']
+            self._between_kind='endpoint' if 'kind' in block else 'between'
     def clear(self):
         self.selected=[];self.selected_between=None;self.cycle=[];self.last_pixel=None;self.press=None
         if self.rubber is not None:
@@ -105,14 +110,14 @@ class GeometrySelection:
                     if ref not in found:found.append(ref)
         return sorted(found,key=lambda ref:(w.layer_artists[ref[0]].get_zorder(),order[ref[0]],ref[1]),reverse=True)
 
-    def find_between_block(self,point):
-        w=self.w
+    @staticmethod
+    def _find_block_in(w,views,point):
         if not w.data or not w.reconstruction_toggle.isChecked():return None
         select_boxes=getattr(w,'selectable_boxes',None)
         def selectable(k):return True if not select_boxes else (k in select_boxes and select_boxes[k].isChecked())
         x,y=float(point[0]),float(point[1]);pt=Point(x,y)
         matches=[]
-        for block in w.reconstruction_overlay.between_views.values():
+        for block in views.values():
             layer=block['ref'][0]
             if not w.visible_boxes.get(layer) or not w.visible_boxes[layer].isChecked() or not selectable(layer):continue
             g=block['geometry']
@@ -128,6 +133,15 @@ class GeometrySelection:
         return min(matches,key=lambda b: (not b['geometry'].contains(pt),order.get(b['ref'][0],0),
                                           bool(b.get('locked')),b['geometry'].area,b['id']))
 
+    def find_between_block(self,point):
+        return GeometrySelection._find_block_in(self.w,self.w.reconstruction_overlay.between_views,point)
+
+    def find_endpoint_block(self,point):
+        return GeometrySelection._find_block_in(self.w,getattr(self.w.reconstruction_overlay,'endpoint_views',{}),point)
+
+    def find_subregion(self,point):
+        return GeometrySelection.find_between_block(self,point) or GeometrySelection.find_endpoint_block(self,point)
+
     def apply_hits(self,hits,mode):
         self.selected_between=None
         if mode=='add':
@@ -141,9 +155,14 @@ class GeometrySelection:
     def click(self,point,pixel,mode='replace'):
         w=self.w;tol=np.ptp(w.ax.get_xlim())/max(1,w.ax.bbox.width)*3
         if mode=='replace' and w.reconstruction_toggle.isChecked():
-            between=self.find_between_block(point)
-            if between is not None:
-                self.selected=[];self.selected_between=between;self.cycle=[];self.last_pixel=None
+            sub=self.find_subregion(point)
+            if sub is not None:
+                repeat=self.last_pixel is not None and np.linalg.norm(np.asarray(pixel)-self.last_pixel)<=4
+                if repeat and self.selected_between is not None and self.selected_between.get('id')==sub.get('id'):
+                    self.selected_between=None;self.selected=[sub['ref']];self.cycle=[sub['ref']];self.cycle_index=0
+                    self.last_pixel=np.asarray(pixel)
+                    self.draw();return
+                self.selected=[];self.selected_between=sub;self.cycle=[];self.last_pixel=np.asarray(pixel)
                 self.draw();return
         hits=self.hits(Point(point).buffer(tol),point=True)
         if mode=='replace':
@@ -234,10 +253,15 @@ class GeometrySelection:
         if redraw:
             summary=w.width_overlay.shown_summary() if hasattr(w,'width_overlay') else None
             if between is not None:
-                from .between_motion import LABELS
+                from .between_motion import ENDPOINT_LABELS,mode_label
                 ref=between['ref']
-                policy='由端点约束' if between.get('locked') else LABELS[between['mode']]+'（右键可切换）'
-                w.statusBar().showMessage(f"已选中动区间图形 {ref[0]} #{ref[1]+1} · 当前随动逻辑：{policy}")
+                if 'kind' in between:
+                    kind_label='固定端铜区' if between['kind']=='fixed' else '运动端铜区'
+                    policy=ENDPOINT_LABELS.get(between['mode'],between['mode'])+('（强制）' if between.get('custom') else '（默认）')
+                    w.statusBar().showMessage(f"已选中{kind_label} {ref[0]} #{ref[1]+1} · 当前：{policy}（右键可切换，再次点击切换整块图形）")
+                else:
+                    policy='由端点约束' if between.get('locked') else mode_label(between['mode'])+'（右键可切换，再次点击切换整块图形）'
+                    w.statusBar().showMessage(f"已选中动区间图形 {ref[0]} #{ref[1]+1} · 当前随动逻辑：{policy}")
             elif self.selected:w.statusBar().showMessage(f'选中 {len(self.selected)} 个图形；'+', '.join(f'{k} #{i+1}' for k,i in self.selected[:6]))
             else:w.statusBar().showMessage('已取消图形选择')
             if w.tabs.currentIndex()!=0:return

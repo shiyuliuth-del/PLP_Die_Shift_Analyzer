@@ -301,7 +301,8 @@ class V73Tests(unittest.TestCase):
                 fixed=w.reconstruction_overlay.between_views[block['id']]['geometry']
                 self.assertTrue(np.all(shapely.contains_xy(fixed.buffer(2*pixel_um),pixels[:,0],pixels[:,1])))
                 dots.set_visible(True)
-                action, = [a for a in menu[0].actions() if a.text().endswith('两侧平均')]
+                all_actions=[sub for a in menu[0].actions() for sub in (a.menu().actions() if a.menu() is not None else (a,))]
+                action, = [a for a in all_actions if a.text().endswith('两侧平均')]
                 action.trigger()
                 wait()
                 self.assertEqual(w.selection.selected_between['mode'], 'average')

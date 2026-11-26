@@ -208,7 +208,7 @@ class V82Tests(unittest.TestCase):
             r2 = Reconstructor(model, params, cfg2, reference=r1, plan_pool=r1.plan_pool)
             r2.predecessor = r1
             try:
-                _, pcs, _ = reusable(r2, zero, {ref})
+                _, pcs, *_ = reusable(r2, zero, {ref})
                 self.assertEqual(pcs, [])
                 f2 = r2.frame(zero, targets={ref})
                 p89 = [q for q in f2['pieces'] if (q['layer'], q['index']) == ref]

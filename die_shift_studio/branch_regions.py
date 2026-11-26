@@ -190,7 +190,7 @@ def fixed_between_owners(source, rows, blocks, ref, tol):
     return tuple(result)
 
 
-def assemble(r,source,rows,states,reference=None):
+def assemble(r,source,rows,states,reference=None,full_states=None):
     from .reconstruction import transform
     from .straight_controls import leaves,representative
     owner=rows[0]['die'];pose=states[owner];center=r.model.bound.centers[owner];shifted=bool(np.any(pose))
@@ -272,25 +272,36 @@ def assemble(r,source,rows,states,reference=None):
         for ix,i in enumerate(ids):
             for j in ids[ix+1:]:edges[i,j]=edges.get((i,j),0.)+1.
     unknown=[i for i in range(physical_count) if i not in known]
-    from .between_motion import STATIONARY,anchor_of,component_modes,graph_poses,solve_graph_weights
+    from .between_motion import STATIONARY,anchor_of,component_modes,endpoint_modes,equivalent_pose,graph_poses,parse_die_mode,solve_graph_weights
     ref=(rows[0]['layer'],rows[0]['index'])
+    orig_known=dict(known)
+    ep_candidates={i:rigid[i] for i in orig_known if i<physical_count and rigid[i].area>r.tol**2}
+    ep_defaults={i:('follow' if orig_known[i]>=0.5 else STATIONARY) for i in ep_candidates}
+    ep_meta=endpoint_modes(r.settings,ref,ep_candidates,ep_defaults,r.tol)
+    for i,(ep_mode,ep_custom) in ep_meta.items():
+        if ep_custom:
+            known[i]=1. if ep_mode=='follow' else 0.
     between_meta=component_modes(r.settings,ref,dict(enumerate(rigid[:physical_count])),r.tol)
     between_modes={i:between_meta[i][0] for i in unknown}
     stationary={i for i in unknown if between_modes[i]==STATIONARY and memberships.get(i,0)>1}
     between_modes={i:mode if i in stationary or mode!=STATIONARY else 'max' for i,mode in between_modes.items()}
-    complex_motion=stationary and reference is not None and np.any(reference.base)
+    die_knots={i:d for i,mode in between_modes.items() if (d:=parse_die_mode(mode)) is not None}
+    complex_motion=(stationary and reference is not None and np.any(reference.base)) or bool(die_knots)
     absolute_modes=between_modes
     if rows[0].get('motion_reversed'):
         between_modes={i:{'max':'min','min':'max'}.get(mode,mode) for i,mode in between_modes.items()}
     values=solve_graph_weights(physical_count,known,edges,between_modes)
     motions={i:pose*weight for i,weight in values.items()}
     if complex_motion:
-        anchors={i:reference.boundary_state(weight) for i,weight in known.items()}
+        all_states=states if full_states is None else full_states
+        anchors={i:(reference.boundary_state(weight) if reference is not None else pose*weight) for i,weight in known.items()}
         point=source.representative_point().coords[0]
-        absolute=graph_poses(physical_count,anchors,edges,absolute_modes,center,point)
-        motions={i:reference.local_pose(state) for i,state in absolute.items()}
+        knot_poses={i:equivalent_pose(center,r.model.bound.centers[d],all_states[d])
+                    for i,d in die_knots.items() if 0<=d<len(all_states)}
+        absolute=graph_poses(physical_count,anchors,edges,absolute_modes,center,point,knot_poses=knot_poses)
+        motions={i:reference.local_pose(state) for i,state in absolute.items()} if reference is not None else absolute
         shifted=shifted or any(np.any(s) for s in motions.values())
-    mobile=[i for i in range(physical_count) if values[i]>1e-12 or (complex_motion and np.any(motions[i]))]
+    mobile=[i for i in range(physical_count) if (i in die_knots) or (values[i]>1e-12 or (complex_motion and np.any(motions[i])))]
     static=[i for i in range(physical_count) if i not in mobile]
     c=_fast_union([rigid[i] for i in mobile]);b=_fast_union([rigid[i] for i in static])
     posed_rigid=[clean_overlay(transform(g,center,motions[i]),r.tol)
@@ -451,6 +462,17 @@ def assemble(r,source,rows,states,reference=None):
             between_blocks.append(dict(ref=ref,id=(*ref,ax,ay),nominal=rigid[i],geometry=posed_rigid[i],
                                        mode=mode,custom=custom,weight=values[i],locked=i in known))
         result[0]['between_blocks']=tuple(between_blocks)
+        endpoint_blocks=[]
+        for i in sorted(ep_candidates):
+            ax,ay=anchor_of(rigid[i])
+            ep_mode,ep_custom=ep_meta[i]
+            endpoint_blocks.append(dict(
+                ref=ref,id=(*ref,ax,ay),kind='moving' if orig_known[i]>=0.5 else 'fixed',
+                default_mode=ep_defaults[i],mode=ep_mode,custom=ep_custom,
+                nominal=rigid[i],geometry=posed_rigid[i],owner=owner,
+                moves=(ep_mode=='follow' and owner in getattr(r,'active_dies',(owner,))),locked=False,
+            ))
+        result[0]['endpoint_blocks']=tuple(endpoint_blocks)
         result[0]['branch_rigid']=(*zip(rigid[:physical_count],posed_rigid),*((g,g) for g in static_domains))
     return result
 
@@ -465,10 +487,12 @@ def consolidate(r,pieces,states,local_states=None,owner_frames=None):
         posed=(local_states or {}).get((rows[0]['layer'],rows[0]['index']),states)
         ref=(rows[0]['layer'],rows[0]['index'])
         ref_overrides=tuple(o for o in getattr(r.settings,'reconstruction_between_overrides',()) if (o[0],o[1])==ref)
+        ref_ep_overrides=tuple(o for o in getattr(r.settings,'reconstruction_endpoint_overrides',()) if (o[0],o[1])==ref)
         reference=(owner_frames or {}).get((ref,rows[0]['die']))
-        cache_key=('branch-assembly-local-intervals-v76',r.rules.identity,r.settings.reconstruction_style,
-                   getattr(r.settings,'reconstruction_between_motion','max'),ref_overrides,
-                   tuple(r.model.bound.centers[rows[0]['die']]),posed[rows[0]['die']].tobytes(),
+        die_override_states=tuple(states[int(o[4][4:])].tobytes() for o in ref_overrides if o[4].startswith('die:') and o[4][4:].isdigit() and int(o[4][4:])<len(states))
+        cache_key=('branch-assembly-local-intervals-v83',r.rules.identity,r.settings.reconstruction_style,
+                   getattr(r.settings,'reconstruction_between_motion','max'),ref_overrides,ref_ep_overrides,
+                   tuple(r.model.bound.centers[rows[0]['die']]),posed[rows[0]['die']].tobytes(),die_override_states,
                    None if reference is None else reference.base.tobytes(),
                    tuple((q['route_identity'],q['interval'],q['boundary_angles'],q.get('boxed'),q.get('box_groups'),
                           q.get('motion_reversed'),tuple(q['nominal_regions'][k].wkb for k in 'ABC')) for q in rows))
@@ -476,7 +500,7 @@ def consolidate(r,pieces,states,local_states=None,owner_frames=None):
         if cached is not None:
             other.extend(dict(q,regions=dict(q['regions'])) for q in cached);continue
         try:
-            assembled=assemble(r,source,rows,posed,reference)
+            assembled=assemble(r,source,rows,posed,reference,full_states=states)
             r.geometry_pool.put(cache_key,tuple(dict(q,regions=dict(q['regions'])) for q in assembled))
             other.extend(assembled)
         except shapely.errors.GEOSException as exc:

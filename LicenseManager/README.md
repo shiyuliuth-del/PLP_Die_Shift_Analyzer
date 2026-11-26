@@ -11,9 +11,9 @@
 
 ## 日常签发
 
-加载加密私钥，粘贴用户提供的一行 Machine ID，点击「签发许可证」。沿用 V80 已验证的 Windows Machine ID。签发历史支持按授权编号或 Machine ID 检索、重新导出、准备重签、导出 CSV 和备份。
+加载加密私钥，粘贴用户提供的一行 Machine ID，可选设置「授权时长（月）」（默认 `0` 表示无期限永久授权；大于 `0` 按自然月到期），点击「签发许可证」。沿用 V80 已验证的 Windows Machine ID。签发历史支持按授权编号或 Machine ID 检索、重新导出、准备重签、导出 CSV 和备份。
 
-签发工具的默认工作/历史数据目录为 `LicenseManager.exe` 同目录，默认签发输出目录为同目录下的 `licenses` 子目录，默认密钥目录为同目录下的 `keys` 子目录。也可在源码根目录运行 `python -m LicenseManager.main` 直接打开工具。
+未打包为 `.exe` 时直接以源码运行会跳过授权校验；打包后的 `.exe` 单独双击即可启动，不要求同级目录保留 `.bat` 启动脚本。签发工具的默认工作/历史数据目录为 `LicenseManager.exe` 同目录，默认签发输出目录为同目录下的 `licenses` 子目录，默认密钥目录为同目录下的 `keys` 子目录。也可在源码根目录运行 `python -m LicenseManager.main` 直接打开工具。
 
 ## 离线构建
 

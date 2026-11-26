@@ -1,5 +1,6 @@
 """Offline signing and administrator history. Never imported by the user EXE."""
 from base64 import b64encode
+import calendar
 from contextlib import closing, contextmanager
 from datetime import datetime
 import csv
@@ -54,12 +55,30 @@ def load_private(path, password):
     return key
 
 
-def sign(key, machine, *, universal=False):
+def add_months(dt, months):
+    total = dt.year * 12 + (dt.month - 1) + months
+    year, month = divmod(total, 12)
+    month += 1
+    day = min(dt.day, calendar.monthrange(year, month)[1])
+    return dt.replace(year=year, month=month, day=day)
+
+
+def sign(key, machine, *, universal=False, duration_months=0, now=None):
     machine = machine.strip().upper()
     if not universal and not MACHINE_ID.fullmatch(machine):
         raise LicenseError('Machine ID 必须为 64 位十六进制。')
+    if type(duration_months) is not int or not (0 <= duration_months <= 12000):
+        raise LicenseError('授权时长必须为 0～12000 的整数月。')
     payload = dict(schema_version=1, license_id=str(uuid.uuid4()), product_id=PRODUCT,
                    machine_id='*' if universal else machine, hwid_version=IPV4_HWID)
+    if duration_months > 0:
+        issued_dt = (now if now is not None else datetime.now().astimezone())
+        if issued_dt.tzinfo is None:
+            issued_dt = issued_dt.astimezone()
+        expires_dt = add_months(issued_dt, duration_months)
+        payload.update(duration_months=duration_months,
+                       issued_at=issued_dt.isoformat(timespec='seconds'),
+                       expires_at=expires_dt.isoformat(timespec='seconds'))
     signature = b64encode(key.sign(canonical(payload))).decode('ascii')
     return payload, (json.dumps(dict(payload=payload,signature=signature),ensure_ascii=False,indent=2)+'\n').encode('utf8')
 
@@ -74,15 +93,20 @@ class History:
         with self.connect() as conn:
             conn.execute(
                 'CREATE TABLE IF NOT EXISTS issuance (license_id TEXT PRIMARY KEY, machine_id TEXT, '
-                'issued TEXT, path TEXT, fingerprint TEXT, content BLOB)'
+                'issued TEXT, path TEXT, fingerprint TEXT, duration_months INTEGER DEFAULT 0, expires_at TEXT DEFAULT \'\', content BLOB)'
             )
+            cols = {row[1] for row in conn.execute('PRAGMA table_info(issuance)').fetchall()}
+            if 'duration_months' not in cols:
+                conn.execute('ALTER TABLE issuance ADD COLUMN duration_months INTEGER DEFAULT 0')
+            if 'expires_at' not in cols:
+                conn.execute("ALTER TABLE issuance ADD COLUMN expires_at TEXT DEFAULT ''")
 
     @contextmanager
     def connect(self):
         with closing(sqlite3.connect(self.path)) as conn, conn:
             yield conn
 
-    def issue(self, key, machine, folder, *, universal=False):
+    def issue(self, key, machine, folder, *, universal=False, duration_months=0):
         folder.mkdir(parents=True, exist_ok=True)
         if universal:
             existing = folder/'Universal.lic'
@@ -92,16 +116,18 @@ class History:
                 if payload['machine_id'] != '*':
                     raise LicenseError('已有同名文件，且不是通用授权。')
                 return existing
-        payload, content = sign(key,machine,universal=universal)
+        payload, content = sign(key,machine,universal=universal,duration_months=duration_months)
         filename = 'Universal.lic' if universal else f"DSA_{payload['machine_id'][:8]}_{payload['license_id']}.lic"
         path = folder/filename
         new_file(path,content)
-        row = dict(payload, issued=datetime.now().astimezone().isoformat(timespec='seconds'),
-                   path=str(path), fingerprint=fingerprint(key))
+        row = dict(payload, issued=payload.get('issued_at') or datetime.now().astimezone().isoformat(timespec='seconds'),
+                   path=str(path), fingerprint=fingerprint(key),
+                   duration_months=int(payload.get('duration_months', 0)),
+                   expires_at=str(payload.get('expires_at', '')))
         try:
             with self.connect() as conn:
-                conn.execute(f"INSERT INTO issuance ({','.join(FIELDS)},content) VALUES (?,?,?,?,?,?)",
-                             (*[row[k] for k in FIELDS],content))
+                conn.execute(f"INSERT INTO issuance ({','.join(FIELDS)},duration_months,expires_at,content) VALUES (?,?,?,?,?,?,?,?)",
+                             (*[row[k] for k in FIELDS],row['duration_months'],row['expires_at'],content))
         except sqlite3.Error:
             path.unlink()
             raise

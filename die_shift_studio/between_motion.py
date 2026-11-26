@@ -5,13 +5,52 @@ import shapely
 from .preview import rigid_transform
 
 STATIONARY = 'static'
-MODES = (STATIONARY, 'max', 'min', 'average')
+SPECIAL_MODES = ('max', 'min', 'average')
+MODES = (STATIONARY, *SPECIAL_MODES)
+ENDPOINT_MODES = ('follow', STATIONARY)
 LABELS = {
     STATIONARY: '静止不动',
     'max': '跟随幅度大的一侧',
     'min': '跟随幅度小的一侧',
     'average': '两侧平均',
 }
+ENDPOINT_LABELS = {
+    'follow': '随动',
+    STATIONARY: '静止',
+}
+
+
+def die_mode(owner):
+    return f'die:{int(owner)}'
+
+
+def parse_die_mode(mode):
+    if isinstance(mode, str) and mode.startswith('die:') and mode[4:].isdigit():
+        return int(mode[4:])
+    return None
+
+
+def is_valid_mode(mode):
+    return mode in MODES or parse_die_mode(mode) is not None
+
+
+def mode_label(mode):
+    owner = parse_die_mode(mode)
+    if owner is not None:
+        return f'跟随DIE{owner + 1}移动'
+    return LABELS.get(mode, str(mode))
+
+
+def equivalent_pose(target_center, source_center, source_state):
+    """Express rigid transform about source_center as an equivalent pose about target_center."""
+    target_center = np.asarray(target_center, float)
+    source_center = np.asarray(source_center, float)
+    source_state = np.asarray(source_state, float)
+    angle = float(source_state[2])
+    c, s = math.cos(angle), math.sin(angle)
+    delta = target_center - source_center
+    rotated = np.array([c * delta[0] - s * delta[1], s * delta[0] + c * delta[1]], float)
+    return np.array([source_state[0] + rotated[0] - delta[0], source_state[1] + rotated[1] - delta[1], angle], float)
 
 
 def normalize_overrides(rows):
@@ -30,11 +69,55 @@ def normalize_overrides(rows):
             raise ValueError('动区间随动记录的锚点坐标无效')
         if not (math.isfinite(ax) and math.isfinite(ay)) or max(abs(ax), abs(ay)) > 1e12:
             raise ValueError('动区间随动记录的锚点坐标超出范围')
-        if mode not in MODES:
+        if not is_valid_mode(mode):
             raise ValueError('动区间随动模式无效')
         key = (layer, index, round(ax, 4), round(ay, 4))
         result[key] = mode
     return tuple((*k, result[k]) for k in sorted(result))
+
+
+def normalize_endpoint_overrides(rows):
+    if not isinstance(rows, (list, tuple)):
+        raise ValueError('端点随动设置必须为列表')
+    result = {}
+    for row in rows:
+        if not isinstance(row, (list, tuple)) or len(row) != 5:
+            raise ValueError('端点随动记录须包含图层、图形编号、锚点坐标与随动模式')
+        layer, index, ax, ay, mode = row
+        if not isinstance(layer, str) or type(index) is not int or index < 0:
+            raise ValueError('端点随动记录的图层或图形编号无效')
+        try:
+            ax, ay = float(ax), float(ay)
+        except (TypeError, ValueError):
+            raise ValueError('端点随动记录的锚点坐标无效')
+        if not (math.isfinite(ax) and math.isfinite(ay)) or max(abs(ax), abs(ay)) > 1e12:
+            raise ValueError('端点随动记录的锚点坐标超出范围')
+        if mode not in ENDPOINT_MODES:
+            raise ValueError('端点随动模式无效')
+        key = (layer, index, round(ax, 4), round(ay, 4))
+        result[key] = mode
+    return tuple((*k, result[k]) for k in sorted(result))
+
+
+def endpoint_modes(settings, ref, components, defaults, tol=1e-3):
+    result = {i: (defaults[i], False) for i in components}
+    overrides = [q for q in getattr(settings, 'reconstruction_endpoint_overrides', ()) if q[:2] == ref]
+    if not overrides or not components:
+        return result
+    candidates = [(i, g, g.representative_point()) for i, g in components.items()
+                  if g is not None and not g.is_empty]
+    margin = max(tol * 8, 1e-2)
+    chosen = {}
+    for layer, index, ax, ay, mode in overrides:
+        pt = shapely.Point(ax, ay)
+        matches = [(not g.contains(pt), g.distance(pt), anchor.distance(pt), i)
+                   for i, g, anchor in candidates if g.dwithin(pt, margin)]
+        if matches:
+            *rank, i = min(matches)
+            if i not in chosen or rank < chosen[i]:
+                chosen[i] = rank
+                result[i] = (mode, True)
+    return result
 
 
 def anchor_of(geometry):
@@ -82,6 +165,8 @@ def solve_serial_weights(modes, *, moving_is_larger=True):
         first=modes.index(STATIONARY)
         return [*solve_serial_weights(modes[:first],moving_is_larger=moving_is_larger),
                 *([0.]*(len(modes)-first))]
+    if any(parse_die_mode(m) is not None for m in modes):
+        modes=tuple('average' if parse_die_mode(m) is not None else m for m in modes)
     locked=set()
     group_ends=[]
     for i,mode in enumerate(modes,1):
@@ -111,10 +196,17 @@ def motion_order(point, center, pose, reference):
         float(np.linalg.norm(base-point)),abs(float(reference.base[2])))
 
 
-def serial_poses(modes, start, end, center, point):
-    """Interpolate two absolute terminal poses with optional zero-pose knots."""
+def serial_poses(modes, start, end, center, point, *, knot_poses=None):
+    """Interpolate two absolute terminal poses with optional zero-pose or per-DIE knots."""
     last=len(modes)+1
-    knots=[(0,start),*((i,np.zeros(3)) for i,mode in enumerate(modes,1) if mode==STATIONARY),(last,end)]
+    knot_poses=knot_poses or {}
+    knots=[(0,start)]
+    for i,mode in enumerate(modes,1):
+        if i in knot_poses:
+            knots.append((i,np.asarray(knot_poses[i],float)))
+        elif mode==STATIONARY:
+            knots.append((i,np.zeros(3)))
+    knots.append((last,end))
     out=np.empty((last+1,3))
     for (a,left),(b,right) in zip(knots,knots[1:]):
         amplitudes=_amplitudes([left,right],center,point)
@@ -208,9 +300,11 @@ def solve_graph_weights(physical_count, known, edges, modes):
     return values
 
 
-def graph_poses(physical_count, anchors, edges, modes, center, point):
+def graph_poses(physical_count, anchors, edges, modes, center, point, *, knot_poses=None):
     """Solve a branch with a stationary anchor and two moving terminals."""
-    known={**anchors,**{i:np.zeros(3) for i,mode in modes.items() if mode==STATIONARY and i not in anchors}}
+    knot_poses=knot_poses or {}
+    known={**anchors,**{i:np.zeros(3) for i,mode in modes.items() if mode==STATIONARY and i not in anchors},
+           **{i:np.asarray(pose,float) for i,pose in knot_poses.items() if i not in anchors}}
     for path,start,end in list(_anchored_chains(known,edges)):
         shares=serial_poses([modes.get(i,'max') for i in path],start,end,center,point)
         known.update(zip(path,shares[1:-1]))
@@ -237,8 +331,11 @@ def graph_poses(physical_count, anchors, edges, modes, center, point):
     return values
 
 
-def pair_middle_pose(geometry, center_a, state_a, center_b, state_b, mode):
+def pair_middle_pose(geometry, center_a, state_a, center_b, state_b, mode, *, centers=None, states=None):
     """Compute rigid (center, state) for a middle core between two moving DIEs."""
+    owner = parse_die_mode(mode)
+    if owner is not None and centers is not None and states is not None and 0 <= owner < len(centers):
+        return np.asarray(centers[owner], float), np.asarray(states[owner], float)
     center_a = np.asarray(center_a, float)
     center_b = np.asarray(center_b, float)
     state_a = np.asarray(state_a, float)

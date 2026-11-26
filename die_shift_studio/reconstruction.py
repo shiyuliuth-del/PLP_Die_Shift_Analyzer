@@ -323,6 +323,9 @@ class Reconstructor:
                 manual.update(self.box_refs)
                 for ref,who in groups_by_ref.items():
                     if len(who)!=1 or ref in paired:continue
+                    rdl_net=int(self.model.nodes[self.model.ids[ref]]['net'])
+                    src=self.model.cache.layers[ref[0]]['geometry'][ref[1]]
+                    if any(v['net']==rdl_net and src.intersects(v['poly']) for v in self.stays):continue
                     self.die_internal[ref]=who[0]
                     if ref in manual:continue
                     self.auto_ignored[ref]=dict(certified=False,scope='DIE内动区判断',following=(mode=='follow'))
@@ -604,7 +607,7 @@ class Reconstructor:
                 rows=[]
                 from .branch_regions import terminal_tree
                 pairs=terminal_tree([v['poly'] for v in mine],fixed)
-                edited=any(row[:2]==(layer,index) for name in ('reconstruction_intervals','reconstruction_angles','reconstruction_added','reconstruction_deleted','reconstruction_cuts','reconstruction_extra_cuts','reconstruction_second_cuts') for row in getattr(self.settings,name,()))
+                edited=(layer,index) in self.box_refs or any(row[:2]==(layer,index) for name in ('reconstruction_intervals','reconstruction_angles','reconstruction_added','reconstruction_deleted','reconstruction_cuts','reconstruction_extra_cuts','reconstruction_second_cuts') for row in getattr(self.settings,name,()))
                 if edited:pairs=[(i,j) for i in range(len(mine)) for j in range(len(fixed))]
                 for number,(i,j) in enumerate(pairs):
                     cancel_check();via,anchor=mine[i],fixed[j]
@@ -821,6 +824,7 @@ class Reconstructor:
             include=set(map(tuple,targets))|set(changed)
             result['pieces']=[q for q in pieces if (q['layer'],q['index']) in include]
             result['between_blocks']=tuple(b for b in result.get('between_blocks',()) if b['ref'] in include)
+            result['endpoint_blocks']=tuple(b for b in result.get('endpoint_blocks',()) if b['ref'] in include)
             result['replacements']={layer:[q for q in rows if any((layer,i) in include for i in q['indices'])] for layer,rows in out.items()}
             result['replacements']={layer:rows for layer,rows in result['replacements'].items() if rows}
         if diagnostics:
@@ -846,14 +850,14 @@ class Reconstructor:
         entries=catalogue if selected is None else [q for ref in sorted(selected) for q in self._entries_by_ref.get(ref,())]
         nominal_intervals=self._nominal_intervals
         from .reconstruction_incremental import reusable
-        retained,retained_pieces,retained_between=reusable(self,states,selected)
+        retained,retained_pieces,retained_between,retained_endpoint=reusable(self,states,selected)
         retained_refs={(layer,i) for layer,rows in retained.items() for row in rows for i in row['indices']}
         entries=[q for q in entries if (selected is None or (q['layer'],q['index']) in selected) and (q['layer'],q['index']) not in retained_refs]
         from .moving_pair import MultiPairFrame,frames as paired_frames,repose
         from .reconstruction_zones import serial_boundary_states
         references=paired_frames(entries,self.model.bound.centers,states,settings=self.settings,interval_fn=lambda e:self.interval(e))
         local_states={};orders={}
-        from .between_motion import STATIONARY,motion_order,serial_poses,solve_serial_weights
+        from .between_motion import STATIONARY,equivalent_pose,motion_order,parse_die_mode,serial_poses,solve_serial_weights
         owner_frames={}
         for entry in entries:
             ref=entry['layer'],entry['index']
@@ -878,17 +882,22 @@ class Reconstructor:
             ref=(entry['layer'],entry['index']);owner=entry['owner']
             frame=owner_frames.get((ref,owner))
             modes=entry.get('serial_modes',())
-            stationary=STATIONARY in modes
+            has_die=any(parse_die_mode(m) is not None for m in modes)
+            stationary=STATIONARY in modes or has_die
             reverse=not orders.get((ref,owner),True)
-            if not reverse and not (stationary and frame is not None and np.any(frame.base)):
+            if not reverse and not (stationary and ((frame is not None and np.any(frame.base)) or has_die)):
                 adjusted.append(entry);continue
             values={'motion_reversed':reverse}
-            if stationary and frame is not None and np.any(frame.base):
+            if stationary and ((frame is not None and np.any(frame.base)) or has_die):
                 ident=(ref,owner,modes)
                 if ident not in shares:
                     point=entry['source'].representative_point().coords[0]
-                    absolute=serial_poses(modes,states[owner],frame.base,frame.center,point)
-                    shares[ident]=tuple(frame.local_pose(s) for s in absolute)
+                    ref_center=frame.center if frame is not None else self.model.bound.centers[owner]
+                    end_pose=frame.base if frame is not None else np.zeros(3)
+                    knot_poses={i:equivalent_pose(ref_center,self.model.bound.centers[d],states[d])
+                                for i,m in enumerate(modes,1) if (d:=parse_die_mode(m)) is not None and 0<=d<len(states)}
+                    absolute=serial_poses(modes,states[owner],end_pose,ref_center,point,knot_poses=knot_poses)
+                    shares[ident]=tuple(frame.local_pose(s) for s in absolute) if frame is not None else tuple(absolute)
                 i=entry['serial_position'];values['serial_local_states']=shares[ident][i:i+2]
             elif modes:
                 if modes not in shares:shares[modes]=solve_serial_weights(modes,moving_is_larger=False)
@@ -1006,7 +1015,11 @@ class Reconstructor:
             if 'serial_between' in entry:
                 blk,mode_b,custom_b,anchor_b=entry['serial_between']
                 if anchor_b is not None and not blk.is_empty:
-                    posed_blk=transform(blk,self.model.bound.centers[owner],left)
+                    die_b=parse_die_mode(mode_b)
+                    if die_b is not None and 0<=die_b<len(states):
+                        posed_blk=transform(blk,self.model.bound.centers[die_b],states[die_b])
+                    else:
+                        posed_blk=transform(blk,self.model.bound.centers[owner],left)
                     piece['serial_between_block']=dict(ref=(layer,index),id=(layer,index,*anchor_b),nominal=blk,geometry=posed_blk,mode=mode_b,custom=custom_b,weight=entry['serial_left'])
             pieces.append(piece);feature['pieces'].append(piece)
         from .branch_regions import consolidate,fixed_between_owners
@@ -1014,15 +1027,16 @@ class Reconstructor:
         features={}
         for q in pieces:
             features.setdefault((q['layer'],q['index']),dict(source=q['source'],pieces=[],net=q['net']))['pieces'].append(q)
-        out={};conflicts=0;between_blocks=list(retained_between)
-        from .between_motion import anchor_of
+        out={};conflicts=0;between_blocks=list(retained_between);endpoint_blocks=list(retained_endpoint)
+        from .between_motion import anchor_of,endpoint_modes
         for (layer,index),feature in features.items():
             ps=feature['pieces'];source=feature['source']
             between_start=len(between_blocks)
             owners=sorted({q['die'] for q in ps}|{v['owner'] for v in self.vias_by_target.get((layer,index),()) if v['owner']>=0})
             ref_between_overrides=tuple(o for o in getattr(self.settings,'reconstruction_between_overrides',()) if (o[0],o[1])==(layer,index))
-            compose_key=('composed-continuity-v73',self.rules.identity,layer,index,quick,self.settings.reconstruction_style,self.settings.reconstruction_boundary_mode,self.settings.reconstruction_allow_moving_pad,
-                         getattr(self.settings,'reconstruction_between_motion','max'),ref_between_overrides,
+            ref_ep_overrides=tuple(o for o in getattr(self.settings,'reconstruction_endpoint_overrides',()) if (o[0],o[1])==(layer,index))
+            compose_key=('composed-continuity-v83',self.rules.identity,layer,index,quick,self.settings.reconstruction_style,self.settings.reconstruction_boundary_mode,self.settings.reconstruction_allow_moving_pad,
+                         getattr(self.settings,'reconstruction_between_motion','max'),ref_between_overrides,ref_ep_overrides,
                          tuple((owner,states[owner].tobytes(),self.model.bound.centers[owner].tobytes()) for owner in owners),
                          tuple((q['route_identity'],q['interval'],q['boundary_angles'],q.get('ignored'),q.get('ignored_following'),q['endpoint_weights'],tuple(s.tobytes() for s in q.get('local_boundary_states',())),q['strict_box'].wkb if q.get('strict_box') is not None else None) for q in ps))
             saved=self.geometry_pool.get(compose_key)
@@ -1044,7 +1058,9 @@ class Reconstructor:
                 geometry=repose(ps,geometry,ref_pose)
                 if isinstance(ref_pose,MultiPairFrame):
                     active=paired_owners & self.active_dies
-                    middle_moves=(active==paired_owners) if ref_pose.mode=='min' else ref_pose.mode!=STATIONARY and bool(active)
+                    die_mid=parse_die_mode(ref_pose.mode)
+                    if die_mid is not None:middle_moves=die_mid in self.active_dies
+                    else:middle_moves=(active==paired_owners) if ref_pose.mode=='min' else ref_pose.mode!=STATIONARY and bool(active)
                 if isinstance(ref_pose,MultiPairFrame) and ref_pose.nominal_core.area>self.tol**2:
                     ax,ay=anchor_of(ref_pose.nominal_core)
                     posed_core=transform(ref_pose.nominal_core,ref_pose.center,ref_pose.base) if np.any(ref_pose.base) else ref_pose.nominal_core
@@ -1058,9 +1074,13 @@ class Reconstructor:
                 for block in blocks:
                     if block['nominal'].area<=self.tol**2:continue
                     item=dict(block)
-                    if ref_pose is not None and np.any(ref_pose.base):item['geometry']=transform(item['geometry'],ref_pose.center,ref_pose.base)
-                    weight=block['weight']
-                    item['moves']=block['mode']!=STATIONARY and bool((q['die'] in self.active_dies and weight>1e-10) or (base_moves and weight<1.-1e-10))
+                    die_blk=parse_die_mode(block['mode'])
+                    if die_blk is not None:
+                        item['moves']=die_blk in self.active_dies
+                    else:
+                        if ref_pose is not None and np.any(ref_pose.base):item['geometry']=transform(item['geometry'],ref_pose.center,ref_pose.base)
+                        weight=block['weight']
+                        item['moves']=block['mode']!=STATIONARY and bool((q['die'] in self.active_dies and weight>1e-10) or (base_moves and weight<1.-1e-10))
                     between_blocks.append(item)
             if ref_pose is None:
                 between_blocks.extend(fixed_between_owners(source,ps,between_blocks[between_start:],(layer,index),self.tol))
@@ -1068,6 +1088,62 @@ class Reconstructor:
             if stationary:
                 ps[0]['stationary_regions']=shapely.union_all([b['nominal'] for b in stationary])
                 for block in stationary:block['geometry']=block['nominal']
+            graph_eps=[b for q in ps for b in q.pop('endpoint_blocks',())]
+            if graph_eps:
+                endpoint_blocks.extend(graph_eps)
+            elif any(q.get('route_plan') is not None and not q.get('ignored') for q in ps):
+                from .reconstruction_route import parts
+                mid_union=shapely.union_all([b['nominal'] for b in between_blocks[between_start:]])
+                ep_items=[]
+                for q in ps:
+                    if q.get('route_plan') is None or q.get('ignored'):continue
+                    if 'serial_left' in q and q.get('endpoint_weights',(1.,0.))[0]<1.-1e-10:continue
+                    c_nom=q['nominal_regions']['C']
+                    if not mid_union.is_empty:c_nom=c_nom.difference(mid_union)
+                    for g in parts(c_nom):
+                        if g.area>self.tol**2:ep_items.append(('moving','follow',q['die'],g,q))
+                if ref_pose is None:
+                    b_nom=shapely.union_all([q['nominal_regions']['B'] for q in ps if q.get('route_plan') is not None and not q.get('ignored')])
+                    if not mid_union.is_empty:b_nom=b_nom.difference(mid_union)
+                    for g in parts(b_nom):
+                        if g.area>self.tol**2:
+                            near_q=min((q for q in ps if q.get('route_plan') is not None),key=lambda q:q['nominal_regions']['A'].distance(g),default=ps[0])
+                            ep_items.append(('fixed',STATIONARY,near_q['die'],g,None))
+                if ep_items:
+                    ep_comps={idx:item[3] for idx,item in enumerate(ep_items)}
+                    ep_defs={idx:item[1] for idx,item in enumerate(ep_items)}
+                    ep_res=endpoint_modes(self.settings,(layer,index),ep_comps,ep_defs,self.tol)
+                    for idx,(ep_kind,ep_def,ep_owner,ep_nom,ep_q) in enumerate(ep_items):
+                        ep_mode,ep_custom=ep_res[idx]
+                        ep_center=self.model.bound.centers[ep_owner]
+                        ep_state=states[ep_owner]
+                        posed_nom=transform(ep_nom,ep_center,ep_state) if np.any(ep_state) else ep_nom
+                        if ep_kind=='moving' and ep_mode==STATIONARY:
+                            ep_geom=ep_nom
+                            if ep_q is not None and ep_mode!=ep_def:
+                                geometry=shapely.union_all([geometry.difference(posed_nom),ep_nom],grid_size=self.tol)
+                                ep_q['regions']['C']=ep_q['regions']['C'].difference(posed_nom)
+                                ep_q['moved']=ep_q['regions']['C']
+                                ep_q['regions']['B']=ep_q['regions']['B'].union(ep_nom)
+                                ep_q['fixed']=ep_q['regions']['B']
+                        elif ep_kind=='fixed' and ep_mode=='follow':
+                            ep_geom=posed_nom
+                            if ep_mode!=ep_def:
+                                geometry=shapely.union_all([geometry.difference(ep_nom),posed_nom],grid_size=self.tol)
+                                for q in ps:
+                                    q['regions']['B']=q['regions']['B'].difference(ep_nom)
+                                    q['fixed']=q['regions']['B']
+                                ps[0]['regions']['C']=ps[0]['regions']['C'].union(posed_nom)
+                                ps[0]['moved']=ps[0]['regions']['C']
+                        else:
+                            ep_geom=posed_nom if ep_mode=='follow' else ep_nom
+                        ax,ay=anchor_of(ep_nom)
+                        endpoint_blocks.append(dict(
+                            ref=(layer,index),id=(layer,index,ax,ay),kind=ep_kind,
+                            default_mode=ep_def,mode=ep_mode,custom=ep_custom,
+                            nominal=ep_nom,geometry=ep_geom,owner=ep_owner,
+                            moves=(ep_mode=='follow' and ep_owner in self.active_dies),locked=False,
+                        ))
             out.setdefault(layer,[]).append(dict(indices=(index,),geometry=geometry,net=feature['net'],movable=occupied,moved=shapely.union_all([q['moved'] for q in ps])))
         for layer,rows in retained.items():out.setdefault(layer,[]).extend(rows)
         pieces.extend(retained_pieces)
@@ -1099,7 +1175,7 @@ class Reconstructor:
             measures=dict(parallel_map(measure,sorted({(q['index'],q['net']) for q in layer_pieces})))
             for q in layer_pieces:
                 if measures[q['index']] is not None:q.update(measures[q['index']]);conflicts+=int(q['conflict'])
-        result=dict(complete=True,reused_sources=len(retained_refs),auto_ignored=self.auto_ignored,rules=dict(width_um=self.rules.width,space_um=self.rules.space,annulus_um=self.p.annulus_um),configuration=self.settings.reconstruction_key(),dbu_um=self.tol,pieces=pieces,replacements=out,between_blocks=tuple(between_blocks),scope='共同端点按全输入概率参考选择；保持所选样式比较有限候选。未形成有效连接时取消连接段并保留两端；实际工况规则另检。不代表全局最优布线或产线签认。',
+        result=dict(complete=True,reused_sources=len(retained_refs),auto_ignored=self.auto_ignored,rules=dict(width_um=self.rules.width,space_um=self.rules.space,annulus_um=self.p.annulus_um),configuration=self.settings.reconstruction_key(),dbu_um=self.tol,pieces=pieces,replacements=out,between_blocks=tuple(between_blocks),endpoint_blocks=tuple(endpoint_blocks),scope='共同端点按全输入概率参考选择；保持所选样式比较有限候选。未形成有效连接时取消连接段并保留两端；实际工况规则另检。不代表全局最优布线或产线签认。',
                     parameters=dict(length_um=0.,width_um=0.,overlap_um=self.p.annulus_um,landing_diameters=AUTO_LANDING_DIAMETERS,shared_nominal=True,connection_style=self.settings.reconstruction_style,boundary_mode=self.settings.reconstruction_boundary_mode),
                     summary=dict(pieces=len(pieces),bridges=sum(not q['bridge'].is_empty for q in pieces),orphans=sum(q['orphan'] for q in pieces),conflicts=conflicts,
                                  warnings=sum(bool(q['warning']) for q in pieces),groups_used=len(features),manual_cuts=sum(q['manual'] for q in pieces),

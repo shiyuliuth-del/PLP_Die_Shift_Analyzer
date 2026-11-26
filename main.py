@@ -15,14 +15,17 @@ if __name__=='__main__':
         parser.add_argument('--project');parser.add_argument('--measured-output',action='store_true');parser.add_argument('--ipc-endpoint');parser.add_argument('--smoke-test',help=argparse.SUPPRESS)
         parser.add_argument('--gpu-info',metavar='FILE',help='write offline GPU self-test results to a JSON file')
         args=parser.parse_args()
-        if args.smoke_test or args.gpu_info:
-            from die_shift_studio.license_core import LicenseError,installed_authorization
-            try:authorization=installed_authorization()
-            except LicenseError as exc:raise SystemExit(str(exc)) from exc
+        if getattr(sys,'frozen',False):
+            if args.smoke_test or args.gpu_info:
+                from die_shift_studio.license_core import LicenseError,installed_authorization
+                try:authorization=installed_authorization()
+                except LicenseError as exc:raise SystemExit(str(exc)) from exc
+            else:
+                from die_shift_studio.license_ui import require_activation
+                app,authorization=require_activation()
+                if authorization is None:raise SystemExit(1)
         else:
-            from die_shift_studio.license_ui import require_activation
-            app,authorization=require_activation()
-            if authorization is None:raise SystemExit(1)
+            authorization=None
         if args.gpu_info:
             import json
             from pathlib import Path

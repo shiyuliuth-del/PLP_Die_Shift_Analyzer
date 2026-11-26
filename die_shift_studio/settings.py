@@ -105,6 +105,7 @@ class ViewSettings:
     reconstruction_fixed_via_follows:tuple=()
     reconstruction_between_motion:str="max"
     reconstruction_between_overrides:tuple=()
+    reconstruction_endpoint_overrides:tuple=()
     reconstruction_box_excluded:tuple=()
 
     # 重构预演初始参数
@@ -246,8 +247,9 @@ class ViewSettings:
             for row in starts):
             raise ValueError('框选动区起点无效')
         values['reconstruction_box_starts']=tuple((*ref,start) for ref,start in sorted({(k,i):s for k,i,s in starts}.items()))
-        from .between_motion import MODES,normalize_overrides
+        from .between_motion import MODES,normalize_endpoint_overrides,normalize_overrides
         values['reconstruction_between_overrides']=normalize_overrides(values.get('reconstruction_between_overrides',()))
+        values['reconstruction_endpoint_overrides']=normalize_endpoint_overrides(values.get('reconstruction_endpoint_overrides',()))
         values['reconstruction_regions']=cls._normalize_regions(values.get('reconstruction_regions',()))
         values['reconstruction_dropped_cuts']=cls._normalize_dropped(values.get('reconstruction_dropped_cuts',()))
         values['width_display']=normalize_display(values.get('width_display',{}))
@@ -322,6 +324,7 @@ class ViewSettings:
                 self.reconstruction_forced,self.reconstruction_angles,self.reconstruction_deleted,self.reconstruction_added,
                 tuple(self.reconstruction_regions),tuple(self.reconstruction_boxes),tuple(self.reconstruction_angle_boxes),self.reconstruction_box_order,self.reconstruction_box_starts,tuple(self.reconstruction_cuts),
                 tuple(self.reconstruction_extra_cuts),tuple(self.reconstruction_second_cuts),
-                tuple(self.reconstruction_dropped_cuts),self.reconstruction_unlinked_boxes,self.reconstruction_two_moving_zones)
+                tuple(self.reconstruction_dropped_cuts),self.reconstruction_unlinked_boxes,self.reconstruction_two_moving_zones,
+                *((self.reconstruction_endpoint_overrides,) if self.reconstruction_endpoint_overrides else ()))
     def deformation_key(self):
         return ('retired-v38',)

@@ -1,6 +1,6 @@
 """Activation and permanent-license status, sharing the application's Qt theme."""
 from . import __version__
-from .license_core import LicenseError, local_authorization
+from .license_core import LicenseError, expiry_text, local_authorization
 from .qt_compat import QtCore, QtWidgets as W, Signal, run_dialog, ACCEPTED
 from .style import STYLE
 
@@ -103,7 +103,9 @@ class LicenseDialog(W.QDialog):
             self.status.setText('\n'.join(messages))
         else:
             payload = authorization.payload
-            title = '通用永久授权' if payload['machine_id'] == '*' else '永久授权'
+            scope = expiry_text(payload)
+            prefix = '通用' if payload['machine_id'] == '*' else ''
+            title = f'{prefix}永久授权' if scope == '永久' else f'{prefix}限时授权（{scope}）'
             self.status.setText(f"{title}\n授权编号 {payload['license_id']}")
 
     def refresh(self):

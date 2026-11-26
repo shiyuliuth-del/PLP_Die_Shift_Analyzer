@@ -2,11 +2,16 @@
 import argparse
 import json
 import multiprocessing
+import os
 from pathlib import Path
 import sys
 
 if not getattr(sys, 'frozen', False):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+else:
+    for _stream in ('stdout', 'stderr'):
+        if getattr(sys, _stream, None) is None:
+            setattr(sys, _stream, open(os.devnull, 'w', encoding='utf-8'))
 
 
 def main():
@@ -21,10 +26,12 @@ def main():
     operation.add_argument('--run-plans', help='按顺序执行计划任务数据库')
     parser.add_argument('--result', help='无界面运行结果JSON')
     args = parser.parse_args()
+    frozen = bool(getattr(sys, 'frozen', False))
     if args.run or args.import_data or args.run_plans:
         from die_shift_studio.license_core import LicenseError, installed_authorization
         try:
-            installed_authorization()
+            if frozen:
+                installed_authorization()
             config = json.loads(Path(args.run or args.import_data).read_text(encoding='utf8')) if not args.run_plans else None
             if args.run_plans:
                 from RealDataAnalyse.plans import Plans, PlanRunner
@@ -55,10 +62,11 @@ def main():
         if args.result:
             Path(args.result).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf8')
         return code
-    from die_shift_studio.license_ui import require_activation
-    app, authorization = require_activation(application='RealDataAnalyse')
-    if authorization is None:
-        return 1
+    if frozen:
+        from die_shift_studio.license_ui import require_activation
+        app, authorization = require_activation(application='RealDataAnalyse')
+        if authorization is None:
+            return 1
     from RealDataAnalyse.gui import launch
     return launch()
 

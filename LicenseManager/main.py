@@ -1,4 +1,5 @@
 """Standalone Windows administrator UI."""
+import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -28,14 +29,20 @@ class Manager(W.QWidget):
         self.universal_dir = self.home
         self.output = W.QLineEdit(str(self.home/'licenses'))
         self.machine = W.QLineEdit()
+        self.duration_months = W.QSpinBox()
+        self.duration_months.setRange(0, 1200)
+        self.duration_months.setValue(0)
+        self.duration_months.setSpecialValueText('0（无期限）')
+        self.duration_months.setSuffix(' 个月')
         layout = W.QFormLayout(self)
-        layout.addRow(PRODUCT, W.QLabel('Permanent License'))
+        layout.addRow(PRODUCT, W.QLabel('Offline License'))
         layout.addRow('数据目录',self.data)
         layout.addRow('签发目录',self.output)
         layout.addRow('私钥状态 / 指纹',self.key_status)
         layout.addRow(self.buttons(('生成密钥对',self.generate_key),('加载私钥',self.open_key),
                                    ('导出公钥',self.export_key),('校验公钥',self.check_key)))
         layout.addRow('Machine ID',self.machine)
+        layout.addRow('授权时长（月）',self.duration_months)
         layout.addRow(self.buttons(('签发许可证',self.issue),('打开输出目录',self.open_folder),('授权历史',self.history)))
         layout.addRow(self.buttons(('首次部署：生成管理员通用许可证',self.issue_universal)))
         self.status = W.QLabel()
@@ -127,8 +134,10 @@ class Manager(W.QWidget):
             self.status.setText('公钥与已加载私钥匹配。')
 
     def issue(self):
-        path = History(Path(self.data.text())).issue(self.require_key(),self.machine.text(),Path(self.output.text()))
-        self.status.setText(f'已签发：{path}')
+        months = int(self.duration_months.value())
+        path = History(Path(self.data.text())).issue(self.require_key(),self.machine.text(),Path(self.output.text()),duration_months=months)
+        note = f'（有效期 {months} 个月）' if months > 0 else '（永久）'
+        self.status.setText(f'已签发{note}：{path}')
 
     def issue_universal(self):
         key = self.require_key()
@@ -192,6 +201,8 @@ class Manager(W.QWidget):
 
 
 if __name__ == '__main__':
+    for _stream in ('stdout','stderr'):
+        if getattr(sys,_stream,None) is None:setattr(sys,_stream,open(os.devnull,'w',encoding='utf-8'))
     app = W.QApplication([])
     window = Manager()
     window.show()

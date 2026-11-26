@@ -145,7 +145,8 @@ class ContourGroup(NamedTuple):
 
 
 def layer_contours(task):
-    key,raw,rows,between,role,options,amount,dbu,minimum_edge=task;cancel_check()
+    key,raw,rows,between,role,options,amount,dbu,minimum_edge,*extra=task;cancel_check()
+    endpoint=extra[0] if extra else ()
     polygons=[p for blob in raw for p in shapely.get_parts(shapely.from_wkb(blob)) if not p.is_empty]
     if any(p.geom_type!='Polygon' or not p.is_valid for p in polygons):raise ValueError(f'图层 {key} 的输出几何无效')
     inputs=len(polygons)
@@ -168,15 +169,23 @@ def layer_contours(task):
     resolved=[q for q in rows if not q.get('box_invalid')]
     masks={k:shapely.union_all([q['regions'][k] for q in resolved]) for k in 'AC'}
     if between:
-        from .between_motion import STATIONARY
+        from .between_motion import STATIONARY, parse_die_mode
         middle=shapely.union_all([block['nominal'] for block in between])
         stationary=shapely.union_all([block['nominal'] for block in between if block['mode']==STATIONARY])
         moving=shapely.union_all([block['nominal'] for block in between
-                                  if block['mode']!=STATIONARY and (block['mode']=='max' or block['moves'])])
+                                  if block['mode']!=STATIONARY and (parse_die_mode(block['mode']) is not None or block['mode']=='max' or block['moves'])])
         # Internal C is the moving side, written to public DXF layer _A.
         masks['C']=shapely.union_all([masks['C'].difference(middle),moving])
         if not stationary.is_empty:
             for k in 'AC':masks[k]=masks[k].difference(stationary)
+    if endpoint:
+        from .between_motion import STATIONARY
+        ep_follow=shapely.union_all([b['nominal'] for b in endpoint if b.get('custom') and b['mode']=='follow'])
+        ep_static=shapely.union_all([b['nominal'] for b in endpoint if b.get('custom') and b['mode']==STATIONARY])
+        if not ep_follow.is_empty:
+            masks['C']=shapely.union_all([masks['C'],ep_follow])
+        if not ep_static.is_empty:
+            for k in 'AC':masks[k]=masks[k].difference(ep_static)
     # A transition face owns all its material. Remove coincident motion masks
     # before projecting seams into the compensation collar.
     if not masks['A'].is_empty and not masks['C'].is_empty:
@@ -305,14 +314,15 @@ def _join_block_paths(paths):
 def _prepare(snapshot,reconstruction,roles,options,progress,compensation=None,dbu=.001):
     tasks=[]
     compensation=compensation or {}
-    pieces=defaultdict(list);between=defaultdict(list)
+    pieces=defaultdict(list);between=defaultdict(list);endpoint=defaultdict(list)
     for piece in reconstruction.get('pieces',()):pieces[piece['layer']].append(piece)
     for block in reconstruction.get('between_blocks',()):between[block['ref'][0]].append(block)
+    for block in reconstruction.get('endpoint_blocks',()):endpoint[block['ref'][0]].append(block)
     for key,raw in sorted(snapshot.layers.items()):
         if roles.get(key) in EXPORT_ROLES:
             amount=round(compensation.get(key,0.)/dbu)*dbu
             tasks.append((key,raw,pieces[key],between[key],roles[key],
-                          options,amount,dbu,snapshot.minimum_edge_um))
+                          options,amount,dbu,snapshot.minimum_edge_um,endpoint[key]))
     profile=resource_profile()
     largest=max((sum(map(len,task[1])) for task in tasks),default=1)
     profile=dict(profile,workers=min(len(tasks) or 1,geometry_budget(profile,largest)))

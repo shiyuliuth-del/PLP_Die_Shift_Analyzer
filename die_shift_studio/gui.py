@@ -1971,13 +1971,13 @@ class MainWindow(W.QMainWindow):
     def clear_manual_cuts(self,*_):
         extras=getattr(self.view_settings,'reconstruction_extra_cuts',())
         dropped=getattr(self.view_settings,'reconstruction_dropped_cuts',())
-        if not any((self.view_settings.reconstruction_cuts,extras,dropped,self.view_settings.reconstruction_second_cuts,self.view_settings.reconstruction_intervals,self.view_settings.reconstruction_angles,self.view_settings.reconstruction_deleted,self.view_settings.reconstruction_added,self.view_settings.reconstruction_boxes,self.view_settings.reconstruction_angle_boxes,self.view_settings.reconstruction_between_overrides)):return
+        if not any((self.view_settings.reconstruction_cuts,extras,dropped,self.view_settings.reconstruction_second_cuts,self.view_settings.reconstruction_intervals,self.view_settings.reconstruction_angles,self.view_settings.reconstruction_deleted,self.view_settings.reconstruction_added,self.view_settings.reconstruction_boxes,self.view_settings.reconstruction_angle_boxes,self.view_settings.reconstruction_between_overrides,self.view_settings.reconstruction_endpoint_overrides)):return
         from dataclasses import replace
         # Also restores the automatic cuts that were deleted, so one button undoes
         # every hand edit of the cut lines.
         self.edit_history.record()
         self.view_settings=replace(self.view_settings,reconstruction_cuts=(),
-                                   reconstruction_extra_cuts=(),reconstruction_second_cuts=(),reconstruction_dropped_cuts=(),reconstruction_intervals=(),reconstruction_angles=(),reconstruction_deleted=(),reconstruction_added=(),reconstruction_forced=(),reconstruction_boxes=(),reconstruction_angle_boxes=(),reconstruction_box_order=(),reconstruction_box_starts=(),reconstruction_unlinked_boxes=(),reconstruction_box_excluded=(),reconstruction_between_overrides=())
+                                   reconstruction_extra_cuts=(),reconstruction_second_cuts=(),reconstruction_dropped_cuts=(),reconstruction_intervals=(),reconstruction_angles=(),reconstruction_deleted=(),reconstruction_added=(),reconstruction_forced=(),reconstruction_boxes=(),reconstruction_angle_boxes=(),reconstruction_box_order=(),reconstruction_box_starts=(),reconstruction_unlinked_boxes=(),reconstruction_box_excluded=(),reconstruction_between_overrides=(),reconstruction_endpoint_overrides=())
         self.invalidate_reconstruction_edit()
         self.statusBar().showMessage('已清除全部手动切口，并恢复被删除的自动切口')
         self.request_preview()
@@ -3368,8 +3368,8 @@ class MainWindow(W.QMainWindow):
 
     def change_between_motion(self,block_id,mode):
         if self.remote_locked or self.data is None:return
-        from .between_motion import LABELS,MODES
-        if mode is not None and mode not in MODES:return
+        from .between_motion import LABELS,is_valid_mode,mode_label
+        if mode is not None and not is_valid_mode(mode):return
         layer,index,ax,ay=block_id
         layer=str(layer);index=int(index);ax=round(float(ax),4);ay=round(float(ay),4)
         # Resolve the action against the current preview. A menu can remain
@@ -3399,17 +3399,54 @@ class MainWindow(W.QMainWindow):
         if rows==self.view_settings.reconstruction_between_overrides:return
         updated=replace(self.view_settings,reconstruction_between_overrides=rows)
         if not self.apply_reconstruction_edit(updated,'修改动区间随动'):return
-        label=LABELS[mode] if mode is not None else '默认（'+LABELS[self.view_settings.reconstruction_between_motion]+'）'
+        label=mode_label(mode) if mode is not None else '默认（'+LABELS[self.view_settings.reconstruction_between_motion]+'）'
         if getattr(self,'reconstruction_pending',False):
             self.statusBar().showMessage(f'已暂存动区间随动逻辑：{label}（点击“重构计算”统一计算）')
         else:
             self.statusBar().showMessage(f'已设置动区间随动逻辑：{label}')
 
+    def change_endpoint_motion(self,block_id,mode):
+        if self.remote_locked or self.data is None:return
+        from .between_motion import ENDPOINT_LABELS,ENDPOINT_MODES
+        if mode is not None and mode not in ENDPOINT_MODES:return
+        layer,index,ax,ay=block_id
+        layer=str(layer);index=int(index);ax=round(float(ax),4);ay=round(float(ay),4)
+        blocks=getattr(self.reconstruction_overlay,'endpoint_views',{})
+        block=blocks.get(block_id)
+        if block is None:
+            point=shapely.Point(ax,ay)
+            matches=[b for b in blocks.values() if b['ref']==(layer,index) and b['nominal'].contains(point)]
+            if len(matches)==1:block=matches[0]
+        if block is None:
+            reason='当前姿态找不到原名义端点铜区'
+            self.log_bus.emit(f'未修改端点随动 · {layer} #{index+1} · {reason}','WARNING')
+            self.statusBar().showMessage(reason)
+            return
+        _,_,ax,ay=block['id']
+        block_geom=block['nominal']
+        rows=[]
+        for row in self.view_settings.reconstruction_endpoint_overrides:
+            if (row[0],row[1])==(layer,index):
+                if (row[2],row[3])==(ax,ay):continue
+                if block_geom.covers(shapely.Point(row[2],row[3])):continue
+            rows.append(row)
+        if mode is not None:
+            rows.append((layer,index,ax,ay,mode))
+        rows=tuple(sorted(set(rows)))
+        if rows==self.view_settings.reconstruction_endpoint_overrides:return
+        updated=replace(self.view_settings,reconstruction_endpoint_overrides=rows)
+        if not self.apply_reconstruction_edit(updated,'修改端点随动'):return
+        label=ENDPOINT_LABELS[mode] if mode is not None else '默认（'+ENDPOINT_LABELS.get(block.get('default_mode','static'),'静止')+'）'
+        if getattr(self,'reconstruction_pending',False):
+            self.statusBar().showMessage(f'已暂存端点随动：{label}（点击“重构计算”统一计算）')
+        else:
+            self.statusBar().showMessage(f'已设置端点随动：{label}')
+
     def _strip_ignored_zones(self,settings,refs):
         """Automatically delete all movable regions on ignored fixed-RDL shapes."""
         fields=('reconstruction_intervals','reconstruction_angles','reconstruction_deleted','reconstruction_added',
                 'reconstruction_cuts','reconstruction_extra_cuts','reconstruction_second_cuts','reconstruction_dropped_cuts',
-                'reconstruction_between_overrides')
+                'reconstruction_between_overrides','reconstruction_endpoint_overrides')
         edits={name:tuple(row for row in getattr(settings,name) if tuple(row[:2]) not in refs) for name in fields}
         edits['reconstruction_forced']=tuple(sorted(set(settings.reconstruction_forced)-refs))
         edits['reconstruction_box_excluded']=tuple(sorted(set(settings.reconstruction_box_excluded)|refs))
@@ -3677,11 +3714,12 @@ class MainWindow(W.QMainWindow):
 
 
 def launch(project=None,measured=False,ipc_endpoint=None,*,authorization=None):
-    if authorization is None:
+    import sys
+    if authorization is None and getattr(sys,'frozen',False):
         from .license_ui import require_activation
         app,authorization=require_activation()
         if authorization is None:return 1
-    else:app=W.QApplication.instance()
+    else:app=W.QApplication.instance() or W.QApplication([])
     app.setApplicationName('Die Shift Analyze')
     startup_status={'failed':False}
     window=MainWindow(measured=measured,authorization=authorization);window.requested_ipc_endpoint=ipc_endpoint;window.show()

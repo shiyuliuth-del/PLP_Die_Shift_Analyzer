@@ -16,14 +16,20 @@ def expand(r,entries):
     from .manual_regions import aligned_partition,route_box_spans,usable_partition
     from .reconstruction_edits import apply_angles
     attached=defaultdict(list);seeded={};result=[]
+    seeded_refs={(row[0],row[1]) for row in r.settings.reconstruction_added if len(row)>5 and row[5:]==('seed',)}
     for row in r.settings.reconstruction_added:
         layer,index,x,y,identity,*scope=row
         candidates=[e for e in entries if (e['layer'],e['index'])==(layer,index) and e['plan'] is not None]
         if scope and scope!=['seed']:candidates=[e for e in candidates if e['plan'].identity==scope[0]]
         if candidates:
-            best=min(candidates,key=lambda e:e['plan'].route.distance(shapely.Point(x,y)))
-            if scope==['seed']:seeded[id(best)]=(x,y,identity)
-            else:attached[id(best)].append((x,y,identity,scope))
+            if scope==['seed']:
+                pt=shapely.Point(x,y)
+                matched=[e for e in candidates if e['plan'].route.distance(pt)<=r.tol*4]
+                if not matched:matched=[min(candidates,key=lambda e:e['plan'].route.distance(pt))]
+                for e in matched:seeded[id(e)]=(x,y,identity)
+            else:
+                best=min(candidates,key=lambda e:e['plan'].route.distance(shapely.Point(x,y)))
+                attached[id(best)].append((x,y,identity,scope))
     box_excluded=set(r.settings.reconstruction_box_excluded)
     ignored_set=set(r.settings.reconstruction_ignored)
     deleted_set=set(r.settings.reconstruction_deleted)
@@ -96,6 +102,10 @@ def expand(r,entries):
                     if cache_key not in crossed_routes:
                         crossed_routes[cache_key]={id(peer) for peer in by_source[ref]
                                                    if peer['plan'].route.intersection(polygon).length>r.tol}
+                        if not crossed_routes[cache_key] and by_source[ref]:
+                            dists={id(peer):peer['plan'].route.distance(polygon) for peer in by_source[ref]}
+                            best_d=min(dists.values())
+                            crossed_routes[cache_key]={pid for pid,d in dists.items() if d<=best_d+r.tol*4}
                     crossed=crossed_routes[cache_key]
                     if crossed and id(entry) not in crossed:continue
                 for part in parts_for(entry,plan,is_free,polygon):yield is_free,polygon,part,sequence
@@ -187,8 +197,17 @@ def expand(r,entries):
         if seed and plan is not None:
             x,y,identity=seed;child=copy.copy(plan);child.cache={};child.pose_memo=OrderedDict();child.memo_bytes=0
             child.identity=plan.identity+'~'+identity
-            a,b=plan.nominal_first,plan.nominal_second;position=float(plan.route.project(shapely.Point(x,y)))
-            changed,_=child.edit(a,b,0,position-child.tolerance*16) if position<a else child.edit(a,b,1,position+child.tolerance*16) if position>b else (child.partition(a,b),False)
+            a,b=plan.nominal_first,plan.nominal_second;pt=shapely.Point(x,y);position=float(plan.route.project(pt))
+            changed=None
+            if position>child.tolerance*16 and not (a<=position<=b):
+                half=max(child.guard*2,30.)
+                for scale in (1,2,4,8):
+                    lo=max(0.,position-half*scale);hi=min(plan.length,position+half*scale)
+                    part=child.partition(lo,hi)
+                    if part is not None and part['A'].covers(pt):
+                        changed=part;break
+            if changed is None:
+                changed,_=child.edit(a,b,0,position-child.tolerance*16) if position<a else child.edit(a,b,1,position+child.tolerance*16) if position>b else (child.partition(a,b),False)
             if changed is not None:child.nominal_first,child.nominal_second=changed['a'],changed['b']
             entry=dict(entry,plan=child,seeded=True);plan=child
 
@@ -197,11 +216,13 @@ def expand(r,entries):
         if plan is None:
             result.append(entry);continue
 
+        local_extras=[ex for ex in extras if len(ex[3])>=4 and ex[3][3]=='local']
+        split_extras=[ex for ex in extras if ex not in local_extras]
         # Step 1: Collect existing zones on this plan (unless ref was ignored before boxes).
         rows=[]
-        had_only_boxes=(ref in ignored_set and bool(applicable_boxes))
+        had_only_boxes=(ref in ignored_set and bool(applicable_boxes)) or (ref in seeded_refs and not seed and not local_extras and not split_extras)
         if not had_only_boxes:
-            if not extras:
+            if not split_extras:
                 if key(plan) not in deleted_set:
                     part,manual=r._interval_without_boxes(entry)
                     if id(original_entry) in extra_partitions and not applicable_boxes and not seed:
@@ -217,15 +238,15 @@ def expand(r,entries):
                     elif part is not None and (manual or id(original_entry) not in suppressed):
                         local=dict(entry,serial_part=part,merged_part=part,serial_explicit=manual)
                         rows.append(local)
-                    elif part is None and not applicable_boxes and id(original_entry) not in suppressed:
+                    elif part is None and not applicable_boxes and not local_extras and id(original_entry) not in suppressed:
                         rows.append(entry)
             else:
                 base,_=r._interval_without_boxes(entry)
                 if base is None:
                     rows.append(entry)
                 else:
-                    a,b=(extras[0][3][1:] if extras[0][3] else (plan.nominal_first,plan.nominal_second))
-                    marks=sorted((float(plan.route.project(shapely.Point(x,y))),identity) for x,y,identity,scope in extras)
+                    a,b=(split_extras[0][3][1:3] if len(split_extras[0][3])>=3 else (plan.nominal_first,plan.nominal_second))
+                    marks=sorted((float(plan.route.project(shapely.Point(x,y))),identity) for x,y,identity,scope in split_extras)
                     spacing=max(plan.tolerance*32,min(plan.guard,(b-a)/(len(marks)+1)*.05))
                     boundaries=[a]
                     for j,(s,_) in enumerate(marks):
@@ -243,6 +264,18 @@ def expand(r,entries):
                         else:
                             local['serial_part']=part;local['merged_part']=part
                         rows.append(local)
+        for x,y,identity,scope in local_extras:
+            la,lb=float(scope[1]),float(scope[2])
+            rows=[row for row in rows if not (
+                row.get('serial_part') is not None and not row.get('serial_explicit')
+                and row['serial_part']['a']<=lb+r.tol and la<=row['serial_part']['b']+r.tol)]
+            cid=plan.identity.split('~')[0]+'~'+identity
+            child=_clone_child(plan,cid,la,lb)
+            if key(child) in deleted_set:continue
+            part,_=r._interval_without_boxes(dict(entry,plan=child))
+            if part is None:continue
+            rows.append(dict(entry,plan=child,serial_base=plan.identity,serial_explicit=True,boxed=True,
+                             serial_part=part,merged_part=part))
 
         # Step 2: Apply boxed zones ADDITIVELY (never deleting non-overlapping existing zones;
         # overlapping boxes expand the existing zone's range).
@@ -410,6 +443,7 @@ def live_serial(original,settings,old,ref,draft=False):
             from .ignored_motion import add_linked_geometry
             changed=add_linked_geometry(rebuilt,changed,old['states'])
         between=tuple(b for b in data.get('between_blocks',()) if b['ref']!=ref)+tuple(local.get('between_blocks',()))
+        endpoint=tuple(b for b in data.get('endpoint_blocks',()) if b['ref']!=ref)+tuple(local.get('endpoint_blocks',()))
     finally:
         rebuilt.close()
-    return dict(old,_reconstruction_changed_refs=tuple(sorted({ref,*repaired})),reconstruction=dict(data,configuration=settings.reconstruction_key(),pieces=rows,replacements=changed,between_blocks=between,violations=[],constraints_complete=False,repair_refs=repaired,hard_failures=blocked,electrically_valid=not bool(blocked)))
+    return dict(old,_reconstruction_changed_refs=tuple(sorted({ref,*repaired})),reconstruction=dict(data,configuration=settings.reconstruction_key(),pieces=rows,replacements=changed,between_blocks=between,endpoint_blocks=endpoint,violations=[],constraints_complete=False,repair_refs=repaired,hard_failures=blocked,electrically_valid=not bool(blocked)))
