@@ -50,12 +50,12 @@ class AuthorizationTests(unittest.TestCase):
         self.assertEqual(license.fingerprint(' {'+SYSTEM_UUID+'} ',' board-001 '),expected)
         response=subprocess.CompletedProcess([],0,json.dumps({'uuid':[SYSTEM_UUID],'board':[' board-001 ']}),'')
         with patch.object(license.sys,'platform','win32'),patch.object(license.subprocess,'run',return_value=response) as run:
-            self.assertEqual(license.machine_id(),expected)
+            self.assertEqual(license.windows_board_id(),expected)
             run.assert_called_once()
             self.assertIn('Get-CimInstance Win32_BaseBoard',run.call_args.args[0][-1])
             self.assertEqual(run.call_args.kwargs['timeout'],10)
             run.side_effect=subprocess.TimeoutExpired([],10)
-            with self.assertRaisesRegex(license.LicenseError,'超时'):license.machine_id()
+            with self.assertRaisesRegex(license.LicenseError,'超时'):license.windows_board_id()
         for uuid,serial in (('0'*32,'BOARD-001'),(SYSTEM_UUID,'DEFAULT STRING'),(SYSTEM_UUID,None)):
             with self.assertRaises(license.LicenseError):license.fingerprint(uuid,serial)
 
@@ -124,6 +124,8 @@ class AuthorizationTests(unittest.TestCase):
             selected=p/'one.lic';selected.write_bytes(sign(key,'tester','1',machine)[1])
             dlg.selected=selected
             dlg.apply()
+            dlg.query.wait()
+            app.processEvents()
             self.assertIsNotNone(state.payload)
             dlg.deleteLater();app.processEvents()
 

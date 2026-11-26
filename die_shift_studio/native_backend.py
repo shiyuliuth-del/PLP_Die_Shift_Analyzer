@@ -1,5 +1,5 @@
 """Native KLayout API, or a persistent installed-desktop batch process. Offline."""
-import atexit,importlib,json,logging,math,os,secrets,shutil,socket,struct,subprocess,sys,tempfile,threading,hashlib
+import atexit,importlib,json,logging,math,os,secrets,shutil,socket,struct,subprocess,sys,tempfile,threading,hashlib,time
 from pathlib import Path
 from functools import lru_cache
 import numpy as np
@@ -42,20 +42,24 @@ def executable_candidates():
 
 class DesktopBackend:
     def __init__(self,executable):
-        self.lock=threading.RLock();self.sock=None;self.process=None
-        self.directory=tempfile.TemporaryDirectory(prefix='die-shift-klayout-');self.log_path=Path(self.directory.name)/'batch.log'
-        listener=socket.socket();listener.bind(('127.0.0.1',0));listener.listen(1);listener.settimeout(30)
-        token=secrets.token_hex(32);config=Path(self.directory.name)/'connection.json'
-        config.write_text(json.dumps(dict(port=listener.getsockname()[1],token=token)),encoding='utf-8')
-        macro=Path(getattr(sys,'_MEIPASS',Path(__file__).resolve().parent.parent))/'die_shift_studio/klayout_worker.py'
-        env=os.environ.copy()
-        # A frozen Qt/Python installation must not override KLayout's runtime.
-        for name in ('PYTHONHOME','PYTHONPATH','QT_PLUGIN_PATH','QT_QPA_PLATFORM_PLUGIN_PATH'):env.pop(name,None)
-        if getattr(sys,'frozen',False) and 'LD_LIBRARY_PATH_ORIG' in env:env['LD_LIBRARY_PATH']=env['LD_LIBRARY_PATH_ORIG']
-        self.log_file=self.log_path.open('wb')
-        kwargs=dict(stdin=subprocess.DEVNULL,stdout=self.log_file,stderr=subprocess.STDOUT,env=env)
-        if sys.platform=='win32':kwargs['creationflags']=subprocess.CREATE_NO_WINDOW
+        self.lock=threading.RLock();self.sock=None;self.process=None;self.log_file=None
+        # This process owns the directory. A TemporaryDirectory finalizer can
+        # run before our atexit handler while Windows still has the log open.
+        self.directory=Path(tempfile.mkdtemp(prefix='die-shift-klayout-'))
+        self.log_path=self.directory/'batch.log'
+        listener=None
         try:
+            listener=socket.socket();listener.bind(('127.0.0.1',0));listener.listen(1);listener.settimeout(30)
+            token=secrets.token_hex(32);config=self.directory/'connection.json'
+            config.write_text(json.dumps(dict(port=listener.getsockname()[1],token=token)),encoding='utf-8')
+            macro=Path(getattr(sys,'_MEIPASS',Path(__file__).resolve().parent.parent))/'die_shift_studio/klayout_worker.py'
+            env=os.environ.copy()
+            # A frozen Qt/Python installation must not override KLayout's runtime.
+            for name in ('PYTHONHOME','PYTHONPATH','QT_PLUGIN_PATH','QT_QPA_PLATFORM_PLUGIN_PATH'):env.pop(name,None)
+            if getattr(sys,'frozen',False) and 'LD_LIBRARY_PATH_ORIG' in env:env['LD_LIBRARY_PATH']=env['LD_LIBRARY_PATH_ORIG']
+            self.log_file=self.log_path.open('wb')
+            kwargs=dict(stdin=subprocess.DEVNULL,stdout=self.log_file,stderr=subprocess.STDOUT,env=env)
+            if sys.platform=='win32':kwargs['creationflags']=subprocess.CREATE_NO_WINDOW
             restore_dll=None
             if sys.platform=='win32' and getattr(sys,'frozen',False):
                 import ctypes
@@ -70,9 +74,11 @@ class DesktopBackend:
             self.info=dict(hello,backend='installed desktop',executable=executable)
             _log.info('KLayout 离线桌面后端：%s',executable)
         except Exception as exc:
-            details=self.log_path.read_text(encoding='utf-8',errors='replace')[-6000:]
+            try:details=self.log_path.read_text(encoding='utf-8',errors='replace')[-6000:]
+            except OSError:details=''
             self.close();raise RuntimeError(f'KLayout 批处理启动失败：{executable}\n{details}\n{exc}') from exc
-        finally:listener.close()
+        finally:
+            if listener is not None:listener.close()
     def _read(self,n):
         data=[]
         while n:
@@ -91,15 +97,31 @@ class DesktopBackend:
             if not response['ok']:raise RuntimeError('KLayout 后端计算失败：\n'+response['error'])
             return response['result']
     def close(self):
-        if self.sock:
-            try:self.sock.close()
-            except OSError:pass
-            self.sock=None
-        if self.process:
-            try:self.process.wait(timeout=3)
-            except subprocess.TimeoutExpired:self.process.terminate();self.process.wait(timeout=3)
-        if hasattr(self,'log_file'):self.log_file.close()
-        self.directory.cleanup()
+        with self.lock:
+            if self.sock is not None:
+                try:self.sock.close()
+                except OSError:pass
+                self.sock=None
+            if self.process is not None:
+                try:self.process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    self.process.terminate()
+                    try:self.process.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        self.process.kill();self.process.wait(timeout=3)
+                self.process=None
+            if self.log_file is not None:
+                self.log_file.close();self.log_file=None
+            for attempt in range(5):
+                try:
+                    shutil.rmtree(self.directory)
+                    break
+                except FileNotFoundError:break
+                except PermissionError:
+                    if attempt==4:
+                        _log.warning('KLayout 临时目录暂时无法清理：%s',self.directory)
+                        break
+                    time.sleep(.05*(attempt+1))
 
 class ModuleBackend:
     def __init__(self):

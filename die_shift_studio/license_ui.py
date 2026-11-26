@@ -1,18 +1,31 @@
 """Activation and permanent-license status, sharing the application's Qt theme."""
 from . import __version__
-from .license_core import Authorization, LicenseError, embedded_public_key, license_path, machine_id
+from .license_core import LicenseError, local_authorization
 from .qt_compat import QtCore, QtWidgets as W, Signal, run_dialog, ACCEPTED
 from .style import STYLE
 
 
-class HardwareQuery(QtCore.QThread):
+class LicenseQuery(QtCore.QThread):
     resolved = Signal(object, str)
 
+    def __init__(self, parent, authorization=None, path=None):
+        super().__init__(parent)
+        self.authorization=authorization
+        self.path=path
+
     def run(self):
+        state=self.authorization
         try:
-            self.resolved.emit(Authorization(machine_id(), embedded_public_key(), license_path()), '')
+            if state is None:
+                state=local_authorization()
+            if self.path is None:
+                state.check()
+            else:
+                state.activate(self.path)
         except (LicenseError, OSError) as exc:
-            self.resolved.emit(None, str(exc))
+            self.resolved.emit(state, str(exc))
+        else:
+            self.resolved.emit(state, '')
 
 
 class LicenseDialog(W.QDialog):
@@ -46,28 +59,44 @@ class LicenseDialog(W.QDialog):
         self.copy.setEnabled(False)
         self.import_btn.setEnabled(False)
         if authorization is None:
-            self.query = HardwareQuery(self)
-            self.query.resolved.connect(self.validated_hardware)
-            self.query.start()
+            self.start_query()
         else:
-            self.validated_hardware(authorization,'')
+            self.show_status(authorization, '' if authorization.payload else '尚未导入许可证。')
 
-    def validated_hardware(self, authorization, error):
+    def start_query(self, path=None):
+        self.exit_btn.setEnabled(False)
+        self.import_btn.setEnabled(False)
+        self.apply_btn.setEnabled(False)
+        self.query=LicenseQuery(self,self.authorization,path)
+        self.query.resolved.connect(self.query_finished)
+        self.query.start()
+
+    def query_finished(self, authorization, error):
+        query=self.query
+        query.wait()
+        imported=query.path is not None
+        self.query=None
+        query.deleteLater()
+        self.exit_btn.setEnabled(True)
+        self.show_status(authorization,error)
+        if not error and (imported or self.parent() is None):
+            self.accept()
+
+    def show_status(self, authorization, error):
         self.authorization = authorization
         if authorization is None:
             self.status.setText(error)
             return
         self.machine.setText(authorization.machine_id)
-        self.copy.setEnabled(True)
+        self.machine.setToolTip(f'Machine ID V{authorization.bindings.version}')
+        self.copy.setEnabled(bool(authorization.machine_id))
         self.import_btn.setEnabled(True)
-        try:
-            payload = authorization.check()
-        except LicenseError as exc:
-            self.status.setText(f'{exc} 请将 Machine ID 发给管理员。')
-            return
-        if self.parent() is None:
-            self.accept()
+        self.apply_btn.setEnabled(self.selected is not None)
+        if error:
+            message = f'{error} 请将 Machine ID 发给管理员。' if authorization.machine_id else '\n'.join(dict.fromkeys(filter(None,(error,authorization.binding_error))))
+            self.status.setText(message)
         else:
+            payload = authorization.payload
             self.status.setText(f"永久授权 · {payload['user_name']} · {payload['employee_id']}\n授权编号 {payload['license_id']}")
 
     def pick(self):
@@ -78,14 +107,14 @@ class LicenseDialog(W.QDialog):
             self.apply()
 
     def apply(self):
-        if not self.selected or self.authorization is None:
+        if not self.selected or self.authorization is None or self.query is not None:
             return
-        try:
-            self.authorization.activate(self.selected)
-        except LicenseError as exc:
-            self.status.setText(str(exc))
-            return
-        self.accept()
+        self.status.setText('正在验证许可证…')
+        self.start_query(self.selected)
+
+    def reject(self):
+        if self.query is None:
+            super().reject()
 
 
 def require_activation():

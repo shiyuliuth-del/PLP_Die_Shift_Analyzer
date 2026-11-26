@@ -1,3 +1,9 @@
+# V80 Windows IPv4 授权与构建退出
+
+Windows 新授权为 HWID V2，使用 `HWID_V2|UUID=<标准大写 UUID>|IPV4=<本机 IPv4>` 的 SHA-256。CIM 只在校验已签名的 V1 逐机许可证、或必要的旧通用许可回退时读取主板序列号。多适配器的显示码按 IPv4 网关、接口优先级和地址稳定排序。签发时使用 V2，旧证书按 V1 继续校验。正式公钥无需轮换。[Windows CIM 属性](https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-networkadapterconfiguration)
+
+`BUILD.bat` 完整构建先检查公钥，`--admin-only` 独立构建。桌面 KLayout 后端拥有独立进程、日志和临时目录，按该顺序清理。预检查退出显式关闭几何后端。回归见 `tests/test_v80_build.py` 和 `tests/test_v80_license.py`。
+
 # V79 永久离线授权与工程切换
 
 授权验证在正常 GUI、实测启动、诊断和命令行入口之前。客户端固定内置 Ed25519 公钥，私钥与签发逻辑仅在独立 LicenseManager。通用证书使用已签名的 `machine_id="*"`，仍需成功读取并验证本机硬件信息。生成正式密钥与通用证书属于管理员首次部署。

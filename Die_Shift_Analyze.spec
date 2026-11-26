@@ -1,7 +1,6 @@
 # Build on Windows with the active Python environment. No sidecar files.
 import importlib.util
 import json
-import os
 import sys
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_dynamic_libs,collect_data_files
@@ -10,12 +9,10 @@ if sys.platform!='win32':
     raise SystemExit('The Windows EXE must be built on Windows.')
 root=Path(SPECPATH)
 sys.path.insert(0,str(root))
-from die_shift_studio.license_core import load_public_key
+from die_shift_studio.license_core import LicenseError,build_public_key
 from cryptography.hazmat.primitives.serialization import Encoding,PublicFormat
-public=Path(os.environ.get('DIE_SHIFT_LICENSE_PUBLIC_KEY') or root/'public_key.pem')
-if not public.is_file():
-    raise SystemExit('Formal Ed25519 public key required. Set DIE_SHIFT_LICENSE_PUBLIC_KEY or provide public_key.pem.')
-key=load_public_key(public.read_bytes())
+try:key=build_public_key(root)
+except LicenseError as exc:raise SystemExit(str(exc)) from exc
 embedded=Path(workpath)/'license_public.pem';embedded.parent.mkdir(parents=True,exist_ok=True)
 embedded.write_bytes(key.public_bytes(Encoding.PEM,PublicFormat.SubjectPublicKeyInfo))
 from die_shift_studio.app_icon import write_ico
