@@ -2,7 +2,7 @@
 
 ## 首次部署
 
-在 Windows 10/11 64 位电脑上解压 GitHub Release 的签发工具 ZIP，双击 `LicenseManager/LicenseManager.exe`。已构建版本可离线运行，无需安装 Python。使用源码时，在已安装根目录 `requirements.txt` 的环境中运行 `BUILD.bat --admin-only`，工具输出至 `dist_admin/LicenseManager.exe`。管理员目录单独部署。
+在 Windows 10/11 64 位电脑上解压 GitHub Release 的源码 ZIP。在源码根目录打开命令提示符，在已安装 `requirements.txt` 依赖的 Python 环境中运行 `BUILD.bat --admin-only`。构建完成后双击 `dist_admin/LicenseManager.exe`。单独构建签发工具无需正式公钥。
 
 在 License Manager 中选择「生成密钥对」，选择独立目录并设置私钥密码。请保留加密的 `private_key.pem` 和备份，仅将 `public_key.pem` 交给构建人员。工具会在自身目录一次创建 `Universal.lic`。同一公钥的后续正式版本可反复导入此文件，使用者无需按机器重新签发。通用许可可激活任何能够读取有效硬件信息的电脑，须只保存在管理员目录。如果工具目录不可写，将程序放到管理员有写权限的目录后，用已生成的私钥打开「首次部署」功能。
 
