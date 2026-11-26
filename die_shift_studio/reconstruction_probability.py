@@ -136,18 +136,29 @@ def pose_probability(grid,p,index):
 
 def attach(bank,r):
     if bank.get('selected_indices') is not None:
-        from .evaluation_scope import SCOPE_NAMES,conditional_weights,conditional_event
+        from .evaluation_scope import SCOPE_NAMES,conditional_weights,digits_for
         indices=bank['selected_indices'];weights,error,logmass=conditional_weights(bank['grid'],r.p,indices)
+        uncond_weights,u_error=extreme_weights(bank['grid'],r.p)
+        checked_mass=math.fsum(
+            math.prod(float(uncond_weights[o][d]) for o,d in enumerate(digits_for(bank['grid'],int(idx))))
+            for idx in indices)
+        unchecked_mass=max(0.,1.-checked_mass)
         title=SCOPE_NAMES['risk' if r.settings.evaluation_scope=='risk' else 'focus']
         result=dict(bank,zones={},configuration=r.settings.reconstruction_key(),scale_nsigma=r.p.scale_nsigma,scope_weights=weights,scope_mass_error=error,scope_log_mass=logmass,scope=f'{title}（含零位）内的离散联合评估')
-        mass=math.exp(logmass)
-        delta=min(1.,2*error/max(mass-error,np.finfo(float).tiny)+64*np.finfo(float).eps*len(indices))
         threshold=2*float(ndtr(-r.p.scale_nsigma))
+        entries=r._plans_for_all_poses(lambda *_:None)
+        lookup={(e['layer'],e['index'],e['owner'],e['plan'].identity if e['plan'] else None):e for e in entries}
         for key,row in bank['zones'].items():
-            passed,failed=conditional_event(bank['grid'],indices,weights,row['clauses'])
-            result['zones'][key]=dict(row,probability=dict(lower=max(0.,failed-delta),upper=min(1.,failed+delta),estimate=failed,
-                threshold=threshold,mass_error=error,certified=True,domain='focused-discrete',
-                reason=f'{title}代表单元内归一化；未覆盖其余组合及连续空间'))
+            cancel_check()
+            _,failed_mass=weighted_pair(ProblemIndex(bank['grid'],row['clauses']),uncond_weights)
+            bound=central_certificate(r,lookup[key],entries) if row['has_failure'] and key in lookup else None
+            upper_bound=min(1.,failed_mass+unchecked_mass+u_error)
+            if bound is not None:upper_bound=min(upper_bound,bound['upper'])
+            result['zones'][key]=dict(row,probability=dict(
+                lower=max(0.,failed_mass-u_error),upper=upper_bound,estimate=failed_mass,
+                threshold=threshold,mass_error=u_error,certified=bool(bound) or unchecked_mass==0.,
+                domain='normal-discrete',
+                reason=f'按正态分布细胞概率计算单图形失效概率（与{title}展示数量无关）'))
         return result
     weights,error=extreme_weights(bank['grid'],r.p)
     entries=r._plans_for_all_poses(lambda *_:None)

@@ -48,8 +48,16 @@ class V57Tests(unittest.TestCase):
             fr_off = engine.frame(st_d2)
             for ref in (('5/0', 18), ('5/0', 68)):
                 q = next(x for x in fr_off['reconstruction']['pieces'] if (x['layer'], x['index']) == ref)
-                # Must never paint an unmoved red ghost at the original position.
-                self.assertTrue(q['missing_region'].equals(q['regions']['C']))
+                # V83/V84: a fixed RDL anchored by a fixed via is reconstructed
+                # instead of following the whole DIE; an ignored-following block
+                # must still never paint an unmoved red ghost at its original spot.
+                if q.get('ignored'):
+                    self.assertTrue(q['missing_region'].equals(q['regions']['C']))
+                else:
+                    self.assertTrue(q['valid'], q.get('warning'))
+                    self.assertFalse(q['connection_failed'])
+                    self.assertFalse(q['regions']['A'].is_empty)
+                    self.assertGreater(q['regions']['C'].area, 0.0)
 
             engine.configure_reconstruction(True, replace(cfg, reconstruction_fixed_via_mode='global'))
             fr_global = engine.frame(st_d2)

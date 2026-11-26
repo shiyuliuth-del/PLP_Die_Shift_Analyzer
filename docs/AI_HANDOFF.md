@@ -1,3 +1,13 @@
+# V84 双侧多过孔聚类、框选隔离、后台良率、无条件概率与单芯片8极端
+
+- `reconstruction.py`：在 `paired` / `paired_clusters` 中推广双侧聚类过孔配对（0 固定过孔、双 DIE 各自成簇时以最近 `(va, vb)` 为主路径并保留全簇 `cluster_moving`/`cluster_fixed`）；单层间距复核共用单个 `STRtree(copper)`；使用模块级 `_PRIORITY_GRID_CACHE` 并复用 `reference.rules._nominal_rows`；将 `MultiPairFrame.nominal_core` 扣除 `serial_between_block` 后按连通部件逐段生成 `between_blocks`。
+- `moving_pair.py` & `reconstruction_overlay.py`：`MultiPairFrame` 对 `core` 使用 `mitre` 开运算清除亚 DBU 边缘毛刺；`CutDrag` 使用 4px 拖动门限并在短按点击时调用 `find_subregion`，修复 `GD55_1119 (-999,-822)` 手动框选后新间隔不可点选。
+- `reconstruction_zones.py`：`had_only_boxes` 改为 `(ref in ignored_set and ref in r.box_refs and ref not in box_excluded)`，防止已忽略多分支图形在未框支路生成自动动区。
+- `risk_scope.py`、`reconstruction_probability.py`、`evaluation_scope.py`、`width_risk_probability.py`：单芯片时 `indices_for` 返回全部 `2^k`（三轴时 8 个）极端角点；`attach` 与 `focused_width` / `enrich` 的单图形/单线失效概率统一改用无条件正态细胞概率 `extreme_weights`，与展示组合数无关。
+- `reconstruction_status.py`、`reconstruction_yield.py`、`gui.py`：在 `measure_reconstruction_yield` 内置 `cancel_check()`，保持 `defer_reconstruction` / 取消期间的「计算中…」标签，独立于重构预演主路径执行。
+- `RealDataAnalyse/projects.py`、`tools/package_release.py`、`Jobs/XD46_SC9211`、`Jobs/XD46_SC58512`：随 Release 附带两个 XD46 公开测试案例。回归见 `tests/test_v84.py`。
+- 测试迁移：`tests/test_v57.py` 的首项断言按 V83 起的合同更新——连接固定过孔的固定 RDL 现在重建为有效过渡区而不整块随动，因此断言改为「忽略块必须无原位红影；重建块必须有效、A 非空且 C 有面积」，其余 GD55_1119 断言不变。`tests/test_v56.py` 的两处 `5/0 #4` 失败为 V81 起的既有失败，与本轮无关。
+
 # V83 端点随动控制、源码免鉴权、限时授权、按 DIE 动区间菜单与多分支重构
 
 - 授权与启动：`main.py`、`RealDataAnalyse/main.py` 与 `gui.launch` 仅在 `getattr(sys, 'frozen', False)` 时执行授权校验，源码模式直接启动；打包后 windowed EXE 补齐空 `stdout/stderr` 守卫且无需同级 `.bat`。`license_core.verify` 与 `LicenseManager/manager.py` 新增可选 `duration_months`/`issued_at`/`expires_at` 签名字段，`duration_months=0` 保持原永久载荷结构。

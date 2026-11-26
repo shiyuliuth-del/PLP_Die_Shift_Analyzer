@@ -22,9 +22,14 @@ def enrich(bank):
         default=record(0.,1.)
     else:
         chunks=bank['chunks'];site_chunks=bank.get('site_chunks',[{} for _ in chunks])
-        totals={};mass=mass2=0.;nseen=0
+        uncond=bank.get('unconditional_weights')
+        totals={};mass=mass2=0.;nseen=0;offset=0
         for (n,_,_,line_masks,weights),sites in zip(chunks,site_chunks):
-            weights=np.ones(n) if weights is None else np.asarray(weights)
+            if uncond is not None:
+                weights=np.asarray(uncond[offset:offset+n],float)
+                offset+=n
+            else:
+                weights=np.ones(n) if weights is None else np.asarray(weights)
             squared=weights**2;wm=float(weights.sum());w2=float(squared.sum())
             masks={('line',key):mask for key,mask in line_masks.items()}
             masks.update({('site',key):mask for key,mask in sites.items()})
@@ -36,9 +41,13 @@ def enrich(bank):
                 hit=np.fromiter((bool(mask>>i&1) for i in range(n)),bool,count=n)
                 stat+=weights[hit].sum(),weights[~hit].sum(),squared[hit].sum(),squared[~hit].sum()
             mass+=wm;mass2+=w2;nseen+=n
+        if uncond is not None:
+            mass=1.0
         if not mass:raise ArithmeticError('宽度概率积分质量为0')
         def evaluate(stat):
             fail,passed,fail2,passed2=stat;interval=None
+            if uncond is not None:
+                return record(fail,max(0.,1.-fail),interval)
             if method=='importance':
                 from .width_sampling import bounded_interval
                 ml,mh=bounded_interval(mass,mass2,nseen,bank['weight_bound'])

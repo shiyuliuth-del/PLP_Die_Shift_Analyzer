@@ -153,6 +153,22 @@ def decorate_problems(data):
         q['problem_region']=active_region(q) if rows else shapely.Polygon()
 
 
+_PRIORITY_GRID_CACHE={}
+
+
+def _cached_priority_grid(params,die_count):
+    from .width_grid import WidthGrid
+    from dataclasses import asdict
+    from .session_cache import logical_fingerprint
+    key=(logical_fingerprint(asdict(params)),int(die_count))
+    grid=_PRIORITY_GRID_CACHE.get(key)
+    if grid is None:
+        grid=WidthGrid(params,die_count,3)
+        if len(_PRIORITY_GRID_CACHE)>32:_PRIORITY_GRID_CACHE.clear()
+        _PRIORITY_GRID_CACHE[key]=grid
+    return grid
+
+
 class Reconstructor:
     def _qualified_refs(self, layer, index, refs):
         refs=normalize_via_refs(refs)
@@ -236,6 +252,8 @@ class Reconstructor:
         self.dropped={(str(l),int(i),normalize_via_refs(v)) for l,i,v in settings.reconstruction_dropped_cuts}
         if reference is not None:
             self.vias=reference.vias;self.stays=reference.stays;self.vias_by_target=reference.vias_by_target.copy()
+            if reference.rules.identity==self.rules.identity and reference.rules._nominal_rows is not None:
+                self.rules._nominal_rows=reference.rules._nominal_rows
             return
         for key,role in model.roles.items():
             if role not in ('运动过孔','固定过孔'):continue
@@ -272,22 +290,66 @@ class Reconstructor:
         if self._plans is not None:return self._plans
         from .statistics import ExtremeCatalog
         catalogue=ExtremeCatalog(self.model.case,self.p)
-        from .width_grid import WidthGrid
         from dataclasses import replace
         probability_parameters=replace(self.p,target_nsigma=0)
-        priority_grid=None if getattr(self,'measured_only',False) else WidthGrid(probability_parameters,len(self.model.bound.centers),3)
+        priority_grid=None if getattr(self,'measured_only',False) else _cached_priority_grid(probability_parameters,len(self.model.bound.centers))
         local_poses=catalogue.locals
         if priority_grid is not None and self.settings.evaluation_scope=='risk':
             priority_grid,local_poses=self.risk_priority(catalogue)
         from .reconstruction_enclosure import enclosure_certificate
-        paired={}
+        from .reconstruction_route import trace as _trace_route
+        def _mst_max(geoms):
+            if len(geoms)<2:return 0.
+            rem=set(range(1,len(geoms)));worst=0.
+            dists={j:geoms[0].distance(geoms[j]) for j in rem}
+            while rem:
+                nxt=min(rem,key=dists.__getitem__)
+                worst=max(worst,dists[nxt]);rem.remove(nxt)
+                for j in rem:
+                    d=geoms[nxt].distance(geoms[j])
+                    if d<dists[j]:dists[j]=d
+            return worst
+        def _side_clustered(source_poly,polys,pt_a,pt_b,min_cross):
+            if len(polys)<2:return True
+            cross_line=_trace_route(source_poly,pt_a,pt_b,self._rule_width)
+            cross_len=cross_line.length if cross_line is not None else min_cross
+            rem=set(range(1,len(polys)))
+            dists={j:polys[0].distance(polys[j]) for j in rem}
+            prev={j:0 for j in rem}
+            buf=source_poly.buffer(self.tol)
+            while rem:
+                nxt=min(rem,key=dists.__getitem__)
+                u,v=polys[prev[nxt]],polys[nxt]
+                if not buf.covers(shapely.shortest_line(u,v)):
+                    t=_trace_route(source_poly,np.asarray(u.centroid.coords[0]),np.asarray(v.centroid.coords[0]),self._rule_width)
+                    if t is None or t.length>=cross_len*.5:return False
+                rem.remove(nxt)
+                for j in rem:
+                    d=polys[nxt].distance(polys[j])
+                    if d<dists[j]:dists[j]=d;prev[j]=nxt
+            return True
+        paired={};paired_clusters={}
         for ref,vias in self.vias_by_target.items():
-            if len(vias)!=2 or any(v['owner']<0 for v in vias):continue
+            if len(vias)<2 or any(v['owner']<0 for v in vias):continue
             source=self.model.cache.layers[ref[0]]['geometry'][ref[1]]
             ref_net=int(self.model.nodes[self.model.ids[ref]]['net'])
             if source.geom_type!='Polygon' or any(v['net']==ref_net and source.intersection(v['poly']).area>self.tol**2 for v in self.stays):continue
-            if all(source.intersection(v['poly']).area>self.tol**2 for v in vias):
+            if not all(source.intersection(v['poly']).area>self.tol**2 for v in vias):continue
+            if len(vias)==2:
                 paired[ref]=tuple(((v['key'],v['index']),v['owner']) for v in vias)
+                continue
+            by_owner={}
+            for v in vias:by_owner.setdefault(v['owner'],[]).append(v)
+            if len(by_owner)!=2:continue
+            (o0,m0),(o1,m1)=sorted(by_owner.items())
+            p0=[v['poly'] for v in m0];p1=[v['poly'] for v in m1]
+            min_cross=min(a.distance(b) for a in p0 for b in p1)
+            if min_cross>self.tol and _mst_max(p0)<min_cross and _mst_max(p1)<min_cross:
+                va=min(m0,key=lambda v:min(v['poly'].distance(b) for b in p1))
+                vb=min(m1,key=lambda v:va['poly'].distance(v['poly']))
+                if _side_clustered(source,p0,va['center'],vb['center'],min_cross) and _side_clustered(source,p1,va['center'],vb['center'],min_cross):
+                    paired[ref]=(((va['key'],va['index']),o0),((vb['key'],vb['index']),o1))
+                    paired_clusters[ref]={o0:(va,m0,m1),o1:(vb,m1,m0)}
         groups=[]
         def classify(item):
             ref,vias=item
@@ -380,6 +442,15 @@ class Reconstructor:
                                          ownership_domain=domain,opposite=[all_vias[1-i]])]
             allocation=divide(original_source.wkb,tuple((v['owner'],v['poly'].wkb) for v in all_vias),self._rule_width,self.tol)
             domains=allocation.get(owner,[(original_source,shapely.Polygon())])
+            cluster_info=paired_clusters.get((layer,index))
+            if cluster_info is not None and owner in cluster_info:
+                va,m_local,m_opp=cluster_info[owner]
+                vb=cluster_info[next(o for o in cluster_info if o!=owner)][0]
+                src_dom,seam_dom=domains[0] if len(domains)==1 else (original_source,shapely.Polygon())
+                return [dict(entry,paired_vias=pair) for entry in
+                        build_domain(layer,index,owner,[va],[va,vb],original_source,original_source,seam_dom,True,
+                                     ownership_domain=src_dom,opposite=[vb],
+                                     cluster_pair=(m_local,[v['poly'] for v in m_opp]))]
             flexible=(bool(allocation) and len(allocation)==2 and all(len(v)==1 for v in allocation.values())
                       and not any(v['net']==net and original_source.intersects(v['poly']) for v in self.stays))
             return [dict(entry,paired_vias=pair) for source,seam in domains
@@ -387,7 +458,7 @@ class Reconstructor:
                     if local for entry in build_domain(layer,index,owner,local,all_vias,original_source,
                                                        original_source if flexible else source,seam,bool(allocation),
                                                        ownership_domain=source if flexible else None)]
-        def build_domain(layer,index,owner,mine,all_vias,original_source,source,seam,allocated,ownership_domain=None,opposite=None):
+        def build_domain(layer,index,owner,mine,all_vias,original_source,source,seam,allocated,ownership_domain=None,opposite=None,cluster_pair=None):
             refs=normalize_via_refs((v['key'],v['index']) for v in mine)
             net=int(self.model.nodes[self.model.ids[layer,index]]['net'])
             from .landing_geometry import embedded_pad
@@ -620,7 +691,7 @@ class Reconstructor:
             branches=branch_sources(source,land,fixed,mine[0]['center'],self._rule_width,self.tol,0.)
             if branches:
                 return [dict(build_source(g,common,[anchor]),branch=i+1,branch_count=len(branches)) for i,(g,common,anchor) in enumerate(branches)]
-            combined=build_source(source,land,fixed)
+            combined=build_source(source,land,fixed,cluster_vias=cluster_pair)
             if combined['plan'] is not None or combined['orphan']:return [combined]
             # In a wide/overlapping pad, embedded_pad can cover the other
             # terminal. Its entire inferred disk is not a rigid constraint;
@@ -1061,10 +1132,6 @@ class Reconstructor:
                     die_mid=parse_die_mode(ref_pose.mode)
                     if die_mid is not None:middle_moves=die_mid in self.active_dies
                     else:middle_moves=(active==paired_owners) if ref_pose.mode=='min' else ref_pose.mode!=STATIONARY and bool(active)
-                if isinstance(ref_pose,MultiPairFrame) and ref_pose.nominal_core.area>self.tol**2:
-                    ax,ay=anchor_of(ref_pose.nominal_core)
-                    posed_core=transform(ref_pose.nominal_core,ref_pose.center,ref_pose.base) if np.any(ref_pose.base) else ref_pose.nominal_core
-                    between_blocks.append(dict(ref=(layer,index),id=(layer,index,ax,ay),nominal=ref_pose.nominal_core,geometry=posed_core,mode=ref_pose.mode,custom=ref_pose.custom,moves=middle_moves))
             for q in ps:
                 if q.get('branch_rigid_unresolved'):continue
                 blocks=q.get('between_blocks',())
@@ -1082,6 +1149,30 @@ class Reconstructor:
                         weight=block['weight']
                         item['moves']=block['mode']!=STATIONARY and bool((q['die'] in self.active_dies and weight>1e-10) or (base_moves and weight<1.-1e-10))
                     between_blocks.append(item)
+            if isinstance(ref_pose,MultiPairFrame) and ref_pose.nominal_core.area>self.tol**2:
+                from .reconstruction_route import parts
+                from .between_motion import lookup_mode,pair_middle_pose
+                core_nom=ref_pose.nominal_core
+                existing_mid=shapely.union_all([b['nominal'] for b in between_blocks[between_start:]])
+                if not existing_mid.is_empty:core_nom=core_nom.difference(existing_mid)
+                core_parts=[g for g in parts(core_nom) if g.area>max(self.tol**2*16,1e-4)]
+                owners_pair=sorted(paired_owners)[:2] if len(paired_owners)>=2 else ()
+                for part_core in core_parts:
+                    ax,ay=anchor_of(part_core)
+                    p_mode,p_custom=lookup_mode(self.settings,(layer,index),part_core,self.tol) if len(core_parts)>1 or not existing_mid.is_empty else (ref_pose.mode,ref_pose.custom)
+                    if len(owners_pair)==2 and (len(core_parts)>1 or not existing_mid.is_empty):
+                        pc_center,pc_state=pair_middle_pose(part_core,self.model.bound.centers[owners_pair[0]],states[owners_pair[0]],self.model.bound.centers[owners_pair[1]],states[owners_pair[1]],p_mode,centers=self.model.bound.centers,states=states)
+                    else:
+                        pc_center,pc_state=ref_pose.center,ref_pose.base
+                    die_mid=parse_die_mode(p_mode)
+                    if die_mid is not None:p_moves=die_mid in self.active_dies
+                    elif len(owners_pair)==2:
+                        active=paired_owners & self.active_dies
+                        p_moves=(active==paired_owners) if p_mode=='min' else p_mode!=STATIONARY and bool(active)
+                    else:
+                        p_moves=middle_moves
+                    posed_core=transform(part_core,pc_center,pc_state) if np.any(pc_state) else part_core
+                    between_blocks.append(dict(ref=(layer,index),id=(layer,index,ax,ay),nominal=part_core,geometry=posed_core,mode=p_mode,custom=p_custom,moves=p_moves))
             if ref_pose is None:
                 between_blocks.extend(fixed_between_owners(source,ps,between_blocks[between_start:],(layer,index),self.tol))
             stationary=[b for b in between_blocks[between_start:] if b['mode']==STATIONARY]
@@ -1151,26 +1242,33 @@ class Reconstructor:
         for layer in (out if diagnostics else ()):
             replaced={q['indices'][0]:q['geometry'] for q in out[layer]}
             copper=[replaced.get(i,g) for i,g in enumerate(self.model.cache.layers[layer]['geometry'])]
-            nets=[int(self.model.nodes[self.model.ids[layer,i]]['net']) for i in range(len(copper))]
-            trees={}
+            nets=np.array([int(self.model.nodes[self.model.ids[layer,i]]['net']) for i in range(len(copper))],int)
+            tree=shapely.STRtree(copper)
             layer_pieces=[q for q in pieces if q['layer']==layer]
-            for net in {q['net'] for q in layer_pieces}:
-                others=[i for i,n in enumerate(nets) if n!=net]
-                trees[net]=(shapely.STRtree([copper[i] for i in others]),others)
             def measure(item):
-                idx,net=item;tree,others=trees[net]
-                if not others:return idx,None
+                idx,net=item
+                if not np.any(nets!=net):return idx,None
                 probe=shapely.from_wkb(replaced[idx].wkb)
-                # Actual overlaps need no nearest-boundary search. Preparing the
-                # one probe amortises the batched predicate over candidate nets.
-                nearby=tree.query(probe)
                 shapely.prepare(probe)
-                hit=nearby[shapely.intersects(probe,tree.geometries[nearby])]
-                if len(hit):i=others[int(hit[0])];gap=0.
+                nearby=tree.query(probe,predicate='dwithin',distance=self.rule_space)
+                foreign=[int(j) for j in nearby if nets[int(j)]!=net]
+                if foreign:
+                    dists=shapely.distance(probe,[copper[j] for j in foreign])
+                    best=int(np.argmin(dists))
+                    i=foreign[best];gap=float(dists[best])
                 else:
-                    indices,distances=tree.query_nearest(probe,return_distance=True,all_matches=False)
-                    i=others[int(indices[0])];gap=float(distances[0])
-                return idx,dict(clearance_um=gap,conflict=gap<self.rule_space-self.tol,conflict_net=nets[i],
+                    # No foreign copper within rule_space; find nearest foreign only via fallback when needed
+                    others=np.flatnonzero(nets!=net)
+                    if not len(others):return idx,None
+                    indices=tree.query_nearest(probe,all_matches=True)
+                    f_near=[int(j) for j in indices if nets[int(j)]!=net]
+                    if f_near:
+                        dists=shapely.distance(probe,[copper[j] for j in f_near])
+                        best=int(np.argmin(dists));i=f_near[best];gap=float(dists[best])
+                    else:
+                        dists=shapely.distance(probe,[copper[int(j)] for j in others])
+                        best=int(np.argmin(dists));i=int(others[best]);gap=float(dists[best])
+                return idx,dict(clearance_um=gap,conflict=gap<self.rule_space-self.tol,conflict_net=int(nets[i]),
                                 conflict_link=shapely.get_coordinates(shapely.shortest_line(probe,copper[i])).tolist())
             measures=dict(parallel_map(measure,sorted({(q['index'],q['net']) for q in layer_pieces})))
             for q in layer_pieces:

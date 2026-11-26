@@ -921,7 +921,7 @@ class CutDrag:
             return
         if self.w.navigation.drag is not None:return
         if event.xdata is None or event.ydata is None:return
-        if not self.state['moved'] and np.linalg.norm(np.array([event.x,event.y])-self.state['start'])<2:return
+        if not self.state['moved'] and np.linalg.norm(np.array([event.x,event.y])-self.state['start'])<4:return
         self.state['moved']=True;self.state['rotated_only']=False;self.latest=np.array([event.xdata,event.ydata])
     def _tick(self):
         state=self.state
@@ -1156,7 +1156,8 @@ class CutDrag:
                 # Actual movement is a drag; a stationary click still selects
                 # the physical strip underneath that generous hit target.
                 point=(event.xdata,event.ydata)
-                if w.selection.find_between_block(point) is not None:
+                finder=getattr(w.selection,'find_subregion',None) or w.selection.find_between_block
+                if finder(point) is not None:
                     w.selection.click(point,(event.x,event.y))
             if state['resume_preview']:w.request_preview(quiet=True,pose_change=True)
             return

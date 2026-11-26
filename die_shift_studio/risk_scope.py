@@ -61,12 +61,21 @@ def indices_for(model, p, grid):
             travel[i] += 2*radius*np.abs(np.sin(grid.locals[i][:, 2]/2))
         ranked = sorted(range(1, grid.radices[i]), key=lambda d: (-hits[i][d], gaps[i][d], -travel[i][d], d))
         strongest[i] = ranked[0]
-        # With only one active axis there are at most two stress directions.
-        # Keep both, including ties which can stress different neighbours.
-        witnesses = ranked if grid.radices[i] <= 3 else {
-            ranked[0], min(ranked, key=lambda d: (gaps[i][d], -travel[i][d], d)),
-            max(ranked, key=lambda d: travel[i][d]),
-        }
+        # With only one active DIE, expose all 2^k extreme corner combinations
+        # across its active axes (8 corners when X, Y, and angle are all non-zero).
+        if len(active) == 1:
+            poses_i = grid.locals[i]
+            active_axes = [ax for ax in range(3) if np.ptp(poses_i[:, ax]) > 0]
+            witnesses = [d for d in range(1, grid.radices[i]) if all(poses_i[d, ax] != 0 for ax in active_axes)]
+            if not witnesses:
+                witnesses = ranked
+        else:
+            # With only one active axis there are at most two stress directions.
+            # Keep both, including ties which can stress different neighbours.
+            witnesses = ranked if grid.radices[i] <= 3 else {
+                ranked[0], min(ranked, key=lambda d: (gaps[i][d], -travel[i][d], d)),
+                max(ranked, key=lambda d: travel[i][d]),
+            }
         for d in witnesses:
             add(((i, d),))
     for i, j in combinations(active, 2):
