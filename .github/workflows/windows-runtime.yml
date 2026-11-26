@@ -100,6 +100,10 @@ on:
         description: 'Run focused interface and reconstruction interaction checks'
         type: boolean
         default: false
+      license_client_only:
+        description: 'Verify the offline licensing Windows client build only'
+        type: boolean
+        default: false
       resume_v55_tail:
         description: 'Continue V55 from the revised branch-grid geometry and run the remaining Windows release stages'
         type: boolean
@@ -137,10 +141,12 @@ permissions:
   contents: read
 jobs:
   offline-license:
-    if: ${{ inputs.focused_reconstruction == true }}
+    if: ${{ inputs.focused_reconstruction == true || inputs.license_client_only == true }}
     uses: ./.github/workflows/windows-v79.yml
+    with:
+      client_only: ${{ inputs.license_client_only == true }}
   build:
-    if: ${{ inputs.resume_v52 != true && inputs.focused_reconstruction != true }}
+    if: ${{ inputs.resume_v52 != true && inputs.focused_reconstruction != true && inputs.license_client_only != true }}
     runs-on: windows-latest
     strategy:
       fail-fast: false
