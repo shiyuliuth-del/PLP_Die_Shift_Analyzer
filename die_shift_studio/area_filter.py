@@ -65,24 +65,22 @@ def apply(data,project,*,reference=None):
         kind,xy,_=shape_nodes(base,layer,index)
         if node_fingerprint(kind,xy)!=fingerprint:raise ValueError(f'已删除图形 {layer} #{index+1} 的源轮廓已改变')
         removed_refs.add((layer,index))
-    out=copy.copy(data);out.layers={};out.shape_info={};out._area_base=data
+    out=copy.copy(data);out.layers={};out.shape_info={};out._area_base=data;out._poly_cache={}
     out.fabrication_filter=(threshold,edge,deletions);out.minimum_edge_um=edge;out.deleted_shapes=deletions
     out.area_threshold=threshold;out.area_indices={};mapping={};removed=holes=shortened=0
     invalid=[]
     previous=getattr(reference,'fabrication_filter',None)
     reuse=getattr(reference,'_area_base',None) is data and previous is not None and previous[:2]==(threshold,edge)
-    from .fast_preview import polygons_from_arrays
+    from .fast_preview import compiled_polygons
     edge2=edge*edge
     for key,arrays in data.layers.items():
-        values=[];metadata=[];indices=[];descriptions=data.shape_info.get(key,[None]*len(arrays))
+        values=[];metadata=[];indices=[];compiled=[];descriptions=data.shape_info.get(key,[None]*len(arrays))
         retained=dict(zip(reference.area_indices[key],zip(reference.layers[key],reference.shape_info[key]))) if reuse else {}
         pending_idx=[i for i in range(len(arrays)) if (key,i) not in removed_refs and i not in retained]
-        fast_polys={}
+        fast_polys={};source_geos=None
         if pending_idx:
-            # Batch-build simple polygons in C via shapely.polygons; fall back to
-            # filled_polygon only for invalid/self-touching winding outlines.
-            batch_arrays=[arrays[i] for i in pending_idx]
-            batch_geos=polygons_from_arrays(batch_arrays)
+            source_geos=compiled_polygons(data,key,arrays)
+            batch_geos=source_geos[pending_idx]
             valid_mask=shapely.is_valid(batch_geos)
             areas=shapely.area(batch_geos)
             hole_counts=shapely.get_num_interior_rings(batch_geos)
@@ -93,7 +91,7 @@ def apply(data,project,*,reference=None):
             if (key,i) in removed_refs:continue
             if i in retained:
                 xy,meta=retained[i]
-                mapping[key,i]=len(values);indices.append(i);values.append(xy);metadata.append(meta)
+                mapping[key,i]=len(values);indices.append(i);values.append(xy);metadata.append(meta);compiled.append(None)
                 continue
             fast=fast_polys.get(i)
             if fast is not None:
@@ -107,7 +105,7 @@ def apply(data,project,*,reference=None):
                     needs_contract=False
                 if not needs_contract:
                     if area<threshold:removed+=1;continue
-                    mapping[key,i]=len(values);indices.append(i);values.append(xy);metadata.append(descriptions[i])
+                    mapping[key,i]=len(values);indices.append(i);values.append(xy);metadata.append(descriptions[i]);compiled.append(g)
                     continue
             else:
                 g=filled_polygon(xy,True)
@@ -122,8 +120,10 @@ def apply(data,project,*,reference=None):
                 clean=shapely.Polygon(clean.exterior,kept);xy=winding_outline(clean)
                 meta=dict(kind='polygon',winding=bool(kept),nodes=xy.copy())
             else:meta=descriptions[i]
-            mapping[key,i]=len(values);indices.append(i);values.append(xy);metadata.append(meta)
+            mapping[key,i]=len(values);indices.append(i);values.append(xy);metadata.append(meta);compiled.append(clean)
         out.layers[key]=values;out.shape_info[key]=metadata;out.area_indices[key]=indices
+        if all(g is not None for g in compiled):
+            out._poly_cache[(key,id(values),len(values))]=np.asarray(compiled,object)
     out.node_edits=[]
     deletion_key=json.dumps(deletions,separators=(',',':')) if deletions else ''
     out.edit_digest=hashlib.sha256((data.edit_digest+'|source-filters-v52|'+threshold.hex()+'|'+edge.hex()+deletion_key).encode()).hexdigest()

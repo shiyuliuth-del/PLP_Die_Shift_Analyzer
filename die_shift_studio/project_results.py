@@ -69,7 +69,7 @@ def portable_path(target,base):
     except ValueError:return str(Path(target).resolve())  # Windows: different drives.
 
 
-def save(w,path):
+def save(w,path,progress=None):
     if not w.view_settings.save_project_results or w.result is None:return None
     if getattr(w,'dirty',False) or getattr(w,'reconstruction_pending',False):
         w.log_bus.emit('参数已变化，本次保存当前设置；旧评估快照不作为新参数的完成结果。','WARNING');return None
@@ -78,11 +78,19 @@ def save(w,path):
         w.log_bus.emit('计算尚未完成，本次仅保存设置，不保存不完整结果。','WARNING');return None
     folder=path.parent/'Cache'
     folder.mkdir(parents=True,exist_ok=True)
+    if progress:progress(25,'整理工程计算结果')
     payload=dict(frame=w.current_frame,result=w.result,shown=w.shown_states,probability=w.probability_data,space=w.space_data,
                  footprints=w.footprint_data,width_summary=w._width_grid_summary,width_bank=w.width_yield.bank,
                  width_token=w.width_yield.key[1] if w.width_yield.key else None,reconstruction_bank=w.reconstruction_yield.bank,
                  reconstruction_evidence=w.reconstruction_yield.evidence,reconstruction_token=w.reconstruction_yield.key[1] if w.reconstruction_yield.key else None,plans=getattr(getattr(w.engine,'reconstructor',None),'plan_pool',{}))
-    raw=zlib.compress(json.dumps(dict(version=__version__,identity=identity(w),payload=encode(payload)),ensure_ascii=False,allow_nan=True).encode(),6)
+    encoded={}
+    items=list(payload.items())
+    for i,(k,v) in enumerate(items):
+        encoded[k]=encode(v)
+        if progress:progress(25+round(35*(i+1)/max(1,len(items))),f'序列化工程结果 ({i+1}/{len(items)})')
+    if progress:progress(62,'生成并压缩工程结果快照')
+    raw=zlib.compress(json.dumps(dict(version=__version__,identity=identity(w),payload=['dict',[[k,v] for k,v in encoded.items()]]),ensure_ascii=False,allow_nan=True).encode(),6)
+    if progress:progress(78,'写入结果缓存文件')
     digest=hashlib.sha256(raw).hexdigest();target=folder/(path.stem+'.'+digest[:20]+'.dsresults')
     fd,name=tempfile.mkstemp(prefix='.results-',dir=folder)
     try:
@@ -90,15 +98,15 @@ def save(w,path):
         os.replace(name,target)
     finally:
         if os.path.exists(name):os.unlink(name)
+    if progress:progress(85,'结果缓存已保存')
     return dict(path=portable_path(target,path.parent),sha256=digest,identity=identity(w))
 
 
-def restore(w,project,path):
+def preload(project,path,progress=None):
     row=project.get('saved_results')
-    if not row or path is None:return False
-    applied=False;e=None;signature=None
+    if not row or path is None:return None
     try:
-        if row['identity']!=identity(w):raise ValueError('源码、图纸或参数已变化')
+        if progress:progress(92,'读取已保存的工程结果缓存')
         file=Path(path).parent/row['path']
         if file.stat().st_size>128*1024**2:raise ValueError('结果文件超过128MiB读取上限')
         raw=file.read_bytes()
@@ -106,9 +114,30 @@ def restore(w,project,path):
         stream=zlib.decompressobj();body=stream.decompress(raw,512*1024**2)
         if not stream.eof:raise ValueError('结果文件过大或不完整')
         item=json.loads(body)
-        if item['version']!=__version__ or item['identity']!=identity(w):raise ValueError('结果版本不一致')
+        if item['version']!=__version__ or item['identity']!=row['identity']:raise ValueError('结果版本不一致')
+        if progress:progress(96,'解码已保存的分析结果')
         value=decode(item['payload'])
         if value.get('result') is None:raise ValueError('缓存中没有已完成的方案评估')
+        return dict(identity=row['identity'],value=value)
+    except Exception as exc:
+        return dict(error=str(exc))
+
+
+def restore(w,project,path,preloaded=None):
+    row=project.get('saved_results')
+    if not row or path is None:return False
+    applied=False;e=None;signature=None
+    try:
+        current_id=identity(w)
+        if row['identity']!=current_id:raise ValueError('源码、图纸或参数已变化')
+        if preloaded is not None:
+            if 'error' in preloaded:raise ValueError(preloaded['error'])
+            if preloaded.get('identity')!=current_id:raise ValueError('结果版本不一致')
+            value=preloaded['value']
+        else:
+            loaded=preload(project,path)
+            if loaded is None or 'error' in loaded:raise ValueError((loaded or {}).get('error','无法读取工程结果'))
+            value=loaded['value']
         from .fast_preview import GeometryCache,PreviewEngine
         cache=w.geometry_cache or GeometryCache(w.data);con=w.case['connections'];p=w.params()
         signature=w.preview_identity(w.data,w.roles(),w.ordered_layers(),w.motions(),p,value['result'])

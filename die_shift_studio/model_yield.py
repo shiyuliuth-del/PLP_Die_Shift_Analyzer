@@ -11,14 +11,14 @@ from functools import lru_cache
 import numpy as np
 import shapely
 from scipy.integrate import quad
-from .statistics import mean_and_bounds,statistical_state
+from .statistics import mean_and_bounds,statistical_state,std_devs
 from .distribution import normal_interval,normalizer
 from .resources import parallel_map
 
 
 class PhysicalMass:
     def __init__(self,p,count):
-        self.mu,self.b=mean_and_bounds(p,count);self.sig=self.b/p.scale_nsigma;self.rho=p.rho_xy
+        self.mu,self.b=mean_and_bounds(p,count);self.sig=np.where(self.b>0,std_devs(p),0.);self.rho=p.rho_xy
         self.z,self.zerr=normalizer(p,count)
 
     @lru_cache(maxsize=8192)

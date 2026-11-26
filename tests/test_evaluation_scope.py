@@ -14,7 +14,7 @@ class ScopeTests(unittest.TestCase):
  def model(self):
   return SimpleNamespace(case={'dies':[box(0,0,10,10),box(1000,0,1010,10)],'infos':[{'cx':5.,'cy':5.},{'cx':1005.,'cy':5.}]},interdie_networks=[])
  def parameters(self):
-  return Parameters(multi_bound_x_um=1,multi_bound_y_um=0,bound_angle_deg=0,target_nsigma=1)
+  return Parameters(multi_bound_x_um=1,multi_bound_y_um=0,bound_angle_deg=0,target_nsigma=1,sigma_x_um=1)
  def test_focus_weights_condition_on_only_selected_joint_cells(self):
   p=self.parameters();grid,indices=focused_catalog(self.model(),p)
   self.assertEqual(len(indices),9);self.assertEqual(grid.total+1,9);self.assertIn(-1,indices)

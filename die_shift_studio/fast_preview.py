@@ -20,6 +20,18 @@ def polygons_from_arrays(arrays):
     if np.any(invalid):result[invalid]=shapely.buffer(result[invalid],0.)
     return result
 
+
+def compiled_polygons(data,key,arrays):
+    cache=getattr(data,'_poly_cache',None)
+    token=(key,id(arrays),len(arrays))
+    if cache is not None and token in cache:
+        return cache[token]
+    geos=polygons_from_arrays(arrays)
+    if cache is None:
+        cache={};data._poly_cache=cache
+    cache[token]=geos
+    return geos
+
 class GeometryCache:
     def __init__(self,data):
         from .geometry_errors import sanitize_data
@@ -27,7 +39,7 @@ class GeometryCache:
         self.data=data;self.profile=resource_profile();self.layers={}
         def compile_layer(item):
             key,arrays=item;counts=np.array([len(a) for a in arrays],np.int32);offsets=np.r_[0,counts.cumsum()]
-            flat=np.concatenate(arrays) if arrays else np.empty((0,2));geometry=polygons_from_arrays(arrays)
+            flat=np.concatenate(arrays) if arrays else np.empty((0,2));geometry=compiled_polygons(data,key,arrays)
             centers=shapely.get_coordinates(shapely.centroid(geometry))
             radii=shapely.distance(shapely.centroid(geometry),shapely.boundary(geometry))
             radii=np.where(shapely.covers(geometry,shapely.centroid(geometry)),radii,0.)

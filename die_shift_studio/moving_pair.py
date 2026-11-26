@@ -70,6 +70,10 @@ def frames(entries, centers, states, *, settings=None, interval_fn=None):
                     if part is not None:
                         occupied.extend((part['A'], part['C']))
             core = source.difference(shapely.union_all(occupied)) if occupied else source
+            if not core.is_empty and core.geom_type!='Polygon':
+                from .reconstruction_route import parts
+                kept_parts=[g for g in parts(core) if g.area>1e-6]
+                core=kept_parts[0] if len(kept_parts)==1 else shapely.MultiPolygon(kept_parts) if kept_parts else shapely.Polygon()
             mode, custom = lookup_mode(settings, ref, core) if settings is not None else ('max', False)
             owner_a, owner_b = sorted(owners)[:2]
             center_shape=source if core.is_empty else core

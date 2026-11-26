@@ -284,7 +284,8 @@ class Reconstructor:
         for ref,vias in self.vias_by_target.items():
             if len(vias)!=2 or any(v['owner']<0 for v in vias):continue
             source=self.model.cache.layers[ref[0]]['geometry'][ref[1]]
-            if source.geom_type!='Polygon' or any(v['net']==vias[0]['net'] and source.intersection(v['poly']).area>self.tol**2 for v in self.stays):continue
+            ref_net=int(self.model.nodes[self.model.ids[ref]]['net'])
+            if source.geom_type!='Polygon' or any(v['net']==ref_net and source.intersection(v['poly']).area>self.tol**2 for v in self.stays):continue
             if all(source.intersection(v['poly']).area>self.tol**2 for v in vias):
                 paired[ref]=tuple(((v['key'],v['index']),v['owner']) for v in vias)
         groups=[]
@@ -401,9 +402,11 @@ class Reconstructor:
             fixed=anchor_clusters(source,fixed,land,self._rule_width,self.tol)
             land_all=land
             base=dict(layer=layer,index=index,owner=owner,refs=refs,source=original_source,land=land,net=net,mine=mine,anchors=fixed,ownership_seam=seam)
-            def build_source(source,land,fixed,moving=None,pair_route=False):
+            def build_source(source,land,fixed,moving=None,pair_route=False,cluster_vias=None):
                 moving=mine if moving is None else moving
-                local_base=dict(base,routing_source=source,land=land,anchors=fixed,mine=moving,refs=normalize_via_refs((v['key'],v['index']) for v in moving))
+                full_moving=cluster_vias[0] if cluster_vias is not None else moving
+                local_refs=normalize_via_refs((v['key'],v['index']) for v in full_moving)
+                local_base=dict(base,routing_source=source,land=land,anchors=fixed,mine=full_moving,refs=local_refs)
                 if not fixed:return dict(local_base,plan=None,orphan=True,warning='无固定连接端，整块按所属DIE平移')
                 if land.is_empty:return dict(local_base,plan=None,orphan=False,warning='名义落盘无可用铜，保留原图')
                 stop=min(fixed,key=lambda g:g.distance(land));legacy_end=np.asarray(stop.representative_point().coords[0])
@@ -423,6 +426,8 @@ class Reconstructor:
                 pairs.extend(inward_routes(source,moving))
                 seen=set();traced=[]
                 real_fixed=tuple(v['poly'] for v in self.stays if v['net']==net and v['poly'].intersects(source) and any(a.intersects(v['poly']) for a in fixed))
+                cluster_moving=shapely.union_all([v['poly'] for v in cluster_vias[0]]) if cluster_vias is not None else None
+                cluster_fixed=shapely.union_all(cluster_vias[1]) if cluster_vias is not None else None
                 found_anchored=False
                 for start,endpoint in pairs:
                     if found_anchored and not with_manual and all(not g.dwithin(shapely.Point(endpoint),self.tol*8) for g in fixed):continue
@@ -432,8 +437,10 @@ class Reconstructor:
                     if line is None:continue
                     traced.append(line)
                     plan=RoutePlan(layer,index,owner,local_base['refs'],source,line,land,tuple(fixed),self.tol,0.,memo_budget=memo_budget)
-                    terminal_fixed=real_fixed
-                    plan.terminal_vias=(tuple(v['poly'] for v in moving),terminal_fixed)
+                    terminal_fixed=tuple(cluster_vias[1]) if cluster_vias is not None else real_fixed
+                    plan.terminal_vias=(tuple(v['poly'] for v in full_moving),terminal_fixed)
+                    if cluster_moving is not None:plan.cluster_moving=cluster_moving
+                    if cluster_fixed is not None:plan.cluster_fixed=cluster_fixed
                     physical_start=any(g.dwithin(shapely.Point(line.coords[0]),self.tol) for g in plan.terminal_vias[0])
                     plan.physical_end=any(g.dwithin(shapely.Point(line.coords[-1]),self.tol) for g in terminal_fixed)
                     plan.reaches_anchor=plan.physical_end or any(g.dwithin(shapely.Point(line.coords[-1]),self.tol*8) for g in fixed)
@@ -480,10 +487,10 @@ class Reconstructor:
                     anchored=[row for row in candidates if getattr(row[2],'anchored_bent',False)]
                     if anchored:candidates=anchored
                     else:
-                        aligned=[row for row in candidates if alignment(row[2])>=np.cos(np.deg2rad(5))]
-                        if aligned:candidates=aligned
                         physical=[row for row in candidates if row[2].reaches_anchor]
                         if physical:candidates=physical
+                        aligned=[row for row in candidates if alignment(row[2])>=np.cos(np.deg2rad(5))]
+                        if aligned:candidates=aligned
                 if pair_route or getattr(self,'measured_only',False):
                     # Individual pair copper is discarded by branch assembly.
                     # Native DRC on every pair checked a fictitious full net and
@@ -538,6 +545,62 @@ class Reconstructor:
                 if invalid:warning=f'基准曲线在{invalid}/{len(local_poses[owner])}个本DIE极端需进一步适配；以当前样式最终检查为准'
                 return dict(local_base,plan=plan,orphan=False,warning=warning,extreme_checks=len(local_poses[owner]),extreme_invalid=invalid,all_die_space_certified=not space_unproven,priority_failure_mass=mass)
             if len(mine)>1 or len(fixed)>1:
+                def _mst_max(geoms):
+                    if len(geoms)<2:return 0.
+                    remaining=set(range(1,len(geoms)));worst=0.
+                    dists={j:geoms[0].distance(geoms[j]) for j in remaining}
+                    while remaining:
+                        nxt=min(remaining,key=dists.__getitem__)
+                        worst=max(worst,dists[nxt]);remaining.remove(nxt)
+                        for j in remaining:
+                            d=geoms[nxt].distance(geoms[j])
+                            if d<dists[j]:dists[j]=d
+                    return worst
+                real_stays=[v for v in self.stays if v['net']==net and source.intersects(v['poly'])]
+                real_stay_polys=[v['poly'] for v in real_stays]
+                extra_anchors=[g for g in fixed if not any(g.intersects(p) for p in real_stay_polys)]
+                f_polys=real_stay_polys+extra_anchors
+                m_polys=[v['poly'] for v in mine]
+                if not extra_anchors and len(m_polys)>=2 and len(f_polys)>=2:
+                    min_cross=min(a.distance(b) for a in m_polys for b in f_polys)
+                    if min_cross>self.tol and _mst_max(m_polys)<min_cross and _mst_max(f_polys)<min_cross:
+                        va=min(mine,key=lambda v:min(v['poly'].distance(b) for b in f_polys))
+                        if real_stays and min(va['poly'].distance(p) for p in real_stay_polys)<=min_cross+self.tol:
+                            vb=min(real_stays,key=lambda v:va['poly'].distance(v['poly']))
+                            lb=landing(vb)
+                            vb_pt=vb['center']
+                        else:
+                            lb=min(fixed,key=lambda g:va['poly'].distance(g))
+                            vb_pt=np.asarray(lb.centroid.coords[0])
+                        from .reconstruction_route import trace as _trace
+                        cross_line=_trace(source,va['center'],vb_pt,self._rule_width)
+                        cross_len=cross_line.length if cross_line is not None else min_cross
+                        def _side_clustered(polys):
+                            rem=set(range(1,len(polys)))
+                            dists={j:polys[0].distance(polys[j]) for j in rem}
+                            prev={j:0 for j in rem}
+                            buf=source.buffer(self.tol)
+                            while rem:
+                                nxt=min(rem,key=dists.__getitem__)
+                                u,v=polys[prev[nxt]],polys[nxt]
+                                if not buf.covers(shapely.shortest_line(u,v)):
+                                    t=_trace(source,np.asarray(u.centroid.coords[0]),np.asarray(v.centroid.coords[0]),self._rule_width)
+                                    if t is None or t.length>=cross_len*.5:
+                                        return False
+                                rem.remove(nxt)
+                                for j in rem:
+                                    d=polys[nxt].distance(polys[j])
+                                    if d<dists[j]:dists[j]=d;prev[j]=nxt
+                            return True
+                        if _side_clustered(m_polys) and _side_clustered(f_polys):
+                            clustered=build_source(source,landing(va),[lb],[va],cluster_vias=(mine,f_polys))
+                            plan_c=clustered.get('plan')
+                            if plan_c is not None:
+                                part_c=plan_c.partition(plan_c.nominal_first,plan_c.nominal_second)
+                                if (part_c is not None and
+                                    shapely.union_all(m_polys).difference(part_c['C']).area<=self.tol*self.tol and
+                                    shapely.union_all(f_polys).difference(part_c['B']).area<=self.tol*self.tol):
+                                    return [clustered]
                 rows=[]
                 from .branch_regions import terminal_tree
                 pairs=terminal_tree([v['poly'] for v in mine],fixed)
@@ -587,7 +650,7 @@ class Reconstructor:
         # Route construction is pose-independent and reused after every handle edit.
         from .session_cache import logical_fingerprint
         base_key=logical_fingerprint((self.model.data.geometry_id,self.model.roles,self.model.connections.order,
-                                'source-routes-v70',self.settings.evaluation_scope=='risk',self.rules.identity,bool(getattr(self,'measured_only',False)),self.settings.reconstruction_allow_moving_pad,self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,'c2'))
+                                'source-routes-v82',self.settings.evaluation_scope=='risk',self.rules.identity,bool(getattr(self,'measured_only',False)),self.settings.reconstruction_allow_moving_pad,self.settings.reconstruction_pad_trigger_um,probability_parameters.__dict__,self._rule_width,'c2'))
         # Forcing/editing one source must not rebuild every source path. Mine
         # membership includes enclosure filtering; all-via ownership controls
         # allocation. Existing path identities survive later manual edits.

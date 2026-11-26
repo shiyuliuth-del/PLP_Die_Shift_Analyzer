@@ -2,6 +2,11 @@
 
 历史完整记录保留在V41及更早标签；主线仅保留最近轮次与当前开发状态。
 
+## 2026-11-26 V82 标准差参数、授权目录、加载保存性能与重构修复
+
+- 从 `main`（V81 `79c68e6`）创建 `codex/v82-sigma-ux-perf-dxf-recon` 完成 V82。
+- 新增 `sigma_x_um`/`sigma_y_um`/`sigma_angle_deg` 与逐 DIE `per_die_sigma_enabled`/`die_sigmas` 并贯通全概率链路；`LicenseManager` 默认目录统一至 `.exe` 目录；更名「两侧运动动区数量」；优化加载多边形缓存与异步结果预解码并新增工程保存进度条；修复 `GD55_1119` 双侧动区切换增量缓存与中间段碎片、`XD46` 多过孔聚类单动区及拐角/分叉窄缝边界问题。遗留 `CRT.7z` 异形 DXF 适配按优先级暂缓。见 [V82 使用说明](V82_使用说明.md) 与 `tests/test_v82.py`。
+
 ## 2026-11-13 V41 开工
 
 V40已完成Release回下载/7-Zip与自动zip/tar逐文件核对，标签不再修改。按用户明确顺序从其main开codex/v41-editable-regions，导入Jobs.zip只读复现。十项合同、案例参数、初步证据和剩余工作见[V41工作记录](https://github.com/shiyuliuth-del/PLP_Die_Shift_Analyzer/blob/V41/docs/V41_WORK.md)。已发现nu17123有40处固定过孔与RDL几何相接但网络漏连；正在补齐局部空白过孔行的最近RDL接口，保持真实金属/RDL阻挡及用户层序。未宣称V41已完成或已发布。

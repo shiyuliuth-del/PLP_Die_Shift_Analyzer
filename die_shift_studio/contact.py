@@ -243,8 +243,7 @@ def support_face_length(poly,normal,maximum):
 def support_shape(poly,owner,centers,p,count,padding=0.):
     if owner<0:return dict(kind='poly',poly=poly,padding=padding,random=False)
     p=p.for_die(owner);mu,cov,_=statistical_state(p,count);c=centers[owner]
-    sx=(p.single_bound_x_um if count==1 else p.multi_bound_x_um)/p.scale_nsigma
-    sy=(p.single_bound_y_um if count==1 else p.multi_bound_y_um)/p.scale_nsigma
+    sx,sy,st=np.sqrt(np.maximum(np.diag(cov),0.))
     # A positive normal variance must never be rounded to zero for infinity.
     rank=2 if sx>0 and sy>0 and abs(p.rho_xy)<1 else (1 if sx>0 or sy>0 else 0)
     if rank==2:return dict(kind='plane',random=True)
@@ -252,13 +251,13 @@ def support_shape(poly,owner,centers,p,count,padding=0.):
     if rank==1:
         axis=np.array([sx,p.rho_xy*sy]) if sx>0 and sy>0 else np.array([float(sx>0),float(sy>0)])
         axis/=np.linalg.norm(axis);normal=np.array([-axis[1],axis[0]])
-        if p.bound_angle_deg/p.scale_nsigma>0:
+        if st>0:
             r=float(np.linalg.norm(np.asarray(poly.exterior.coords)-c,axis=1).max())+padding;middle=float((c+mu[:2])@normal);lo,hi=middle-r,middle+r
         else:
             values=np.asarray(transformed.exterior.coords)@normal;lo,hi=float(values.min())-padding,float(values.max())+padding
-        faces=None if p.bound_angle_deg/p.scale_nsigma>0 else (support_face_length(transformed,normal,False),support_face_length(transformed,normal,True))
+        faces=None if st>0 else (support_face_length(transformed,normal,False),support_face_length(transformed,normal,True))
         return dict(kind='band',normal=normal,lo=lo,hi=hi,faces=faces,random=True)
-    if p.bound_angle_deg/p.scale_nsigma>0:
+    if st>0:
         return dict(kind='annulus',center=c+mu[:2],inner=max(0.,poly.distance(Point(c))-padding),outer=float(np.linalg.norm(np.asarray(poly.exterior.coords)-c,axis=1).max())+padding,random=True)
     return dict(kind='poly',poly=transformed,padding=padding,random=False)
 

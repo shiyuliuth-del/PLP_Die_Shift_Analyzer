@@ -117,7 +117,9 @@ def pose_probability(grid,p,index):
     key=(p.input_nsigma,p.target_nsigma,p.reference_nsigma,
          p.single_bound_x_um,p.single_bound_y_um,p.multi_bound_x_um,p.multi_bound_y_um,
          p.bound_angle_deg,p.mean_x_um,p.mean_y_um,p.mean_angle_deg,p.rho_xy,
-         p.per_die_enabled,tuple(tuple(r) for r in (p.die_bounds or ())))
+         p.sigma_x_um,p.sigma_y_um,p.sigma_angle_deg,
+         p.per_die_enabled,tuple(tuple(r) for r in (p.die_bounds or ())),
+         p.per_die_sigma_enabled,tuple(tuple(r) for r in (p.die_sigmas or ())))
     cached=getattr(grid,'_extreme_weights_cache',None)
     if cached is None or cached[0]!=key:
         weights,_=extreme_weights(grid,p)

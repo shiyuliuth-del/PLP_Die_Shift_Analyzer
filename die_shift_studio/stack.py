@@ -31,8 +31,8 @@ class Connections:
         self.order=stack_order(data,self.roles,order);self.links=[]
         self.outgoing={k:{} for k in data.layers};self.incoming={k:{} for k in data.layers}
         if geometries is None:
-            from .fast_preview import polygons_from_arrays
-            geometries=dict(parallel_map(lambda item:(item[0],polygons_from_arrays(item[1])),data.layers.items()))
+            from .fast_preview import compiled_polygons
+            geometries=dict(parallel_map(lambda item:(item[0],compiled_polygons(data,item[0],item[1])),data.layers.items()))
         self.geometry=geometries
         planes={}
         for key in self.order:
@@ -88,21 +88,58 @@ class Connections:
         for rank,group in enumerate(self.groups):
             for key in group:
                 if self.roles[key]!='固定过孔':continue
-                for index,geometry in enumerate(self.geometry[key]):
-                    for direction in (-1,1):
-                        at=rank+direction
-                        while 0<=at<len(self.groups):
-                            other_group=self.groups[at];rdls=[k for k in other_group if self.roles[k] in rdl_roles]
-                            if rdls:
-                                for other in rdls:
-                                    for j in overlaps(other,geometry):
-                                        ref=(other,j,key,index) if direction<0 else (key,index,other,j)
-                                        if ref not in known:
-                                            row=dict(upper=ref[0],upper_index=ref[1],lower=ref[2],lower_index=ref[3])
-                                            self.links.append(row);self.inferred_interfaces.append(row);known.add(ref)
-                                break  # a real RDL plane is never jumped
-                            if any(self.roles[k] not in via_roles or overlaps(k,geometry) for k in other_group):break
-                            at+=direction
+                via_geos=self.geometry[key]
+                if not len(via_geos):continue
+                for direction in (-1,1):
+                    at=rank+direction
+                    while 0<=at<len(self.groups):
+                        other_group=self.groups[at];rdls=[k for k in other_group if self.roles[k] in rdl_roles]
+                        if rdls:
+                            for other in rdls:
+                                tree=self._layer_tree(other)
+                                if tree is None:continue
+                                pairs=tree.query(via_geos,predicate='intersects')
+                                if not pairs.size:continue
+                                other_geos=self.geometry[other]
+                                valid=shapely.area(shapely.intersection(via_geos[pairs[0]],other_geos[pairs[1]]))>eps
+                                for idx_pos in np.flatnonzero(valid):
+                                    index=int(pairs[0,idx_pos]);j=int(pairs[1,idx_pos])
+                                    ref=(other,j,key,index) if direction<0 else (key,index,other,j)
+                                    if ref not in known:
+                                        row=dict(upper=ref[0],upper_index=ref[1],lower=ref[2],lower_index=ref[3])
+                                        self.links.append(row);self.inferred_interfaces.append(row);known.add(ref)
+                            break  # a real RDL plane is never jumped
+                        # Check which vias are blocked by an intermediate via/non-via plane
+                        if any(self.roles[k] not in via_roles for k in other_group):break
+                        blocked=np.zeros(len(via_geos),bool)
+                        for k in other_group:
+                            tree=self._layer_tree(k)
+                            if tree is None:continue
+                            pairs=tree.query(via_geos,predicate='intersects')
+                            if pairs.size:
+                                k_geos=self.geometry[k]
+                                valid=shapely.area(shapely.intersection(via_geos[pairs[0]],k_geos[pairs[1]]))>eps
+                                if np.any(valid):blocked[pairs[0,valid]]=True
+                        if np.all(blocked):break
+                        # Only unblocked vias continue walking in this direction; handle partially blocked via subset
+                        if np.any(blocked):
+                            for index in np.flatnonzero(~blocked):
+                                geometry=via_geos[index]
+                                sub_at=at+direction
+                                while 0<=sub_at<len(self.groups):
+                                    og=self.groups[sub_at];s_rdls=[k for k in og if self.roles[k] in rdl_roles]
+                                    if s_rdls:
+                                        for other in s_rdls:
+                                            for j in overlaps(other,geometry):
+                                                ref=(other,j,key,int(index)) if direction<0 else (key,int(index),other,j)
+                                                if ref not in known:
+                                                    row=dict(upper=ref[0],upper_index=ref[1],lower=ref[2],lower_index=ref[3])
+                                                    self.links.append(row);self.inferred_interfaces.append(row);known.add(ref)
+                                        break
+                                    if any(self.roles[k] not in via_roles or overlaps(k,geometry) for k in og):break
+                                    sub_at+=direction
+                            break
+                        at+=direction
         for link in self.links:
             self.outgoing[link['upper']].setdefault(link['upper_index'],[]).append(link)
             self.incoming[link['lower']].setdefault(link['lower_index'],[]).append(link)

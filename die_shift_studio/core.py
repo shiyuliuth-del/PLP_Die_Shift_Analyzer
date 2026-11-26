@@ -40,6 +40,7 @@ PARAMETER_DESCRIPTIONS = {
     'rotation_center':'旋转中心选项', 'rotation_x_um':'自定义中心相对芯片中心X / μm', 'rotation_y_um':'自定义中心相对芯片中心Y / μm',
     'target_nsigma':'目标0～12；0为全部有界概率，∞为二值模式 / 无量纲', 'mean_x_um':'平均X偏移 / μm',
     'mean_y_um':'平均Y偏移 / μm', 'mean_angle_deg':'平均转角 / °', 'rho_xy':'X/Y相关系数 / 无量纲',
+    'sigma_x_um':'X偏移正态分布标准差 / μm', 'sigma_y_um':'Y偏移正态分布标准差 / μm', 'sigma_angle_deg':'角度正态分布标准差 / °',
     'interdie':'跨芯片连接：unknown待确认、none无、present有',
     'fixed_via_assignment':'固定过孔归属：all所有点保守包络、nearest最近芯片假设',
 }
@@ -83,6 +84,11 @@ class Parameters:
     mean_y_um: float = 0.0
     mean_angle_deg: float = 0.0
     rho_xy: float = 0.0
+    sigma_x_um: float = 3.0
+    sigma_y_um: float = 3.0
+    sigma_angle_deg: float = 0.02
+    per_die_sigma_enabled: bool = False
+    die_sigmas: list = field(default_factory=list)  # rows: [σX μm, σY μm, σθ degrees], DIE order
     interdie: str = "unknown"  # unknown, none, present
     fixed_via_assignment: str = "all"  # all: conservative envelope; nearest: explicit user assumption
 
@@ -90,6 +96,7 @@ class Parameters:
         # Old projects may contain an obsolete independent input multiplier.
         from copy import deepcopy
         self.die_bounds=deepcopy(self.die_bounds);self.die_pivots=deepcopy(self.die_pivots)
+        self.die_sigmas=deepcopy(self.die_sigmas)
         self.input_nsigma=self.target_nsigma
         if 0<self.target_nsigma<math.inf:self.reference_nsigma=self.target_nsigma
 
@@ -109,12 +116,19 @@ class Parameters:
 
     def for_die(self,owner):
         """Resolve one immutable per-DIE snapshot; all model consumers use this."""
-        if not self.per_die_enabled:return self
-        if not 0 <= owner < len(self.die_bounds):raise ValueError(f"DIE {owner+1} 缺少单独幅度参数，请检查芯片识别与幅度表")
-        x,y,a=self.die_bounds[owner]
-        mode,px,py=self.die_pivots[owner] if owner<len(self.die_pivots) else (self.rotation_center,self.rotation_x_um,self.rotation_y_um)
-        return replace(self,per_die_enabled=False,single_bound_x_um=x,single_bound_y_um=y,
-                       multi_bound_x_um=x,multi_bound_y_um=y,bound_angle_deg=a,rotation_center=mode,rotation_x_um=px,rotation_y_um=py)
+        if not self.per_die_enabled and not self.per_die_sigma_enabled:return self
+        updates={}
+        if self.per_die_enabled:
+            if not 0 <= owner < len(self.die_bounds):raise ValueError(f"DIE {owner+1} 缺少单独幅度参数，请检查芯片识别与幅度表")
+            x,y,a=self.die_bounds[owner]
+            mode,px,py=self.die_pivots[owner] if owner<len(self.die_pivots) else (self.rotation_center,self.rotation_x_um,self.rotation_y_um)
+            updates.update(per_die_enabled=False,single_bound_x_um=x,single_bound_y_um=y,
+                           multi_bound_x_um=x,multi_bound_y_um=y,bound_angle_deg=a,rotation_center=mode,rotation_x_um=px,rotation_y_um=py)
+        if self.per_die_sigma_enabled:
+            if not 0 <= owner < len(self.die_sigmas):raise ValueError(f"DIE {owner+1} 缺少单独标准差参数，请检查芯片识别与标准差表")
+            sx,sy,sa=self.die_sigmas[owner]
+            updates.update(per_die_sigma_enabled=False,sigma_x_um=sx,sigma_y_um=sy,sigma_angle_deg=sa)
+        return replace(self,**updates)
 
     @property
     def scale_nsigma(self):
@@ -126,10 +140,15 @@ class Parameters:
 
     def validate(self,require_rdl=True):
         if not isinstance(self.per_die_enabled,bool):raise ValueError("逐芯片开关必须为布尔值")
+        if not isinstance(self.per_die_sigma_enabled,bool):raise ValueError("逐芯片标准差开关必须为布尔值")
         if not isinstance(self.die_bounds,list):raise ValueError("逐芯片幅度必须为表格")
         for i,row in enumerate(self.die_bounds):
             if not isinstance(row,(list,tuple)) or len(row)!=3 or any(isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v) or v<0 for v in row) or row[2]>180:
                 raise ValueError(f"DIE {i+1} 幅度须为非负有限数，角度不超过180°")
+        if not isinstance(self.die_sigmas,list):raise ValueError("逐芯片标准差必须为表格")
+        for i,row in enumerate(self.die_sigmas):
+            if not isinstance(row,(list,tuple)) or len(row)!=3 or any(isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v) or v<0 for v in row) or row[2]>180:
+                raise ValueError(f"DIE {i+1} 标准差须为非负有限数，角度不超过180°")
         from .pivots import PIVOT_CHOICES
         allowed={v for _,v in PIVOT_CHOICES}
         if self.rotation_center not in allowed:raise ValueError("旋转中心选项无效")
@@ -138,7 +157,7 @@ class Parameters:
             if not isinstance(row,(list,tuple)) or len(row)!=3 or row[0] not in allowed or any(isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v) for v in row[1:]):raise ValueError("逐芯片旋转中心须包含有效选项和有限相对坐标")
         for f in fields(self):
             x = getattr(self, f.name)
-            if f.name in ("per_die_enabled","die_bounds","die_pivots"):continue
+            if f.name in ("per_die_enabled","die_bounds","die_pivots","per_die_sigma_enabled","die_sigmas"):continue
             if f.type == "str":
                 continue
             if f.name in ('input_nsigma','target_nsigma') and x==math.inf:continue
@@ -157,9 +176,12 @@ class Parameters:
                 raise ValueError(f"{key} 必须大于0")
         for key in ("minimum_area_um2", "minimum_edge_um", "package_clearance_um", "moving_annulus_um", "annulus_um", "residual_budget_um", "routing_edge_keepout_um", "min_die_gap_um",
                     "min_package_clearance_um", "single_bound_x_um", "single_bound_y_um",
-                    "multi_bound_x_um", "multi_bound_y_um", "bound_angle_deg"):
+                    "multi_bound_x_um", "multi_bound_y_um", "bound_angle_deg",
+                    "sigma_x_um", "sigma_y_um", "sigma_angle_deg"):
             if getattr(self,key) < 0:
                 raise ValueError(f"{key} 不得为负")
+        if self.sigma_angle_deg > 180:
+            raise ValueError("角度标准差不得超过180°")
         if not (self.input_nsigma in range(0,13) or self.input_nsigma==math.inf) or not (self.target_nsigma in range(0,13) or self.target_nsigma==math.inf):
             raise ValueError("目标覆盖须为0～12的整数或∞")
         if self.reference_nsigma not in range(1,13):raise ValueError("保留的概率尺度级别须为1～12整数")
@@ -517,7 +539,7 @@ def evaluate(data,roles,params,geometry=None,progress=lambda *_:None,layer_order
         progress(100,"评估完成")
         result=dict(version=__version__,units="μm",source_path=data.path,source_sha256=data.sha256,node_edit_count=len(data.node_edits),geometry_revision=data.edit_digest,import_warnings=data.import_warnings,
             top_cell=data.top_name,dbu_um=data.dbu_um,parameters=asdict(p),roles=roles,
-            die_count=count,target_failure=alpha,input_ellipsoid_radius=statistical_state(p,count)[2],
+            die_count=count,target_failure=alpha,input_ellipsoid_radius=statistical_state(p.for_die(0) if count else p,count)[2],
             distribution='binary' if math.isinf(p.target_nsigma) else 'normal',
             interdie_networks=contact_model.interdie_networks,
             connections=connections.summary(),contact_analysis=contact,screening=metrics,safe_ranges=ranges,model_yield=whole_yield,
