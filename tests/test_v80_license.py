@@ -1,4 +1,6 @@
 """Windows IPv4 machine IDs and compatibility with signed V79 licenses."""
+from base64 import b64encode
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -52,7 +54,7 @@ class IPv4LicenseTests(unittest.TestCase):
     def test_v2_accepts_present_ip_and_rejects_a_changed_ip_or_uuid(self):
         key=Ed25519PrivateKey.generate()
         binding=license.ipv4_bindings(UUID,[adapter(['10.2.1.4','172.16.0.10'])])
-        signed=sign(key,'测试','08',digest('172.16.0.10'),hwid_version=2)[1]
+        signed=sign(key,digest('172.16.0.10'))[1]
         old_board=Mock(side_effect=license.LicenseError('板号不可读'))
         self.assertEqual(license.verify(signed,key.public_key(),binding,legacy_board_id=old_board)['hwid_version'],2)
         for other in (license.ipv4_bindings(UUID,[adapter(['172.16.0.11'])]),
@@ -66,8 +68,13 @@ class IPv4LicenseTests(unittest.TestCase):
         new=license.ipv4_bindings(UUID,[adapter(['192.168.42.11'])])
         old_code=license.fingerprint(UUID,'KNOWN-BOARD')
         old=Mock(return_value=old_code)
-        old_signed=sign(key,'旧许可证','08',old_code,hwid_version=1)[1]
-        legacy_universal=sign(key,'旧通用许可证','07','',universal=True)[1]
+        def legacy_license(machine):
+            payload, _ = sign(key, machine, universal=machine=='*')
+            payload.update(user_name='旧许可证', employee_id='08', hwid_version=1)
+            signature = b64encode(key.sign(license.canonical(payload))).decode()
+            return json.dumps(dict(payload=payload,signature=signature)).encode()
+        old_signed=legacy_license(old_code)
+        legacy_universal=legacy_license('*')
         self.assertEqual(license.verify(legacy_universal,key.public_key(),new,legacy_board_id=old)['machine_id'],'*')
         old.assert_not_called()
         self.assertEqual(license.verify(old_signed,key.public_key(),new,legacy_board_id=old)['hwid_version'],1)
@@ -80,19 +87,22 @@ class IPv4LicenseTests(unittest.TestCase):
             license.verify(json.dumps(data).encode(),key.public_key(),new,legacy_board_id=old)
         old.assert_not_called()
 
-    def test_history_migrates_v79_and_records_new_version(self):
+    def test_history_reads_v79_rows_and_adds_current_fields(self):
         key=Ed25519PrivateKey.generate()
         with TemporaryDirectory() as tmp:
             folder=Path(tmp)
-            with sqlite3.connect(folder/'license_history.db') as db:
+            with closing(sqlite3.connect(folder/'license_history.db')) as db, db:
                 db.execute('CREATE TABLE issuance (license_id TEXT PRIMARY KEY,user_name TEXT,employee_id TEXT,machine_id TEXT,issued TEXT,product_id TEXT,path TEXT,fingerprint TEXT,notes TEXT,content BLOB)')
                 db.execute('INSERT INTO issuance VALUES (?,?,?,?,?,?,?,?,?,?)',('old','用户','1','test','2026','app','old','fingerprint','',b'old'))
-            db.close()
             history=History(folder)
-            self.assertEqual(history.search('1')[0][-1],1)
-            path=history.issue(key,'用户','2',digest('192.168.42.11'),'',folder/'signed',hwid_version=2)
-            self.assertEqual(history.search('2')[0][-1],2)
-            self.assertEqual(json.loads(path.read_bytes())['payload']['hwid_version'],2)
+            self.assertEqual(history.search('test')[0][0],'old')
+            machine=digest('192.168.42.11')
+            path=history.issue(key,machine,folder/'signed')
+            row,=history.search(machine)
+            self.assertEqual(row[1],machine)
+            payload=json.loads(path.read_bytes())['payload']
+            self.assertEqual(set(payload),license.FIELDS)
+            self.assertEqual(payload['hwid_version'],2)
 
     def test_activation_recovers_when_only_ipv4_is_available(self):
         os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
@@ -105,7 +115,7 @@ class IPv4LicenseTests(unittest.TestCase):
             old=Mock(side_effect=license.LicenseError('无法读取主板序列号。'))
             state=license.Authorization(binding,key.public_key(),folder/'active.lic',legacy_board_id=old)
             chosen=folder/'selected.lic'
-            chosen.write_bytes(sign(key,'测试','1',binding.primary,hwid_version=2)[1])
+            chosen.write_bytes(sign(key,binding.primary)[1])
             with patch('die_shift_studio.license_ui.local_authorization',return_value=state):
                 dialog=LicenseDialog()
                 dialog.query.wait()

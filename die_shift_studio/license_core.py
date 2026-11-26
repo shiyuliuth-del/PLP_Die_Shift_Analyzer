@@ -14,12 +14,15 @@ import sys
 from tempfile import NamedTemporaryFile
 import uuid
 
+from .jobs import installation_root
+
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 PRODUCT = 'DIE_SHIFT_ANALYZE'
-FIELDS = {'schema_version','license_id','product_id','user_name','employee_id','machine_id','hwid_version'}
+FIELDS = {'schema_version','license_id','product_id','machine_id','hwid_version'}
+LEGACY_FIELDS = FIELDS | {'user_name','employee_id'}
 LIMIT = 16384
 MACHINE_ID = re.compile(r'[0-9A-F]{64}')
 INVALID_BOARD = {'TO BE FILLED BY O.E.M.','TO BE FILLED BY OEM','DEFAULT STRING','SYSTEM SERIAL NUMBER',
@@ -172,21 +175,44 @@ def embedded_public_key():
     if getattr(sys,'frozen',False):
         path = Path(sys._MEIPASS)/'die_shift_studio'/'license_public.pem'
     else:
-        path = Path(__file__).resolve().parent.parent/'public_key.pem'
+        path = build_public_key_path(installation_root())
     try:
         return load_public_key(path.read_bytes())
     except OSError as exc:
         raise LicenseError('软件缺少正式授权公钥，请联系管理员。') from exc
 
 
+def admin_key_directory():
+    return local_directory('DieShiftLicenseManager')/'keys'
+
+
+def build_public_key_path(root):
+    override = os.environ.get('DIE_SHIFT_LICENSE_PUBLIC_KEY')
+    if override:
+        return Path(override).expanduser()
+    bundled = Path(root)/'public_key.pem'
+    return bundled if bundled.exists() else admin_key_directory()/'public_key.pem'
+
+
 def build_public_key(root):
-    path = Path(os.environ.get('DIE_SHIFT_LICENSE_PUBLIC_KEY') or Path(root)/'public_key.pem').expanduser()
+    path = build_public_key_path(root)
     try:
         return load_public_key(path.read_bytes())
     except FileNotFoundError as exc:
-        raise LicenseError('Formal Ed25519 public key required. Set DIE_SHIFT_LICENSE_PUBLIC_KEY or provide public_key.pem.') from exc
+        raise LicenseError(
+            'Formal Ed25519 public key required. Run LicenseManager_BUILD.bat, open LicenseManager '
+            'and generate a key pair, or provide public_key.pem next to BUILD.bat.'
+        ) from exc
     except OSError as exc:
         raise LicenseError(f'无法读取构建公钥：{path}') from exc
+
+
+def frozen_public_key_data(root, workpath):
+    key = build_public_key(root)
+    target = Path(workpath)/'license_public.pem'
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(key.public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))
+    return str(target), 'die_shift_studio'
 
 
 def local_directory(name):
@@ -222,11 +248,11 @@ def verify(content, key, bindings, *, legacy_board_id=None, binding_error=''):
     if not isinstance(value, dict) or set(value) != {'payload','signature'}:
         raise LicenseError('许可证格式错误。')
     payload, signature = value['payload'], value['signature']
-    if not isinstance(payload, dict) or set(payload) != FIELDS or not isinstance(signature, str):
+    if not isinstance(payload, dict) or set(payload) not in (FIELDS, LEGACY_FIELDS) or not isinstance(signature, str):
         raise LicenseError('许可证字段不正确。')
     if any(type(payload[k]) is not int for k in ('schema_version','hwid_version')) or any(
             not isinstance(payload[k], str) or not payload[k].strip() or len(payload[k]) > 256
-            for k in FIELDS-{'schema_version','hwid_version'}):
+            for k in payload.keys()-{'schema_version','hwid_version'}):
         raise LicenseError('许可证字段类型不正确。')
     try:
         decoded = b64decode(signature, validate=True)
@@ -293,27 +319,55 @@ def store_license(path, content):
 
 
 class Authorization:
-    def __init__(self, bindings, key, path, *, legacy_board_id=None, binding_error=''):
+    def __init__(self, bindings, key, path, *, root=None, legacy_board_id=None, binding_error='', key_error=''):
         self.bindings = MachineBindings(BOARD_HWID, (bindings,)) if isinstance(bindings,str) else bindings
+        self.legacy_board_id = legacy_board_id
         self.key = key
         self.path = path
-        self.payload = None
-        self.legacy_board_id = legacy_board_id
+        self.root = root
         self.binding_error = binding_error
+        self.key_error = key_error
+        self.payload = None
 
     @property
     def machine_id(self):
         return self.bindings.primary
+
+    def _require_key(self):
+        if self.key is None:
+            raise LicenseError(self.key_error or '软件缺少授权公钥。')
 
     def _verify(self, content):
         return verify(content, self.key, self.bindings,
                       legacy_board_id=self.legacy_board_id, binding_error=self.binding_error)
 
     def check(self):
-        self.payload = self._verify(read_license(self.path))
-        return self.payload
+        self.payload = None
+        self._require_key()
+
+        candidates = []
+        if self.root is not None:
+            try:
+                candidates = sorted((p for p in self.root.iterdir() if p.suffix.lower() == '.lic' and p.is_file()),
+                                    key=lambda p:(p.name.lower() != 'license.lic', p.name.casefold(), p.name))
+            except OSError as exc:
+                raise LicenseError(f'无法读取软件目录：{self.root}') from exc
+        if self.path.is_file() and self.path not in candidates:
+            candidates.append(self.path)
+
+        first_error = None
+        for path in candidates:
+            try:
+                self.payload = self._verify(read_license(path))
+            except LicenseError as exc:
+                if first_error is None:
+                    first_error = f'{path.name}：{exc}'
+            else:
+                return self.payload
+        raise LicenseError(first_error or '尚未找到许可证。请将管理员签发的 .lic 放到软件根目录。')
 
     def activate(self, path):
+        self._require_key()
         content = read_license(path)
         payload = self._verify(content)
         store_license(self.path, content)
@@ -322,7 +376,8 @@ class Authorization:
 
 
 def local_authorization():
-    key = embedded_public_key()
+    key = None
+    key_error = ''
     windows = sys.platform == 'win32'
     legacy = windows_board_id if windows else None
     error = ''
@@ -331,7 +386,12 @@ def local_authorization():
     except LicenseError as exc:
         bindings = MachineBindings(IPV4_HWID if windows else BOARD_HWID, ())
         error = str(exc)
-    return Authorization(bindings,key,license_path(),legacy_board_id=legacy,binding_error=error)
+    try:
+        key = embedded_public_key()
+    except LicenseError as exc:
+        key_error = str(exc)
+    return Authorization(bindings,key,license_path(),root=installation_root(),legacy_board_id=legacy,
+                         binding_error=error,key_error=key_error)
 
 
 def installed_authorization():
@@ -341,5 +401,7 @@ def installed_authorization():
 
 
 if __name__=='__main__':
-    try:build_public_key(Path(__file__).resolve().parent.parent)
+    root = Path(__file__).resolve().parent.parent
+    try:build_public_key(root)
     except LicenseError as exc:raise SystemExit(str(exc)) from exc
+    print(f'Build public key: {build_public_key_path(root)}')

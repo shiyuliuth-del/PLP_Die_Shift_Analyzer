@@ -46,7 +46,7 @@
 
 版本每轮递增，当前看 `die_shift_studio/__init__.py`。更新README、使用说明、现行合同、已知问题、轮次记录和本地研究工作区AGENTS入口。
 
-联合发布使用根目录的 DieShiftAnalyze_RUN.bat 和 RealDataAnalyze_RUN.bat。BUILD.bat 一键构建两个 EXE 到同一 dist，并复制两份启动脚本。启动先检查同目录和 dist 中的 EXE，再查找 Python。Release 提供联合源码 ZIP 与 SHA-256，管理员使用根目录的 BUILD.bat --admin-only 自行打包 LicenseManager。按用户本轮明确要求，Jobs/GD55中的图纸、工程、三份合成Excel及说明随包公开；此为历史不附GDS规则的特定例外。其他图纸、图片、用户端测试 EXE、密钥、许可证、签发数据库与 Jobs 缓存不得上传。
+联合发布使用根目录的 DieShiftAnalyze_RUN.bat 和 RealDataAnalyze_RUN.bat。BUILD.bat 一键构建两个 EXE 到同一 dist，并复制两份启动脚本。启动先检查同目录和 dist 中的 EXE，再查找 Python。Release 提供联合源码 ZIP 与 SHA-256，管理员使用根目录的 LicenseManager_BUILD.bat 自行打包 LicenseManager。按用户本轮明确要求，Jobs/GD55中的图纸、工程、三份合成Excel及说明随包公开；此为历史不附GDS规则的特定例外。其他图纸、图片、用户端测试 EXE、密钥、许可证、签发数据库与 Jobs 缓存不得上传。
 
 使用 `python3 tools/package_release.py make-source`，正式包与GitHub自动源码归档均只含运行必需文件。发布前核对最新头Windows clean/with-cupy检查；发布后回下载Release、自动ZIP/tar，逐文件匹配tag、CRC/SHA/7-Zip验证。失败不得覆盖旧交付物，不重写tag来补文档。发布后证据可补在Release说明。
 

@@ -48,6 +48,7 @@ RealDataAnalyse-output/
 *.db-wal
 *.db-shm
 dist_admin/
+build_admin/
 Jobs/.DXFImports/
 
 # Project-owned runs are private; reviewed Jobs/GD55 inputs are versioned.

@@ -10,12 +10,7 @@ if not defined DSA_PYTHON for /f "delims=" %%P in ('python -c "import sys; print
 if not defined DSA_PYTHON for /f "delims=" %%P in ('py -c "import sys; print(sys.executable)" 2^>nul') do set "DSA_PYTHON=%%P"
 :selected
 if not exist "%DSA_PYTHON%" goto failed
-if /i "%~1"=="--admin-only" goto build_admin
 "%DSA_PYTHON%" -m die_shift_studio.license_core || goto invalid_key
-:build_admin
-"%DSA_PYTHON%" -m PyInstaller --clean --noconfirm --distpath "%~dp0dist_admin" "%~dp0LicenseManager\LicenseManager.spec" || goto failed
-if not exist "%~dp0dist_admin\LicenseManager.exe" goto failed
-if /i "%~1"=="--admin-only" goto admin_ready
 "%DSA_PYTHON%" -m die_shift_studio.dependencies || goto failed
 "%DSA_PYTHON%" -m PyInstaller --clean --noconfirm "%~dp0Die_Shift_Analyze.spec" || goto failed
 "%DSA_PYTHON%" -m PyInstaller --clean --noconfirm "%~dp0RealDataAnalyse\RealDataAnalyse.spec" || goto failed
@@ -27,13 +22,12 @@ for %%L in (DieShiftAnalyze_RUN.bat RealDataAnalyze_RUN.bat) do (
 )
 echo Ready: "%~dp0dist\Die_Shift_Analyze.exe"
 echo Ready: "%~dp0dist\RealDataAnalyse.exe"
-:admin_ready
-echo Administrator only: "%~dp0dist_admin\LicenseManager.exe"
 if not defined CI pause
 exit /b 0
 :invalid_key
-echo Client build needs the formal Ed25519 public key: public_key.pem next to BUILD.bat.
-echo Use the LicenseManager Release download, or run BUILD.bat --admin-only to build the administrator tool.
+echo Run LicenseManager_BUILD.bat first and generate a key pair in LicenseManager.
+echo BUILD.bat reads public_key.pem from the source folder or the default LicenseManager key folder.
+echo For a custom key folder, copy its public_key.pem next to BUILD.bat or set DIE_SHIFT_LICENSE_PUBLIC_KEY.
 if not defined CI pause
 exit /b 1
 :failed

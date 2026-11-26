@@ -2,6 +2,9 @@ name: Windows offline licensing and packaging
 on:
   workflow_call:
     inputs:
+      source_only:
+        type: boolean
+        default: false
       client_only:
         type: boolean
         default: false
@@ -14,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        component: ${{ fromJSON(inputs.client_only && '["client"]' || '["administrator","client"]') }}
+        component: ${{ fromJSON(inputs.source_only && '["source"]' || inputs.client_only && '["client"]' || '["source","client"]') }}
     env:
       QT_QPA_PLATFORM: offscreen
       PYTHONPATH: '.;tests'
@@ -28,23 +31,14 @@ jobs:
         with:
           python-version: '3.13'
       - run: python -m pip install -r requirements.txt
-      - if: matrix.component == 'administrator'
-        run: python -m unittest -v test_v80_license test_v80_build test_v79.AuthorizationTests test_branch_integration
-      - name: Build the standalone administrator tool
-        if: matrix.component == 'administrator'
-        run: cmd /c BUILD.bat --admin-only
-      - uses: actions/upload-artifact@v4
-        if: matrix.component == 'administrator'
-        with:
-          name: LicenseManager-windows
-          path: dist_admin/LicenseManager.exe
-          if-no-files-found: error
+      - if: matrix.component == 'source'
+        run: python -m unittest -v test_v81_license test_v80_license test_v80_build test_v79.AuthorizationTests test_branch_integration
       - name: Verify missing-key preflight and build an isolated QA client
         if: matrix.component == 'client'
         shell: pwsh
         run: |
           cmd /c BUILD.bat *> missing-build-key.log
-          if ($LASTEXITCODE -eq 0 -or -not (Select-String -LiteralPath missing-build-key.log -Pattern 'Client build needs the formal Ed25519 public key' -SimpleMatch)) { throw 'BUILD.bat did not report its missing key before client packaging' }
+          if ($LASTEXITCODE -eq 0 -or -not (Select-String -LiteralPath missing-build-key.log -Pattern 'Formal Ed25519 public key required' -SimpleMatch)) { throw 'BUILD.bat did not report its missing key before client packaging' }
           python -m PyInstaller --clean --noconfirm Die_Shift_Analyze.spec *> missing-key.log
           if ($LASTEXITCODE -eq 0 -or -not (Select-String -LiteralPath missing-key.log -Pattern 'Formal Ed25519 public key required' -SimpleMatch)) { throw 'Missing public key did not fail closed' }
           python tools/qa_license.py

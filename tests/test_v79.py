@@ -60,8 +60,9 @@ class AuthorizationTests(unittest.TestCase):
             with self.assertRaises(license.LicenseError):license.fingerprint(uuid,serial)
 
     def test_sign_store_verify_tamper_and_history(self):
-        first=license.fingerprint(SYSTEM_UUID,'ALPHA')
-        second=license.fingerprint(SYSTEM_UUID,'BETA')
+        first,second='A'*64,'B'*64
+        bindings=license.MachineBindings(license.IPV4_HWID,(first,))
+        other_bindings=license.MachineBindings(license.IPV4_HWID,(second,))
         with TemporaryDirectory() as tmp:
             root=Path(tmp)
             keys=root/'keys'
@@ -73,34 +74,34 @@ class AuthorizationTests(unittest.TestCase):
             with self.assertRaises(license.LicenseError):load_private(private,'wrong')
             key=load_private(private,'测试保护口令')
             target=root/'user'/'license.lic'
-            state=license.Authorization(first,key.public_key(),target)
+            state=license.Authorization(bindings,key.public_key(),target)
             with self.assertRaises(license.LicenseError):state.check()
             history=History(root)
-            issued=history.issue(key,'测试姓名','测试工号',first,'QA',root/'files')
+            issued=history.issue(key,first,root/'files')
             original=issued.read_bytes()
-            self.assertEqual(state.activate(issued)['user_name'],'测试姓名')
-            self.assertEqual(license.Authorization(first,key.public_key(),target).check()['machine_id'],first)
+            self.assertEqual(state.activate(issued)['machine_id'],first)
+            self.assertEqual(license.Authorization(bindings,key.public_key(),target).check()['machine_id'],first)
             with self.assertRaisesRegex(license.LicenseError,'此电脑'):
-                license.Authorization(second,key.public_key(),target).check()
-            for field,changed in (('machine_id',second),('user_name','修改'),('product_id','OTHER'),('schema_version',9)):
+                license.Authorization(other_bindings,key.public_key(),target).check()
+            for field,changed in (('machine_id',second),('product_id','OTHER'),('schema_version',9)):
                 data=json.loads(original);data['payload'][field]=changed
                 with self.assertRaisesRegex(license.LicenseError,'签名'):
-                    license.verify(json.dumps(data).encode(),key.public_key(),first)
+                    license.verify(json.dumps(data).encode(),key.public_key(),bindings)
             invalid=root/'broken.lic'
             invalid.write_bytes(original.replace(b'"signature":',b'"signature":"x","signature":',1))
             with self.assertRaisesRegex(license.LicenseError,'重复'):state.activate(invalid)
             self.assertEqual(target.read_bytes(),original)
             _,other=generate(root/'other','pass')
             with self.assertRaisesRegex(license.LicenseError,'签名'):
-                license.verify(sign(other,'other','employee',first)[1],key.public_key(),first)
-            wildcard=history.issue(key,'Administrator','UNIVERSAL','*','QA',root/'admin',universal=True)
+                license.verify(sign(other,first)[1],key.public_key(),bindings)
+            wildcard=history.issue(key,'*',root/'admin',universal=True)
             shared=wildcard.read_bytes()
             for machine in (first,second):
                 self.assertEqual(license.verify(shared,key.public_key(),machine)['machine_id'],'*')
             with self.assertRaises(license.LicenseError):license.verify(shared,key.public_key(),'')
-            history.issue(key,'Administrator','UNIVERSAL','*','QA',root/'admin',universal=True)
+            history.issue(key,'*',root/'admin',universal=True)
             self.assertEqual(wildcard.read_bytes(),shared)
-            row,=history.search('测试姓名')
+            row,=history.search(first[:12])
             reexport=root/'reexport.lic'
             history.export_original(row[0],reexport)
             self.assertEqual(reexport.read_bytes(),original)
@@ -115,13 +116,14 @@ class AuthorizationTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             p=Path(tmp)
             _,key=generate(p,'pass')
-            machine=license.fingerprint(SYSTEM_UUID,'BOARD')
-            state=license.Authorization(machine,key.public_key(),p/'local.lic')
+            machine='A'*64
+            bindings=license.MachineBindings(license.IPV4_HWID,(machine,))
+            state=license.Authorization(bindings,key.public_key(),p/'local.lic')
             dlg=LicenseDialog(authorization=state)
             self.assertEqual(dlg.machine.text(),machine)
             self.assertTrue(dlg.machine.isReadOnly())
             self.assertFalse(dlg.apply_btn.isEnabled())
-            selected=p/'one.lic';selected.write_bytes(sign(key,'tester','1',machine)[1])
+            selected=p/'one.lic';selected.write_bytes(sign(key,machine)[1])
             dlg.selected=selected
             dlg.apply()
             dlg.query.wait()

@@ -20,6 +20,6 @@ else:
     path=license_path()
     if path.exists():
         raise RuntimeError('Refusing to overwrite an existing real license.')
-    store_license(path,sign(key,'Github QA','QA',bindings.primary,hwid_version=bindings.version)[1])
+    store_license(path,sign(key,bindings.primary)[1])
     (root/'qa-hardware-valid').touch(exist_ok=False)
     (root/'qa-hardware-status.txt').write_text(f'Validated CIM hardware identifiers for HWID V{bindings.version} and prepared a machine-bound QA license.',encoding='utf8')

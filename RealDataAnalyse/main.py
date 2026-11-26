@@ -13,7 +13,7 @@ def main():
     from die_shift_studio.jobs import measured_workspace
     from RealDataAnalyse.transport import installation
     from RealDataAnalyse.storage import configure_logging
-    configure_logging(installation())
+    logger = configure_logging(installation())
     parser = argparse.ArgumentParser(description='RealDataAnalyse')
     operation = parser.add_mutually_exclusive_group()
     operation.add_argument('--run', help='恢复运行配置JSON（database/endpoint/project/output/workers等）')
@@ -22,7 +22,9 @@ def main():
     parser.add_argument('--result', help='无界面运行结果JSON')
     args = parser.parse_args()
     if args.run or args.import_data or args.run_plans:
+        from die_shift_studio.license_core import LicenseError, installed_authorization
         try:
+            installed_authorization()
             config = json.loads(Path(args.run or args.import_data).read_text(encoding='utf8')) if not args.run_plans else None
             if args.run_plans:
                 from RealDataAnalyse.plans import Plans, PlanRunner
@@ -43,6 +45,9 @@ def main():
                 from RealDataAnalyse.runner import Runner
                 result = Runner(**config).run()
             code = 0 if result.get('state', 'completed') == 'completed' else 1
+        except LicenseError as exc:
+            logger.warning('授权验证未通过：%s',exc)
+            result, code = dict(state='error', message=str(exc)), 1
         except Exception as exc:
             import logging
             logging.getLogger('RealDataAnalyse').exception('自动化任务失败')
@@ -50,6 +55,10 @@ def main():
         if args.result:
             Path(args.result).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf8')
         return code
+    from die_shift_studio.license_ui import require_activation
+    app, authorization = require_activation(application='RealDataAnalyse')
+    if authorization is None:
+        return 1
     from RealDataAnalyse.gui import launch
     return launch()
 
