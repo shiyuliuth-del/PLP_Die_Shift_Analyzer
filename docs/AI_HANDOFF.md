@@ -1,8 +1,8 @@
-# V80 Windows IPv4 授权与构建退出
+# V81 共享离线授权
 
-Windows 新授权为 HWID V2，使用 `HWID_V2|UUID=<标准大写 UUID>|IPV4=<本机 IPv4>` 的 SHA-256。CIM 只在校验已签名的 V1 逐机许可证、或必要的旧通用许可回退时读取主板序列号。多适配器的显示码按 IPv4 网关、接口优先级和地址稳定排序。签发时使用 V2，旧证书按 V1 继续校验。正式公钥无需轮换。[Windows CIM 属性](https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-networkadapterconfiguration)
+`license_core` 保持 V80 的 Windows UUID 与本机 IPv4 机器码算法。启动按两个 EXE 所在目录扫描 `.lic`，再回退到用户目录。错误许可不会遮盖有效许可。Die Shift Analyze 的 GUI、诊断、CLI 与 RealDataAnalyse 的 GUI、CLI 共用授权验证和内置公钥。独立启动授权窗口即使缺少公钥也会尝试显示 Machine ID。
 
-`BUILD.bat` 完整构建先检查公钥，`--admin-only` 独立构建。桌面 KLayout 后端拥有独立进程、日志和临时目录，按该顺序清理。预检查退出显式关闭几何后端。回归见 `tests/test_v80_build.py` 和 `tests/test_v80_license.py`。
+`LicenseManager_BUILD.bat` 独立构建签发工具，生成密钥后再运行 `BUILD.bat`。两份用户程序 spec 通过 `frozen_public_key_data` 使用相同的公钥查找顺序。当前签发仅使用 Machine ID，验签继续接受既有签名载荷。正式私钥和通用许可均由管理员在部署环境生成。重点回归见 `tests/test_v81_license.py` 和 `tests/test_v80_license.py`。
 
 # V79 永久离线授权与工程切换
 

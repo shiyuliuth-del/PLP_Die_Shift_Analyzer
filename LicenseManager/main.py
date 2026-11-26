@@ -4,8 +4,8 @@ import sys
 from pathlib import Path
 
 from die_shift_studio import __version__
-from die_shift_studio.license_core import BOARD_HWID, IPV4_HWID, LicenseError, PRODUCT, load_public_key, local_directory
-from die_shift_studio.qt_compat import QtCore, QtGui, QtWidgets as W, run_dialog, ACCEPTED
+from die_shift_studio.license_core import LicenseError, PRODUCT, admin_key_directory, load_public_key, local_directory
+from die_shift_studio.qt_compat import QtCore, QtGui, QtWidgets as W, run_dialog
 from die_shift_studio.style import STYLE
 from LicenseManager.manager import History, FIELDS, fingerprint, generate, load_private, new_file, public_bytes
 
@@ -24,13 +24,7 @@ class Manager(W.QWidget):
         admin_folder = Path(sys.executable if getattr(sys,'frozen',False) else __file__).resolve().parent
         self.universal_dir = admin_folder
         self.output = W.QLineEdit(str(self.home/'licenses'))
-        self.name = W.QLineEdit()
-        self.employee = W.QLineEdit()
         self.machine = W.QLineEdit()
-        self.version = W.QComboBox()
-        self.version.addItem('V2 · Windows IPv4（V80 起）', IPV4_HWID)
-        self.version.addItem('V1 · 主板序列号（旧版）', BOARD_HWID)
-        self.notes = W.QLineEdit()
         layout = W.QFormLayout(self)
         layout.addRow(PRODUCT, W.QLabel('Permanent License'))
         layout.addRow('数据目录',self.data)
@@ -38,8 +32,7 @@ class Manager(W.QWidget):
         layout.addRow('私钥状态 / 指纹',self.key_status)
         layout.addRow(self.buttons(('生成密钥对',self.generate_key),('加载私钥',self.open_key),
                                    ('导出公钥',self.export_key),('校验公钥',self.check_key)))
-        for title,field in (('姓名',self.name),('工号',self.employee),('Machine ID',self.machine),('机器码版本',self.version),('备注',self.notes)):
-            layout.addRow(title,field)
+        layout.addRow('Machine ID',self.machine)
         layout.addRow(self.buttons(('签发许可证',self.issue),('打开输出目录',self.open_folder),('授权历史',self.history)))
         layout.addRow(self.buttons(('首次部署：生成管理员通用许可证',self.issue_universal)))
         self.status = W.QLabel()
@@ -70,7 +63,9 @@ class Manager(W.QWidget):
         self.key_status.setText(fingerprint(key))
 
     def generate_key(self):
-        folder = W.QFileDialog.getExistingDirectory(self,'选择新密钥保存目录',self.data.text())
+        default = admin_key_directory()
+        default.mkdir(parents=True,exist_ok=True)
+        folder = W.QFileDialog.getExistingDirectory(self,'选择新密钥保存目录',str(default))
         if not folder:
             return
         password, ok = self.ask_password('设置私钥密码')
@@ -89,7 +84,7 @@ class Manager(W.QWidget):
             self.status.setText(f'密钥已保存在 {folder}。管理员通用许可：{path}')
 
     def open_key(self):
-        path, _ = W.QFileDialog.getOpenFileName(self,'加载加密私钥',self.data.text(),'PEM (*.pem)')
+        path, _ = W.QFileDialog.getOpenFileName(self,'加载加密私钥',str(admin_key_directory()/'private_key.pem'),'PEM (*.pem)')
         if path:
             password, ok = self.ask_password('解锁私钥')
             if ok:
@@ -117,21 +112,19 @@ class Manager(W.QWidget):
             self.status.setText('公钥与已加载私钥匹配。')
 
     def issue(self):
-        path = History(Path(self.data.text())).issue(self.require_key(),self.name.text(),self.employee.text(),
-                        self.machine.text(),self.notes.text(),Path(self.output.text()),hwid_version=self.version.currentData())
+        path = History(Path(self.data.text())).issue(self.require_key(),self.machine.text(),Path(self.output.text()))
         self.status.setText(f'已签发：{path}')
 
     def issue_universal(self):
         key = self.require_key()
         button = W.QMessageBox.StandardButton
-        if W.QMessageBox.question(self,'管理员通用许可','该文件可激活任何具备有效硬件信息的电脑。仅保存在管理员目录。',button.Yes|button.No,button.No)!=button.Yes:
+        if W.QMessageBox.question(self,'管理员通用许可','该文件可激活任何能够生成 Machine ID 的电脑。仅保存在管理员目录。',button.Yes|button.No,button.No)!=button.Yes:
             return
         path=self.save_universal(key)
         self.status.setText(f'通用永久许可证：{path}')
 
     def save_universal(self,key):
-        return History(Path(self.data.text())).issue(key,'Administrator','UNIVERSAL','*','管理员通用许可',
-                                                    self.universal_dir,universal=True)
+        return History(Path(self.data.text())).issue(key,'*',self.universal_dir,universal=True)
 
     def open_folder(self):
         path = Path(self.output.text()).resolve()
@@ -145,10 +138,10 @@ class Manager(W.QWidget):
         dialog.resize(1000,500)
         layout = W.QVBoxLayout(dialog)
         query = W.QLineEdit()
-        query.setPlaceholderText('搜索姓名、工号或机器码')
+        query.setPlaceholderText('搜索授权编号或机器码')
         layout.addWidget(query)
         table = W.QTableWidget(0,len(FIELDS))
-        table.setHorizontalHeaderLabels(('授权编号','姓名','工号','机器码','签发日期','产品','文件','公钥指纹','备注','机器码版本'))
+        table.setHorizontalHeaderLabels(('授权编号','机器码','签发日期','文件','公钥指纹'))
         table.setSelectionBehavior(W.QAbstractItemView.SelectionBehavior.SelectRows)
         table.setEditTriggers(W.QAbstractItemView.EditTrigger.NoEditTriggers)
         layout.addWidget(table)
@@ -168,13 +161,12 @@ class Manager(W.QWidget):
             return tuple(table.item(table.currentRow(),c).text() for c in range(len(FIELDS)))
         def reexport():
             row = selected()
-            export('导出原许可证',Path(row[6]).name,'许可证 (*.lic)',lambda path:history.export_original(row[0],path))
+            export('导出原许可证',Path(row[3]).name,'许可证 (*.lic)',lambda path:history.export_original(row[0],path))
         def reissue():
             row = selected()
-            if row[3]=='*':
+            if row[1]=='*':
                 raise LicenseError('通用许可请使用首次部署入口。')
-            self.name.setText(row[1]);self.employee.setText(row[2]);self.machine.setText(row[3]);self.notes.setText(row[8])
-            self.version.setCurrentIndex(self.version.findData(int(row[9])))
+            self.machine.setText(row[1])
             dialog.accept()
         layout.addLayout(self.buttons(('导出原许可证',reexport),('准备重新签发',reissue),
                         ('CSV',lambda:export('导出 CSV','licenses.csv','CSV (*.csv)',lambda p:history.export_csv(p,query.text()))),

@@ -9,18 +9,15 @@ if sys.platform!='win32':
     raise SystemExit('The Windows EXE must be built on Windows.')
 root=Path(SPECPATH)
 sys.path.insert(0,str(root))
-from die_shift_studio.license_core import LicenseError,build_public_key
-from cryptography.hazmat.primitives.serialization import Encoding,PublicFormat
-try:key=build_public_key(root)
+from die_shift_studio.license_core import LicenseError,frozen_public_key_data
+try:license_data=frozen_public_key_data(root,workpath)
 except LicenseError as exc:raise SystemExit(str(exc)) from exc
-embedded=Path(workpath)/'license_public.pem';embedded.parent.mkdir(parents=True,exist_ok=True)
-embedded.write_bytes(key.public_bytes(Encoding.PEM,PublicFormat.SubjectPublicKeyInfo))
 from die_shift_studio.app_icon import write_ico
 icon=Path(workpath)/'Die_Shift_Analyze.ico'
 icon.parent.mkdir(parents=True,exist_ok=True);write_ico(icon)
 
 data=collect_data_files('scipy.stats',includes=['_sobol_direction_numbers.npz'])
-data.append((str(embedded),'die_shift_studio'))
+data.append(license_data)
 data.extend(collect_data_files('ezdxf'))
 data.extend((str(root/'die_shift_studio'/name),'die_shift_studio') for name in ('native_ops.py','klayout_worker.py','cuda_kernels.ptx'))
 binaries=collect_dynamic_libs('gdstk')

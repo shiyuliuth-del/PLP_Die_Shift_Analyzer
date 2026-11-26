@@ -1,23 +1,20 @@
-# Die Shift Analyze 管理员离线签发工具
+# Die Shift Analyze 与 RealDataAnalyse 离线签发
 
 ## 首次部署
 
-在 Windows 10/11 64 位电脑上解压 GitHub Release 的源码 ZIP。在源码根目录打开命令提示符，在已安装 `requirements.txt` 依赖的 Python 环境中运行 `BUILD.bat --admin-only`。构建完成后双击 `dist_admin/LicenseManager.exe`。单独构建签发工具无需正式公钥。
+1. 在 Windows 解压 Release 源码包。在已安装依赖的 Python 环境中双击根目录的 `LicenseManager_BUILD.bat`。签发工具可以先独立构建，无需公钥。完成后打开 `dist_admin\LicenseManager.exe`。
+2. 点「生成密钥对」，使用默认的 `%LOCALAPPDATA%\DieShiftLicenseManager\keys` 并设置私钥密码。工具生成加密私钥和 `public_key.pem`，并在签发工具目录生成管理员通用许可 `Universal.lic`。
+3. 双击根目录的 `BUILD.bat`，构建两个用户程序。脚本会自动读取默认目录的公钥。若更换了密钥目录或在另一台电脑构建，只把 `public_key.pem` 复制到 `BUILD.bat` 同目录，或设置 `DIE_SHIFT_LICENSE_PUBLIC_KEY`。环境变量优先，其次是源码根目录，最后是签发工具的默认密钥目录。
+4. 用户把管理员签发的 `.lic` 放到两个 EXE 所在的同一个目录。两个程序通过同一公钥验证，启动时自动读取这份许可。若授权窗口已打开，放入文件后点击「重新检查」。
 
-在 License Manager 中选择「生成密钥对」，选择独立目录并设置私钥密码。请保留加密的 `private_key.pem` 和备份，仅将 `public_key.pem` 交给构建人员。工具会在自身目录一次创建 `Universal.lic`。同一公钥的后续正式版本可反复导入此文件，使用者无需按机器重新签发。通用许可可激活任何能够读取有效硬件信息的电脑，须只保存在管理员目录。如果工具目录不可写，将程序放到管理员有写权限的目录后，用已生成的私钥打开「首次部署」功能。
-
-设置 `DIE_SHIFT_LICENSE_PUBLIC_KEY` 指向该公钥，或把公钥放到源码根目录并命名为 `public_key.pem`，运行 `BUILD.bat`。程序在 `dist`，管理员工具在 `dist_admin`。用户端只部署两个用户软件及其启动器。正式构建缺少公钥时会停止。后续版本使用同一个公钥。加密私钥、通用许可、授权历史和测试密钥都保留在发布目录之外。
+保留加密的私钥及其备份。发布时只需要内置公钥。通用许可可授权任何能够生成 Machine ID 的电脑，仅保存在管理员目录。首次生成时如果工具目录不可写，可以把工具移到管理员可写的目录，再用已有私钥打开「首次部署」入口。
 
 ## 日常签发
 
-用户提供一行 64 位 Machine ID。加载加密私钥后，输入姓名、工号和 Machine ID，点击「签发许可证」。V80 Windows 使用默认的 V2（UUID 和本机 IPv4）。旧版的 Machine ID 选 V1（UUID 和主板序列号）。IPv4 变化后，使用软件显示的新机器码重新签发逐机许可。已有的密钥和通用许可证可以继续使用。授权历史可搜索、重导出原文件、准备重签发、导出 CSV 或备份本地数据库。日期仅用于查阅授权记录。
+加载加密私钥，粘贴用户提供的一行 Machine ID，点击「签发许可证」。V81 沿用 V80 已验证的 Windows Machine ID。签发历史支持按授权编号或 Machine ID 检索、重新导出、准备重签、导出 CSV 和备份。
 
-默认数据目录为 `%LOCALAPPDATA%\DieShiftLicenseManager`，可在界面修改。密码只用于生成或解锁私钥。开发环境可在源码根目录运行 `python -m LicenseManager.main`。
+签发工具的默认数据目录为 `%LOCALAPPDATA%\DieShiftLicenseManager`。也可在源码根目录运行 `python -m LicenseManager.main` 直接打开工具。
 
 ## 离线构建
 
-用与目标 Windows Python 版本和架构一致的联网构建环境，执行 `python -m pip wheel -r requirements.txt -w wheels`。把 wheel 文件复制到离线构建电脑，通过 `python -m pip install --no-index --find-links wheels -r requirements.txt` 安装后运行构建脚本。运行已构建的 EXE 无需另装 Python。
-
-## 保护边界
-
-这是面向普通复制行为的 Level 1 离线保护。PyInstaller 提供程序封装，Ed25519 验证许可证。硬件标识可能被仿造，客户端可以被逆向改动。授权绑定电脑，永久许可证无法远程撤销。通用许可证外流会失去逐机绑定的保护效果。
+在与目标电脑的 Python 版本和架构相同的联网 Windows 环境中执行 `python -m pip wheel -r requirements.txt -w wheels`。把 wheel 文件复制到离线电脑，通过 `python -m pip install --no-index --find-links wheels -r requirements.txt` 安装后运行构建脚本。也可设置 `DIE_SHIFT_PYTHON` 指向已安装依赖的解释器。运行已构建的 EXE 无需另装 Python。

@@ -759,6 +759,8 @@ class MainWindow(W.QMainWindow):
         if self.authorization is not None:
             dialog=LicenseDialog(self,self.authorization)
             run_dialog(dialog)
+            if dialog.authorization is not None and dialog.authorization.payload is not None:
+                self.authorization=dialog.authorization
             dialog.deleteLater()
 
     def load_view_settings(self):

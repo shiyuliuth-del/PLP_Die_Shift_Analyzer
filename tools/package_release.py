@@ -20,7 +20,7 @@ def check_source():
     with tempfile.TemporaryDirectory(prefix='die-shift-source-qa-') as name:
         stage=Path(name)
         selected=subprocess.check_output(['git','ls-files','-z','--','die_shift_studio','RealDataAnalyse','LicenseManager','cases','tests','tools','Jobs','examples',
-                   'main.py','die_shift_model.py','DieShiftAnalyze_RUN.bat','RealDataAnalyze_RUN.bat','BUILD.bat','requirements.txt','Die_Shift_Analyze.spec'],cwd=ROOT)
+                   'main.py','die_shift_model.py','DieShiftAnalyze_RUN.bat','RealDataAnalyze_RUN.bat','BUILD.bat','LicenseManager_BUILD.bat','requirements.txt','Die_Shift_Analyze.spec'],cwd=ROOT)
         for value in selected.split(b'\0'):
             if not value:continue
             relative=Path(os.fsdecode(value));dst=stage/relative;dst.parent.mkdir(parents=True,exist_ok=True)
@@ -50,7 +50,7 @@ def check_source():
              platform=sys.platform,verified_runtime_sha256=runtime_hash,gui_suites=len(gui),runs=records)
     (ROOT/'docs/package_verification.json').write_text(json.dumps(out,ensure_ascii=False,indent=2)+'\n',encoding='utf8')
 
-SOURCE_FILES={'main.py','DieShiftAnalyze_RUN.bat','RealDataAnalyze_RUN.bat','BUILD.bat','Die_Shift_Analyze.spec','requirements.txt'}
+SOURCE_FILES={'main.py','DieShiftAnalyze_RUN.bat','RealDataAnalyze_RUN.bat','BUILD.bat','LicenseManager_BUILD.bat','Die_Shift_Analyze.spec','requirements.txt'}
 
 def tagged_sources(ref):
     # Read Git objects so checkout EOL settings cannot change the tested ZIP.
