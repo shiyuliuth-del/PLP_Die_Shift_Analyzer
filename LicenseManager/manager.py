@@ -1,5 +1,6 @@
 """Offline signing and administrator history. Never imported by the user EXE."""
 from base64 import b64encode
+from contextlib import closing, contextmanager
 from datetime import datetime
 import csv
 import hashlib
@@ -76,8 +77,10 @@ class History:
         with self.connect() as conn:
             conn.execute('CREATE TABLE IF NOT EXISTS issuance (license_id TEXT PRIMARY KEY, user_name TEXT, employee_id TEXT, machine_id TEXT, issued TEXT, product_id TEXT, path TEXT, fingerprint TEXT, notes TEXT, content BLOB)')
 
+    @contextmanager
     def connect(self):
-        return sqlite3.connect(self.path)
+        with closing(sqlite3.connect(self.path)) as conn, conn:
+            yield conn
 
     def issue(self, key, user, employee, machine, notes, folder, *, universal=False):
         folder.mkdir(parents=True, exist_ok=True)
@@ -129,7 +132,7 @@ class History:
         with open(path,'xb'):
             pass
         try:
-            with self.connect() as source, sqlite3.connect(path) as destination:
+            with self.connect() as source, closing(sqlite3.connect(path)) as destination:
                 source.backup(destination)
         except sqlite3.Error:
             Path(path).unlink()

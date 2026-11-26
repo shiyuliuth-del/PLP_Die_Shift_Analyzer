@@ -201,7 +201,7 @@ class GeometryLifecycleTests(unittest.TestCase):
                 self.assertFalse(old.values.memory)
                 self.assertEqual(old.values['test'],dict(sample=1))
                 w.load_project(saved);wait()
-                self.assertEqual(w.dxf_source,str(source))
+                self.assertEqual(Path(w.dxf_source),source.resolve())
                 self.assertEqual(w.fields['line_width_um'].value(),69.)
                 self.assertEqual({key[1] for key in w.dxf_outline_artists},{'A','B','C'})
                 generic=folder/'arbitrary.dxf'
