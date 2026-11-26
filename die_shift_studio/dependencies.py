@@ -14,4 +14,8 @@ def verify():
     from .native_backend import backend
     return backend().info
 
-if __name__=='__main__':print(verify())
+if __name__=='__main__':
+    try:print(verify())
+    finally:
+        native=sys.modules.get(f'{__package__}.native_backend')
+        if native is not None:native.close()

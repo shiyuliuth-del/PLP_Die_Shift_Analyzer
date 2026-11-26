@@ -3,7 +3,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from die_shift_studio.license_core import LicenseError, PRODUCT, load_public_key, local_directory
+from die_shift_studio import __version__
+from die_shift_studio.license_core import BOARD_HWID, IPV4_HWID, LicenseError, PRODUCT, load_public_key, local_directory
 from die_shift_studio.qt_compat import QtCore, QtGui, QtWidgets as W, run_dialog, ACCEPTED
 from die_shift_studio.style import STYLE
 from LicenseManager.manager import History, FIELDS, fingerprint, generate, load_private, new_file, public_bytes
@@ -12,7 +13,7 @@ from LicenseManager.manager import History, FIELDS, fingerprint, generate, load_
 class Manager(W.QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('Die Shift Analyze · License Manager')
+        self.setWindowTitle(f'Die Shift Analyze {__version__} · License Manager')
         self.setStyleSheet(STYLE)
         self.resize(740, 510)
         self.home = local_directory('DieShiftLicenseManager')
@@ -26,6 +27,9 @@ class Manager(W.QWidget):
         self.name = W.QLineEdit()
         self.employee = W.QLineEdit()
         self.machine = W.QLineEdit()
+        self.version = W.QComboBox()
+        self.version.addItem('V2 · Windows IPv4（V80 起）', IPV4_HWID)
+        self.version.addItem('V1 · 主板序列号（旧版）', BOARD_HWID)
         self.notes = W.QLineEdit()
         layout = W.QFormLayout(self)
         layout.addRow(PRODUCT, W.QLabel('Permanent License'))
@@ -34,7 +38,7 @@ class Manager(W.QWidget):
         layout.addRow('私钥状态 / 指纹',self.key_status)
         layout.addRow(self.buttons(('生成密钥对',self.generate_key),('加载私钥',self.open_key),
                                    ('导出公钥',self.export_key),('校验公钥',self.check_key)))
-        for title,field in (('姓名',self.name),('工号',self.employee),('Machine ID',self.machine),('备注',self.notes)):
+        for title,field in (('姓名',self.name),('工号',self.employee),('Machine ID',self.machine),('机器码版本',self.version),('备注',self.notes)):
             layout.addRow(title,field)
         layout.addRow(self.buttons(('签发许可证',self.issue),('打开输出目录',self.open_folder),('授权历史',self.history)))
         layout.addRow(self.buttons(('首次部署：生成管理员通用许可证',self.issue_universal)))
@@ -114,7 +118,7 @@ class Manager(W.QWidget):
 
     def issue(self):
         path = History(Path(self.data.text())).issue(self.require_key(),self.name.text(),self.employee.text(),
-                        self.machine.text(),self.notes.text(),Path(self.output.text()))
+                        self.machine.text(),self.notes.text(),Path(self.output.text()),hwid_version=self.version.currentData())
         self.status.setText(f'已签发：{path}')
 
     def issue_universal(self):
@@ -144,7 +148,7 @@ class Manager(W.QWidget):
         query.setPlaceholderText('搜索姓名、工号或机器码')
         layout.addWidget(query)
         table = W.QTableWidget(0,len(FIELDS))
-        table.setHorizontalHeaderLabels(('授权编号','姓名','工号','机器码','签发日期','产品','文件','公钥指纹','备注'))
+        table.setHorizontalHeaderLabels(('授权编号','姓名','工号','机器码','签发日期','产品','文件','公钥指纹','备注','机器码版本'))
         table.setSelectionBehavior(W.QAbstractItemView.SelectionBehavior.SelectRows)
         table.setEditTriggers(W.QAbstractItemView.EditTrigger.NoEditTriggers)
         layout.addWidget(table)
@@ -153,7 +157,7 @@ class Manager(W.QWidget):
             table.setRowCount(len(rows))
             for i,row in enumerate(rows):
                 for j,value in enumerate(row):
-                    table.setItem(i,j,W.QTableWidgetItem(value))
+                    table.setItem(i,j,W.QTableWidgetItem(str(value)))
         def export(title, filename, filters, callback):
             path, _ = W.QFileDialog.getSaveFileName(dialog,title,str(Path(self.output.text())/filename),filters)
             if path:
@@ -170,6 +174,7 @@ class Manager(W.QWidget):
             if row[3]=='*':
                 raise LicenseError('通用许可请使用首次部署入口。')
             self.name.setText(row[1]);self.employee.setText(row[2]);self.machine.setText(row[3]);self.notes.setText(row[8])
+            self.version.setCurrentIndex(self.version.findData(int(row[9])))
             dialog.accept()
         layout.addLayout(self.buttons(('导出原许可证',reexport),('准备重新签发',reissue),
                         ('CSV',lambda:export('导出 CSV','licenses.csv','CSV (*.csv)',lambda p:history.export_csv(p,query.text()))),

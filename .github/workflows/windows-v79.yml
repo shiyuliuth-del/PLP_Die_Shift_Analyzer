@@ -1,4 +1,4 @@
-name: V79 Windows offline licensing and interface
+name: Windows offline licensing and packaging
 on:
   workflow_call:
     inputs:
@@ -11,6 +11,10 @@ jobs:
   validate:
     runs-on: windows-latest
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        component: ${{ fromJSON(inputs.client_only && '["client"]' || '["administrator","client"]') }}
     env:
       QT_QPA_PLATFORM: offscreen
       PYTHONPATH: '.;tests'
@@ -24,20 +28,23 @@ jobs:
         with:
           python-version: '3.13'
       - run: python -m pip install -r requirements.txt
-      - if: ${{ !inputs.client_only }}
-        run: python -m unittest -v test_v79 test_v78 test_v76 test_v59 test_branch_integration
+      - if: matrix.component == 'administrator'
+        run: python -m unittest -v test_v80_license test_v80_build test_v79.AuthorizationTests test_branch_integration
       - name: Build the standalone administrator tool
-        if: ${{ !inputs.client_only }}
+        if: matrix.component == 'administrator'
         run: cmd /c BUILD.bat --admin-only
       - uses: actions/upload-artifact@v4
-        if: ${{ !inputs.client_only }}
+        if: matrix.component == 'administrator'
         with:
           name: LicenseManager-windows
           path: dist_admin/LicenseManager.exe
           if-no-files-found: error
       - name: Verify missing-key preflight and build an isolated QA client
+        if: matrix.component == 'client'
         shell: pwsh
         run: |
+          cmd /c BUILD.bat *> missing-build-key.log
+          if ($LASTEXITCODE -eq 0 -or -not (Select-String -LiteralPath missing-build-key.log -Pattern 'Client build needs the formal Ed25519 public key' -SimpleMatch)) { throw 'BUILD.bat did not report its missing key before client packaging' }
           python -m PyInstaller --clean --noconfirm Die_Shift_Analyze.spec *> missing-key.log
           if ($LASTEXITCODE -eq 0 -or -not (Select-String -LiteralPath missing-key.log -Pattern 'Formal Ed25519 public key required' -SimpleMatch)) { throw 'Missing public key did not fail closed' }
           python tools/qa_license.py
@@ -52,9 +59,11 @@ jobs:
             Write-Warning 'Runner lacks valid CIM hardware identifiers. Real activation requires a supported computer.'
           }
       - uses: actions/upload-artifact@v4
+        if: matrix.component == 'client'
         with:
           name: licensing-validation
           path: |
             qa-hardware-status.txt
             qa-activated.json
             missing-key.log
+            missing-build-key.log

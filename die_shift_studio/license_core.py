@@ -1,8 +1,10 @@
 """Permanent offline license verification. Signing belongs to the admin tool."""
 from base64 import b64decode
 import binascii
+from dataclasses import dataclass
 import hashlib
 import hmac
+from ipaddress import IPv4Address
 import json
 import os
 from pathlib import Path
@@ -22,51 +24,122 @@ LIMIT = 16384
 MACHINE_ID = re.compile(r'[0-9A-F]{64}')
 INVALID_BOARD = {'TO BE FILLED BY O.E.M.','TO BE FILLED BY OEM','DEFAULT STRING','SYSTEM SERIAL NUMBER',
                  'UNKNOWN','NONE','NOT SPECIFIED','NOT APPLICABLE','N/A','NA','NULL','INVALID','NO SERIAL NUMBER'}
+BOARD_HWID = 1
+IPV4_HWID = 2
+HWID_VERSIONS = (BOARD_HWID, IPV4_HWID)
 
 
 class LicenseError(ValueError):
     pass
 
 
-def fingerprint(system_uuid, board_serial):
+def normalized_uuid(system_uuid):
     try:
         value = uuid.UUID(str(system_uuid).strip())
         if value.int in (0, 2**128-1):
             raise ValueError
     except (ValueError, AttributeError) as exc:
         raise LicenseError('电脑 UUID 无效，请联系管理员。') from exc
+    return str(value).upper()
+
+
+def fingerprint(system_uuid, board_serial):
+    system_uuid = normalized_uuid(system_uuid)
     board = board_serial.strip().upper() if isinstance(board_serial,str) else ''
     if not board or board in INVALID_BOARD or re.fullmatch(r'(0+|F+)', board):
         raise LicenseError('主板序列号无效，请联系管理员。')
     try:
-        raw=f'HWID_V1|UUID={str(value).upper()}|BOARD={board}'.encode('utf-8')
+        raw=f'HWID_V1|UUID={system_uuid}|BOARD={board}'.encode('utf-8')
     except UnicodeError as exc:
         raise LicenseError('主板序列号的字符无效。') from exc
     return hashlib.sha256(raw).hexdigest().upper()
 
 
-def machine_id():
+@dataclass(frozen=True)
+class MachineBindings:
+    version: int
+    codes: tuple[str, ...]
+
+    @property
+    def primary(self):
+        return self.codes[0] if self.codes else ''
+
+
+def _windows_cim(query):
+    program = Path(os.environ.get('SystemRoot', r'C:\Windows'))/'System32'/'WindowsPowerShell'/'v1.0'/'powershell.exe'
+    command = ("$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
+               "$u=@((Get-CimInstance Win32_ComputerSystemProduct).UUID);" + query)
+    try:
+        result = subprocess.run([str(program),'-NoProfile','-NonInteractive','-Command',command],
+                                capture_output=True, text=True, encoding='utf-8-sig', check=True,
+                                timeout=10, creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0x08000000))
+        value = json.loads(result.stdout)
+    except subprocess.TimeoutExpired as exc:
+        raise LicenseError('读取电脑授权信息超时。') from exc
+    except (OSError, subprocess.CalledProcessError, ValueError) as exc:
+        raise LicenseError('无法通过 Windows CIM 读取电脑授权信息。') from exc
+    ids = value.get('uuid') if isinstance(value, dict) else None
+    if not isinstance(ids, list) or len(ids) != 1 or not ids[0]:
+        raise LicenseError('无法读取唯一的电脑 UUID。')
+    return ids[0], value
+
+
+def _ipv4(value):
+    if not isinstance(value, str):
+        return None
+    try:
+        address = IPv4Address(value.strip())
+    except ValueError:
+        return None
+    if address.is_loopback or address.is_link_local or address.is_multicast or address.is_reserved or int(address)>>24==0:
+        return None
+    return address
+
+
+def ipv4_bindings(system_uuid, adapters):
+    system_uuid = normalized_uuid(system_uuid)
+    if not isinstance(adapters, list):
+        raise LicenseError('Windows 返回的本机 IPv4 信息无效。')
+    priorities = []
+    for adapter in adapters:
+        if not isinstance(adapter, dict):
+            continue
+        addresses, gateways = adapter.get('addresses'), adapter.get('gateways')
+        if not isinstance(addresses, list) or not isinstance(gateways, list):
+            continue
+        metric, index = adapter.get('metric'), adapter.get('index')
+        priority = (not any(_ipv4(gateway) for gateway in gateways),
+                    metric if type(metric) is int and metric >= 0 else 2**32,
+                    index if type(index) is int and index >= 0 else 2**32)
+        for address in addresses:
+            ip = _ipv4(address)
+            if ip is not None:
+                priorities.append((*priority, ip))
+    addresses = dict.fromkeys(row[-1] for row in sorted(priorities))
+    if not addresses:
+        raise LicenseError('未找到有效的本机 IPv4 地址。请连接局域网或为网卡分配 IPv4 地址。')
+    codes = tuple(hashlib.sha256(f'HWID_V2|UUID={system_uuid}|IPV4={ip}'.encode('ascii')).hexdigest().upper()
+                  for ip in addresses)
+    return MachineBindings(IPV4_HWID, codes)
+
+
+def windows_board_id():
+    system_uuid, value = _windows_cim("$b=@((Get-CimInstance Win32_BaseBoard).SerialNumber);"
+                                      "@{uuid=$u;board=$b}|ConvertTo-Json -Compress")
+    boards = value.get('board')
+    if not isinstance(boards, list) or len(boards) != 1 or not boards[0]:
+        raise LicenseError('无法读取旧版许可证所需的主板序列号。')
+    return fingerprint(system_uuid, boards[0])
+
+
+def machine_bindings():
     if sys.platform == 'win32':
-        program = Path(os.environ.get('SystemRoot', r'C:\Windows'))/'System32'/'WindowsPowerShell'/'v1.0'/'powershell.exe'
-        command = ("$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
-                   "$u=@((Get-CimInstance Win32_ComputerSystemProduct).UUID);"
-                   "$b=@((Get-CimInstance Win32_BaseBoard).SerialNumber);"
-                   "@{uuid=$u;board=$b}|ConvertTo-Json -Compress")
-        try:
-            result = subprocess.run([str(program),'-NoProfile','-NonInteractive','-Command',command],
-                                    capture_output=True, text=True, encoding='utf-8-sig', check=True,
-                                    timeout=10, creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0x08000000))
-            value = json.loads(result.stdout)
-            system_ids, boards = value['uuid'], value['board']
-        except subprocess.TimeoutExpired as exc:
-            raise LicenseError('读取电脑硬件信息超时。') from exc
-        except (OSError, subprocess.CalledProcessError, ValueError, KeyError, TypeError) as exc:
-            raise LicenseError('无法通过 Windows CIM 读取 UUID 或主板序列号。') from exc
-        if not isinstance(system_ids, list) or len(system_ids) != 1 or not system_ids[0]:
-            raise LicenseError('无法读取唯一的电脑 UUID。')
-        if not isinstance(boards, list) or len(boards) != 1 or not boards[0]:
-            raise LicenseError('无法读取唯一的主板序列号。')
-        return fingerprint(system_ids[0], boards[0])
+        # Read only local adapters. No DNS, remote IP lookup, or mainboard query.
+        system_uuid, value = _windows_cim(
+            '$n=@(Get-CimInstance Win32_NetworkAdapterConfiguration -Filter "IPEnabled = TRUE" | ForEach-Object {'
+            '@{addresses=@($_.IPAddress);gateways=@($_.DefaultIPGateway);metric=$_.IPConnectionMetric;index=$_.InterfaceIndex}});'
+            '@{uuid=$u;adapters=$n}|ConvertTo-Json -Compress -Depth 5')
+        return ipv4_bindings(system_uuid, value.get('adapters'))
 
     def dmi(name, description):
         try:
@@ -74,7 +147,11 @@ def machine_id():
         except (OSError, UnicodeError) as exc:
             raise LicenseError(f'无法读取{description}。') from exc
 
-    return fingerprint(dmi('product_uuid','电脑 UUID'), dmi('board_serial','主板序列号'))
+    return MachineBindings(BOARD_HWID,(fingerprint(dmi('product_uuid','电脑 UUID'), dmi('board_serial','主板序列号')),))
+
+
+def machine_id():
+    return machine_bindings().primary
 
 
 def canonical(payload):
@@ -102,6 +179,16 @@ def embedded_public_key():
         raise LicenseError('软件缺少正式授权公钥，请联系管理员。') from exc
 
 
+def build_public_key(root):
+    path = Path(os.environ.get('DIE_SHIFT_LICENSE_PUBLIC_KEY') or Path(root)/'public_key.pem').expanduser()
+    try:
+        return load_public_key(path.read_bytes())
+    except FileNotFoundError as exc:
+        raise LicenseError('Formal Ed25519 public key required. Set DIE_SHIFT_LICENSE_PUBLIC_KEY or provide public_key.pem.') from exc
+    except OSError as exc:
+        raise LicenseError(f'无法读取构建公钥：{path}') from exc
+
+
 def local_directory(name):
     if sys.platform == 'win32':
         base = Path(os.environ.get('LOCALAPPDATA') or Path.home()/'AppData'/'Local')
@@ -123,7 +210,7 @@ def _unique(pairs):
     return result
 
 
-def verify(content, key, current_machine):
+def verify(content, key, bindings, *, legacy_board_id=None, binding_error=''):
     if len(content) > LIMIT:
         raise LicenseError('许可证文件过大。')
     try:
@@ -151,7 +238,8 @@ def verify(content, key, current_machine):
         key.verify(decoded, canonical(payload))
     except (InvalidSignature, UnicodeError) as exc:
         raise LicenseError('许可证数字签名无效。') from exc
-    if payload['schema_version'] != 1 or payload['hwid_version'] != 1:
+    version = payload['hwid_version']
+    if payload['schema_version'] != 1 or version not in HWID_VERSIONS:
         raise LicenseError('许可证协议版本不受支持。')
     if payload['product_id'] != PRODUCT:
         raise LicenseError('许可证不适用于此软件。')
@@ -160,9 +248,18 @@ def verify(content, key, current_machine):
     except ValueError as exc:
         raise LicenseError('许可证授权编号无效。') from exc
     bound = payload['machine_id']
-    if not MACHINE_ID.fullmatch(current_machine):
-        raise LicenseError('本机硬件信息无效。')
-    if bound != '*' and (not MACHINE_ID.fullmatch(bound) or not hmac.compare_digest(bound,current_machine)):
+    if bound != '*' and not MACHINE_ID.fullmatch(bound):
+        raise LicenseError('许可证机器码无效。')
+    if isinstance(bindings, str):
+        bindings = MachineBindings(BOARD_HWID, (bindings,))
+    codes = tuple(code for code in bindings.codes if MACHINE_ID.fullmatch(code))
+    if bound == '*' and codes:
+        return payload
+    if version != bindings.version or not codes:
+        codes = (legacy_board_id(),) if version == BOARD_HWID and legacy_board_id is not None else ()
+    if not codes:
+        raise LicenseError(binding_error or '本机无法生成此版本许可证所需的 Machine ID。')
+    if bound != '*' and not any(hmac.compare_digest(bound, code) for code in codes):
         raise LicenseError('许可证不适用于此电脑。')
     return payload
 
@@ -196,25 +293,53 @@ def store_license(path, content):
 
 
 class Authorization:
-    def __init__(self, current_machine, key, path):
-        self.machine_id = current_machine
+    def __init__(self, bindings, key, path, *, legacy_board_id=None, binding_error=''):
+        self.bindings = MachineBindings(BOARD_HWID, (bindings,)) if isinstance(bindings,str) else bindings
         self.key = key
         self.path = path
         self.payload = None
+        self.legacy_board_id = legacy_board_id
+        self.binding_error = binding_error
+
+    @property
+    def machine_id(self):
+        return self.bindings.primary
+
+    def _verify(self, content):
+        return verify(content, self.key, self.bindings,
+                      legacy_board_id=self.legacy_board_id, binding_error=self.binding_error)
 
     def check(self):
-        self.payload = verify(read_license(self.path), self.key, self.machine_id)
+        self.payload = self._verify(read_license(self.path))
         return self.payload
 
     def activate(self, path):
         content = read_license(path)
-        payload = verify(content, self.key, self.machine_id)
+        payload = self._verify(content)
         store_license(self.path, content)
         self.payload = payload
         return payload
 
 
+def local_authorization():
+    key = embedded_public_key()
+    windows = sys.platform == 'win32'
+    legacy = windows_board_id if windows else None
+    error = ''
+    try:
+        bindings = machine_bindings()
+    except LicenseError as exc:
+        bindings = MachineBindings(IPV4_HWID if windows else BOARD_HWID, ())
+        error = str(exc)
+    return Authorization(bindings,key,license_path(),legacy_board_id=legacy,binding_error=error)
+
+
 def installed_authorization():
-    state=Authorization(machine_id(),embedded_public_key(),license_path())
+    state=local_authorization()
     state.check()
     return state
+
+
+if __name__=='__main__':
+    try:build_public_key(Path(__file__).resolve().parent.parent)
+    except LicenseError as exc:raise SystemExit(str(exc)) from exc

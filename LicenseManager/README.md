@@ -2,7 +2,7 @@
 
 ## 首次部署
 
-在 Windows 构建电脑已安装根目录 `requirements.txt` 的环境中运行 `BUILD.bat --admin-only`。将 `dist_admin/LicenseManager.exe` 单独交给管理员，可在未安装 Python 的 Windows 10/11 电脑上离线运行。管理员目录不随用户端部署。
+在 Windows 10/11 64 位电脑上解压 GitHub Release 的签发工具 ZIP，双击 `LicenseManager/LicenseManager.exe`。已构建版本可离线运行，无需安装 Python。使用源码时，在已安装根目录 `requirements.txt` 的环境中运行 `BUILD.bat --admin-only`，工具输出至 `dist_admin/LicenseManager.exe`。管理员目录单独部署。
 
 在 License Manager 中选择「生成密钥对」，选择独立目录并设置私钥密码。请保留加密的 `private_key.pem` 和备份，仅将 `public_key.pem` 交给构建人员。工具会在自身目录一次创建 `Universal.lic`。同一公钥的后续正式版本可反复导入此文件，使用者无需按机器重新签发。通用许可可激活任何能够读取有效硬件信息的电脑，须只保存在管理员目录。如果工具目录不可写，将程序放到管理员有写权限的目录后，用已生成的私钥打开「首次部署」功能。
 
@@ -10,7 +10,7 @@
 
 ## 日常签发
 
-用户提供一行 64 位 Machine ID。加载加密私钥后，输入姓名、工号和 Machine ID，点击「签发许可证」。只需把该用户的 `.lic` 文件发给用户。授权历史可搜索、重导出原文件、准备重签发、导出 CSV 或备份本地数据库。日期仅用于查阅授权记录。
+用户提供一行 64 位 Machine ID。加载加密私钥后，输入姓名、工号和 Machine ID，点击「签发许可证」。V80 Windows 使用默认的 V2（UUID 和本机 IPv4）。旧版的 Machine ID 选 V1（UUID 和主板序列号）。IPv4 变化后，使用软件显示的新机器码重新签发逐机许可。已有的密钥和通用许可证可以继续使用。授权历史可搜索、重导出原文件、准备重签发、导出 CSV 或备份本地数据库。日期仅用于查阅授权记录。
 
 默认数据目录为 `%LOCALAPPDATA%\DieShiftLicenseManager`，可在界面修改。密码只用于生成或解锁私钥。开发环境可在源码根目录运行 `python -m LicenseManager.main`。
 
