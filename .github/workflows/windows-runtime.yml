@@ -197,6 +197,9 @@ jobs:
           $expand = Join-Path $env:RUNNER_TEMP "目标 Windows"
           Expand-Archive -LiteralPath $zip.FullName -DestinationPath $expand
           $source = Join-Path $expand $zip.BaseName
+          & $py tools/qa_license.py
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path qa-hardware-valid)) { throw 'Windows runner did not provide a valid QA hardware binding' }
+          Copy-Item public_key.pem "$source\public_key.pem"
           "DSA_TEST_SOURCE=$source" >> $env:GITHUB_ENV
           "DIE_SHIFT_PYTHON=$py" >> $env:GITHUB_ENV
       - name: Verify ordered plans, output isolation and bounded IPC conversation

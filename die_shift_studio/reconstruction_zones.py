@@ -29,6 +29,33 @@ def expand(r,entries):
     deleted_set=set(r.settings.reconstruction_deleted)
     stored_intervals={row[:5] for row in r.settings.reconstruction_intervals}
     boxes=r.ordered_source_boxes
+    pair_candidates=defaultdict(list)
+    pair_count=r.settings.reconstruction_two_moving_zones
+    for entry in entries:
+        if entry.get('paired_vias') and entry['plan'] is not None:
+            pair_candidates[entry['layer'],entry['index']].append(entry)
+    suppressed=set();extra_partitions={}
+    for peers in pair_candidates.values():
+        if pair_count==0:
+            suppressed.update(id(entry) for entry in peers)
+            continue
+        if pair_count==2 or len(peers)!=2:continue
+        preferred=sorted(peers,key=lambda e:(-(e['plan'].nominal_second-e['plan'].nominal_first),key(e['plan'])))
+        if pair_count==1:
+            if key(preferred[0]['plan']) in deleted_set:preferred.reverse()
+            suppressed.add(id(preferred[1]))
+        else:
+            for candidate in preferred:
+                plan=candidate['plan'];a,b=plan.nominal_first,plan.nominal_second
+                gap=max(plan.tolerance*32,(b-a)*.05)
+                for fraction in (.5,.4,.6,.3,.7):
+                    middle=a+(b-a)*fraction
+                    left=apply_angles(r.settings,plan,plan.partition(a,middle-gap))
+                    right=apply_angles(r.settings,plan,plan.partition(middle+gap,b))
+                    if left is not None and right is not None and left['b']+r.tol<right['a']:
+                        extra_partitions[id(candidate)]=(left,right)
+                        break
+                if id(candidate) in extra_partitions:break
     by_source=defaultdict(list)
     for entry in entries:
         ref=(entry['layer'],entry['index'])
@@ -173,10 +200,20 @@ def expand(r,entries):
             if not extras:
                 if key(plan) not in deleted_set:
                     part,manual=r._interval_without_boxes(entry)
-                    if part is not None:
+                    if id(original_entry) in extra_partitions and not applicable_boxes and not seed:
+                        left,right=extra_partitions[id(original_entry)]
+                        child=_clone_child(plan,plan.identity+'~auto3',right['a'],right['b'])
+                        if not manual:part=left
+                        if part is not None:
+                            rows.append(dict(entry,serial_part=part,merged_part=part,serial_explicit=manual,serial_base=plan.identity))
+                        if key(child) not in deleted_set:
+                            secondary,edited=r._interval_without_boxes(dict(entry,plan=child))
+                            if secondary is not None:
+                                rows.append(dict(entry,plan=child,serial_part=secondary,merged_part=secondary,serial_explicit=edited,serial_base=plan.identity))
+                    elif part is not None and (manual or id(original_entry) not in suppressed):
                         local=dict(entry,serial_part=part,merged_part=part,serial_explicit=manual)
                         rows.append(local)
-                    elif not applicable_boxes:
+                    elif part is None and not applicable_boxes and id(original_entry) not in suppressed:
                         rows.append(entry)
             else:
                 base,_=r._interval_without_boxes(entry)

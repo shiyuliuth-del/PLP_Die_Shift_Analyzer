@@ -9,3 +9,5 @@ Pillow
 PyInstaller
 klayout
 openpyxl
+cryptography
+ezdxf

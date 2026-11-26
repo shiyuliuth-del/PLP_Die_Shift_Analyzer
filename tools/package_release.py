@@ -19,7 +19,7 @@ def check_source():
     records=[]
     with tempfile.TemporaryDirectory(prefix='die-shift-source-qa-') as name:
         stage=Path(name)
-        selected=subprocess.check_output(['git','ls-files','-z','--','die_shift_studio','RealDataAnalyse','cases','tests','tools','Jobs','examples',
+        selected=subprocess.check_output(['git','ls-files','-z','--','die_shift_studio','RealDataAnalyse','LicenseManager','cases','tests','tools','Jobs','examples',
                    'main.py','die_shift_model.py','DieShiftAnalyze_RUN.bat','RealDataAnalyze_RUN.bat','BUILD.bat','requirements.txt','Die_Shift_Analyze.spec'],cwd=ROOT)
         for value in selected.split(b'\0'):
             if not value:continue
@@ -61,16 +61,17 @@ def tagged_sources(ref):
     kernels={'die_shift_studio/cuda_kernels.cu','die_shift_studio/cuda_kernels.ptx'}
     root_files={name for name in files if '/' not in name}
     client_files={'RealDataAnalyse/'+n for n in ('__init__.py','main.py','gui.py','excel.py','measurements.py','runner.py','storage.py','transport.py','projects.py','conversation.py','instances.py','plans.py','plan_ui.py','widgets.py','RealDataAnalyse.spec','requirements.txt','README.md')}
+    admin_files={'LicenseManager/'+n for n in ('main.py','manager.py','LicenseManager.spec','README.md')}
     from RealDataAnalyse.projects import GD55_INPUTS, GD55_1119_INPUTS, SH22_INPUTS
     case_files={f'Jobs/{folder}/{name}' for folder, inputs in
                 (('GD55',GD55_INPUTS),('GD55_1119',GD55_1119_INPUTS),('SH22',SH22_INPUTS)) for name in inputs}
     if root_files!=SOURCE_FILES or any(
-            name not in SOURCE_FILES|kernels|client_files|case_files and not (name.startswith('die_shift_studio/') and name.endswith('.py'))
+            name not in SOURCE_FILES|kernels|client_files|case_files|admin_files and not (name.startswith('die_shift_studio/') and name.endswith('.py'))
             for name in files):
         raise ValueError('The source export must contain only both applications, build recipes and the explicitly requested GD55 case.')
     required={'die_shift_studio/__init__.py','die_shift_studio/gui.py','die_shift_studio/app_icon.py',
               'die_shift_studio/native_ops.py','die_shift_studio/klayout_worker.py'}
-    if not (required|kernels|client_files|case_files).issubset(files):raise ValueError('A required runtime module or GD55 case is missing')
+    if not (required|kernels|client_files|case_files|admin_files).issubset(files):raise ValueError('A required runtime module or GD55 case is missing')
     return files
 
 def make_source(out):

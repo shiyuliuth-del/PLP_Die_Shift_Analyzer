@@ -184,13 +184,15 @@ class NoWheelValues(QtCore.QObject):
 
 
 class MainWindow(W.QMainWindow):
-    def __init__(self,jobs_dir=None,*,measured=False):
+    def __init__(self,jobs_dir=None,*,measured=False,authorization=None):
         super().__init__();self.setWindowTitle(f'Die Shift Analyze {__version__}')
         from .app_icon import window_icon
         self.setWindowIcon(window_icon())
         self.setAttribute(getattr(Qt,'WidgetAttribute',Qt).WA_DeleteOnClose)
         self.jobs_dir=Path(jobs_dir) if jobs_dir is not None else installation_root()/'Jobs'
         self.jobs_dir.mkdir(parents=True,exist_ok=True)
+        self.authorization=authorization
+        self.dxf_source='';self.dxf_layer_names={};self.dxf_outlines=();self.dxf_outline_artists={}
         self.wheel_filter=NoWheelValues(self);W.QApplication.instance().installEventFilter(self.wheel_filter)
         self.resize(1540,1000);self.setMinimumSize(1120,740);self.setStyleSheet(STYLE)
         self.remote_locked=False;self.data=None;self.result=None;self.case=None;self.worker=None;self.project_path=None
@@ -308,12 +310,14 @@ class MainWindow(W.QMainWindow):
         self.task_control=TaskControl(self,header)
         self.job_combo=W.QComboBox();self.job_combo.setMinimumWidth(100);self.job_combo.setMaximumWidth(220)
         self.job_combo.setToolTip('Jobs工程；空白项表示未命名的新工程');self.job_combo.currentIndexChanged.connect(self.job_selected);header.addWidget(self.job_combo)
+        self.job_combo.activated.connect(lambda index:self.reset_project() if index==0 and self.data is not None else None)
         self.save_button=W.QPushButton('保存工程');self.save_button.clicked.connect(self.save_project);header.addWidget(self.save_button)
         self.runtime_toggle=W.QCheckBox('运行信息');header.addWidget(self.runtime_toggle)
         for widget in (self.progress,self.task_control.button,self.job_combo,self.save_button,self.runtime_toggle):
             widget.setFixedHeight(24);widget.setStyleSheet(widget.styleSheet()+'padding:1px 3px;font-size:11px;')
-        split=W.QSplitter(HORIZONTAL);root.addWidget(split,1)
-        left=W.QWidget();left.setMinimumWidth(410);left.setMaximumWidth(530);lay=W.QVBoxLayout(left);lay.setContentsMargins(0,0,0,0)
+        split=W.QSplitter(HORIZONTAL);split.setChildrenCollapsible(False);root.addWidget(split,1)
+        self.workspace_split=split
+        left=W.QWidget();left.setMinimumWidth(160);lay=W.QVBoxLayout(left);lay.setContentsMargins(0,0,0,0)
         self.controls=W.QTabWidget();lay.addWidget(self.controls,1)
         page=self._page('偏移')
         self.gds_label=W.QLineEdit();self.gds_label.setReadOnly(True);self.gds_label.setPlaceholderText('尚未打开GDS/OAS');self.gds_label.setFixedHeight(25);page.addWidget(self.gds_label)
@@ -369,7 +373,10 @@ class MainWindow(W.QMainWindow):
         self.regions_dxf_button.clicked.connect(lambda:export_dxf(self,regions=True))
         self.regions_import_button.clicked.connect(lambda:import_regions(self))
         self.run_button=W.QPushButton('方案评估');self.run_button.setObjectName('Primary');self.run_button.clicked.connect(lambda:self.run_evaluation());lay.addWidget(self.run_button);split.addWidget(left)
-        self.tabs=W.QTabWidget();self.tabs.setCornerWidget(self.header_widget);split.addWidget(self.tabs);split.setSizes([445,1095])
+        self.tabs=W.QTabWidget();self.tabs.setCornerWidget(self.header_widget)
+        right=W.QScrollArea();right.setFrameShape(getattr(W.QFrame,'Shape',W.QFrame).NoFrame)
+        right.setWidgetResizable(True);right.setWidget(self.tabs);right.setMinimumWidth(180);split.addWidget(right)
+        split.setStretchFactor(0,0);split.setStretchFactor(1,1);split.setSizes([445,1095])
         self.figure=Figure(figsize=(9,5));self.figure.subplots_adjust(left=.043,right=.993,bottom=.095,top=.99);self.canvas=FigureCanvasQTAgg(self.figure);self.ax=self.figure.add_subplot(111)
         page=W.QWidget();v=W.QVBoxLayout(page);v.setContentsMargins(0,0,0,0);self.toolbar=NavigationToolbar2QT(self.canvas,self)
         from .width_yield_display import WidthYieldDisplay
@@ -494,6 +501,11 @@ class MainWindow(W.QMainWindow):
         def group(title):
             return self.collapsible(page,title,self.setting_sections)[2]
         general=group('通用')
+        authorization=group('授权管理')
+        license_info=W.QPushButton('查看授权 / 导入许可证')
+        license_info.setEnabled(self.authorization is not None)
+        license_info.clicked.connect(self.show_license)
+        authorization.addRow(license_info)
         scale=W.QComboBox()
         for percent in UI_SCALE_LEVELS:scale.addItem(f'{percent}%',percent)
         scale.setAccessibleName('界面缩放级别')
@@ -672,6 +684,8 @@ class MainWindow(W.QMainWindow):
 
         choices['reconstruction_style']=[('直线','linear'),('一阶','c1'),('二阶','c2'),('圆弧','arc')]
         choice(recon,'reconstruction_style','连接样式')
+        count=spin(recon,'reconstruction_two_moving_zones','两侧运动的动区生成数量',0,3)
+        count.setToolTip('两端均连接运动过孔时自动生成的动区数量。0 关闭该类自动生成，手动动区仍可应用。')
         choices['reconstruction_boundary_mode']=[('垂直','perpendicular'),('重构区优先','wide'),('两侧平均','balanced')]
         choice(recon,'reconstruction_boundary_mode','边界角度')
         moving_pad=W.QCheckBox('允许运动孔盘随动');self.setting_fields['reconstruction_allow_moving_pad']=moving_pad
@@ -740,6 +754,13 @@ class MainWindow(W.QMainWindow):
             combo.setCurrentIndex(max(0,combo.findData(self.view_settings.acceleration)));combo.blockSignals(False)
         def finished():self.hardware_worker=None;worker.deleteLater()
         worker.done.connect(accepted);worker.finished.connect(finished);worker.start()
+    def show_license(self):
+        from .license_ui import LicenseDialog
+        if self.authorization is not None:
+            dialog=LicenseDialog(self,self.authorization)
+            run_dialog(dialog)
+            dialog.deleteLater()
+
     def load_view_settings(self):
         from .resources import configure_limits
         configure_limits(self.view_settings.max_threads,self.view_settings.max_memory_mb)
@@ -1076,7 +1097,10 @@ class MainWindow(W.QMainWindow):
         self.stop_animation();self._prepared_motion=None;self._prepared_package=None
         self.cancel_previews()
         if self.motion_worker:self.motion_worker.cancelled.set()
-        if self.cache_group.key!=key:self.parked_groups.append(self.cache_group)
+        if self.cache_group.key!=key:
+            self.parked_groups.append(self.cache_group)
+            self.width_yield.reset();self.reconstruction_yield.reset()
+            self._clear_native_when_idle=True
         self._attach_cache_group(key,count);self.cleanup_retired_sessions();self.refresh_cache_status()
     def reset_session_cache(self):
         self._coupled_key=None;self._coupled_data=None
@@ -1125,11 +1149,9 @@ class MainWindow(W.QMainWindow):
             reachable_enclosure.cache_clear()
             from .reconstruction_ownership import divide
             divide.cache_clear();self.reconstruction_yield.plan_pool.clear();self.reconstruction_yield.factor_pool.clear();self.reconstruction_yield.geometry_pool.clear();self.constraint_feedback.context=None
-        for group_ in self.parked_groups:
+        for group_ in dict.fromkeys(self.parked_groups):
             if group_ is self.cache_group:continue
-            group_.park_frames()
-            for engine in group_.engines.values():
-                for deformer in engine.deformers.values():deformer.release_workers()
+            group_.park()
         self.parked_groups.clear()
     def assessment_identity(self,data,roles,order,p,settings):
         from .session_cache import logical_fingerprint
@@ -1301,7 +1323,12 @@ class MainWindow(W.QMainWindow):
             self.dxf_settings=DxfSettings.from_dict(project.get('dxf_options'));restore_dxf_controls(self)
             from .layout_export import restore_controls
             restore_controls(self,project.get('layout_output'))
-            self.data=data;self.gds_label.setText(str(Path(data.path).resolve()));self.gds_label.setToolTip(str(Path(data.path).resolve()))
+            self.data=data
+            self.dxf_source=project.get('dxf_source','')
+            self.dxf_layer_names=project.get('dxf_layer_names',{})
+            self.dxf_outlines=project.get('dxf_outlines',())
+            location=self.dxf_source or str(Path(data.path).resolve())
+            self.gds_label.setText(location);self.gds_label.setToolTip(location)
             view=project.get('extreme_view',{'mode':'risk','page':1})
             self.grid_mode.blockSignals(True);self.grid_mode.setCurrentIndex(self.grid_mode.findData(view['mode']));self.grid_mode.blockSignals(False)
             self.problem_filter.blockSignals(True);self.problem_filter.setCurrentIndex({'all':0,'drc':1,'failed':2}[view['filter_mode']]);self.problem_filter.blockSignals(False)
@@ -1334,7 +1361,9 @@ class MainWindow(W.QMainWindow):
                 check.toggled.connect(lambda checked,k=key:self.visibility_changed(k));self.visible_boxes[key]=check;self.layer_table.setCellWidget(i,0,check)
                 sel=LayerCheckBox();sel.setChecked(saved_sel.get(key,role=='固定RDL'))
                 sel.toggled.connect(lambda checked,k=key:self.selectability_changed(k));self.selectable_boxes[key]=sel;self.layer_table.setCellWidget(i,1,sel)
-                self.layer_table.setItem(i,2,W.QTableWidgetItem(key))
+                layer_item=W.QTableWidgetItem(key)
+                layer_item.setToolTip(self.dxf_layer_names.get(key,key))
+                self.layer_table.setItem(i,2,layer_item)
                 box=W.QComboBox();box.addItems(ROLES);box.setCurrentText(role)
                 self.role_boxes[key]=box;self.layer_table.setCellWidget(i,3,box)
                 box.currentTextChanged.connect(lambda _,k=key:self.role_changed(k))
@@ -1372,6 +1401,11 @@ class MainWindow(W.QMainWindow):
         finally:self._restoring_project=False
         if restored:return
         remembered=self.cache_group.last_assessment
+        if remembered is None:
+            last_key=self.session_values.get('parked-assessment-key')
+            assessment=self.session_values.get(last_key) if last_key is not None else None
+            if assessment is not None:
+                remembered=(last_key,dict(assessment,motions=self.motions(),view_settings=asdict(self.view_settings)))
         if remembered is not None:
             key=self.assessment_identity(data,self.roles(),self.ordered_layers(),self.params(),self.view_settings)
             if remembered[0]==key:self.display_result(remembered[1]);self.log_bus.emit('已恢复本次运行中此工程的评估缓存')
@@ -1446,12 +1480,19 @@ class MainWindow(W.QMainWindow):
         for artist in list(self.ax.collections)+list(self.ax.texts)+list(self.ax.patches)+list(self.ax.lines):artist.remove()
         if hasattr(self,'scene_renderer'):
             self.scene_renderer.external_draw(None);self.scene_renderer.static_cache.clear();self.scene_renderer.pending_key=None
-        self.replacement_artists={};self.layer_artists={};self.die_labels=[];self.issue_artists=[];self.shift_artist=None;self.failure_artist=None;self._artist_frame=None;self.invalid_artists=[]
+        self.replacement_artists={};self.layer_artists={};self.dxf_outline_artists={};self.die_labels=[];self.issue_artists=[];self.shift_artist=None;self.failure_artist=None;self._artist_frame=None;self.invalid_artists=[]
         for artist in self.probability_artists:
             if artist.axes is not None:artist.remove()
         self.probability_artists=[];self.probability_stamp=None;self.zone_artists=[]
         if self.legend is not None:self.legend.remove();self.legend=None
         self.space_stamp=None
+        self._path_frame=None;self._path_cache={};self._contact_ranges=None
+        self.viewport_index=None;self._viewport_stamp=None
+        if hasattr(self,'reconstruction_overlay'):self.reconstruction_overlay.release_artwork()
+        if hasattr(self,'width_overlay'):
+            self.width_overlay.rows=[];self.width_overlay.tree=None;self.width_overlay.selected=None
+            self.width_overlay.labels=[];self.width_overlay.barriers=self.width_overlay.boxes=self.width_overlay.outlines=None
+        if hasattr(self,'drc_overlay'):self.drc_overlay.area=self.drc_overlay.points=self.drc_overlay.links=None
         self._default_view=None
     def set_view(self,center,width,height):
         ratio=max(1,self.ax.bbox.width)/max(1,self.ax.bbox.height)
@@ -2109,6 +2150,7 @@ class MainWindow(W.QMainWindow):
             self.shift_artist.set_segments(self.connector_segments);self.shift_artist._connector_data=self.connector_segments
         self.draw_contact_ranges();self.fill_issues()
         self.drc_overlay.draw()
+        self.draw_imported_outlines()
         self.draw_probability();self.draw_space()
         self.footprint_overlay.draw()
         if hasattr(self,'reconstruction_overlay'):self.reconstruction_overlay.draw()
@@ -2127,7 +2169,7 @@ class MainWindow(W.QMainWindow):
             for i,key in enumerate(self._layer_keys):
                 sty=self.style_for(key);item=self.layer_table.item(i,2)
                 if item:
-                    background=QtGui.QColor(sty['color']).lighter(125);item.setForeground(QtGui.QColor('#ffffff' if background.lightnessF()<.55 else '#33465a'));item.setBackground(background);item.setToolTip(sty['label'])
+                    background=QtGui.QColor(sty['color']).lighter(125);item.setForeground(QtGui.QColor('#ffffff' if background.lightnessF()<.55 else '#33465a'));item.setBackground(background);item.setToolTip(self.dxf_layer_names.get(key,sty['label']))
                 self.role_boxes[key].setToolTip(roles[key])
         if hasattr(self,'selection'):self.selection.draw(redraw=False)
         if hasattr(self,'mouse_die'):self.mouse_die.update_text()
@@ -2135,6 +2177,21 @@ class MainWindow(W.QMainWindow):
         draw_diagnostic(self)
         if hasattr(self,'rulers'):self.rulers.draw(redraw=False)
         self.render_scene()
+    def draw_imported_outlines(self):
+        if self.dxf_outlines and not self.dxf_outline_artists:
+            from collections import defaultdict
+            paths=defaultdict(list)
+            for layer,kind,vertices in self.dxf_outlines:
+                paths[layer,kind].append(vertices)
+            for (layer,kind),segments in paths.items():
+                color={'A':'#468d80','B':'#6a7890','C':'#ca883c'}[kind]
+                artist=LineCollection(segments,colors=color,linewidths=.85,zorder=4)
+                self.ax.add_collection(artist,autolim=False);self.dxf_outline_artists[layer,kind]=artist
+        nominal=self.current_frame is None or not np.any(self.current_frame['states'])
+        live=self.reconstruction_toggle.isChecked() and (self.current_frame or {}).get('reconstruction')
+        for (key,_),artist in self.dxf_outline_artists.items():
+            artist.set_visible(bool(nominal and not live and key in self.visible_boxes and self.visible_boxes[key].isChecked()))
+
     def render_scene(self):
         if hasattr(self,'scene_renderer'):
             key=(tuple(self.ax.get_xlim()),tuple(self.ax.get_ylim()),tuple(self.ax.bbox.bounds),self._legend_stamp,self.space_stamp,
@@ -3149,7 +3206,53 @@ class MainWindow(W.QMainWindow):
     def job_selected(self,index):
         path=self.job_combo.itemData(index)
         if path:self.load_project(path)
-        else:self.project_path=None;self.statusBar().showMessage('当前为未命名工程，保存时输入名称')
+        else:self.reset_project()
+
+    def reset_project(self):
+        self.stop_animation();self.exit_region_mode();self.coverage_timer.stop()
+        self._coverage_pending=False;self._evaluation_requested=False
+        self.revision+=1;self._project_cache_root=None
+        defaults=ViewSettings(reconstruction_auto=False,evaluation_scope='risk')
+        self.switch_project_cache('empty',defaults.cache_max_entries)
+        self.loading=True
+        try:
+            self.data=self.case=self.project_path=self.geometry_cache=self.connections=None
+            self.view_settings=defaults;self.layer_styles={};self.auto_values={};self.stage_hints={}
+            self.dxf_source='';self.dxf_layer_names={};self.dxf_outlines=()
+            self.ignored_drc={};self._waiver_cache=None;self.ignored_width_lines=frozenset();self.apd_options={};self.dxf_directory=''
+            self.pending_deleted_shapes={};self.pending_restored_shapes={};self.pending_node_shapes={};self.pending_layout_ops=[]
+            self._staged_deletions=self._staged_restored_edits=self._staged_node_edits=None
+            self._reconstruction_edit=None;self._applied_preview_settings=None
+            self.reconstruction_pending=False;self._reconstruction_apply_once=False
+            self._initial_extreme_page=0;self.issue_page=0
+            self.layer_drag.end_drag();self.layer_table.setRowCount(0)
+            self._layer_keys=[];self.role_boxes={};self.visible_boxes={};self.selectable_boxes={};self.compensation_boxes={}
+            self.gds_label.clear();self.gds_label.setToolTip('');self.top.clear()
+            parameters=Parameters()
+            for key,field in self.fields.items():field.setValue(getattr(parameters,key))
+            self.reference_nsigma=parameters.reference_nsigma
+            self.target_sigma.setCurrentText(f'{parameters.target_nsigma:g}')
+            self.fixed_assignment=parameters.fixed_via_assignment
+            self.pivot_editor.setValue([parameters.rotation_center,parameters.rotation_x_um,parameters.rotation_y_um])
+            self.per_die_values=[];self.per_die_pivots=[];self._per_die_initialized=False
+            self.per_die_toggle.setChecked(False);self.per_die_changed()
+            self.manual_preview.hide();self.manual_preview.restore_fields(None)
+            self.grid_mode.setCurrentIndex(self.grid_mode.findData(defaults.evaluation_scope))
+            self.problem_filter.setCurrentIndex(1)
+            for name,value in project_overlays({}).items():
+                button=self.overlay_widget(name);old=button.blockSignals(True);button.setChecked(value and not self.remote_locked);button.blockSignals(old)
+            from .dxf_settings import DxfSettings
+            from .dxf_controls import restore as restore_dxf
+            from .layout_export import restore_controls
+            self.dxf_settings=DxfSettings();restore_dxf(self);restore_controls(self,None)
+            if not self.remote_locked:self.measured_output.restore(None)
+            for header in self.setting_sections.values():header.setChecked(False)
+            for header in self.process_sections.values():header.setChecked(True)
+            self.load_view_settings();self.rulers.restore([])
+            self.drop_result();self.reset_plot()
+            self.ax.set_xlim(0,1);self.ax.set_ylim(0,1);self.canvas.draw_idle()
+        finally:self.loading=False
+        self.refresh_jobs();self.statusBar().showMessage('当前为未命名工程，尚未打开图纸')
     def save_project(self):
         if not self.data:self.error('请先输入GDS');return
         path=self.project_path
@@ -3168,6 +3271,7 @@ class MainWindow(W.QMainWindow):
         solver=None if getattr(self.engine,'busy',False) else getattr(self.engine,'reconstructor',None)
         settings=retire_pad_intervals(self.view_settings,solver)
         return dict(schema_version=5,app_version=__version__,rulers=self.rulers.rows,sha256=self.data.sha256,top_cell=self.data.top_name,
+                    dxf_source=self.dxf_source,dxf_layer_names=self.dxf_layer_names,dxf_outlines=list(self.dxf_outlines),
                     roles=self.roles(),parameters=asdict(self.params()),settings=asdict(settings),node_edits=list(self.data.node_edits),
                     deleted_shapes=list(self._effective_deleted_shapes()),
                     geometry_indexing=getattr(self.data,'geometry_indexing','legacy'),legacy_node_edits=list(getattr(self.data,'legacy_node_edits',[])),
@@ -3507,10 +3611,15 @@ class MainWindow(W.QMainWindow):
         self.runtime_capture.close();event.accept()
 
 
-def launch(project=None,measured=False,ipc_endpoint=None):
-    app=W.QApplication.instance() or W.QApplication([]);app.setApplicationName('Die Shift Analyze')
+def launch(project=None,measured=False,ipc_endpoint=None,*,authorization=None):
+    if authorization is None:
+        from .license_ui import require_activation
+        app,authorization=require_activation()
+        if authorization is None:return 1
+    else:app=W.QApplication.instance()
+    app.setApplicationName('Die Shift Analyze')
     startup_status={'failed':False}
-    window=MainWindow(measured=measured);window.requested_ipc_endpoint=ipc_endpoint;window.show()
+    window=MainWindow(measured=measured,authorization=authorization);window.requested_ipc_endpoint=ipc_endpoint;window.show()
     if measured:
         def startup_error(message):
             window.log_bus.emit(str(message),'ERROR');window._closing=True;startup_status['failed']=True

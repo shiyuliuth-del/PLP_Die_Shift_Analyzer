@@ -23,6 +23,7 @@ def normalize_display(values):
 class ViewSettings:
     max_undo_steps:int=10
     ui_scale_percent:int=100
+    reconstruction_two_moving_zones:int=1
     space_export_interval_um:float=100.
     from .drc_policy import ALL
     drc_checks:tuple=ALL
@@ -270,8 +271,8 @@ class ViewSettings:
                 'footprint_samples':(1,8),'space_resolution':(31,401),
                 'animation_fps':(10,120),'animation_speed':(1,5),'camera_speed':(1,5),'contact_box_budget':(128,32768),'animation_duration_ms':(80,3000),'animation_steps':(2,60),'probability_alpha':(.05,.95),'space_alpha':(.05,.95),'intrusion_alpha':(.05,.85)}
         integers={'width_yield_decimals','width_label_decimals','animation_fps','animation_speed','camera_speed','contact_box_budget','sample_exponent','random_seed','quadrature_order','angle_bins','footprint_samples','space_resolution','animation_duration_ms','animation_steps'}
-        integers.update(('max_threads','max_memory_mb','table_page_limit','ui_scale_percent'))
-        limits.update(table_page_limit=(2,2000),max_threads=(0,1024),max_memory_mb=(0,16777216))
+        integers.update(('max_threads','max_memory_mb','table_page_limit','ui_scale_percent','reconstruction_two_moving_zones'))
+        limits.update(table_page_limit=(2,2000),max_threads=(0,1024),max_memory_mb=(0,16777216),reconstruction_two_moving_zones=(0,3))
         limits['max_undo_steps']=(0,1000);integers.add('max_undo_steps')
         limits['space_export_interval_um']=(.001,10000.)
         limits.update(reconstruction_node_snap_um=(-1,1000),reconstruction_node_snap_strength=(0,1))
@@ -321,6 +322,6 @@ class ViewSettings:
                 self.reconstruction_forced,self.reconstruction_angles,self.reconstruction_deleted,self.reconstruction_added,
                 tuple(self.reconstruction_regions),tuple(self.reconstruction_boxes),tuple(self.reconstruction_angle_boxes),self.reconstruction_box_order,self.reconstruction_box_starts,tuple(self.reconstruction_cuts),
                 tuple(self.reconstruction_extra_cuts),tuple(self.reconstruction_second_cuts),
-                tuple(self.reconstruction_dropped_cuts),self.reconstruction_unlinked_boxes)
+                tuple(self.reconstruction_dropped_cuts),self.reconstruction_unlinked_boxes,self.reconstruction_two_moving_zones)
     def deformation_key(self):
         return ('retired-v38',)

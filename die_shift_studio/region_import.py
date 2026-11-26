@@ -40,10 +40,11 @@ def edit_fields():
         'reconstruction_fixed_via_follows','reconstruction_box_order','reconstruction_box_starts','reconstruction_unlinked_boxes'))
 
 
-def context_id(data,roles,order,parameters,settings,version=76):
+def context_id(data,roles,order,parameters,settings,version=79):
     from .session_cache import logical_fingerprint
     empty=replace(settings,**dict.fromkeys((*edit_fields(),'reconstruction_box_order','reconstruction_box_starts','reconstruction_unlinked_boxes'),()))
     key=empty.reconstruction_key()
+    if version<79:key=key[:-1]
     if version==75:key=(key[0],'nominal-route-continuity-v75',*key[2:])
     if version<75:key=(key[0],f'nominal-route-continuity-v{version}',*key[2:-1])
     if version==71:key=(key[0],'nominal-route-continuity-v59',*key[2:-6],*key[-4:])
@@ -78,6 +79,33 @@ def write_metadata(writer,groups,metadata):
     if len(payload)>MAX_METADATA:return
     data=base64.b64encode(zlib.compress(payload)).decode('ascii')
     for i in range(0,len(data),180):writer.add(999,COMMENT+data[i:i+180])
+
+
+def decode_metadata(encoded):
+    if not encoded:return None
+    try:
+        decoder=zlib.decompressobj()
+        payload=decoder.decompress(base64.b64decode(''.join(encoded),validate=True),MAX_METADATA+1)
+        if len(payload)<=MAX_METADATA and decoder.eof and not decoder.unused_data:
+            record=json.loads(payload)
+            if isinstance(record,dict):return record
+    except (ValueError,zlib.error,RecursionError):pass
+    return None
+
+
+def read_metadata(path):
+    """Read our comments without expanding or retaining the DXF entities."""
+    prefix=COMMENT.encode('ascii');size=0;encoded=[]
+    with open(path,'rb') as stream:
+        if stream.read(22).startswith(b'AutoCAD Binary DXF'):return None
+        stream.seek(0)
+        while code:=stream.readline():
+            value=stream.readline().strip()
+            if code.strip()!=b'999' or not value.startswith(prefix):continue
+            size+=len(value)-len(prefix)
+            if size>MAX_METADATA*2:return None
+            encoded.append(value[len(prefix):].decode('ascii',errors='replace'))
+    return decode_metadata(encoded)
 
 
 def metadata_for(data,roles,order,parameters,settings,layers,dxf,compensation):
@@ -139,7 +167,7 @@ def resolve_stackup(contours,record,data,current_roles,current_order,current_com
 def recover_metadata(record,contours,data,roles,order,parameters,settings):
     if not isinstance(record,dict):return None
     context=record.get('context')
-    if not any(context==context_id(data,roles,order,parameters,settings,version) for version in (76,75,74,73,72,71)):return None
+    if not any(context==context_id(data,roles,order,parameters,settings,version) for version in (79,76,75,74,73,72,71)):return None
     layers=set(contours)
     saved_layers=record.get('layers',())
     if not isinstance(saved_layers,list) or any(not isinstance(k,str) for k in saved_layers) or set(saved_layers)!=layers:return None
@@ -258,14 +286,7 @@ def read(path,*,with_metadata=False):
     expand(entities,np.eye(2)*UNIT_UM[unit],np.zeros(2))
     if not output:raise ValueError('DXF 中未找到 L层号_D数据类型_A / _B / _C 图层')
     if not with_metadata:return output
-    record=None
-    if encoded:
-        try:
-            decoder=zlib.decompressobj()
-            payload=decoder.decompress(base64.b64decode(''.join(encoded),validate=True),MAX_METADATA+1)
-            if len(payload)<=MAX_METADATA and decoder.eof and not decoder.unused_data:record=json.loads(payload)
-        except (ValueError,zlib.error):pass
-    return output,record
+    return output,decode_metadata(encoded)
 
 
 def assign(lines,sources,epsilon):

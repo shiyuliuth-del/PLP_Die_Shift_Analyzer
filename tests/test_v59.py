@@ -30,7 +30,7 @@ def two_ended(different=True):
     case = build_case(data, roles, layer_order=['1/0','2/0'])
     p = Parameters(line_width_um=15, annulus_um=10)
     engine = PreviewEngine(GeometryCache(data), case, roles, {}, p, None, case['connections'])
-    settings = ViewSettings(reconstruction_boundary_mode='perpendicular')
+    settings = ViewSettings(reconstruction_boundary_mode='perpendicular',reconstruction_two_moving_zones=2)
     engine.configure_reconstruction(True, settings)
     return engine, settings, copper
 

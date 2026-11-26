@@ -1,7 +1,7 @@
 @echo off
 setlocal DisableDelayedExpansion
 cd /d "%~dp0" || exit /b 1
-echo Building both programs with your existing Windows Python environment...
+echo Building with your existing Windows Python environment...
 set "DSA_PYTHON=%DIE_SHIFT_PYTHON%"
 if defined DSA_PYTHON goto selected
 if defined VIRTUAL_ENV if exist "%VIRTUAL_ENV%\Scripts\python.exe" set "DSA_PYTHON=%VIRTUAL_ENV%\Scripts\python.exe"
@@ -10,6 +10,9 @@ if not defined DSA_PYTHON for /f "delims=" %%P in ('python -c "import sys; print
 if not defined DSA_PYTHON for /f "delims=" %%P in ('py -c "import sys; print(sys.executable)" 2^>nul') do set "DSA_PYTHON=%%P"
 :selected
 if not exist "%DSA_PYTHON%" goto failed
+"%DSA_PYTHON%" -m PyInstaller --clean --noconfirm --distpath "%~dp0dist_admin" "%~dp0LicenseManager\LicenseManager.spec" || goto failed
+if not exist "%~dp0dist_admin\LicenseManager.exe" goto failed
+if /i "%~1"=="--admin-only" goto admin_ready
 "%DSA_PYTHON%" -m die_shift_studio.dependencies || goto failed
 "%DSA_PYTHON%" -m PyInstaller --clean --noconfirm "%~dp0Die_Shift_Analyze.spec" || goto failed
 "%DSA_PYTHON%" -m PyInstaller --clean --noconfirm "%~dp0RealDataAnalyse\RealDataAnalyse.spec" || goto failed
@@ -21,6 +24,8 @@ for %%L in (DieShiftAnalyze_RUN.bat RealDataAnalyze_RUN.bat) do (
 )
 echo Ready: "%~dp0dist\Die_Shift_Analyze.exe"
 echo Ready: "%~dp0dist\RealDataAnalyse.exe"
+:admin_ready
+echo Administrator only: "%~dp0dist_admin\LicenseManager.exe"
 if not defined CI pause
 exit /b 0
 :failed
