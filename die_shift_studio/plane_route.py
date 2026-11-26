@@ -24,17 +24,18 @@ class PlaneRoute(RoutePlan):
             if direction@self.tangent((part['a']+part['b'])/2)<=self.tolerance:return self.partition(a,b),True
         return part,clamped
 
-    def partition(self,a,b,angles=(0.,0.)):
+    def partition(self,a,b,angles=(0.,0.),*,tight=None):
+        if tight is None:tight=getattr(self,'cut_mode','auto')=='manual'
         b=self.fixed_side(b)
         if not 0<=a<b<=self.length:return None
-        if a==0 and not self.allows_pad_point:return self.moving_line_partition(b,angles)
+        if a==0 and not self.allows_pad_point:return self.moving_line_partition(b,angles,tight=tight)
         c=EMPTY if a==0 else self.half(a,angles[0])
         fixed=self.source.difference(self.half(b,angles[1]))
         overlap=c.intersection(fixed)
         if overlap.area>self.tolerance**2:
             # Intersecting infinite cut planes at a bend cannot turn their
             # remote overlap into a spurious active copper island.
-            return RoutePlan.partition(self,a,b,angles)
+            return RoutePlan.partition(self,a,b,angles,tight=tight)
         c_parts=parts(c.difference(overlap));c=c_parts[0] if len(c_parts)==1 else shapely.union_all(c_parts) if c_parts else EMPTY
         f_parts=parts(fixed.difference(overlap));fixed=f_parts[0] if len(f_parts)==1 else shapely.union_all(f_parts) if f_parts else EMPTY
         a_parts=parts(self.source.difference(shapely.union_all([c,fixed])))

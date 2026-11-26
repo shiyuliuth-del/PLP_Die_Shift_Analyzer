@@ -62,10 +62,8 @@ def tagged_sources(ref):
     root_files={name for name in files if '/' not in name}
     client_files={'RealDataAnalyse/'+n for n in ('__init__.py','main.py','gui.py','excel.py','measurements.py','runner.py','storage.py','transport.py','projects.py','conversation.py','instances.py','plans.py','plan_ui.py','widgets.py','RealDataAnalyse.spec','requirements.txt','README.md')}
     admin_files={'LicenseManager/'+n for n in ('main.py','manager.py','LicenseManager.spec','README.md')}
-    from RealDataAnalyse.projects import GD55_INPUTS, GD55_1119_INPUTS, SH22_INPUTS, XD46_SC9211_INPUTS, XD46_SC58512_INPUTS
-    case_files={f'Jobs/{folder}/{name}' for folder, inputs in
-                (('GD55',GD55_INPUTS),('GD55_1119',GD55_1119_INPUTS),('SH22',SH22_INPUTS),
-                 ('XD46_SC9211',XD46_SC9211_INPUTS),('XD46_SC58512',XD46_SC58512_INPUTS)) for name in inputs}
+    from RealDataAnalyse.projects import CASE_INPUTS
+    case_files={f'Jobs/{folder}/{name}' for folder, inputs in CASE_INPUTS.items() for name in inputs}
     if root_files!=SOURCE_FILES or any(
             name not in SOURCE_FILES|kernels|client_files|case_files|admin_files and not (name.startswith('die_shift_studio/') and name.endswith('.py'))
             for name in files):

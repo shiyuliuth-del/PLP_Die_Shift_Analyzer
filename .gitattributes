@@ -25,6 +25,8 @@ Jobs/XD46_SC9211 -export-ignore
 Jobs/XD46_SC9211/** -export-ignore
 Jobs/XD46_SC58512 -export-ignore
 Jobs/XD46_SC58512/** -export-ignore
+Jobs/XJ88_GDM32311 -export-ignore
+Jobs/XJ88_GDM32311/** -export-ignore
 docs export-ignore
 examples export-ignore
 figures export-ignore

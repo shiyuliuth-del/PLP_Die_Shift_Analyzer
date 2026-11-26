@@ -1,3 +1,10 @@
+# V85 示例精简、过孔相切限位、XJ88 静止与失败姿态刚体铜
+
+- `RealDataAnalyse/projects.py` 新增 `CASE_INPUTS` 与 `EXAMPLE_CASES=('SH22',)`；`install_case(destination,cases=EXAMPLE_CASES)` 只复制示例，测试按需指定 `GD55_1119`。`BUILD.bat` 无需改动。
+- `reconstruction_route.py` 新增 `RoutePlan.via_limits()` 与 `_moving_cover()`：手动 `snap`/`moving_line_partition`/`partition(...,tight=True)` 以实际过孔为硬限位（运动侧 `via_end`、固定侧 `via_start`），可进入孔盘环形区域；`choose()` 显式 `tight=False` 保持自动动区从孔盘外缘开始，连续概率证书与历史行为不变。`PlaneRoute.partition` 同步接受 `tight`。
+- XJ88（`Jobs/XJ88_GDM32311`）作为验证案例随源码包提供；`tests/test_v85.py` 逐 27 个极端断言 `5/0 #3`、`#13` 替换铜与源铜一致且 `ignored_following=False`。
+- 失败显示：`reconstruction._posed_failure_geometry` 与 `branch_regions` 的 GEOS 异常路径保留 B（固定名义）与 C（随动姿态）铜，`reconstruction_diagnostic.display` 对失败图形以 B∪C 重建替换铜、仅绘制动区虚线；`tests/test_v85.py` 覆盖合成诊断与 GD55_1119 真实失败姿态。
+
 # V84 双侧多过孔聚类、框选隔离、后台良率、无条件概率与单芯片8极端
 
 - `reconstruction.py`：在 `paired` / `paired_clusters` 中推广双侧聚类过孔配对（0 固定过孔、双 DIE 各自成簇时以最近 `(va, vb)` 为主路径并保留全簇 `cluster_moving`/`cluster_fixed`）；单层间距复核共用单个 `STRtree(copper)`；使用模块级 `_PRIORITY_GRID_CACHE` 并复用 `reference.rules._nominal_rows`；将 `MultiPairFrame.nominal_core` 扣除 `serial_between_block` 后按连通部件逐段生成 `between_blocks`。

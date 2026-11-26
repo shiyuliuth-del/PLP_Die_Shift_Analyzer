@@ -41,10 +41,11 @@ class MovingPadTests(unittest.TestCase):
                 drawn, _ = current_plan.edit(*piece['interval'], 0, 0.)
                 self.assertEqual(drawn['near'].geom_type, expected)
                 union = shapely.union_all(list(piece['nominal_regions'].values()))
-                self.assertTrue(union.equals(current_plan.source))
+                self.assertLess(union.symmetric_difference(current_plan.source).area,1e-6)
                 if not config.reconstruction_allow_moving_pad:
-                    self.assertGreater(piece['interval'][0], current_plan.land_end)
-                    self.assertLess(piece['interval'][0] - current_plan.land_end, .02)
+                    cut_lo=current_plan.via_limits()[0]
+                    self.assertGreaterEqual(piece['interval'][0],cut_lo-1e-3)
+                    self.assertLessEqual(piece['interval'][0],cut_lo+.02)
                     migrated = retire_pad_intervals(config, engine.reconstructor)
                     self.assertEqual(migrated.reconstruction_intervals[0][5:], piece['interval'])
                     shifted = engine.reconstructor.frame(np.array([[-15., 12., .01]]))

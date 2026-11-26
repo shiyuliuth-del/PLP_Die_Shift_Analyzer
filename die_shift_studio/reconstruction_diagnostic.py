@@ -64,12 +64,32 @@ def display(result,centers,states):
                                     for part in shapely.get_parts(line) if part.geom_type=='LineString' and part.length>0)
             except (ValueError,shapely.errors.GEOSException):continue
         pieces.append(q)
+    # Failed transitions keep their rigid sides in the real pose: the moving
+    # side still follows its DIE and the fixed side stays. Only the zone (A) is
+    # omitted and drawn dashed, never the whole source frozen at nominal.
+    posed={}
+    for q in pieces:
+        if not q.get('diagnostic'):continue
+        ref=(q['layer'],q['index'])
+        b=q['regions'].get('B');c=q['regions'].get('C')
+        keep=[g for g in (b,c) if g is not None and not g.is_empty]
+        if keep:
+            g=shapely.union_all(keep)
+            posed[ref]=g if ref not in posed else shapely.union_all([posed[ref],g])
     overrides={}
     for layer,rows in result.get('replacements',{}).items():
         out=[]
         for row in rows:
-            holes_here=[g for index in row['indices'] for g in holes.get((layer,index),())]
-            g=row['geometry'].difference(shapely.union_all(holes_here)) if holes_here else row['geometry']
+            index=row['indices'][0]
+            rebuild=posed.get((layer,index))
+            if rebuild is not None and not rebuild.is_empty:
+                # Keep successfully rebuilt sibling transitions out of the
+                # fallback, then omit only the dashed failed zone.
+                healthy_here=healthy.get((layer,index))
+                g=rebuild.difference(healthy_here) if healthy_here is not None and not healthy_here.is_empty else rebuild
+            else:
+                holes_here=[g for i in row['indices'] for g in holes.get((layer,i),())]
+                g=row['geometry'].difference(shapely.union_all(holes_here)) if holes_here else row['geometry']
             out.append(dict(row,geometry=g))
         overrides[layer]=out
     return dict(result,pieces=pieces,replacements=overrides,diagnostic_only=True,failed_segments=segments)

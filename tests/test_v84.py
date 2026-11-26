@@ -110,7 +110,7 @@ class V84Tests(unittest.TestCase):
             for name in inputs:
                 self.assertTrue((ROOT / 'Jobs' / folder / name).is_file(), f'{folder}/{name}')
         with TemporaryDirectory() as tmp:
-            install_case(tmp)
+            install_case(tmp, ('XD46_SC9211', 'XD46_SC58512'))
             for folder, inputs in (('XD46_SC9211', XD46_SC9211_INPUTS), ('XD46_SC58512', XD46_SC58512_INPUTS)):
                 for name in inputs:
                     self.assertTrue((Path(tmp) / 'Jobs' / folder / name).is_file())

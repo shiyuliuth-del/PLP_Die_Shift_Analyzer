@@ -32,6 +32,28 @@ def cut_identity_matches(row_refs, piece_refs):
                 and row == tuple(sorted(v[1] for v in piece)))
 
 
+def _posed_failure_geometry(ps,source,tolerance):
+    """Keep rigid copper in its posed or fixed position when the zone fails.
+
+    Only the transition (A) is omitted and drawn as a dashed warning; the
+    moving terminal side must still follow its DIE and the fixed side stays put
+    instead of freezing the whole source polygon at the nominal position.
+    """
+    from .reconstruction_route import EMPTY
+    for q in ps:
+        regions=q.get('regions') or {}
+        fixed=regions.get('B');moved=regions.get('C')
+        fixed=EMPTY if fixed is None else fixed
+        moved=EMPTY if moved is None else moved
+        q.update(regions=dict(A=EMPTY,B=fixed,C=moved),bridge=EMPTY,moved=moved,fixed=fixed,
+                 bridge_area_um2=0.,moved_area_um2=moved.area,fixed_area_um2=fixed.area)
+    geoms=[q['regions'][k] for q in ps for k in 'BC' if not q['regions'][k].is_empty]
+    geometry=shapely.union_all(geoms) if geoms else source
+    if not geometry.is_valid:geometry=shapely.make_valid(geometry)
+    polys=[g for g in shapely.get_parts(geometry) if g.geom_type=='Polygon']
+    return shapely.union_all(polys) if polys else source
+
+
 def _compose_feature(source,ps,tolerance,moving):
     """One assembly contract for full frames and live edits; modifies local pieces."""
     from .reconstruction_route import EMPTY
@@ -48,8 +70,8 @@ def _compose_feature(source,ps,tolerance,moving):
     fixed=ps[0]['regions']['B'] if len(ps)==1 and ps[0].get('source_scope_complete',True) else source.difference(occupied)
     if ambiguous:
         reason='多个DIE动区归属重叠；无法确定分区，保留源图'
-        for q in ps:q.update(valid=False,connection_failed=True,warning=reason,regions=dict(A=EMPTY,B=source,C=EMPTY),bridge=EMPTY,moved=EMPTY,fixed=source)
-        geometry=source
+        for q in ps:q.update(valid=False,connection_failed=True,warning=reason)
+        geometry=_posed_failure_geometry(ps,source,tolerance)
     else:
         graph=any(q.get('graph_members') for q in ps)
         if moving and graph:
@@ -78,11 +100,11 @@ def _compose_feature(source,ps,tolerance,moving):
                              bridge=EMPTY,bridge_area_um2=0.)
                     q['regions']['A']=EMPTY
                 if rigid_collision:
-                    # The incompatible rigid pieces cannot both be drawn as
-                    # final copper. Keep the nominal source for diagnosis only.
-                    for q in ps:q.update(regions=dict(A=EMPTY,B=source,C=EMPTY),bridge=EMPTY,moved=EMPTY,fixed=source,
-                                         bridge_area_um2=0.,moved_area_um2=0.,fixed_area_um2=source.area,branch_rigid_unresolved=True)
-                    return source,occupied
+                    # Overlapping rigid pieces cannot both be drawn as certified
+                    # copper. Keep each side in its real pose for diagnosis and
+                    # mark the transition only; never freeze moving copper.
+                    for q in ps:q.update(branch_rigid_unresolved=True)
+                    return _posed_failure_geometry(ps,source,tolerance),occupied
         for q in ps:q['fixed']=fixed;q['regions']['B']=fixed;q['fixed_area_um2']=fixed.area
         geometry=shapely.union_all([fixed,*[q['regions'][k] for q in ps for k in 'AC']],grid_size=tolerance if moving else None)
     # With no material motion and a source-preserving style, partition overlay
@@ -116,10 +138,7 @@ def _compose_feature(source,ps,tolerance,moving):
                 q.update(valid=False,connection_failed=True,warning='组合连接发生冲突，已取消连接段',regions=regions,bridge=regions['A'],moved=regions['C'],fixed=fixed)
             else:
                 q.update(valid=False,connection_failed=True,warning='随动分支连接关系已改变；保留各分支实体并标记')
-        geometry=shapely.union_all([fixed,*[q['regions'][k] for q in ps for k in 'AC']])
-        if not geometry.is_valid:
-            geometry=source
-            for q in ps:q.update(valid=False,warning='无法生成有效分区，保留源图供核对',regions=dict(A=EMPTY,B=source,C=EMPTY),bridge=EMPTY,moved=EMPTY,fixed=source)
+        geometry=_posed_failure_geometry(ps,source,tolerance)
     return geometry,occupied
 
 
@@ -130,11 +149,8 @@ def compose_feature(source,ps,tolerance,moving):
         if not result[0].is_empty or source.is_empty:return result
         reason='型变后没有有效铜；保留原铜并标记失败'
     except shapely.errors.GEOSException as exc:reason='型变布尔运算未通过；保留原铜：'+str(exc)
-    from .reconstruction_route import EMPTY
-    for q in ps:
-        q.update(valid=False,connection_failed=True,warning=reason,
-                 regions=dict(A=EMPTY,B=source,C=EMPTY),bridge=EMPTY,moved=EMPTY,fixed=source)
-    return source,EMPTY
+    for q in ps:q.update(valid=False,connection_failed=True,warning=reason)
+    return _posed_failure_geometry(ps,source,tolerance),shapely.Polygon()
 
 
 def feature_moves(pieces,states,style):
@@ -781,14 +797,16 @@ class Reconstructor:
         for l,i,owner,refs,identity,left,right in self.settings.reconstruction_intervals:
             if (l,i,owner,normalize_via_refs(refs))==plan.key and identity==plan.identity:
                 from .reconstruction_edits import blade_angles
+                plan.cut_mode='manual'
                 angles,pinned=blade_angles(self.settings,plan,left,plan.fixed_side(right))
-                part=plan.partition(float(left),float(right),angles)
+                part=plan.partition(float(left),float(right),angles,tight=True)
                 if part is not None:
                     a,b=part['a'],part['b'];manual=True
                     if not self.settings.reconstruction_regions:return dict(part,manual_angles=pinned),True
         if entry.get('seeded') and not self.settings.reconstruction_regions:
             from .reconstruction_edits import apply_angles
-            return apply_angles(self.settings,plan,plan.partition(a,b)),True
+            plan.cut_mode='manual'
+            return apply_angles(self.settings,plan,plan.partition(a,b,tight=True)),True
         # Migrate legacy cut planes by projecting their NOMINAL points on the route.
         for which,rows in ((0,self.settings.reconstruction_cuts),(1,self.settings.reconstruction_second_cuts or self.settings.reconstruction_extra_cuts)):
             point=next(self._matching_cut_rows(((l,i,v,(x,y)) for l,i,v,nx,ny,x,y in rows),plan.layer,plan.index,plan.refs),None)
@@ -811,7 +829,8 @@ class Reconstructor:
                 else:changed,_=plan.edit(a,b,1,min(b,lo)) if lo>a else (None,True)
                 if changed:a,b=changed['a'],changed['b'];manual=True
         from .reconstruction_edits import apply_angles
-        base=plan.partition(a,b)
+        if manual:plan.cut_mode='manual'
+        base=plan.partition(a,b,tight=manual) if manual else plan.partition(a,b)
         return apply_angles(self.settings,plan,base),manual
 
     def interval(self,entry):

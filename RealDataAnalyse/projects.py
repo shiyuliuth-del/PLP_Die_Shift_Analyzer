@@ -23,6 +23,13 @@ SH22_INPUTS = ('sh22.gds', 'SH22.dshift.json', f'{REALDATA_DIRECTORY}/{SETTINGS}
                  for die in ('101', '102') for part in (1, 2)))
 XD46_SC9211_INPUTS = ('PDS-XD46-SC9211CFCPLR-A0_.gds', 'xd46-sc9211cfcplr.dshift.json')
 XD46_SC58512_INPUTS = ('PDS-XD46-SCT85330CPLR-A0.gds', 'xd46-sc58512acplr.dshift.json')
+XJ88_INPUTS = ('XJ88_GDM32311_Final5.gds', 'xj88.dshift.json')
+CASE_INPUTS = {'GD55': GD55_INPUTS, 'GD55_1119': GD55_1119_INPUTS, 'SH22': SH22_INPUTS,
+               'XD46_SC9211': XD46_SC9211_INPUTS, 'XD46_SC58512': XD46_SC58512_INPUTS,
+               'XJ88_GDM32311': XJ88_INPUTS}
+# Only SH22 is provisioned as the shipped example; other cases remain in the
+# source package for reproduction and are copied on demand by tests/admins.
+EXAMPLE_CASES = ('SH22',)
 
 
 def inside(folder, value):
@@ -200,13 +207,20 @@ def copy_inputs(folder, paths, stop, subfolder, suffixes):
     return result
 
 
-def install_case(destination):
-    """Place the shipped projects next to built EXEs; never alter an existing project."""
+def install_case(destination, cases=EXAMPLE_CASES):
+    """Place the example project next to built EXEs; never alter an existing project.
+
+    The user asked the packaged application not to spawn GD55/GD55_1119 (and the
+    other regression cases) inside the installation folder on startup. Only SH22
+    is provisioned by default; every other case can still be installed by name.
+    """
     root_jobs = Path(__file__).resolve().parents[1] / 'Jobs'
     jobs = Path(destination).resolve() / 'Jobs'
     jobs.mkdir(parents=True, exist_ok=True)
-    for folder, inputs in (('GD55', GD55_INPUTS), ('GD55_1119', GD55_1119_INPUTS), ('SH22', SH22_INPUTS),
-                           ('XD46_SC9211', XD46_SC9211_INPUTS), ('XD46_SC58512', XD46_SC58512_INPUTS)):
+    for folder in cases:
+        inputs = CASE_INPUTS.get(folder)
+        if inputs is None:
+            raise ValueError(f'未知测试案例：{folder}')
         source = root_jobs / folder
         target = jobs / folder
         if target.exists() or not source.is_dir():
@@ -216,7 +230,7 @@ def install_case(destination):
             provision_project(stage)
             # Only the reviewed case inputs, never copy a developer's task outputs.
             for name in inputs:
-                (stage / name).parent.mkdir(parents=True,exist_ok=True)
+                (stage / name).parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(source / name, stage / name)
             if not target.exists():
                 os.rename(stage, target)

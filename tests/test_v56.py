@@ -42,7 +42,7 @@ class V56Tests(unittest.TestCase):
         for name in GD55_1119_INPUTS:
             self.assertTrue((GD55_1119_DIR / name).is_file(), name)
         with TemporaryDirectory() as tmp:
-            install_case(tmp)
+            install_case(tmp, ('GD55_1119',))
             for name in GD55_1119_INPUTS:
                 self.assertTrue((Path(tmp) / 'Jobs' / 'GD55_1119' / name).is_file(), name)
 
