@@ -504,17 +504,19 @@ def consolidate(r,pieces,states,local_states=None,owner_frames=None):
             r.geometry_pool.put(cache_key,tuple(dict(q,regions=dict(q['regions'])) for q in assembled))
             other.extend(assembled)
         except shapely.errors.GEOSException as exc:
-            # A numerical failure is a failed connection with retained source,
-            # never an empty replacement or a silently repaired fabrication.
+            # A numerical failure is a failed connection with retained posed
+            # copper; the moving side must not be frozen at the nominal spot.
             empty=shapely.Polygon()
             for row in rows:
-                q=dict(row,valid=False,connection_failed=True,graph_branch=False,
-                    warning='分叉型变布尔运算未通过；保留原铜：'+str(exc),
-                    missing_region=row['nominal_regions']['A'],source_scope_complete=False,
-                    regions=dict(A=empty,B=source,C=empty),nominal_regions=dict(A=empty,B=source,C=empty),
-                    bridge=empty,movable=empty,moved=empty,fixed=source,immovable=source,
-                    bridge_area_um2=0.,movable_area_um2=0.,moved_area_um2=0.,fixed_area_um2=source.area)
-                other.append(q)
+                regions=row.get('regions') or {}
+                fixed=regions.get('B');moved=regions.get('C')
+                fixed=source if fixed is None or fixed.is_empty else fixed
+                moved=empty if moved is None else moved
+                other.append(dict(row,valid=False,connection_failed=True,graph_branch=False,
+                    warning='分叉型变布尔运算未通过；保留动/静铜并标记连接：'+str(exc),
+                    missing_region=row['nominal_regions']['A'],source_scope_complete=False,branch_rigid_unresolved=True,
+                    regions=dict(A=empty,B=fixed,C=moved),bridge=empty,moved=moved,fixed=fixed,
+                    bridge_area_um2=0.,moved_area_um2=moved.area,fixed_area_um2=fixed.area))
     return other
 
 

@@ -88,7 +88,7 @@ class V55Tests(unittest.TestCase):
             self.assertEqual(aligned['angles'], (0., 0.))
             self.assertFalse(aligned.get('manual_angles'))
             migrated = plan.partition(100., plan.length)
-            self.assertLess(migrated['b'], plan.fixed_start)
+            self.assertLess(migrated['b'], plan.via_limits()[1])
             self.assertEqual(migrated['far'].geom_type, 'LineString')
             near, _ = plan.edit(100., 500., 0, 0.)
             self.assertEqual(near['near'].geom_type, 'Point')

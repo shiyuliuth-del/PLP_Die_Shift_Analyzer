@@ -1,0 +1,1002 @@
+{
+  "schema_version": 5,
+  "app_version": "V76",
+  "rulers": [],
+  "sha256": "bf7017b780a6f2f525e52e1e8231cebc8b75ea961ea0e39dcf3f29d0127b6ed4",
+  "top_cell": "XJ88_GDM32311_Final5",
+  "roles": {
+    "5/0": "固定RDL",
+    "7/0": "不参与",
+    "3/0": "不参与",
+    "11/0": "封装边框",
+    "10/0": "芯片边框",
+    "6/0": "固定过孔",
+    "4/0": "运动过孔"
+  },
+  "parameters": {
+    "panel_layers": 1,
+    "wafer_layers": 0,
+    "line_width_um": 15.0,
+    "line_space_um": 15.0,
+    "wafer_line_width_um": 15.0,
+    "wafer_line_space_um": 15.0,
+    "via_diameter_um": 40.00000000000389,
+    "annulus_um": 15.0,
+    "moving_annulus_um": 15.0,
+    "residual_budget_um": 5.0,
+    "transition_length_um": 200.0,
+    "max_route_angle_deg": 30.0,
+    "package_clearance_um": 10.0,
+    "minimum_area_um2": 0.5,
+    "minimum_edge_um": 0.01,
+    "routing_edge_keepout_um": 40.0,
+    "min_die_gap_um": 20.0,
+    "min_package_clearance_um": 20.0,
+    "single_bound_x_um": 15.0,
+    "single_bound_y_um": 15.0,
+    "multi_bound_x_um": 35.0,
+    "multi_bound_y_um": 35.0,
+    "bound_angle_deg": 1.0,
+    "per_die_enabled": false,
+    "die_bounds": [],
+    "rotation_center": "center",
+    "rotation_x_um": 0.0,
+    "rotation_y_um": 0.0,
+    "die_pivots": [
+      [
+        "center",
+        0.0,
+        0.0
+      ]
+    ],
+    "input_nsigma": 6.0,
+    "target_nsigma": 6.0,
+    "reference_nsigma": 6.0,
+    "mean_x_um": 0.0,
+    "mean_y_um": 0.0,
+    "mean_angle_deg": 0.0,
+    "rho_xy": 0.0,
+    "interdie": "unknown",
+    "fixed_via_assignment": "all"
+  },
+  "settings": {
+    "max_undo_steps": 10,
+    "space_export_interval_um": 100.0,
+    "drc_checks": [
+      "width",
+      "space",
+      "enclosure",
+      "angle",
+      "board",
+      "die_gap",
+      "die_edge",
+      "keepout"
+    ],
+    "drc_visible": [
+      "width",
+      "space",
+      "enclosure",
+      "angle",
+      "board",
+      "die_gap",
+      "die_edge",
+      "keepout"
+    ],
+    "table_page_limit": 500,
+    "max_threads": 0,
+    "max_memory_mb": 0,
+    "reconstruction_pad_trigger_um": 5.0,
+    "reconstruction_node_snap_um": 0.0,
+    "drc_waived_refs": [],
+    "drc_retained_refs": [],
+    "reconstruction_node_snap_strength": 0.4,
+    "save_project_results": true,
+    "result_cache_directory": "",
+    "width_display": {
+      "固定RDL": "dim",
+      "运动RDL": "dim",
+      "固定过孔": "show",
+      "运动过孔": "show",
+      "封装边框": "show",
+      "芯片边框": "show",
+      "其他": "show",
+      "运动过孔孔盘": "show",
+      "固定过孔孔盘": "show",
+      "固定障碍": "show",
+      "禁布区": "show",
+      "截面": "show",
+      "描边": "show",
+      "标注": "show",
+      "边距": "show"
+    },
+    "width_label_font_pt": 8.0,
+    "width_label_decimals": 2,
+    "width_yield_decimals": 6,
+    "width_yield_method": "grid",
+    "width_show_probability": true,
+    "width_yield_exponent": 12,
+    "width_yield_seed": 510,
+    "width_grid_nodes": 5,
+    "show_contact_markers": true,
+    "show_low_contact": false,
+    "show_low_width": true,
+    "cache_max_entries": 2000,
+    "acceleration": "cuda",
+    "drc_min_angle_deg": 90.0,
+    "drc_tolerance_um": 0.1,
+    "probability_method": "sobol",
+    "sample_exponent": 12,
+    "random_seed": 510,
+    "quadrature_order": 25,
+    "tail_sigma": 8.0,
+    "probability_cell_um": 0.0,
+    "angle_bins": 24,
+    "footprint_samples": 4,
+    "probability_alpha": 0.42,
+    "probability_show_ranges": false,
+    "probability_ranges": [],
+    "probability_target_color": "#bf526d",
+    "show_annulus_range": true,
+    "show_spacing_range": true,
+    "contact_marker_color": "#bc243e",
+    "contact_marker_size": 5.0,
+    "contact_marker_absolute": false,
+    "unadapted_marker_color": "#ba7628",
+    "unadapted_marker_size": 7.0,
+    "unadapted_marker_absolute": false,
+    "space_resolution": 101,
+    "space_cmap": "pastel",
+    "space_interpolation": "bilinear",
+    "space_alpha": 0.65,
+    "intrusion_alpha": 0.52,
+    "probability_cmap": "blue",
+    "probability_gamma": 0.35,
+    "probability_interpolation": "nearest",
+    "space_scope": "moving",
+    "animation_enabled": false,
+    "animation_return_zero": true,
+    "animation_strategy": "prepared",
+    "evaluation_scope": "risk",
+    "reconstruction_die_mode": "follow",
+    "animation_duration_ms": 1000,
+    "animation_steps": 12,
+    "animation_fps": 30,
+    "animation_speed": 3,
+    "camera_speed": 4,
+    "contact_box_budget": 2048,
+    "reconstruction_regions": [],
+    "reconstruction_boxes": [],
+    "reconstruction_angle_boxes": [
+      [
+        "5/0",
+        [
+          [
+            -312.45243401896926,
+            625.79544294334
+          ],
+          [
+            -344.5003076250163,
+            686.0687269923071
+          ],
+          [
+            -389.9252259377233,
+            661.9158694929886
+          ],
+          [
+            -357.87735233167626,
+            601.6425854440215
+          ]
+        ]
+      ],
+      [
+        "5/0",
+        [
+          [
+            -85.57688172992403,
+            741.8158847475011
+          ],
+          [
+            99.46043330820373,
+            741.8158847475011
+          ],
+          [
+            99.46043330820373,
+            720.5398171647198
+          ],
+          [
+            -85.57688172992403,
+            720.5398171647198
+          ]
+        ]
+      ],
+      [
+        "5/0",
+        [
+          [
+            297.07426829526423,
+            851.4886403923994
+          ],
+          [
+            351.33898612003463,
+            851.4886403923994
+          ],
+          [
+            351.33898612003463,
+            697.8281522945347
+          ],
+          [
+            297.07426829526423,
+            697.8281522945347
+          ]
+        ]
+      ],
+      [
+        "5/0",
+        [
+          [
+            706.535347239921,
+            757.3929990248215
+          ],
+          [
+            885.4477337314904,
+            757.3929990248215
+          ],
+          [
+            885.4477337314904,
+            734.8274728006595
+          ],
+          [
+            706.535347239921,
+            734.8274728006595
+          ]
+        ]
+      ],
+      [
+        "5/0",
+        [
+          [
+            722.3817389933928,
+            349.6821419750504
+          ],
+          [
+            863.1476406774505,
+            349.6821419750504
+          ],
+          [
+            863.1476406774505,
+            317.44567594053336
+          ],
+          [
+            722.3817389933928,
+            317.44567594053336
+          ]
+        ]
+      ],
+      [
+        "5/0",
+        [
+          [
+            347.34286507564065,
+            292.47316025246096
+          ],
+          [
+            428.5787594826235,
+            292.47316025246096
+          ],
+          [
+            428.5787594826235,
+            270.55236334898933
+          ],
+          [
+            347.34286507564065,
+            270.55236334898933
+          ]
+        ]
+      ],
+      [
+        "5/0",
+        [
+          [
+            242.8967151238055,
+            207.36888992133586
+          ],
+          [
+            271.90953455487085,
+            207.36888992133586
+          ],
+          [
+            271.90953455487085,
+            138.38285260746932
+          ],
+          [
+            242.8967151238055,
+            138.38285260746932
+          ]
+        ]
+      ],
+      [
+        "5/0",
+        [
+          [
+            -482.75020654663575,
+            82.92557858717619
+          ],
+          [
+            -414.6238610533895,
+            110.45040883675442
+          ],
+          [
+            -425.4863702391615,
+            137.33606251757246
+          ],
+          [
+            -493.61271573240776,
+            109.81123226799423
+          ]
+        ]
+      ],
+      [
+        "5/0",
+        [
+          [
+            -18.95922556530877,
+            -134.03446320743888
+          ],
+          [
+            107.89269771575307,
+            -66.58609917449999
+          ],
+          [
+            86.43762587794266,
+            -26.234977753223177
+          ],
+          [
+            -40.414297403119186,
+            -93.68334178616206
+          ]
+        ]
+      ],
+      [
+        "5/0",
+        [
+          [
+            389.7802082881716,
+            77.81541244099228
+          ],
+          [
+            442.7540050932751,
+            89.07534054849148
+          ],
+          [
+            480.55519231130813,
+            -88.76526301149883
+          ],
+          [
+            427.5813955062046,
+            -100.02519111899804
+          ]
+        ]
+      ],
+      [
+        "5/0",
+        [
+          [
+            313.3752773090987,
+            -710.5757918590866
+          ],
+          [
+            491.630039893564,
+            -710.5757918590866
+          ],
+          [
+            491.630039893564,
+            -735.0858217144507
+          ],
+          [
+            313.3752773090987,
+            -735.0858217144507
+          ]
+        ]
+      ],
+      [
+        "5/0",
+        [
+          [
+            -479.6386889137984,
+            486.04746346729087
+          ],
+          [
+            -318.0953103216266,
+            486.04746346729087
+          ],
+          [
+            -318.0953103216266,
+            466.5508488096149
+          ],
+          [
+            -479.6386889137984,
+            466.5508488096149
+          ]
+        ]
+      ],
+      [
+        "5/0",
+        [
+          [
+            -90.23657082970075,
+            -406.4388960953576
+          ],
+          [
+            68.58682217500262,
+            -440.197850425204
+          ],
+          [
+            58.338323443644185,
+            -488.41324613370466
+          ],
+          [
+            -100.48506956105919,
+            -454.65429180385826
+          ]
+        ]
+      ],
+      [
+        "5/0",
+        [
+          [
+            -737.0217595665481,
+            -329.3557374887318
+          ],
+          [
+            -692.4580689204316,
+            -329.3557374887318
+          ],
+          [
+            -692.4580689204316,
+            -471.40250142322805
+          ],
+          [
+            -737.0217595665481,
+            -471.40250142322805
+          ]
+        ]
+      ],
+      [
+        "5/0",
+        [
+          [
+            -879.5452361544487,
+            -847.4549874881072
+          ],
+          [
+            -716.1450371186886,
+            -847.4549874881072
+          ],
+          [
+            -716.1450371186886,
+            -866.0231919239891
+          ],
+          [
+            -879.5452361544487,
+            -866.0231919239891
+          ]
+        ]
+      ],
+      [
+        "5/0",
+        [
+          [
+            -457.68662948752916,
+            -786.1891692384233
+          ],
+          [
+            -336.60171219254136,
+            -840.0996477763636
+          ],
+          [
+            -371.70484483308076,
+            -918.9425745662525
+          ],
+          [
+            -492.78976212806856,
+            -865.0320960283123
+          ]
+        ]
+      ],
+      [
+        "5/0",
+        [
+          [
+            -403.212495243945,
+            -218.69381470019843
+          ],
+          [
+            -298.7258826292595,
+            -226.00023041111996
+          ],
+          [
+            -303.4083757416356,
+            -292.9630016605634
+          ],
+          [
+            -407.89498835632116,
+            -285.65658594964185
+          ]
+        ]
+      ],
+      [
+        "5/0",
+        [
+          [
+            -482.4515267614412,
+            -783.2149201591476
+          ],
+          [
+            -324.6914401015814,
+            -834.4742795943462
+          ],
+          [
+            -352.4489509655691,
+            -919.9031138134045
+          ],
+          [
+            -510.2090376254289,
+            -868.6437543782058
+          ]
+        ]
+      ],
+      [
+        "5/0",
+        [
+          [
+            -877.0672050358542,
+            -839.5202830156735
+          ],
+          [
+            -725.7556430595685,
+            -839.5202830156735
+          ],
+          [
+            -725.7556430595685,
+            -850.054632267187
+          ],
+          [
+            -877.0672050358542,
+            -850.054632267187
+          ]
+        ]
+      ],
+      [
+        "5/0",
+        [
+          [
+            434.2330808356883,
+            78.71301536345607
+          ],
+          [
+            461.95644162537303,
+            78.71301536345607
+          ],
+          [
+            461.95644162537303,
+            -77.9562095642973
+          ],
+          [
+            434.2330808356883,
+            -77.9562095642973
+          ]
+        ]
+      ]
+    ],
+    "reconstruction_box_order": [
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned",
+      "aligned"
+    ],
+    "reconstruction_box_starts": [
+      [
+        "5/0",
+        1,
+        18
+      ],
+      [
+        "5/0",
+        2,
+        17
+      ],
+      [
+        "5/0",
+        21,
+        19
+      ]
+    ],
+    "reconstruction_unlinked_boxes": [],
+    "reconstruction_box_mode": "aligned",
+    "reconstruction_fixed_via_mode": "off",
+    "reconstruction_fixed_via_follows": [],
+    "reconstruction_between_motion": "max",
+    "reconstruction_between_overrides": [],
+    "reconstruction_box_excluded": [
+      [
+        "5/0",
+        1
+      ],
+      [
+        "5/0",
+        3
+      ],
+      [
+        "5/0",
+        4
+      ],
+      [
+        "5/0",
+        13
+      ],
+      [
+        "5/0",
+        14
+      ],
+      [
+        "5/0",
+        21
+      ],
+      [
+        "5/0",
+        23
+      ],
+      [
+        "5/0",
+        24
+      ],
+      [
+        "5/0",
+        30
+      ],
+      [
+        "5/0",
+        31
+      ]
+    ],
+    "reconstruction_cuts": [],
+    "reconstruction_extra_cuts": [],
+    "reconstruction_second_cuts": [],
+    "reconstruction_dropped_cuts": [],
+    "reconstruction_enabled": false,
+    "reconstruction_auto": false,
+    "reconstruction_live": true,
+    "reconstruction_allow_moving_pad": false,
+    "reconstruction_style": "linear",
+    "reconstruction_boundary_mode": "perpendicular",
+    "reconstruction_ignored": [
+      [
+        "5/0",
+        1
+      ],
+      [
+        "5/0",
+        2
+      ],
+      [
+        "5/0",
+        3
+      ],
+      [
+        "5/0",
+        4
+      ],
+      [
+        "5/0",
+        13
+      ],
+      [
+        "5/0",
+        14
+      ],
+      [
+        "5/0",
+        21
+      ],
+      [
+        "5/0",
+        23
+      ],
+      [
+        "5/0",
+        24
+      ],
+      [
+        "5/0",
+        30
+      ],
+      [
+        "5/0",
+        31
+      ]
+    ],
+    "reconstruction_following": [],
+    "reconstruction_forced": [
+      [
+        "5/0",
+        34
+      ]
+    ],
+    "reconstruction_angles": [],
+    "reconstruction_deleted": [],
+    "reconstruction_added": [
+      [
+        "5/0",
+        34,
+        -735.6587142936279,
+        766.9676730108458,
+        "75719ad1bd17",
+        "seed"
+      ]
+    ],
+    "reconstruction_grid_nodes": 3,
+    "reconstruction_intervals": [
+      [
+        "5/0",
+        9,
+        0,
+        [
+          [
+            "4/0",
+            4
+          ]
+        ],
+        "33db239d3d83e6074991",
+        191.39782837702228,
+        246.65239999999912
+      ],
+      [
+        "5/0",
+        9,
+        0,
+        [
+          [
+            "4/0",
+            2
+          ]
+        ],
+        "8b5c99e118294931afb4",
+        749.1397594993925,
+        923.3848613421405
+      ],
+      [
+        "5/0",
+        9,
+        0,
+        [
+          [
+            "4/0",
+            3
+          ]
+        ],
+        "d2dacdc7e1beb0433f4c",
+        836.2888841807405,
+        1010.5339860234885
+      ],
+      [
+        "5/0",
+        34,
+        0,
+        [
+          [
+            "4/0",
+            20
+          ]
+        ],
+        "d5cfaa173e84e43c1e01~75719ad1bd17",
+        70.2520833174403,
+        108.32267431504587
+      ],
+      [
+        "5/0",
+        38,
+        0,
+        [
+          [
+            "4/0",
+            24
+          ]
+        ],
+        "50c0c9236ab79c652ef6",
+        35.015508480692176,
+        37.93616757696123
+      ]
+    ],
+    "reconstruction_auto_waive_drc": false,
+    "reconstruction_waiver_mantissa": 1,
+    "reconstruction_waiver_exponent": -6,
+    "yield_method": "monte_carlo",
+    "yield_sample_exponent": 12,
+    "yield_box_budget": 4096,
+    "yield_tolerance": 0.001,
+    "safe_box_precision": 0.01,
+    "safe_box_budget": 512,
+    "safe_box_starts": 3,
+    "safe_box_passes": 2
+  },
+  "node_edits": [],
+  "deleted_shapes": [],
+  "geometry_indexing": "merged-v39",
+  "legacy_node_edits": [],
+  "layout_output": {
+    "directory": "",
+    "layer_scope": "all",
+    "merge_layers": true,
+    "dbu_um": 0.0,
+    "max_points": 8190
+  },
+  "dxf_directory": "",
+  "dxf_options": {
+    "merge_layers": true,
+    "layer_scope": "all",
+    "polygon_mode": "outline",
+    "scale": 1.0,
+    "separate_holes": false,
+    "show_fill": false,
+    "region_auto_join": true
+  },
+  "measured_output": {
+    "output_directory": "",
+    "max_memory_mb": 0,
+    "max_threads": 0
+  },
+  "apd_export": {},
+  "layer_compensation": {},
+  "ignored_drc": {},
+  "ignored_reconstruction": {
+    "sha256": "bf7017b780a6f2f525e52e1e8231cebc8b75ea961ea0e39dcf3f29d0127b6ed4",
+    "top_cell": "XJ88_GDM32311_Final5",
+    "refs": [
+      [
+        "5/0",
+        1
+      ],
+      [
+        "5/0",
+        2
+      ],
+      [
+        "5/0",
+        3
+      ],
+      [
+        "5/0",
+        4
+      ],
+      [
+        "5/0",
+        13
+      ],
+      [
+        "5/0",
+        14
+      ],
+      [
+        "5/0",
+        21
+      ],
+      [
+        "5/0",
+        23
+      ],
+      [
+        "5/0",
+        24
+      ],
+      [
+        "5/0",
+        30
+      ],
+      [
+        "5/0",
+        31
+      ]
+    ]
+  },
+  "ignored_width_lines": {
+    "sha256": "bf7017b780a6f2f525e52e1e8231cebc8b75ea961ea0e39dcf3f29d0127b6ed4",
+    "top_cell": "XJ88_GDM32311_Final5",
+    "refs": []
+  },
+  "extreme_view": {
+    "filter_mode": "drc",
+    "filter_problems": true,
+    "mode": "risk",
+    "page_size": 499,
+    "page": 1
+  },
+  "layer_table_height": 298,
+  "expanded_settings": [
+    "硬件与计算资源",
+    "重构预演"
+  ],
+  "expanded_process": [
+    "线宽线距",
+    "过孔包围量",
+    "芯片距离",
+    "其他"
+  ],
+  "manual_preview": {
+    "values": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ]
+    ],
+    "pivots": [
+      [
+        "center",
+        0.0,
+        0.0
+      ]
+    ]
+  },
+  "overlays": {
+    "drc": true,
+    "space": false,
+    "width": true,
+    "width_sufficient": false,
+    "reconstruction": true,
+    "footprint": false
+  },
+  "layer_styles": {},
+  "visibility": {
+    "5/0": true,
+    "7/0": false,
+    "3/0": false,
+    "11/0": true,
+    "10/0": true,
+    "6/0": true,
+    "4/0": true
+  },
+  "selectability": {
+    "5/0": true,
+    "7/0": false,
+    "3/0": false,
+    "11/0": false,
+    "10/0": false,
+    "6/0": false,
+    "4/0": false
+  },
+  "motions": {
+    "5/0": "fixed",
+    "7/0": "fixed",
+    "3/0": "fixed",
+    "11/0": "fixed",
+    "10/0": "auto",
+    "6/0": "fixed",
+    "4/0": "auto"
+  },
+  "layer_order": [
+    "6/0",
+    "5/0",
+    "4/0",
+    "11/0",
+    "10/0",
+    "7/0",
+    "3/0"
+  ],
+  "gds_path": "XJ88_GDM32311_Final5.gds"
+}

@@ -94,9 +94,11 @@ class V42Tests(unittest.TestCase):
    q=e.frame(np.zeros((1,3)))['reconstruction']['pieces'][0];plan=q['route_plan'];a,b=q['interval']
    self.assertFalse(plan.pad_hit((600,300),1))
    self.assertFalse(plan.pad_hit((600,0),1))
-   at=plan.snap(plan.fixed_start+1,1,a)
+   cut_hi=plan.via_limits()[1]
+   at=plan.snap(plan.length,1,a)
    self.assertLess(at,plan.length)
-   self.assertEqual(plan.snap(plan.fixed_start+10,1,a),at)
+   self.assertLessEqual(cut_hi-at,max(plan.tolerance*8,1e-4)+1e-9)
+   self.assertEqual(plan.snap(plan.length-5,1,a),at)
    stopped=plan.edit_pose(a,b,1,plan.length,e.bound.centers[0],np.zeros(3),'c2',cursor=(600,300))[0]
    self.assertNotEqual(stopped['far'].geom_type,'Point')
   finally:e.close()
@@ -170,10 +172,13 @@ class V42Tests(unittest.TestCase):
     pieces=consolidate(r,[q],np.zeros((1,3)))
    self.assertTrue(all(v['connection_failed'] and not v['valid'] for v in pieces))
    copper,_=compose_feature(q['source'],pieces,r.tol,False)
-   self.assertTrue(copper.equals(q['source']))
+   # No material motion: the nominal copper is shown in full at zero pose.
+   self.assertLess(copper.symmetric_difference(q['source']).area,1e-6)
    with patch('die_shift_studio.reconstruction._compose_feature',side_effect=shapely.errors.GEOSException('overlay failure')):
-    copper,_=compose_feature(q['source'],[dict(q)],r.tol,True)
-   self.assertTrue(copper.equals(q['source']))
+    failed=[dict(q)];copper,_=compose_feature(q['source'],failed,r.tol,True)
+   expected=shapely.union_all([g for g in (failed[0]['regions']['B'],failed[0]['regions']['C']) if not g.is_empty])
+   self.assertLess(copper.symmetric_difference(expected).area,1e-6)
+   self.assertTrue(failed[0]['connection_failed'])
   finally:e.close()
  def test_unresolved_route_and_disconnected_ignored_copper_are_failures(self):
   from die_shift_studio.reconstruction import compose_feature

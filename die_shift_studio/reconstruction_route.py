@@ -196,6 +196,7 @@ class RoutePlan:
     nominal_second:float=0.
     warning:str=''
     memo_budget:int=1024*1024
+    cut_mode:str='auto'
     cache:dict=field(default_factory=dict,repr=False)
 
     def __post_init__(self):
@@ -217,9 +218,51 @@ class RoutePlan:
                 radius=min(max(self.guard,float(shapely.Point(self.xy[i]).distance(self.source.boundary))*.65),.3*min(self.lengths[i-1],self.lengths[i]))
                 self.corners.append((float(self.marks[i]),radius))
 
+    def _moving_cover(self):
+        """Physical moving terminals (vias), the hard requirement for the C side."""
+        tv=getattr(self,'terminal_vias',None)
+        cached=getattr(self,'_moving_cover_cache',None)
+        if cached is not None and cached[0] is tv:return cached[1],cached[2],cached[3]
+        geom=self.land
+        if tv and tv[0]:
+            polys=[g for g in tv[0] if g is not None and not g.is_empty]
+            if polys:geom=shapely.union_all(polys) if len(polys)>1 else polys[0]
+        self._moving_cover_cache=(tv,geom,float(geom.area),geom.bounds)
+        return self._moving_cover_cache[1:]
+
+    def via_limits(self):
+        """Cut limits tangent to the actual terminal vias, not the enclosing pad.
+
+        `land_end`/`fixed_start` stop at the pad+annulus boundary. The user may
+        move a boundary until it is tangent to the via itself; the annulus ring
+        between that tangent and the pad edge belongs to the transition. The
+        physical vias still stay entirely on their own rigid side, which
+        `prefix` verifies against these same polygons.
+        """
+        tv=getattr(self,'terminal_vias',None)
+        cached=getattr(self,'_via_limits_cache',None)
+        if cached is not None and cached[0] is tv:return cached[1],cached[2]
+        lo,hi=self.land_end,self.fixed_start
+        if tv:
+            moving=[]
+            for g in (tv[0] or ()):
+                if g is None or g.is_empty:continue
+                marks=terminal_marks(self.route,g)
+                if len(marks):moving.append(float(marks.max()))
+            fixed=[]
+            for g in (tv[1] or ()):
+                if g is None or g.is_empty:continue
+                marks=terminal_marks(self.route,g)
+                if len(marks):fixed.append(float(marks.min()))
+            if moving:lo=min(self.land_end,min(moving))
+            if fixed:hi=max(self.fixed_start,min(fixed))
+        if hi<lo:hi=lo
+        self._via_limits_cache=(tv,lo,hi)
+        return lo,hi
+
     def __getstate__(self):
         state=dict(self.__dict__);state['cache']={};state['pose_memo']=OrderedDict();state['memo_bytes']=0
-        for name in ('_ring_cache','_land_cache','_anchor_cache','_source_meta','_side_meta'):state.pop(name,None)
+        for name in ('_ring_cache','_land_cache','_anchor_cache','_source_meta','_side_meta','_via_limits_cache','_moving_cover_cache'):state.pop(name,None)
         return state
 
     def _source_info(self):
@@ -309,14 +352,20 @@ class RoutePlan:
         return float(previous) if best is None else best[1]
 
     def snap(self,s,which,other,allow_pad=True,corner_snap=None):
-        eps=max(self.tolerance*8,1e-4)
-        lo=0. if which==0 else max(other+eps,self.land_end+eps)
-        hi=min(other-eps,self.fixed_start-eps) if which==0 else self.fixed_start-eps
+        eps=max(self.tolerance*8,1e-4);cut_lo,cut_hi=self.via_limits()
+        lo=0. if which==0 else max(other+eps,cut_lo+eps)
+        hi=min(other-eps,cut_hi-eps) if which==0 else cut_hi-eps
         if hi<lo:return lo
         s=float(np.clip(s,lo,hi))
         margin=getattr(self,'pad_trigger',0.)
         if which==0 and s<=self.land_end+eps:
-            return 0. if allow_pad and self.allows_pad_point and s<=max(0.,self.land_end-margin) else min(hi,self.land_end+eps)
+            # Grabbing the pad itself still collapses the boundary to a point
+            # when that mode is enabled. Otherwise the closest straight cut is
+            # tangent to the via, leaving only the pad annulus in the transition.
+            if allow_pad and self.allows_pad_point:
+                if s<=max(0.,self.land_end-margin):return 0.
+                return min(hi,max(lo,cut_lo))
+            return min(hi,max(lo,cut_lo))
         for corner,radius in self.corners:
             if corner_snap is not None:
                 if corner_snap<=0:break
@@ -365,9 +414,10 @@ class RoutePlan:
         self.cache[key]=result
         return result
 
-    def prefix(self,s,angle=0.):
+    def prefix(self,s,angle=0.,*,tight=None):
         """Connected source portion on the moving-terminal side of a local cut."""
-        key=('prefix',round(float(s),8),round(float(angle),10))
+        if tight is None:tight=getattr(self,'cut_mode','auto')=='manual'
+        key=('prefix',round(float(s),8),round(float(angle),10),bool(tight))
         if key in self.cache:return self.cache[key]
         face=self.section(s,angle)
         if face is None:return None
@@ -376,9 +426,19 @@ class RoutePlan:
         try:pieces=parts(split(self.source,blade))
         except (ValueError,shapely.errors.GEOSException):return None
         land_area,land_bounds=self._land_info();anchor_bounds=self._anchor_info()
+        if tight:target,cover_area,cover_bounds=self._moving_cover()
+        else:target,cover_area,cover_bounds=self.land,land_area,land_bounds
         eps=max(self.tolerance**2,land_area*1e-7)
-        candidates=[g for g in pieces if self._bounds_overlap(g.bounds,land_bounds) and (g.covers(self.land) or g.intersection(self.land).area>=land_area-eps)]
-        candidates=[g for g in candidates if all(not self._bounds_overlap(g.bounds,ab) or not g.intersects(a) or g.intersection(a).area<=eps for a,ab in zip(self.anchors,anchor_bounds))]
+        candidates=[g for g in pieces if self._bounds_overlap(g.bounds,cover_bounds) and (g.covers(target) or g.intersection(target).area>=cover_area-eps)]
+        tv=getattr(self,'terminal_vias',None)
+        if tight and tv and tv[1]:
+            # The transition may cut through the fixed pad annulus, but never
+            # through a fixed via: exclude only the actual fixed via bodies.
+            fixed_targets=[g for g in tv[1] if g is not None and not g.is_empty]
+            fixed_bounds=[g.bounds for g in fixed_targets]
+        else:
+            fixed_targets=list(self.anchors);fixed_bounds=list(anchor_bounds)
+        candidates=[g for g in candidates if all(not self._bounds_overlap(g.bounds,ab) or not g.intersects(a) or g.intersection(a).area<=eps for a,ab in zip(fixed_targets,fixed_bounds))]
         extra_fixed=getattr(self,'cluster_fixed',None)
         if candidates and extra_fixed is not None and not extra_fixed.is_empty:
             feps=max(self.tolerance**2,1e-8)
@@ -396,22 +456,23 @@ class RoutePlan:
 
     def fixed_side(self,s):
         # Convert legacy saved whole-fixed paths to the last real line cut.
-        return min(float(s),self.fixed_start-max(self.tolerance*8,1e-4))
+        return min(float(s),self.via_limits()[1]-max(self.tolerance*8,1e-4))
 
-    def moving_line_partition(self,b,angles=(0.,0.)):
+    def moving_line_partition(self,b,angles=(0.,0.),*,tight=None):
         """Find the first usable straight moving-side section beyond the pad."""
+        if tight is None:tight=getattr(self,'cut_mode','auto')=='manual'
         b=self.fixed_side(b)
         angles=tuple(map(float,angles))
-        mkey=('moving-line',round(b,8),angles)
+        mkey=('moving-line',round(b,8),angles,bool(tight))
         if mkey in self.cache:
             cached=self.cache[mkey]
             return None if cached is None else dict(cached)
         step=max(self.tolerance*8,1e-4)
-        lo=self.land_end+step
+        lo=(self.via_limits()[0] if tight else self.land_end)+step
         hi=b-step
-        if hi<lo or self.prefix(b,angles[1]) is None:
+        if hi<lo or self.prefix(b,angles[1],tight=tight) is None:
             self.cache[mkey]=None;return None
-        part=self.partition(lo,b,angles)
+        part=self.partition(lo,b,angles,tight=tight)
         if part is not None:
             self.cache[mkey]=dict(part);return part
         # Include bend limits so a usable neck is not skipped by uniform probes.
@@ -433,16 +494,17 @@ class RoutePlan:
         self.cache[mkey]=None
         return None
 
-    def partition(self,a,b,angles=(0.,0.)):
+    def partition(self,a,b,angles=(0.,0.),*,tight=None):
         """Return disjoint A/B/C and their real shared boundaries, or no partition."""
+        if tight is None:tight=getattr(self,'cut_mode','auto')=='manual'
         b=self.fixed_side(b)
         if a>=b:return None
-        if a==0 and not self.allows_pad_point:return self.moving_line_partition(b,angles)
+        if a==0 and not self.allows_pad_point:return self.moving_line_partition(b,angles,tight=tight)
         angles=tuple(map(float,angles))
-        key=('partition',float(a),b,angles)
+        key=('partition',float(a),b,angles,bool(tight))
         cached=self.cache.get(key)
         if cached is not None:return dict(cached)
-        outer=self.prefix(b,angles[1])
+        outer=self.prefix(b,angles[1],tight=tight)
         if outer is None:return None
         moving_plus,far,b_shape=outer
         if a==0.:
@@ -455,8 +517,10 @@ class RoutePlan:
             try:pieces=parts(split(moving_plus,blade))
             except (ValueError,shapely.errors.GEOSException):return None
             land_area,land_bounds=self._land_info()
+            if tight:target,cover_area,cover_bounds=self._moving_cover()
+            else:target,cover_area,cover_bounds=self.land,land_area,land_bounds
             epsilon=max(self.tolerance**2,land_area*1e-7)
-            movable=[g for g in pieces if self._bounds_overlap(g.bounds,land_bounds) and (g.covers(self.land) or g.intersection(self.land).area>=land_area-epsilon)]
+            movable=[g for g in pieces if self._bounds_overlap(g.bounds,cover_bounds) and (g.covers(target) or g.intersection(target).area>=cover_area-epsilon)]
             extra_moving=getattr(self,'cluster_moving',None)
             if len(movable)==1 and extra_moving is not None and not extra_moving.is_empty:
                 meps=max(self.tolerance**2,1e-8)
@@ -481,7 +545,8 @@ class RoutePlan:
     def pad_handle(self,side):
         """UI-only branchward point; electrical endpoint and export stay exact."""
         origin=np.asarray(self.route.coords[0 if side==0 else -1],float)
-        position=min(self.length,max(self.land_end+self.guard,self.length*.25)) if side==0 else max(0.,min(self.fixed_start-self.guard,self.length*.75))
+        cut_lo,cut_hi=self.via_limits()
+        position=min(self.length,max(cut_lo+self.guard,self.length*.25)) if side==0 else max(0.,min(cut_hi-self.guard,self.length*.75))
         toward=np.asarray(self.route.interpolate(position).coords[0])-origin
         pad=self.land if side==0 else min(self.anchors,key=lambda g:g.distance(shapely.Point(origin)),default=self.source)
         radius=float(shapely.Point(origin).distance(pad.boundary))
@@ -504,6 +569,7 @@ class RoutePlan:
         This is a bounded engineering search, not a global routing optimum.
         The same full-input displacement bound is used in every pose.
         """
+        self.cut_mode='auto'
         preferred=getattr(self,'preferred_land',None)
         if preferred is not None and preferred.difference(self.land).area>self.tolerance**2:
             original_land=self.land;original_end=self.land_end
@@ -524,17 +590,17 @@ class RoutePlan:
             # Width changes at pads may occupy the beginning/end of a segment.
             # Search inward only until a genuine separating section is found.
             for a in np.linspace(lo,min(hi,lo+max(2*self.guard,(hi-lo)*.15)),5):
-                if self.prefix(a) is not None:break
+                if self.prefix(a,tight=False) is not None:break
             else:continue
             for b in np.linspace(hi,max(a,hi-max(2*self.guard,(hi-a)*.15)),5):
-                part=self.partition(float(a),float(b))
+                part=self.partition(float(a),float(b),tight=False)
                 if part is not None:break
             else:continue
             candidates.append((float(b-a),float(a),float(b),part))
         if not candidates:
             # Bent or branched path: a topology-checked full-length interval.
             for b in np.linspace(auto_end-eps,self.land_end+eps,24):
-                part=self.partition(0.,float(b))
+                part=self.partition(0.,float(b),tight=False)
                 if part is not None:
                     candidates.append((part['b']-part['a'],part['a'],part['b'],part));break
         if not candidates:return None
@@ -558,7 +624,7 @@ class RoutePlan:
                     if best is None or stations[right]-stations[left]>stations[best[1]]-stations[best[0]]:best=(left,right)
             if best and stations[best[1]]-stations[best[0]]>best_uniform:
                 lo,hi=map(float,stations[list(best)])
-                part=self.partition(lo,hi)
+                part=self.partition(lo,hi,tight=False)
                 if part is not None:
                     uniform.append((hi-lo,lo,hi,part))
                     best_uniform=max(best_uniform,hi-lo)
@@ -578,6 +644,7 @@ class RoutePlan:
         return best[3]
 
     def edit(self,a,b,which,position,allow_pad=True,corner_snap=None):
+        self.cut_mode='manual'
         target=self.snap(position,which,b if which==0 else a,allow_pad,corner_snap)
         start=a if which==0 else b
         trials=[target,*np.linspace(target,start,25)[1:]]

@@ -110,11 +110,14 @@ class Projects(unittest.TestCase):
         stop = threading.Event(); stop.set()
         with self.assertRaises(InterruptedError): copy_excel(self.folder, [external], stop)
 
-    def test_build_installs_case_without_overwriting_user_project(self):
+    def test_build_installs_only_sh22_example_without_overwriting_user_project(self):
         destination = self.root/'dist'
         install_case(destination)
-        project = destination/'Jobs/GD55/GD55.dshift.json'
-        self.assertEqual(project.read_bytes(), (ROOT/'Jobs/GD55/GD55.dshift.json').read_bytes())
+        project = destination/'Jobs/SH22/SH22.dshift.json'
+        self.assertEqual(project.read_bytes(), (ROOT/'Jobs/SH22/SH22.dshift.json').read_bytes())
+        # The packaged application must not spawn GD55/GD55_1119 by default.
+        for folder in ('GD55', 'GD55_1119', 'XD46_SC9211', 'XD46_SC58512', 'XJ88_GDM32311'):
+            self.assertFalse((destination/'Jobs'/folder).exists(), folder)
         project.write_text('user changes')
         install_case(destination)
         self.assertEqual(project.read_text(), 'user changes')

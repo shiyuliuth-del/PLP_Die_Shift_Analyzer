@@ -15,7 +15,7 @@ class ContinuityTests(unittest.TestCase):
   part,_=plan.edit_pose(50,150,0,25,[0,0],np.zeros(3),'c2',cursor=(25,0))
   self.assertEqual(part['a'],0.)
   part,_=plan.edit_pose(50,150,1,175,[0,0],np.zeros(3),'c2',cursor=(175,0))
-  self.assertLess(part['b'],plan.fixed_start)
+  self.assertLess(part['b'],plan.via_limits()[1])
   self.assertEqual(part['far'].geom_type,'LineString')
   self.assertFalse(plan.pad_hit((100,100),1))
 
