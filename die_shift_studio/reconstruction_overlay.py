@@ -768,6 +768,13 @@ class ReconstructionOverlay:
             if artist is not None:artist.set_visible(False)
         self.w.scene_renderer.external_draw(None)
 
+    def release_artwork(self):
+        """Forget detached artists and their geometry when replacing the drawing."""
+        self.draft_frame=self.draft_data=self.draft_key=None
+        self.artists.clear();self.stationary_artists.clear();self.path_cache.clear();self.union_cache.clear()
+        for items in (self.labels,self.staged_tags,self.end_artists,self.region_artists,self.arrow_artists):items.clear()
+        self.cuts=self.second_cuts=self.points=self.second_points=self.warning=self.problems=self.low_problems=self.staged=self.hover=None
+
 
 class CutDrag:
     def __init__(self,window):

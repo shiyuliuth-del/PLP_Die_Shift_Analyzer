@@ -320,11 +320,7 @@ class MeasuredOutput(QtCore.QObject):
             if self.render_engine:self.render_engine.close();self.render_engine=None
             if self.session:self.session.close();self.session=None
             if command=='project.close':
-                w.drop_result();w.data=None;w.case=None;w.project_path=None;w.geometry_cache=None;w.connections=None
-                w.layer_drag.end_drag()
-                w.layer_table.setRowCount(0);w.role_boxes={};w.visible_boxes={};w.compensation_boxes={};w._layer_keys=[];w.gds_label.clear()
-                w.top.blockSignals(True);w.top.clear();w.top.blockSignals(False)
-                w.ax.clear();w.canvas.draw_idle();w.refresh_jobs();return dict(status='completed',result={'closed':True})
+                w.reset_project();return dict(status='completed',result={'closed':True})
             path=Path(args['path']).expanduser().resolve()
             if not path.is_file():raise ValueError('工程文件不存在')
             from .project import normalize_project

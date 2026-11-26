@@ -42,6 +42,13 @@ RealDataAnalyse-output/
 *.sqlite-wal
 *.sqlite-shm
 *.lock
+*.lic
+*.pem
+*.db
+*.db-wal
+*.db-shm
+dist_admin/
+Jobs/.DXFImports/
 
 # Project-owned runs are private; reviewed Jobs/GD55 inputs are versioned.
 Jobs/**/Cache/

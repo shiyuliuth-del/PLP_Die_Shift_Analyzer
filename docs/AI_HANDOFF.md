@@ -1,3 +1,9 @@
+# V79 永久离线授权与工程切换
+
+授权验证在正常 GUI、实测启动、诊断和命令行入口之前。客户端固定内置 Ed25519 公钥，私钥与签发逻辑仅在独立 LicenseManager。通用证书使用已签名的 `machine_id="*"`，仍需成功读取并验证本机硬件信息。生成正式密钥与通用证书属于管理员首次部署。
+
+DXF 转为工程可保存的 OAS 源与 ABC 轮廓，忽略当前图纸。空白工程命令调用统一的 `reset_project`。旧工程缓存组在最后一个后台任务结束时 park，释放旧引擎与热缓存。双端动孔自动动区数加入重构缓存键，历史设置沿 schema5 读入。
+
 # V78 界面缩放
 
 `ViewSettings.ui_scale_percent` 使用 schema5 可选字段。`interface_scale.InterfaceScale` 从窗口原始 Qt 样式、控件约束和表格行高应用比例，可往返恢复；动态表格列和工具栏图标沿用同一比例。大字号时可滚动访问超出窗口的界面。`settings_changed` 直接处理缩放，不进入数值更新，`project_results.identity` 排除该字段。[V78 使用说明](V78_使用说明.md)

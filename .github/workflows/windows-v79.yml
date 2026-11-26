@@ -1,0 +1,60 @@
+name: V79 Windows offline licensing and interface
+on:
+  workflow_call:
+    inputs:
+      client_only:
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONPATH: '.;tests'
+      OPENBLAS_NUM_THREADS: '1'
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -r requirements.txt
+      - if: ${{ !inputs.client_only }}
+        run: python -m unittest -v test_v79 test_v78 test_v76 test_v59 test_branch_integration
+      - name: Build the standalone administrator tool
+        if: ${{ !inputs.client_only }}
+        run: cmd /c BUILD.bat --admin-only
+      - uses: actions/upload-artifact@v4
+        if: ${{ !inputs.client_only }}
+        with:
+          name: LicenseManager-windows
+          path: dist_admin/LicenseManager.exe
+          if-no-files-found: error
+      - name: Verify missing-key preflight and build an isolated QA client
+        shell: pwsh
+        run: |
+          python -m PyInstaller --clean --noconfirm Die_Shift_Analyze.spec *> missing-key.log
+          if ($LASTEXITCODE -eq 0 -or -not (Select-String -LiteralPath missing-key.log -Pattern 'Formal Ed25519 public key required' -SimpleMatch)) { throw 'Missing public key did not fail closed' }
+          python tools/qa_license.py
+          if ($LASTEXITCODE -ne 0) { throw 'QA key setup failed' }
+          python -m PyInstaller --clean --noconfirm Die_Shift_Analyze.spec
+          if ($LASTEXITCODE -ne 0) { throw 'QA client build failed' }
+          $process = Start-Process -Wait -PassThru dist/Die_Shift_Analyze.exe -ArgumentList '--smoke-test','qa-activated.json'
+          if (Test-Path qa-hardware-valid) {
+            if ($process.ExitCode -ne 0 -or -not (Test-Path qa-activated.json)) { throw 'Licensed EXE failed smoke test' }
+          } else {
+            if ($process.ExitCode -eq 0 -or (Test-Path qa-activated.json)) { throw 'EXE ran without a valid hardware binding' }
+            Write-Warning 'Runner lacks valid CIM hardware identifiers. Real activation requires a supported computer.'
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: licensing-validation
+          path: |
+            qa-hardware-status.txt
+            qa-activated.json
+            missing-key.log

@@ -59,6 +59,17 @@ class ProjectCacheGroup:
     def park_frames(self):
         with self.lock:
             if self.frame_ram is not None:self.frame_ram.clear()
+    def park(self):
+        """Release inactive geometry and hot buffers while keeping disk-backed frames."""
+        with self.lock:
+            for engine in tuple(self.engines.values()):engine.close()
+            self.engines.clear();self.nominal.clear();self.replays.clear()
+            if self.last_assessment is not None:
+                assessment_key,_=self.last_assessment
+                if assessment_key in self.values:self.values['parked-assessment-key']=assessment_key
+                self.last_assessment=None
+            self.park_frames()
+            for cache in self.caches.values():cache.memory.clear();cache.used=0
     def register(self,cache):
         with self.lock:self.caches[id(cache)]=cache
     def entries(self,cache):

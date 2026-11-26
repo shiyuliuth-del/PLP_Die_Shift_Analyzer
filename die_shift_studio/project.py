@@ -105,6 +105,20 @@ def normalize_project(project):
     from .drc_waivers import normalize as normalize_waivers
     p['ignored_drc']=normalize_waivers(p.get('ignored_drc'))
     if not isinstance(p.setdefault('dxf_directory',''),str):raise ValueError('DXF输出目录必须为文本')
+    if not isinstance(p.setdefault('dxf_source',''),str):raise ValueError('DXF 来源路径必须为文本')
+    names=p.setdefault('dxf_layer_names',{})
+    if not isinstance(names,dict) or any(not isinstance(k,str) or not isinstance(v,str) for k,v in names.items()):
+        raise ValueError('DXF 图层名称格式无效')
+    paths=p.setdefault('dxf_outlines',[])
+    if not isinstance(paths,list) or any(not isinstance(row,(list,tuple)) or len(row)!=3 or
+                row[0] not in p['roles'] or row[1] not in ('A','B','C') or not isinstance(row[2],(list,tuple)) or len(row[2])<2
+                for row in paths):
+        raise ValueError('DXF 动静区轮廓格式无效')
+    if paths:
+        import numpy as np
+        for _,_,vertices in paths:
+            xy=np.asarray(vertices,dtype=float)
+            if xy.shape!=(len(vertices),2) or not np.isfinite(xy).all():raise ValueError('DXF 动静区轮廓坐标无效')
     view=p.get('extreme_view',{})
     if not isinstance(view,dict):raise ValueError('工程极端情况视图必须是对象')
     view={'mode':'risk','page':1,'page_size':64,**view}

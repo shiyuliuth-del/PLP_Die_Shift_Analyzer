@@ -6,75 +6,24 @@ from .layer_roles import EXPORT_ONLY,NON_PARTICIPATING
 
 def import_regions(window):
     if window.remote_locked:return
-    if window.data is None:
-        window.error('请先打开原始 GDS/OAS 并设置图层用途');return
     if window.worker is not None or window.cut_drag.state is not None or window.pending_layout_ops or window.pending_node_shapes:
         window.error('请先完成当前任务及待应用的图纸编辑');return
-    data=window.data
-    root=window.dxf_directory or str(Path(data.path).parent)
+    previous=window.data
+    root=window.dxf_directory or (str(Path(previous.path).parent) if previous else str(window.jobs_dir))
     name,_=W.QFileDialog.getOpenFileName(window,'动静区输入',root,'DXF (*.dxf)')
     if not name:return
-    roles,order,motions=window.roles(),window.ordered_layers(),window.motions()
-    params,settings=window.params(),window.view_settings
-    geometry=window.geometry_cache;case=window.case
-    compensation=window.output_compensation();window_options=window.dxf_settings
-
+    folder=window.jobs_dir/'.DXFImports'
     def work(progress):
-        from .contact import ContactModel
-        from .core import build_case
-        from .fast_preview import GeometryCache
-        from .region_import import configure,read,read_domains,recover_metadata,resolve_stackup,validate_rebuild
-        from .resources import progress_slice
-        if progress:progress(0,'读取动静区 DXF 并同步层叠状态')
-        contours,record=read(name,with_metadata=True)
-        contours={k:v for k,v in contours.items() if k in data.layers}
-        if not contours:raise ValueError('DXF 中的动静区图层与当前图纸没有任何匹配图层')
-        target_roles,target_order,target_motions,target_comp=resolve_stackup(contours,record,data,roles,order,compensation)
-        stackup_changed=(target_roles!=roles or target_order!=order or target_comp!=compensation)
-        cache=geometry or GeometryCache(data)
-        current=case if (case is not None and not stackup_changed) else build_case(data,target_roles,geometry=cache.geometries,layer_order=target_order)
-        model=ContactModel(data,current,target_roles,current['connections'],cache,target_motions,params)
-        verification=progress_slice(progress,18,.82)
-        try:
-            restored=recover_metadata(record,contours,data,target_roles,target_order,params,settings)
-            if restored is not None:
-                from .dxf_settings import DxfSettings
-                from .output_compensation import normalize
-                options=DxfSettings.from_dict(record.get('dxf'))
-                offsets=normalize(record.get('compensation'))
-                if validate_rebuild(model,params,restored,contours,options,offsets,verification,references=record.get('references')):
-                    return restored,len(contours),'已核对原生动区及输出轮廓',target_roles,target_order,target_comp,current,stackup_changed
-        except (TypeError,ValueError,OverflowError):
-            if progress:progress(18,'原生记录无法复核，依据 DXF 轮廓导入')
-        try:
-            domains=read_domains(contours,cache,target_roles,target_comp,window_options.scale,data.dbu_um)
-            return configure(model,params,settings,domains,verification),len(contours),'已核对源铜、切口及实际动区',target_roles,target_order,target_comp,current,stackup_changed
-        except ValueError:
-            # Legacy files only carry exterior outlines. If they match the
-            # current generated layout, the existing settings resolve them.
-            if validate_rebuild(model,params,settings,contours,window_options,target_comp,verification):
-                return settings,len(contours),'与当前名义动静区一致',target_roles,target_order,target_comp,current,stackup_changed
-            raise
-
-    def complete(out):
-        if window.data is not data or window.view_settings!=settings or window.remote_locked:return
-        updated,count,reason,target_roles,target_order,target_comp,current,stackup_changed=out
-        window.edit_history.record()
-        if stackup_changed:
-            window.apply_stackup(target_roles,target_order,target_comp,case=current)
-        window.view_settings=updated
+        from .dxf_input import load
+        return load(name,folder,progress)
+    def complete(result):
+        if window.data is not previous or window.remote_locked:return
+        data,project=result
+        window.project_path=None
+        window.set_data(data,project)
         window.dxf_directory=str(Path(name).parent)
-        window.reconstruction_pending=False
-        window._reconstruction_apply_once=True
-        overlay=window.reconstruction_overlay
-        overlay.staged_overlay=None;overlay.draft_frame=overlay.draft_data=overlay.draft_key=None;overlay.clear_hover()
-        toggle=window.reconstruction_toggle
-        blocked=toggle.blockSignals(True);toggle.setChecked(True);toggle.blockSignals(blocked)
-        window.invalidate_reconstruction_edit()
-        window.request_preview(quiet=True)
-        suffix='，已自动同步 DXF 层叠状态' if stackup_changed else ''
-        window.log_bus.emit(f'已按 DXF 名义坐标应用 {count} 层动静区定义。{reason}{suffix}。')
-
+        window.refresh_jobs()
+        window.log_bus.emit(f'已从 DXF 导入 {len(data.layers)} 层并替换当前图纸与图层设置。')
     window.start_worker(work,complete)
 
 

@@ -1,6 +1,7 @@
 # Build on Windows with the active Python environment. No sidecar files.
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_dynamic_libs,collect_data_files
@@ -9,11 +10,21 @@ if sys.platform!='win32':
     raise SystemExit('The Windows EXE must be built on Windows.')
 root=Path(SPECPATH)
 sys.path.insert(0,str(root))
+from die_shift_studio.license_core import load_public_key
+from cryptography.hazmat.primitives.serialization import Encoding,PublicFormat
+public=Path(os.environ.get('DIE_SHIFT_LICENSE_PUBLIC_KEY') or root/'public_key.pem')
+if not public.is_file():
+    raise SystemExit('Formal Ed25519 public key required. Set DIE_SHIFT_LICENSE_PUBLIC_KEY or provide public_key.pem.')
+key=load_public_key(public.read_bytes())
+embedded=Path(workpath)/'license_public.pem';embedded.parent.mkdir(parents=True,exist_ok=True)
+embedded.write_bytes(key.public_bytes(Encoding.PEM,PublicFormat.SubjectPublicKeyInfo))
 from die_shift_studio.app_icon import write_ico
 icon=Path(workpath)/'Die_Shift_Analyze.ico'
 icon.parent.mkdir(parents=True,exist_ok=True);write_ico(icon)
 
 data=collect_data_files('scipy.stats',includes=['_sobol_direction_numbers.npz'])
+data.append((str(embedded),'die_shift_studio'))
+data.extend(collect_data_files('ezdxf'))
 data.extend((str(root/'die_shift_studio'/name),'die_shift_studio') for name in ('native_ops.py','klayout_worker.py','cuda_kernels.ptx'))
 binaries=collect_dynamic_libs('gdstk')
 hidden=['matplotlib.backends.backend_qtagg','scipy.special._ufuncs','shapely.lib']
@@ -24,7 +35,7 @@ if importlib.util.find_spec('klayout'):
 qt='PyQt6' if importlib.util.find_spec('PyQt6') else 'PyQt5'
 exclude=['PyQt5' if qt=='PyQt6' else 'PyQt6','PySide6','PySide2','tkinter',
          'cupy','cupyx','cupy_backends','nvidia','torch','torchvision','torchaudio','tensorflow',
-         'jax','jaxlib','numba','pandas','sklearn','IPython','pytest','notebook','jupyterlab']
+         'jax','jaxlib','numba','pandas','sklearn','IPython','pytest','notebook','jupyterlab','LicenseManager']
 a=Analysis([str(root/'main.py')],pathex=[str(root)],binaries=binaries,datas=data,
            hiddenimports=hidden,excludes=exclude,
            hooksconfig={'matplotlib':{'backends':['QtAgg','Agg']}})
