@@ -2,6 +2,7 @@
 from base64 import b64decode
 import binascii
 from dataclasses import dataclass
+from datetime import datetime
 import hashlib
 import hmac
 from ipaddress import IPv4Address
@@ -23,6 +24,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 PRODUCT = 'DIE_SHIFT_ANALYZE'
 FIELDS = {'schema_version','license_id','product_id','machine_id','hwid_version'}
 LEGACY_FIELDS = FIELDS | {'user_name','employee_id'}
+TIMED_FIELDS = {'duration_months','issued_at','expires_at'}
+ALLOWED_FIELDS = LEGACY_FIELDS | TIMED_FIELDS
 LIMIT = 16384
 MACHINE_ID = re.compile(r'[0-9A-F]{64}')
 INVALID_BOARD = {'TO BE FILLED BY O.E.M.','TO BE FILLED BY OEM','DEFAULT STRING','SYSTEM SERIAL NUMBER',
@@ -244,7 +247,21 @@ def _unique(pairs):
     return result
 
 
-def verify(content, key, bindings, *, legacy_board_id=None, binding_error=''):
+def expiry_text(payload):
+    if not isinstance(payload, dict) or not payload.get('expires_at'):
+        return '永久'
+    months = payload.get('duration_months')
+    try:
+        dt = datetime.fromisoformat(str(payload['expires_at']))
+        if dt.tzinfo is not None:
+            dt = dt.astimezone()
+        date_text = dt.strftime('%Y-%m-%d')
+    except ValueError:
+        date_text = str(payload['expires_at'])
+    return f'{months} 个月（至 {date_text}）' if months else f'至 {date_text}'
+
+
+def verify(content, key, bindings, *, legacy_board_id=None, binding_error='', now=None):
     if len(content) > LIMIT:
         raise LicenseError('许可证文件过大。')
     try:
@@ -256,12 +273,15 @@ def verify(content, key, bindings, *, legacy_board_id=None, binding_error=''):
     if not isinstance(value, dict) or set(value) != {'payload','signature'}:
         raise LicenseError('许可证格式错误。')
     payload, signature = value['payload'], value['signature']
-    if not isinstance(payload, dict) or set(payload) not in (FIELDS, LEGACY_FIELDS) or not isinstance(signature, str):
+    if not isinstance(payload, dict) or not FIELDS.issubset(payload) or not set(payload).issubset(ALLOWED_FIELDS) or not isinstance(signature, str):
         raise LicenseError('许可证字段不正确。')
-    if any(type(payload[k]) is not int for k in ('schema_version','hwid_version')) or any(
+    int_fields = {'schema_version','hwid_version'} | ({'duration_months'} if 'duration_months' in payload else set())
+    if any(type(payload[k]) is not int for k in int_fields) or any(
             not isinstance(payload[k], str) or not payload[k].strip() or len(payload[k]) > 256
-            for k in payload.keys()-{'schema_version','hwid_version'}):
+            for k in payload.keys()-int_fields):
         raise LicenseError('许可证字段类型不正确。')
+    if 'duration_months' in payload and not (0 <= payload['duration_months'] <= 12000):
+        raise LicenseError('许可证有效时长无效。')
     try:
         decoded = b64decode(signature, validate=True)
         if len(decoded) != 64:
@@ -281,6 +301,20 @@ def verify(content, key, bindings, *, legacy_board_id=None, binding_error=''):
         uuid.UUID(payload['license_id'])
     except ValueError as exc:
         raise LicenseError('许可证授权编号无效。') from exc
+    if 'expires_at' in payload:
+        try:
+            expires_at = datetime.fromisoformat(payload['expires_at'])
+        except ValueError as exc:
+            raise LicenseError('许可证过期时间格式无效。') from exc
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.astimezone()
+        current = now if now is not None else datetime.now().astimezone()
+        if current.tzinfo is None:
+            current = current.astimezone()
+        if current > expires_at:
+            raise LicenseError(f"许可证已于 {expires_at.astimezone().strftime('%Y-%m-%d')} 过期，请联系管理员续期。")
+    elif payload.get('duration_months', 0) > 0:
+        raise LicenseError('限时许可证缺少过期时间。')
     bound = payload['machine_id']
     if bound != '*' and not MACHINE_ID.fullmatch(bound):
         raise LicenseError('许可证机器码无效。')

@@ -1,3 +1,10 @@
+# V83 端点随动控制、源码免鉴权、限时授权、按 DIE 动区间菜单与多分支重构
+
+- 授权与启动：`main.py`、`RealDataAnalyse/main.py` 与 `gui.launch` 仅在 `getattr(sys, 'frozen', False)` 时执行授权校验，源码模式直接启动；打包后 windowed EXE 补齐空 `stdout/stderr` 守卫且无需同级 `.bat`。`license_core.verify` 与 `LicenseManager/manager.py` 新增可选 `duration_months`/`issued_at`/`expires_at` 签名字段，`duration_months=0` 保持原永久载荷结构。
+- 固定过孔防误判与端点子区域：`ignored_motion.fixed_enclosures_safe` / `complex_mode` 改用目标 RDL 的 `rdl_net` 检索 `r.stays`，`reconstruction.py` 在 `die_internal` 排除连接固定过孔的图形。`branch_regions.assemble` 与 `reconstruction.py` 输出 `endpoint_blocks`，新增 `ViewSettings.reconstruction_endpoint_overrides` 与 `between_motion.endpoint_modes`、`MainWindow.change_endpoint_motion`、`GeometrySelection.find_endpoint_block` / 同位点击循环、`shape_menu.py` 端点菜单，并贯通 `region_export` ABC 分类与 `ReconstructionOverlay.endpoint_views`。
+- 按 DIE 动区间与滚轮菜单：`between_motion` 支持 `die:<owner>`、`equivalent_pose` 与 `mode_label`，贯穿 `MultiPairFrame`、`serial_poses`、`graph_poses`、`branch_regions`、`region_export`（归入 `_A`）与 `ReconstructionOverlay`；`shape_menu.py` 调整动区间菜单层级并新增 `_configure_scrollable_menu` + `_MenuWheelFilter`（使用 `menu-scrollable: 1` 与滚轮步进）。
+- 多分支区创建：`reconstruction.py` 将 `self.box_refs` 计入 `edited`；`reconstruction_edits.change_zone('add')` 检索 `solver._base_plans` 未使用分支并在区间外新增 `'local'` 独立区；`reconstruction_zones.expand` 支持 `local_extras`、全路由 `seed` 局部化与未跨中心线框选的最近路由回退。回归见 `tests/test_v83.py`。
+
 # V82 正态标准差、授权默认目录、性能与重构边界修复
 
 - `Parameters` 新增 `sigma_x_um=3.0`、`sigma_y_um=3.0`、`sigma_angle_deg=0.02`、`per_die_sigma_enabled=False`、`die_sigmas=[]`，与硬范围 `bounds` 及 `target_nsigma` 解耦；`statistics.statistical_state`、`distribution`、`model_yield`、`width_probability`、`width_yield`、`width_sampling`、`contact_probability`、`probability_overlay`、`reconstruction_probability`、`result_analysis` 统一通过 `Parameters.for_die()` 消费该标准差。旧工程默认 `3.0 / 3.0 / 0.02`，均值默认 `0`。

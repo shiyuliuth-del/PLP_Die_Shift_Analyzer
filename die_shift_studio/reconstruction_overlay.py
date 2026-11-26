@@ -6,7 +6,7 @@ import math
 import numpy as np
 import shapely
 from .moving_pair import boundary_pose,relative_pose
-from .between_motion import LABELS,STATIONARY,lookup_mode
+from .between_motion import ENDPOINT_LABELS,LABELS,STATIONARY,endpoint_modes,lookup_mode,mode_label,parse_die_mode
 from matplotlib.collections import LineCollection,PatchCollection,PathCollection
 from matplotlib.lines import Line2D
 from matplotlib.markers import MarkerStyle
@@ -67,6 +67,7 @@ def display_material(data,visible_layers):
 
 def between_color(rgb,mode):
     if mode==STATIONARY:return tuple(c*.69 for c in rgb)
+    if mode=='follow_ep' or parse_die_mode(mode) is not None:return tuple(c*.72+v*.28 for c,v in zip(rgb,(.79,.70,.92)))
     if mode=='min':return tuple(c*.87 for c in rgb)
     if mode=='max':return tuple(c+(1-c)*.25 for c in rgb)
     return rgb
@@ -75,7 +76,7 @@ def between_color(rgb,mode):
 class ReconstructionOverlay:
     def __init__(self,window):
         self.draft_frame=self.draft_data=self.draft_key=None;self.staged_overlay=None;self._stage_worker=None;self._stage_pending=None;self._stage_ref_keys={}
-        self._stage_frame=None;self.between_views={}
+        self._stage_frame=None;self.between_views={};self.endpoint_views={}
         self.w=window;self.artists={};self.stationary_artists={};self.cuts=None;self.stamp=self.table_stamp=None
         self.selected=self.selected_kind=None;self.hover=None;self.hover_key=None
         self.end_artists=[];self.region_artists=[];self.arrow_artists=[];self.path_cache={};self.handles={};self.union_cache={};self.labels=[];self.staged_tags=[];self.text_sizes={};self.zone_views={};self.zone_low={};self.zone_clips={}
@@ -126,7 +127,7 @@ class ReconstructionOverlay:
             else:
                 _,layer,vertices=row
                 staged_boxes.append((layer,shapely.Polygon(vertices)))
-        for name in ('ignored','following','forced','angles','intervals','added','deleted','regions','boxes','angle_boxes','box_starts','box_excluded','cuts','extra_cuts','second_cuts','dropped_cuts','fixed_via_follows','between_overrides'):
+        for name in ('ignored','following','forced','angles','intervals','added','deleted','regions','boxes','angle_boxes','box_starts','box_excluded','cuts','extra_cuts','second_cuts','dropped_cuts','fixed_via_follows','between_overrides','endpoint_overrides'):
             field='reconstruction_'+name
             cur=set(getattr(cfg,field));prev=set(getattr(previous,field))
             for row in cur^prev:
@@ -138,9 +139,9 @@ class ReconstructionOverlay:
                 elif name=='fixed_via_follows':
                     ref=(str(row[0]),int(row[1]));via_refs.add(ref)
                     tag(ref,'固定过孔随动' if row in cur else '固定过孔静止')
-                elif name=='between_overrides':
+                elif name in ('between_overrides','endpoint_overrides'):
                     ref=(str(row[0]),int(row[1]));between_refs.add(ref);rdl_refs.add(ref)
-                    tag(ref,'动区间随动')
+                    tag(ref,'动区间随动' if name=='between_overrides' else '端点随动')
                 else:
                     ref=(str(row[0]),int(row[1]));rdl_refs.add(ref)
                     if name=='deleted' and row in cur:tag(ref,'删除动区')
@@ -170,6 +171,7 @@ class ReconstructionOverlay:
                         tuple(r for r in cfg.reconstruction_second_cuts if (r[0],r[1])==target),
                         tuple(r for r in cfg.reconstruction_dropped_cuts if (r[0],r[1])==target),
                         tuple(r for r in cfg.reconstruction_between_overrides if (r[0],r[1])==target),
+                        tuple(r for r in cfg.reconstruction_endpoint_overrides if (r[0],r[1])==target),
                         tuple(r for r in cfg.reconstruction_box_starts if (r[0],r[1])==target),
                         cfg.reconstruction_between_motion,
                         cfg.reconstruction_boxes,cfg.reconstruction_angle_boxes,cfg.reconstruction_box_order,cfg.reconstruction_regions,
@@ -443,7 +445,7 @@ class ReconstructionOverlay:
             self.pulse_timer.stop();self.hover_key=None
         w.scene_renderer.feedback_background=None
         self.stamp=stamp;paths={};colors={};first=[];second=[];dots=[];far_dots=[];warnings=[];region_groups={};red=[];low_red=[]
-        self.between_views={};active_by_ref=defaultdict(list)
+        self.between_views={};self.endpoint_views={};active_by_ref=defaultdict(list)
         old_unions=self.union_cache;self.union_cache={};old_cache=self.path_cache;self.path_cache={};self.zone_views={};self.zone_low={}
         old_clips=self.zone_clips;self.zone_clips={}
         def patch(g):
@@ -545,7 +547,26 @@ class ReconstructionOverlay:
                 before=lookup_mode(previous,ref,block['nominal'])
                 after=lookup_mode(w.view_settings,ref,block['nominal'])
                 if before!=after:
-                    staged_between.append((ref,g,LABELS[after[0]]))
+                    staged_between.append((ref,g,mode_label(after[0])))
+        for block in (data or {}).get('endpoint_blocks',()):
+            ref=block['ref']
+            base=copper.get(ref);g=block['geometry']
+            if base is None or g.is_empty or not _in_view(g.bounds,w.view_bounds):continue
+            if not base.covers(g):g=base.intersection(g)
+            active=active_by_ref.get(ref,())
+            if active:g=g.difference(shapely.union_all(active))
+            if g.area<=(data or {}).get('dbu_um',.001)**2:continue
+            self.endpoint_views[block['id']]=dict(block,geometry=g)
+            if block.get('custom') or block['mode']!=block.get('default_mode'):
+                paint_by_ref[ref].append(g)
+                paint_key='follow_ep' if block['mode']=='follow' else STATIONARY
+                region_groups.setdefault((*ref,'C',paint_key),{})[id(g)]=g
+            if previous is not None:
+                default_m=block.get('default_mode',STATIONARY)
+                before=endpoint_modes(previous,ref,{0:block['nominal']},{0:default_m})[0]
+                after=endpoint_modes(w.view_settings,ref,{0:block['nominal']},{0:default_m})[0]
+                if before!=after:
+                    staged_between.append((ref,g,ENDPOINT_LABELS.get(after[0],after[0])))
         for (layer,index),g in copper.items():
             if not _in_view(g.bounds,w.view_bounds):continue
             middle=paint_by_ref.get((layer,index))
@@ -582,18 +603,18 @@ class ReconstructionOverlay:
         staged_actions=(staged_info or {}).get('actions',{})
         if staged_info:staged_refs.update(staged_info.get('refs',()))
         placed_between=set()
-        for ref,g,mode_label in staged_between:
+        for ref,g,mode_text in staged_between:
             face,edge=STAGED_STYLE['动区间随动'];placed_between.add(ref)
             staged.append(patch(g));staged_faces.append(to_rgba(face));staged_edges.append(to_rgba(edge))
             if len(tag_items)<12:
                 anchor=g.representative_point()
-                tag_items.append((anchor.x,anchor.y,'待算：'+mode_label,edge))
+                tag_items.append((anchor.x,anchor.y,'待算：'+mode_text,edge))
         solver=getattr(getattr(w,'engine',None),'reconstructor',None)
         geo_layers=solver.model.cache.layers if solver is not None else (w.geometry_cache.layers if getattr(w,'geometry_cache',None) is not None else {})
         marked_refs=staged_refs|((staged_info or {}).get('between_refs',set())-placed_between)
         for layer,index in sorted(marked_refs):
             if layer in vis:
-                ref=(layer,index);ops=tuple(op for op in staged_actions.get(ref,()) if op!='动区间随动' or ref not in placed_between)
+                ref=(layer,index);ops=tuple(op for op in staged_actions.get(ref,()) if op not in ('动区间随动','端点随动') or ref not in placed_between)
                 if ref in placed_between and not ops:continue
                 face,edge=STAGED_STYLE.get(ops[-1],('#5992b633','#2b6ea3')) if ops else ('#5992b62a','#44698c')
                 gs=[g for (l,i,kind,status),parts in region_groups.items() if (l,i)==ref and kind=='A' for g in parts.values()]

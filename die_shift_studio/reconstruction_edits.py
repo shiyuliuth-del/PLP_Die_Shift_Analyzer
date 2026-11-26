@@ -92,7 +92,7 @@ def change_zone(window,action,piece=None,ref=None,point=None,side=None,refs=()):
         refs={tuple(ref) for ref in refs}
         if not refs:return
         fields=('reconstruction_intervals','reconstruction_angles','reconstruction_deleted','reconstruction_added',
-                'reconstruction_cuts','reconstruction_extra_cuts','reconstruction_second_cuts','reconstruction_dropped_cuts','reconstruction_between_overrides')
+                'reconstruction_cuts','reconstruction_extra_cuts','reconstruction_second_cuts','reconstruction_dropped_cuts','reconstruction_between_overrides','reconstruction_endpoint_overrides')
         edits={name:tuple(row for row in getattr(cfg,name) if row[:2] not in refs) for name in fields}
         updated=replace(cfg,**edits,reconstruction_ignored=tuple(sorted(ignored|refs)),
                         reconstruction_forced=tuple(sorted(forced-refs)),
@@ -133,8 +133,17 @@ def change_zone(window,action,piece=None,ref=None,point=None,side=None,refs=()):
             nominal_sites=[(q,nominal_at(q)) for q in current]
             target,nominal=min(nominal_sites,key=lambda item:(
                 item[0]['route_plan'].route.distance(item[1]),item[0]['bridge'].distance(probe)))
-            plan=target['route_plan'];base_id=plan.identity.split('~')[0]
-            a,b=target['interval']
+            solver=getattr(getattr(window,'engine',None),'reconstructor',None)
+            base_plans=[e['plan'] for e in (getattr(solver,'_base_plans',None) or ())
+                        if (e['layer'],e['index'])==ref and e.get('plan') is not None]
+            current_bases={q['route_plan'].identity.split('~')[0] for q in current}
+            unused_plan=min((p for p in base_plans if p.identity.split('~')[0] not in current_bases),
+                            key=lambda p:p.route.distance(nominal),default=None)
+            use_unused=(unused_plan is not None and
+                        unused_plan.route.distance(nominal)+unused_plan.tolerance<target['route_plan'].route.distance(nominal))
+            plan=unused_plan if use_unused else target['route_plan']
+            base_id=plan.identity.split('~')[0]
+            a,b=(0.,plan.length) if use_unused else target['interval']
             if not plan.source.covers(nominal):
                 nominal=shapely.shortest_line(plan.source,nominal).interpolate(0)
             position=float(plan.route.project(nominal))
@@ -148,8 +157,8 @@ def change_zone(window,action,piece=None,ref=None,point=None,side=None,refs=()):
                 window.statusBar().showMessage('该点击位置不能形成保持连接的动区，未在其他位置替代添加');return
             left,right=chosen;identity=uuid.uuid4().hex[:12];new_id=base_id+'~'+identity
             saved={tuple(r[:5]):r for r in intervals}
-            automatic=[q for q in current if q.get('graph_branch') and not q['manual']
-                       and q['die']==target['die'] and q['nominal_regions']['A'].covers(nominal)]
+            automatic=([] if use_unused else [q for q in current if q.get('graph_branch') and not q['manual']
+                       and q['die']==target['die'] and q['nominal_regions']['A'].covers(nominal)])
             scoped=[q for q in current if q['route_plan'].identity.split('~')[0]==base_id]
             outer_a=min([left,*[q['interval'][0] for q in scoped]]);outer_b=max([right,*[q['interval'][1] for q in scoped]])
             if any(q is target for q in automatic):
@@ -162,6 +171,12 @@ def change_zone(window,action,piece=None,ref=None,point=None,side=None,refs=()):
                     part=route.partition(lo,hi)
                     if part is not None:
                         identity_key=key(route);saved[identity_key]=(*identity_key,part['a'],part['b'])
+            elif use_unused or position<a-guard or position>b+guard:
+                for q in scoped:
+                    identity_key=key(q['route_plan']);lo,hi=q['interval']
+                    saved.setdefault(identity_key,(*identity_key,lo,hi))
+                saved[(*plan.key,new_id)]=(*plan.key,new_id,left,right)
+                added=(*added,(*ref,float(plan.route.interpolate(position).x),float(plan.route.interpolate(position).y),identity,base_id,left,right,'local'))
             else:
                 for q in scoped:
                     identity_key=key(q['route_plan']);lo,hi=q['interval']

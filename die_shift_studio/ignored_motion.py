@@ -9,12 +9,13 @@ def fixed_enclosures_safe(r,ref,vias):
     source=r.model.cache.layers[ref[0]]['geometry'][ref[1]]
     owners={v['owner'] for v in vias if v['owner']>=0}
     if len(owners)!=1:return False
+    rdl_net=int(r.model.nodes[r.model.ids[ref]]['net'])
     owner=next(iter(owners));mu,b=mean_and_bounds(r.p.for_die(owner),len(r.model.bound.centers))
     radius=np.linalg.norm(shapely.get_coordinates(source)-r.model.bound.centers[owner],axis=1).max()
     reach=np.linalg.norm(abs(mu[:2])+b[:2])+2*radius*np.sin(min(np.pi,abs(mu[2])+b[2])/2)
     inner=source if r.settings.reconstruction_fixed_via_mode=='global' else source.buffer(-reach-4*r.tol)
     return all(inner.covers(v['poly'].buffer(r.rules.p.annulus_um)) for v in r.stays
-               if v['net']==vias[0]['net'] and source.intersects(v['poly']))
+               if v['net']==rdl_net and source.intersects(v['poly']))
 
 
 def entries(r):
@@ -40,7 +41,8 @@ def entries(r):
 def complex_mode(r,ref,vias,stationary_certificate):
     """Choose only a rigid mode certified over the complete independent box."""
     source=r.model.cache.layers[ref[0]]['geometry'][ref[1]]
-    fixed=[v for v in r.stays if v['net']==vias[0]['net'] and source.intersects(v['poly'])]
+    rdl_net=int(r.model.nodes[r.model.ids[ref]]['net'])
+    fixed=[v for v in r.stays if v['net']==rdl_net and source.intersects(v['poly'])]
     from .drc_rules import effective_rules
     width,space=effective_rules(r.p,r.settings)
     from .geometry_rules import width_ok
@@ -65,7 +67,7 @@ def complex_mode(r,ref,vias,stationary_certificate):
         margin=board.boundary.distance(swept);safe=True
         for node in r.model.nodes:
             key=node['key'];role=r.model.roles[key]
-            if role!='固定RDL' or key.split('/')[0]!=ref[0].split('/')[0] or node['net']==vias[0]['net']:continue
+            if role!='固定RDL' or key.split('/')[0]!=ref[0].split('/')[0] or node['net']==rdl_net:continue
             other=r.vias_by_target.get((key,node['index']),())
             expansion=reach(node['poly'],{v['owner'] for v in other})
             gap=swept.distance(node['poly'])-expansion-space
