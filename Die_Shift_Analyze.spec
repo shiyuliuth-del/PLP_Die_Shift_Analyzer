@@ -21,7 +21,7 @@ data.append(license_data)
 data.extend(collect_data_files('ezdxf'))
 data.extend((str(root/'die_shift_studio'/name),'die_shift_studio') for name in ('native_ops.py','klayout_worker.py','cuda_kernels.ptx'))
 binaries=collect_dynamic_libs('gdstk')
-hidden=['matplotlib.backends.backend_qtagg','scipy.special._ufuncs','shapely.lib']
+hidden=['matplotlib.backends.backend_qtagg','scipy.special._ufuncs','shapely.lib','die_shift_studio.klayout_setup','die_shift_studio.klayout_ui']
 if importlib.util.find_spec('klayout'):
     binaries+=collect_dynamic_libs('klayout')
     hidden+=['klayout.db','klayout.dbcore','klayout.tl','klayout.tlcore']

@@ -5,6 +5,8 @@ import sys
 
 if __name__=='__main__':
     multiprocessing.freeze_support()
+    from die_shift_studio.openssl_compat import disable_legacy_provider
+    disable_legacy_provider()
     try:
         from die_shift_studio.frozen_support import prepare_runtime,hide_owned_console,smoke
         from die_shift_studio.reconstruction_workers import enable_spawn
@@ -34,7 +36,7 @@ if __name__=='__main__':
             Path(args.gpu_info).write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf8')
             raise SystemExit(0)
         from die_shift_studio.dependencies import verify
-        verify()
+        verify(require_klayout=False)
         if args.smoke_test:raise SystemExit(smoke(args.smoke_test))
         from die_shift_studio.gui import launch
         raise SystemExit(launch(args.project,args.measured_output,args.ipc_endpoint,authorization=authorization))
